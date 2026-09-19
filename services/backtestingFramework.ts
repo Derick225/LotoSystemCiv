@@ -3,7 +3,9 @@ import { generateMasterPrediction } from "./predictionEngine";
 import { useNexusStore } from "../store/useNexusStore";
 import { analyzeForManipulation } from "./forensicAuditService";
 import { AlgoKey } from "../shared/prediction.types";
-import { getPayoutMultiplier } from "../constants";
+import { getPayoutMultiplier, drawHasMachineNumbers } from "../constants";
+import { purifyHistoryForDraw } from "../utils/arrayUtils";
+import { normalizeWeights } from "./prediction/weightsManager";
 
 export interface WalkForwardMetric {
   strategyName: string;
@@ -145,17 +147,24 @@ export class BacktestingFramework {
     onProgress?: (percent: number) => void,
     payoutModel: string = "LEGACY"
   ): Promise<Record<string, WalkForwardMetric>> {
-    
-    if (!history || history.length < depth + 10) {
+    const cleanHistory = purifyHistoryForDraw(drawName, history);
+    if (!cleanHistory || cleanHistory.length < depth + 10) {
       throw new Error(`Historique insuffisant pour un backtest de profondeur ${depth} (Min requis: ${depth + 10} draws).`);
     }
+
+    const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
+    const sanitizedWeights = { ...globalWeights };
+    if (!hasMachine) {
+      (sanitizedWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    }
+    const normalizedActiveWeights = normalizeWeights(sanitizedWeights);
 
     // Testing configurations
     const strategies = [
       { name: "Baseline Random", weights: {} as AlgoWeights },
       { name: "Frequency Only", weights: { [AlgoKey.FREQUENCY]: 1.0 } as unknown as AlgoWeights },
-      { name: "Full Hybrid", weights: globalWeights },
-      { name: "Adversarial Defensive", weights: globalWeights, adversarial: true }
+      { name: "Full Hybrid", weights: normalizedActiveWeights },
+      { name: "Adversarial Defensive", weights: normalizedActiveWeights, adversarial: true }
     ];
 
     const results: Record<string, WalkForwardMetric> = {};
@@ -184,7 +193,7 @@ export class BacktestingFramework {
     });
 
     // We slide a testing window of size `depth` backwards in time (towards the present)
-    const testingWindow = history.slice(0, depth).reverse();
+    const testingWindow = cleanHistory.slice(0, depth).reverse();
     
     // Seed and generator for baseline random strategy (Zéro hasard)
     const lcg = new DeterministicLCG(7331 + depth);
@@ -207,6 +216,11 @@ export class BacktestingFramework {
       calibrationHits[s.name] = results[s.name].calibrationCurve.map(() => ({ totalInBin: 0, drawsInBin: 0 }));
     });
 
+    const storeState = useNexusStore?.getState?.();
+    const isForensicOptimized = storeState?.isForensicOptimized ?? false;
+    const useSpatioTemporalHawkes = storeState?.useSpatioTemporalHawkes ?? false;
+    const temporalDepth = storeState?.temporalDepth ?? 100;
+
     // Execute Walk-Forward iterations
     for (let i = 0; i < testingWindow.length; i++) {
       await new Promise(r => setTimeout(r, 0));
@@ -216,7 +230,7 @@ export class BacktestingFramework {
 
       const target = testingWindow[i];
       const originalIndex = depth - 1 - i;
-      const trainingContext = history.slice(originalIndex + 1);
+      const trainingContext = cleanHistory.slice(originalIndex + 1);
 
       // Iterate over strategies
       for (const s of strategies) {
@@ -249,7 +263,6 @@ export class BacktestingFramework {
           selection.sort((a, b) => a - b);
         } else {
           try {
-            const temporalDepth = useNexusStore?.getState()?.temporalDepth ?? 100;
             const predictRes = await generateMasterPrediction(
               drawName,
               trainingContext,
@@ -257,15 +270,13 @@ export class BacktestingFramework {
               s.weights,
               undefined,
               undefined,
-              // CORRECTIF CRITIQUE : true (au lieu de false). Avec skipTraining=false, le pipeline
-              // interne appelait saveAlgoWeights(drawName, ...) à CHAQUE itération du walk-forward,
-              // ce qui écrasait silencieusement les poids d'algorithme RÉELS de production
-              // (IndexedDB + localStorage + Supabase) pour ce tirage, simplement en lançant une
-              // comparaison de stratégies dans l'onglet Simulation. Une simulation/backtest doit
-              // rester strictement en lecture seule, comme le font déjà backtestService.ts et
-              // simulationCore.ts (qui utilisent tous deux skipTraining=true).
               true,
-              s.adversarial || false
+              s.adversarial || false,
+              0,
+              isForensicOptimized,
+              undefined,
+              undefined,
+              useSpatioTemporalHawkes
             );
             selection = predictRes.suggestedNumbers;
             probabilities = calculateCalibratedProbabilities(predictRes, s.weights);

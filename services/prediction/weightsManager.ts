@@ -5,6 +5,7 @@ import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
 import { drawHasMachineNumbers } from '../../constants';
+import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 export const getDefaultWeights = (): AlgoWeights => ({ ...DEFAULT_ALGO_WEIGHTS });
 
@@ -208,7 +209,14 @@ export const evaluateAlgoEmpiricalProof = (
   // Fonction de confiance temporelle basée sur le cycle théorique
   const confidence = Math.tanh(T / expectedMeanGap);
 
-  // Comptabilisation des succès empiriques par canal algorithmique
+  // Module d'atténuation exponentielle continue basée sur l'âge des tirages
+  const temporalDecayHalfLife = Math.max(4, evalDepth * 0.45);
+  const temporalDecayRate = Math.LN2 / temporalDecayHalfLife;
+
+  let sumWeights = 0;
+  let sumWeightsSq = 0;
+
+  // Comptabilisation des succès empiriques pondérés dans le temps par canal algorithmique
   const hits: Record<AlgoKey, number> = {} as any;
   const trials: Record<AlgoKey, number> = {} as any;
   validKeys.forEach(k => { hits[k] = 0; trials[k] = 0; });
@@ -220,6 +228,11 @@ export const evaluateAlgoEmpiricalProof = (
     const subHistory = sample.slice(t + 1);
     if (subHistory.length < 3) continue;
 
+    // Poids d'atténuation temporelle exponentielle continue w_t = exp(-lambda * t)
+    const tWeight = Math.exp(-temporalDecayRate * t);
+    sumWeights += tWeight;
+    sumWeightsSq += tWeight * tWeight;
+
     const lastWinners = subHistory[0]?.gagnants || [];
     const subT = subHistory.length;
 
@@ -227,8 +240,8 @@ export const evaluateAlgoEmpiricalProof = (
     const subFreq = new Int32Array(91);
     subHistory.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) subFreq[n]++; }));
     const topFreq = [...numIndices].sort((a, b) => subFreq[b] - subFreq[a]).slice(0, 10);
-    hits[AlgoKey.FREQUENCY] += topFreq.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.FREQUENCY] += 10;
+    hits[AlgoKey.FREQUENCY] += topFreq.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.FREQUENCY] += 10 * tWeight;
 
     // 2. Canal Gaps & Écarts
     const subGaps = new Int32Array(91);
@@ -241,8 +254,8 @@ export const evaluateAlgoEmpiricalProof = (
       subGaps[n] = g;
     }
     const topGaps = [...numIndices].sort((a, b) => subGaps[b] - subGaps[a]).slice(0, 10);
-    hits[AlgoKey.GAPS] += topGaps.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.GAPS] += 10;
+    hits[AlgoKey.GAPS] += topGaps.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.GAPS] += 10 * tWeight;
 
     // 3. Canal Markov Transitions
     const markovTrans = new Int32Array(91);
@@ -255,8 +268,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     }
     const topMarkov = [...numIndices].sort((a, b) => markovTrans[b] - markovTrans[a]).slice(0, 10);
-    hits[AlgoKey.MARKOV] += topMarkov.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.MARKOV] += 10;
+    hits[AlgoKey.MARKOV] += topMarkov.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.MARKOV] += 10 * tWeight;
 
     // 4. Canal Momentum (Différentiel court terme vs long terme)
     const shortL = Math.min(5, Math.floor(subT / 2));
@@ -270,8 +283,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     }
     const topMom = [...numIndices].sort((a, b) => momScores[b] - momScores[a]).slice(0, 10);
-    hits[AlgoKey.MOMENTUM] += topMom.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.MOMENTUM] += 10;
+    hits[AlgoKey.MOMENTUM] += topMom.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.MOMENTUM] += 10 * tWeight;
 
     // 5. Canal GAP_CADENCE (Stabilité de cadence et résonance de phase)
     const cadenceScores = new Float32Array(91);
@@ -292,8 +305,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     }
     const topCadence = [...numIndices].sort((a, b) => cadenceScores[b] - cadenceScores[a]).slice(0, 10);
-    hits[AlgoKey.GAP_CADENCE] += topCadence.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.GAP_CADENCE] += 10;
+    hits[AlgoKey.GAP_CADENCE] += topCadence.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.GAP_CADENCE] += 10 * tWeight;
 
     // 6. Canal GAP_PATTERN (Signature de gap successif)
     const gapPatternScores = new Float32Array(91);
@@ -302,8 +315,8 @@ export const evaluateAlgoEmpiricalProof = (
       gapPatternScores[n] = (g % 5 === 0 ? 1.5 : 1.0) * (subFreq[n] / (g + 1));
     }
     const topGapPattern = [...numIndices].sort((a, b) => gapPatternScores[b] - gapPatternScores[a]).slice(0, 10);
-    hits[AlgoKey.GAP_PATTERN] += topGapPattern.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.GAP_PATTERN] += 10;
+    hits[AlgoKey.GAP_PATTERN] += topGapPattern.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.GAP_PATTERN] += 10 * tWeight;
 
     // 7. Canal GAP_SEQUENCE (Évolution différentielle des 2 derniers écarts)
     const gapSeqScores = new Float32Array(91);
@@ -312,8 +325,8 @@ export const evaluateAlgoEmpiricalProof = (
       gapSeqScores[n] = g > 0 ? (g * 0.6 + subFreq[n] * 0.4) : 0;
     }
     const topGapSeq = [...numIndices].sort((a, b) => gapSeqScores[b] - gapSeqScores[a]).slice(0, 10);
-    hits[AlgoKey.GAP_SEQUENCE] += topGapSeq.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.GAP_SEQUENCE] += 10;
+    hits[AlgoKey.GAP_SEQUENCE] += topGapSeq.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.GAP_SEQUENCE] += 10 * tWeight;
 
     // 8. Canal GAP_BAND_SEQUENCE (Dynamique des déciles 1-9, 10-19, ...)
     const bandFreq = new Int32Array(10);
@@ -324,8 +337,8 @@ export const evaluateAlgoEmpiricalProof = (
       bandScores[n] = (bandFreq[b] > 0 ? 0.5 : 1.5) * subFreq[n];
     }
     const topBandSeq = [...numIndices].sort((a, b) => bandScores[b] - bandScores[a]).slice(0, 10);
-    hits[AlgoKey.GAP_BAND_SEQUENCE] += topBandSeq.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.GAP_BAND_SEQUENCE] += 10;
+    hits[AlgoKey.GAP_BAND_SEQUENCE] += topBandSeq.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.GAP_BAND_SEQUENCE] += 10 * tWeight;
 
     // 9. Canal GAP_TREND (Pente d'accélération de sortie)
     const gapTrendScores = new Float32Array(91);
@@ -333,8 +346,8 @@ export const evaluateAlgoEmpiricalProof = (
       gapTrendScores[n] = momScores[n] * (1.0 + subGaps[n] * 0.05);
     }
     const topGapTrend = [...numIndices].sort((a, b) => gapTrendScores[b] - gapTrendScores[a]).slice(0, 10);
-    hits[AlgoKey.GAP_TREND] += topGapTrend.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.GAP_TREND] += 10;
+    hits[AlgoKey.GAP_TREND] += topGapTrend.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.GAP_TREND] += 10 * tWeight;
 
     // 10. Canal SPECTRAL (Projection de puissance fréquentielle Fourier)
     const spectralScores = new Float32Array(91);
@@ -350,8 +363,8 @@ export const evaluateAlgoEmpiricalProof = (
       spectralScores[n] = Math.sqrt(re * re + im * im);
     }
     const topSpectral = [...numIndices].sort((a, b) => spectralScores[b] - spectralScores[a]).slice(0, 10);
-    hits[AlgoKey.SPECTRAL] += topSpectral.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.SPECTRAL] += 10;
+    hits[AlgoKey.SPECTRAL] += topSpectral.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.SPECTRAL] += 10 * tWeight;
 
     // 11. Canal BAYES (Mise à jour bayésienne prior global x vraisemblance locale)
     const bayesScores = new Float32Array(91);
@@ -363,8 +376,8 @@ export const evaluateAlgoEmpiricalProof = (
       bayesScores[n] = prior * likelihood;
     }
     const topBayes = [...numIndices].sort((a, b) => bayesScores[b] - bayesScores[a]).slice(0, 10);
-    hits[AlgoKey.BAYES] += topBayes.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.BAYES] += 10;
+    hits[AlgoKey.BAYES] += topBayes.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.BAYES] += 10 * tWeight;
 
     // 12. Canal TEMPORAL (Déclin exponentiel temporel continu)
     const temporalScores = new Float32Array(91);
@@ -374,8 +387,8 @@ export const evaluateAlgoEmpiricalProof = (
       subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) temporalScores[n] += decay; });
     }
     const topTemporal = [...numIndices].sort((a, b) => temporalScores[b] - temporalScores[a]).slice(0, 10);
-    hits[AlgoKey.TEMPORAL] += topTemporal.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.TEMPORAL] += 10;
+    hits[AlgoKey.TEMPORAL] += topTemporal.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.TEMPORAL] += 10 * tWeight;
 
     // 13. Canal FRACTAL (Persistance d'échelle et exposant de Hurst local)
     const fractalScores = new Float32Array(91);
@@ -383,8 +396,8 @@ export const evaluateAlgoEmpiricalProof = (
       fractalScores[n] = (subFreq[n] / (subGaps[n] + 1)) * (1.0 + Math.abs(momScores[n]));
     }
     const topFractal = [...numIndices].sort((a, b) => fractalScores[b] - fractalScores[a]).slice(0, 10);
-    hits[AlgoKey.FRACTAL] += topFractal.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.FRACTAL] += 10;
+    hits[AlgoKey.FRACTAL] += topFractal.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.FRACTAL] += 10 * tWeight;
 
     // 14. Canal ECHO_STATE (Réservoir stochastique à états retardés)
     const echoScores = new Float32Array(91);
@@ -393,8 +406,8 @@ export const evaluateAlgoEmpiricalProof = (
       subHistory[s].gagnants.forEach(n => { if (n >= 1 && n <= 90) echoScores[n] += echoWeight; });
     }
     const topEcho = [...numIndices].sort((a, b) => echoScores[b] - echoScores[a]).slice(0, 10);
-    hits[AlgoKey.ECHO_STATE] += topEcho.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.ECHO_STATE] += 10;
+    hits[AlgoKey.ECHO_STATE] += topEcho.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.ECHO_STATE] += 10 * tWeight;
 
     // 15. Canal AFFINITY (Co-occurrences avec les numéros du dernier tirage)
     const affinityScores = new Float32Array(91);
@@ -406,8 +419,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     }
     const topAffinity = [...numIndices].sort((a, b) => affinityScores[b] - affinityScores[a]).slice(0, 10);
-    hits[AlgoKey.AFFINITY] += topAffinity.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.AFFINITY] += 10;
+    hits[AlgoKey.AFFINITY] += topAffinity.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.AFFINITY] += 10 * tWeight;
 
     // 16. Canal SPATIAL (Proximité spatiale grille 9x10 avec derniers gagnants)
     const spatialScores = new Float32Array(91);
@@ -422,8 +435,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     });
     const topSpatial = [...numIndices].sort((a, b) => spatialScores[b] - spatialScores[a]).slice(0, 10);
-    hits[AlgoKey.SPATIAL] += topSpatial.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.SPATIAL] += 10;
+    hits[AlgoKey.SPATIAL] += topSpatial.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.SPATIAL] += 10 * tWeight;
 
     // 17. Canal DERIVED_NEIGHBOR (Voisins numériques +/- 1 et +/- 10 modulo 90)
     const neighborScores = new Float32Array(91);
@@ -436,8 +449,8 @@ export const evaluateAlgoEmpiricalProof = (
       });
     });
     const topNeighbor = [...numIndices].sort((a, b) => neighborScores[b] - neighborScores[a]).slice(0, 10);
-    hits[AlgoKey.DERIVED_NEIGHBOR] += topNeighbor.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.DERIVED_NEIGHBOR] += 10;
+    hits[AlgoKey.DERIVED_NEIGHBOR] += topNeighbor.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.DERIVED_NEIGHBOR] += 10 * tWeight;
 
     // 18. Canal SHADOW_PROBABILITY (Numéros froids à basse variance d'écart)
     const shadowScores = new Float32Array(91);
@@ -445,8 +458,8 @@ export const evaluateAlgoEmpiricalProof = (
       shadowScores[n] = subGaps[n] / (subFreq[n] + 1);
     }
     const topShadow = [...numIndices].sort((a, b) => shadowScores[b] - shadowScores[a]).slice(0, 10);
-    hits[AlgoKey.SHADOW_PROBABILITY] += topShadow.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.SHADOW_PROBABILITY] += 10;
+    hits[AlgoKey.SHADOW_PROBABILITY] += topShadow.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.SHADOW_PROBABILITY] += 10 * tWeight;
 
     // 19. Canal NETWORK_CORRELATION (Centralité de réseau dans les graphes de co-occurrences)
     const networkScores = new Float32Array(91);
@@ -460,8 +473,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     }
     const topNetwork = [...numIndices].sort((a, b) => networkScores[b] - networkScores[a]).slice(0, 10);
-    hits[AlgoKey.NETWORK_CORRELATION] += topNetwork.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.NETWORK_CORRELATION] += 10;
+    hits[AlgoKey.NETWORK_CORRELATION] += topNetwork.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.NETWORK_CORRELATION] += 10 * tWeight;
 
     // 20. Canal SEQUENCE_PATTERN (Motifs de paires/triplettes consécutives)
     const seqPatternScores = new Float32Array(91);
@@ -475,8 +488,8 @@ export const evaluateAlgoEmpiricalProof = (
       });
     }
     const topSeqPattern = [...numIndices].sort((a, b) => seqPatternScores[b] - seqPatternScores[a]).slice(0, 10);
-    hits[AlgoKey.SEQUENCE_PATTERN] += topSeqPattern.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.SEQUENCE_PATTERN] += 10;
+    hits[AlgoKey.SEQUENCE_PATTERN] += topSeqPattern.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.SEQUENCE_PATTERN] += 10 * tWeight;
 
     // 21. Canal INTER_MONTHLY_RESONANCE (Périodicité mensuelle multi-échelles & harmoniques temporelles continues)
     const targetDateObj = sample[t].date ? new Date(sample[t].date) : null;
@@ -509,8 +522,8 @@ export const evaluateAlgoEmpiricalProof = (
       }
     }
     const topMonthly = [...numIndices].sort((a, b) => interMonthlyScores[b] - interMonthlyScores[a]).slice(0, 10);
-    hits[AlgoKey.INTER_MONTHLY_RESONANCE] += topMonthly.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.INTER_MONTHLY_RESONANCE] += 10;
+    hits[AlgoKey.INTER_MONTHLY_RESONANCE] += topMonthly.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.INTER_MONTHLY_RESONANCE] += 10 * tWeight;
 
     // 22. Canal ISOLATION_ANOMALY (Anomalie d'écart dans l'espace d'états)
     const isolationScores = new Float32Array(91);
@@ -518,8 +531,8 @@ export const evaluateAlgoEmpiricalProof = (
       isolationScores[n] = Math.abs(subGaps[n] - 18) * subFreq[n];
     }
     const topIsolation = [...numIndices].sort((a, b) => isolationScores[b] - isolationScores[a]).slice(0, 10);
-    hits[AlgoKey.ISOLATION_ANOMALY] += topIsolation.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.ISOLATION_ANOMALY] += 10;
+    hits[AlgoKey.ISOLATION_ANOMALY] += topIsolation.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.ISOLATION_ANOMALY] += 10 * tWeight;
 
     // 23. Canal MACHINE_TRANSFER (Co-occurrence empirique et transfert machine -> gagnants)
     const machineScores = new Float32Array(91);
@@ -541,11 +554,11 @@ export const evaluateAlgoEmpiricalProof = (
         if (m >= 1 && m <= 90) machineScores[m] += 1.0;
       });
       const topMachine = [...numIndices].sort((a, b) => machineScores[b] - machineScores[a]).slice(0, 10);
-      hits[AlgoKey.MACHINE_TRANSFER] += topMachine.filter(n => actualDraw.includes(n)).length;
-      trials[AlgoKey.MACHINE_TRANSFER] += 10;
+      hits[AlgoKey.MACHINE_TRANSFER] += topMachine.filter(n => actualDraw.includes(n)).length * tWeight;
+      trials[AlgoKey.MACHINE_TRANSFER] += 10 * tWeight;
     } else {
       // Aucun essai si le tirage ne contient aucune donnée machine
-      trials[AlgoKey.MACHINE_TRANSFER] += 10;
+      trials[AlgoKey.MACHINE_TRANSFER] += 10 * tWeight;
     }
 
     // 24. Canal INTER_DRAW_RESONANCE (Report direct, miroirs décimaux et compléments 91)
@@ -566,9 +579,12 @@ export const evaluateAlgoEmpiricalProof = (
       });
     }
     const topInterDraw = [...numIndices].sort((a, b) => interDrawScores[b] - interDrawScores[a]).slice(0, 10);
-    hits[AlgoKey.INTER_DRAW_RESONANCE] += topInterDraw.filter(n => actualDraw.includes(n)).length;
-    trials[AlgoKey.INTER_DRAW_RESONANCE] += 10;
+    hits[AlgoKey.INTER_DRAW_RESONANCE] += topInterDraw.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.INTER_DRAW_RESONANCE] += 10 * tWeight;
   }
+
+  // Taille d'échantillon effective de Kish pour séries pondérées exponentiellement
+  const nEff = sumWeightsSq > 0 ? (sumWeights * sumWeights) / sumWeightsSq : 1;
 
   // Vérification stricte de la présence de numéros machine sur le tirage
   const hasMachine = drawHasMachineNumbers(drawName, sample);
@@ -584,7 +600,8 @@ export const evaluateAlgoEmpiricalProof = (
     const t = trials[k] || 1;
     const h = hits[k] || 0;
     const rate = h / t;
-    const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / t) || 0.01;
+    const effectiveTrials = Math.max(1, (t / sumWeights) * nEff);
+    const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / effectiveTrials) || 0.01;
     const zScore = (rate - baselineRate) / stdErr;
     const proofScore = zScore * confidence;
     const hasProof = proofScore > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
@@ -605,6 +622,270 @@ export const evaluateAlgoEmpiricalProof = (
   algoEmpiricalProofCache.set(cacheKey, result);
 
   return result;
+};
+
+export const ALGO_DISPLAY_NAMES: Record<AlgoKey, string> = {
+  [AlgoKey.FREQUENCY]: "Fréquence Linéaire",
+  [AlgoKey.GAPS]: "Écarts & Retards",
+  [AlgoKey.SPECTRAL]: "Transformée de Fourier (DFT)",
+  [AlgoKey.MARKOV]: "Transitions Markoviennes",
+  [AlgoKey.BAYES]: "Vraisemblance Bayésienne",
+  [AlgoKey.MOMENTUM]: "Momentum Différentiel",
+  [AlgoKey.AFFINITY]: "Affinités de Co-occurrence",
+  [AlgoKey.SPATIAL]: "Topologie Spatiale Grille",
+  [AlgoKey.TEMPORAL]: "Processus Hawkes Temporel",
+  [AlgoKey.FRACTAL]: "Multi-Fractal & Hurst",
+  [AlgoKey.SHADOW_PROBABILITY]: "Probabilités Fantômes",
+  [AlgoKey.NETWORK_CORRELATION]: "Centralité de Réseau",
+  [AlgoKey.ECHO_STATE]: "Réservoir Echo State",
+  [AlgoKey.GAP_SEQUENCE]: "Séquences d'Écarts",
+  [AlgoKey.DERIVED_NEIGHBOR]: "Voisins & Miroirs Dérivés",
+  [AlgoKey.GAP_PATTERN]: "Motifs Géométriques d'Écarts",
+  [AlgoKey.SEQUENCE_PATTERN]: "Motifs de Séquences",
+  [AlgoKey.GAP_CADENCE]: "Harmoniques de Cadence",
+  [AlgoKey.GAP_TREND]: "Accélération de Tendance",
+  [AlgoKey.INTER_MONTHLY_RESONANCE]: "Résonance Inter-Mensuelle",
+  [AlgoKey.ISOLATION_ANOMALY]: "Anomalie d'Isolation",
+  [AlgoKey.GAP_BAND_SEQUENCE]: "Dynamique par Déciles",
+  [AlgoKey.MACHINE_TRANSFER]: "Transfert Machine",
+  [AlgoKey.INTER_DRAW_RESONANCE]: "Résonance Inter-Tirages",
+};
+
+export interface AlgoWeightProofItem {
+  key: AlgoKey;
+  name: string;
+  weight: number;
+  baselineWeight: number; // 1 / N (ex: 0.04167)
+  empiricalHitRate: number;
+  baselineRate: number; // 5 / 90 (0.0556)
+  proofScore: number; // Z-Score
+  hasProof: boolean;
+  status: "PROUVE" | "DECOTE_CONFORME" | "NEUTRE" | "SURPONDERE_NON_CONFIRME";
+  isCompliant: boolean;
+  relativeGain: number; // empiricalHitRate / baselineRate
+  justification: string;
+}
+
+export interface AlgoWeightsProofReport {
+  drawName: string;
+  complianceRate: number; // 0 à 100%
+  isStrictlyValid: boolean;
+  provenCount: number;
+  unprovenDampedCount: number;
+  unconfirmedBoostsCount: number;
+  averageHitRate: number;
+  averageAlphaGain: number;
+  overallZScore: number;
+  items: AlgoWeightProofItem[];
+}
+
+/**
+ * VALIDATION STRICTE DU POIDS DES ALGORITHMES PAR PREUVE DE CONFIRMATION DE RÉUSSITE
+ *
+ * Règle d'or absolue : "Qu'aucun algorithme ne soit surpondéré ou prioritaire sans preuve empirique de réussite."
+ * Compare chaque poids actif w_k au poids d'équiprobabilité neutre w_0 = 1 / 24 (~4.17%).
+ * Si un algorithme n'a pas prouvé sa capacité prédictive (Z <= 0 ou hitRate <= 5/90) sur l'historique isolé du tirage,
+ * son poids DOIT être inférieur ou égal au seuil neutre (amorti).
+ * S'il dépasse ce seuil sans preuve empirique, il est déclaré NON CONFORME.
+ */
+export const validateAlgoWeightsByProof = (
+  drawName: string,
+  history: DrawResult[],
+  weights?: AlgoWeights
+): AlgoWeightsProofReport => {
+  const validKeys = Object.values(AlgoKey);
+  const numAlgos = validKeys.length;
+  const baselineWeight = 1.0 / numAlgos; // 1 / 24 = ~0.04167
+  const baselineRate = 5.0 / 90.0; // Espérance neutre 5.56%
+
+  const cleanHistory = purifyHistoryForDraw(drawName, history);
+  const effectiveWeights = normalizeWeights(weights || getDefaultWeights());
+  const proofMap = evaluateAlgoEmpiricalProof(drawName, cleanHistory);
+  const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
+
+  let compliantCount = 0;
+  let provenCount = 0;
+  let unprovenDampedCount = 0;
+  let unconfirmedBoostsCount = 0;
+  let sumHitRate = 0;
+  let sumZScore = 0;
+
+  const items: AlgoWeightProofItem[] = validKeys.map(key => {
+    const w = effectiveWeights[key] !== undefined ? effectiveWeights[key] : baselineWeight;
+    const proof = proofMap[key] || {
+      hasProof: false,
+      proofScore: 0,
+      empiricalHitRate: baselineRate,
+      baselineRate,
+      confidence: 0
+    };
+
+    const relativeGain = proof.baselineRate > 0 ? proof.empiricalHitRate / proof.baselineRate : 1.0;
+    sumHitRate += proof.empiricalHitRate;
+    sumZScore += proof.proofScore;
+
+    // Règle spécifique Transfert Machine
+    if (key === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
+      const isZero = w <= 0.0001;
+      if (isZero) {
+        compliantCount++;
+        unprovenDampedCount++;
+        return {
+          key,
+          name: ALGO_DISPLAY_NAMES[key] || key,
+          weight: w,
+          baselineWeight,
+          empiricalHitRate: proof.empiricalHitRate,
+          baselineRate: proof.baselineRate,
+          proofScore: proof.proofScore,
+          hasProof: false,
+          status: "DECOTE_CONFORME",
+          isCompliant: true,
+          relativeGain,
+          justification: "Tirage sans numéros machine certifié : poids nul (0.00%) strictement respecté."
+        };
+      } else {
+        unconfirmedBoostsCount++;
+        return {
+          key,
+          name: ALGO_DISPLAY_NAMES[key] || key,
+          weight: w,
+          baselineWeight,
+          empiricalHitRate: proof.empiricalHitRate,
+          baselineRate: proof.baselineRate,
+          proofScore: proof.proofScore,
+          hasProof: false,
+          status: "SURPONDERE_NON_CONFIRME",
+          isCompliant: false,
+          relativeGain,
+          justification: `Incohérence : Tirage sans machine mais poids résiduel non nul (${(w * 100).toFixed(2)}%).`
+        };
+      }
+    }
+
+    // Algorithme ayant prouvé sa réussite prédictive
+    if (proof.hasProof && proof.proofScore > 0) {
+      provenCount++;
+      compliantCount++;
+      return {
+        key,
+        name: ALGO_DISPLAY_NAMES[key] || key,
+        weight: w,
+        baselineWeight,
+        empiricalHitRate: proof.empiricalHitRate,
+        baselineRate: proof.baselineRate,
+        proofScore: proof.proofScore,
+        hasProof: true,
+        status: "PROUVE",
+        isCompliant: true,
+        relativeGain,
+        justification: `Confirmation empirique avérée (Z = +${proof.proofScore.toFixed(2)}, hit-rate ${(proof.empiricalHitRate * 100).toFixed(1)}% vs ${(proof.baselineRate * 100).toFixed(1)}%). Surpondération légitime.`
+      };
+    }
+
+    // Algorithme non prouvé ou à performance stochastique neutre / sous le hasard
+    // Tolérance d'arrondi de normalisation : 0.005
+    const isWithinBaselineTolerance = w <= baselineWeight + 0.005;
+    if (isWithinBaselineTolerance) {
+      compliantCount++;
+      unprovenDampedCount++;
+      const isDamped = w < baselineWeight - 0.002;
+      return {
+        key,
+        name: ALGO_DISPLAY_NAMES[key] || key,
+        weight: w,
+        baselineWeight,
+        empiricalHitRate: proof.empiricalHitRate,
+        baselineRate: proof.baselineRate,
+        proofScore: proof.proofScore,
+        hasProof: false,
+        status: isDamped ? "DECOTE_CONFORME" : "NEUTRE",
+        isCompliant: true,
+        relativeGain,
+        justification: isDamped
+          ? `Amorti conformément aux preuves (Z = ${proof.proofScore.toFixed(2)} <= 0, poids réduit à ${(w * 100).toFixed(2)}%).`
+          : `Poids neutre à l'espérance mathématique (4.17%), sans surpondération injustifiée.`
+      };
+    } else {
+      unconfirmedBoostsCount++;
+      return {
+        key,
+        name: ALGO_DISPLAY_NAMES[key] || key,
+        weight: w,
+        baselineWeight,
+        empiricalHitRate: proof.empiricalHitRate,
+        baselineRate: proof.baselineRate,
+        proofScore: proof.proofScore,
+        hasProof: false,
+        status: "SURPONDERE_NON_CONFIRME",
+        isCompliant: false,
+        relativeGain,
+        justification: `Violation : Poids (${(w * 100).toFixed(2)}%) supérieur au seuil neutre (4.17%) sans confirmation empirique de succès (Z = ${proof.proofScore.toFixed(2)} <= 0).`
+      };
+    }
+  });
+
+  const complianceRate = Math.round((compliantCount / numAlgos) * 100);
+  const averageHitRate = sumHitRate / numAlgos;
+  const averageAlphaGain = baselineRate > 0 ? averageHitRate / baselineRate : 1.0;
+  const overallZScore = parseFloat((sumZScore / numAlgos).toFixed(3));
+
+  return {
+    drawName,
+    complianceRate,
+    isStrictlyValid: complianceRate === 100,
+    provenCount,
+    unprovenDampedCount,
+    unconfirmedBoostsCount,
+    averageHitRate: parseFloat(averageHitRate.toFixed(4)),
+    averageAlphaGain: parseFloat(averageAlphaGain.toFixed(3)),
+    overallZScore,
+    items
+  };
+};
+
+/**
+ * APPLICATION STRICTE DE LA PREUVE DE RÉUSSITE SUR LES POIDS (AUTO-RÉPARATION DÉTERMINISTE)
+ *
+ * Élimine toute surpondération non prouvée et recalibre l'ensemble du vecteur de poids
+ * de façon continue selon les scores de preuve empiriques du tirage.
+ */
+export const enforceStrictWeightsProof = (
+  drawName: string,
+  history: DrawResult[],
+  weights?: AlgoWeights
+): AlgoWeights => {
+  const validKeys = Object.values(AlgoKey);
+  const baselineWeight = 1.0 / validKeys.length;
+  const cleanHistory = purifyHistoryForDraw(drawName, history);
+  const baseW = weights ? { ...weights } : getDefaultWeights();
+  const proofMap = evaluateAlgoEmpiricalProof(drawName, cleanHistory);
+  const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
+
+  const adjusted: Record<string, number> = {};
+
+  validKeys.forEach(k => {
+    if (k === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
+      adjusted[k] = 0.0;
+      return;
+    }
+
+    const currentVal = typeof baseW[k] === 'number' && !isNaN(baseW[k]) ? baseW[k] : baselineWeight;
+    const proof = proofMap[k];
+
+    if (proof && proof.hasProof && proof.proofScore > 0) {
+      // Prouvé : amplifié de façon continue et différentiable selon le Z-score
+      const boost = 1.0 + Math.tanh(proof.proofScore);
+      adjusted[k] = Math.max(baselineWeight, currentVal * boost);
+    } else {
+      // Non prouvé : strictement contraint sous le seuil neutre par sigmoïde continue
+      const z = proof ? proof.proofScore : -1.0;
+      const dampener = 1.0 / (1.0 + Math.exp(-2.5 * z)); // <= 0.5 quand z <= 0
+      adjusted[k] = Math.min(baselineWeight, currentVal) * dampener;
+    }
+  });
+
+  return normalizeWeights(adjusted as AlgoWeights);
 };
 
 /**
@@ -1143,7 +1424,10 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
       }
     }
     if (isSupabaseConfigured()) {
-      await supabase.from('algo_weights').upsert({ draw_name: drawName, weights: normalized });
+      await Promise.allSettled([
+        supabase.from('algo_weights').upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() }),
+        supabase.from('model_weights_config').upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() })
+      ]);
     }
   } catch (e) { /* Silenced */ }
 };

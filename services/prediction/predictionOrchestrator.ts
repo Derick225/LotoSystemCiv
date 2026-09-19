@@ -529,8 +529,12 @@ export const selectPredictionNumbers = async (
   }
 
   // --- DÉTECTION DYNAMIQUE DU RÉGIME DE JEU (RÉGULATION THERMODYNAMIQUE & DIVERGENCE KL POISSON) ---
-  const empiricalCalibration = generateEmpiricalCalibration(context.history);
   const thermoRegime = calculateThermodynamicRegime(context.history);
+  const empiricalCalibration = generateEmpiricalCalibration(
+    context.history, 
+    thermoRegime.hurst, 
+    thermoRegime.entropy
+  );
   
   const outsiderCount = context.forcedOutsiderCount !== undefined 
     ? context.forcedOutsiderCount 

@@ -3,7 +3,9 @@ import { DrawResult } from "../types";
 import { generateMasterPrediction } from "./predictionEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useNexusStore } from "../store/useNexusStore";
-import { getPayoutMultiplier } from "../constants";
+import { getPayoutMultiplier, drawHasMachineNumbers } from "../constants";
+import { AlgoKey } from "../shared/prediction.types";
+import { normalizeWeights } from "./prediction/weightsManager";
 import { extractMathProofMetadata, MathematicalProofMetadata } from "./forensic/forensicProofStandard";
 
 export type BettingStrategy = "FLAT" | "MARTINGALE" | "KELLY" | "CONFIDENCE_SMART";
@@ -61,6 +63,18 @@ export async function runSimulationCore(config: SimulationConfig) {
     throw new Error("Historique insuffisant pour la profondeur demandée.");
   }
 
+  const hasMachine = drawHasMachineNumbers(drawName, history);
+  const sanitizedWeights = { ...weights };
+  if (!hasMachine) {
+    (sanitizedWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+  }
+  const effectiveWeights = normalizeWeights(sanitizedWeights);
+
+  const storeState = useNexusStore?.getState?.();
+  const isForensicOptimized = storeState?.isForensicOptimized ?? false;
+  const useSpatioTemporalHawkes = storeState?.useSpatioTemporalHawkes ?? false;
+  const temporalDepth = storeState?.temporalDepth ?? 100;
+
   const simWindow = history.slice(0, depth).reverse();
   const INITIAL_BANKROLL = initialBankroll || 50000;
   const UNIT_BET = unitBet || 200;
@@ -105,15 +119,20 @@ export async function runSimulationCore(config: SimulationConfig) {
     const originalIndex = depth - 1 - i;
     const context = history.slice(originalIndex + 1);
 
-    const temporalDepth = useNexusStore?.getState()?.temporalDepth ?? 100;
     const predictionResult = await generateMasterPrediction(
       config.drawName,
       context,
       temporalDepth,
-      weights,
+      effectiveWeights,
       undefined,
       undefined,
-      true // skipTraining
+      true, // skipTraining
+      false,
+      0,
+      isForensicOptimized,
+      undefined,
+      undefined,
+      useSpatioTemporalHawkes
     );
     const prediction = predictionResult.suggestedNumbers;
 

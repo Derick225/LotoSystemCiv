@@ -735,7 +735,30 @@ export const generateCombination = async (
   let bestCombo = [...currentCombo];
   let bestEnergy = currentEnergy;
 
-  // --- ÉTAPE 3 : CALIBRATION DYNAMIQUE DE LA TEMPÉRATURE SUR L'AGITATION LOCALE ---
+  // --- ÉTAPE 3 : DÉTECTION CONTINUE DU RÉGIME DE VARIANCE ET RATIO SIGNAL/BRUIT (SNR) ---
+  // Partition continue du signal (top candidats) vs bruit de fond (background)
+  const topCutoff = Math.min(15, Math.max(5, Math.floor(sortedScores.length * 0.2)));
+  const topScoresList = sortedScores.slice(0, topCutoff).map(s => s.score);
+  const bgScoresList = sortedScores.slice(topCutoff).map(s => s.score);
+
+  const meanTop = topScoresList.reduce((a, b) => a + b, 0) / Math.max(1, topScoresList.length);
+  const meanBg = bgScoresList.reduce((a, b) => a + b, 0) / Math.max(1, bgScoresList.length);
+  const varTop = topScoresList.reduce((a, b) => a + Math.pow(b - meanTop, 2), 0) / Math.max(1, topScoresList.length);
+  const varBg = bgScoresList.reduce((a, b) => a + Math.pow(b - meanBg, 2), 0) / Math.max(1, bgScoresList.length);
+
+  const signalContrast = Math.max(0, meanTop - meanBg);
+  // Ratio Signal / Bruit (SNR) continu
+  const snr = (Math.pow(signalContrast, 2) + varTop) / (varBg + 1e-4);
+
+  // Équilibre continu Exploration (0.0) vs Exploitation (1.0)
+  // Mapping logistique continu centré sur log(SNR)
+  const hurstMod = Math.max(0.2, Math.min(0.8, hurst));
+  const logSnrNorm = Math.log(Math.max(1e-4, snr));
+  const rawExploitationBeta = 1.0 / (1.0 + Math.exp(-2.5 * (logSnrNorm - 0.4)));
+  const exploitationBeta = Math.max(0.05, Math.min(0.95, rawExploitationBeta * (0.6 + 0.8 * hurstMod)));
+  const explorationBeta = 1.0 - exploitationBeta;
+
+  // Calibration dynamique de la température basée sur l'agitation locale et le régime de variance
   let sumDelta = 0;
   let samplesCount = 0;
   for (let s = 0; s < 10; s++) {
@@ -753,56 +776,50 @@ export const generateCombination = async (
   }
 
   const meanDelta = samplesCount > 0 ? sumDelta / samplesCount : 2.5;
-  let temperature = Math.max(1.0, meanDelta) * Math.exp(regimeStateNormalized);
+  // En régime d'exploration (faible SNR), la température initiale s'élève pour favoriser la recherche globale
+  // En régime d'exploitation (fort SNR), la température se concentre pour le raffinement fin
+  const tempScale = 1.2 - 0.4 * exploitationBeta;
+  let temperature = Math.max(1.0, meanDelta * tempScale) * Math.exp(regimeStateNormalized);
   const initialTemperature = temperature;
   const minTemperature = initialTemperature * 1e-4;
   
   const stateSpaceSize = DRAW_SIZE * (DOMAIN_SIZE - DRAW_SIZE);
-  const iterationsPerTemp = Math.max(8, Math.floor(Math.log(stateSpaceSize) * 3.5 * Math.exp(regimeStateNormalized)));
+  // Itérations par température ajustées continûment selon l'équilibre exploration/exploitation
+  const itersScaling = (3.0 * explorationBeta + 2.0 * exploitationBeta);
+  const iterationsPerTemp = Math.max(8, Math.floor(Math.log(stateSpaceSize) * itersScaling * Math.exp(regimeStateNormalized)));
 
   let stagnationCounter = 0;
 
-  // CORRECTIF PERFORMANCE : mesuré empiriquement sur données réelles (Baraka, 240 tirages),
-  // le plafond précédent (2x le pire cas théorique sans réchauffe, ~1833 itérations) était
-  // SYSTÉMATIQUEMENT atteint intégralement — la boucle ne convergeait jamais naturellement
-  // avant la limite, causant ~20 secondes par prédiction. Deux causes combinées :
-  // 1) le mécanisme de réchauffe peut se déclencher très souvent en cas de stagnation
-  //    fréquente près d'un optimum local, entretenant une tension avec le refroidissement ;
-  // 2) le plafond de 2x était lui-même trop généreux pour un usage interactif.
-  // On plafonne maintenant les DEUX leviers : le nombre total d'itérations externes (budget
-  // resserré, toujours dérivé du pire cas théorique mais avec une marge réduite) ET le nombre
-  // de réchauffes autorisées (au-delà, le refroidissement continue sans plus être contré).
-  // bestCombo (déjà suivi tout au long de la recherche) garantit qu'on ne perd jamais la
-  // meilleure solution trouvée, quel que soit le point d'arrêt.
+  // Seuil de stagnation et réchauffes modulés continûment par le ratio SNR
   const worstCaseCoolingSteps = Math.log(1e-4) / Math.log(0.99);
-  const maxOuterIterations = Math.ceil(worstCaseCoolingSteps * 0.4);
-  const maxReheatEvents = Math.max(3, Math.ceil(Math.log2(stateSpaceSize)));
+  const maxOuterIterations = Math.ceil(worstCaseCoolingSteps * (0.35 + 0.15 * explorationBeta));
+  const maxReheatEvents = Math.max(2, Math.ceil(Math.log2(stateSpaceSize) * (0.8 + 0.4 * explorationBeta)));
   let reheatEventCount = 0;
   let outerIterationCount = 0;
 
-  // --- ÉTAPE 4 : RECUIT SIMULÉ ULTRA ROBUSTE ---
+  // --- ÉTAPE 4 : RECUIT SIMULÉ ULTRA ROBUSTE AVEC ADAPTATION DE RÉGIME ---
   while (temperature > minTemperature && outerIterationCount < maxOuterIterations) {
     outerIterationCount++;
 
-    // CORRECTIF RÉACTIVITÉ : céder le contrôle au navigateur toutes les 15 itérations
-    // externes. Sans ce point de cession, même une recherche rapide en soi (quelques
-    // secondes) s'exécute comme un unique bloc synchrone ininterrompu, gelant l'interface
-    // (aucun rendu, aucune interaction possible) pendant toute sa durée. La fréquence (15)
-    // équilibre réactivité perçue et surcoût de planification : assez fréquent pour rester
-    // fluide, assez espacé pour ne pas dominer le temps de calcul utile.
     if (outerIterationCount % 15 === 0) {
       await new Promise(resolve => setTimeout(resolve, 0));
     }
 
     const energyVariances: number[] = [];
     
+    // Probabilités des opérateurs de mutation modulées par le régime exploration/exploitation
+    // Régime exploration : davantage de doubles swaps et de dispersion
+    // Régime exploitation : prépondérance du ciblage par affinité et swaps fins
+    const pSingleSwap = 0.70 + 0.10 * exploitationBeta; // 70% à 80%
+    const pDoubleSwap = pSingleSwap + (0.20 * explorationBeta + 0.05 * exploitationBeta); // 15% (exploration) -> 5% (exploitation)
+
     for (let i = 0; i < iterationsPerTemp; i++) {
       let proposedCombo = [...currentCombo];
       const moveType = lcgRandom();
 
-      // Opérateurs de mutations enrichis
-      if (moveType < 0.8) {
-        // A. Single swap classique (80%)
+      // Opérateurs de mutations enrichis continus
+      if (moveType < pSingleSwap) {
+        // A. Single swap classique
         const indexToSwap = Math.floor(lcgRandom() * DRAW_SIZE);
         const isOutsiderSlot = indexToSwap >= targetTop;
         const candidateList = isOutsiderSlot && outsiderPool.length > 0 ? outsiderPool : topPool;
@@ -815,8 +832,8 @@ export const generateCombination = async (
         }
         proposedCombo[indexToSwap] = newNum;
       } 
-      else if (moveType < 0.9) {
-        // B. Double swap lourd (10%)
+      else if (moveType < pDoubleSwap) {
+        // B. Double swap lourd (Exploration structurelle)
         const idx1 = Math.floor(lcgRandom() * DRAW_SIZE);
         let idx2 = Math.floor(lcgRandom() * DRAW_SIZE);
         while (idx2 === idx1) {
@@ -844,7 +861,7 @@ export const generateCombination = async (
         proposedCombo[idx2] = newNum2;
       } 
       else {
-        // C. Mutation ciblée par affinité (10%)
+        // C. Mutation ciblée par affinité harmonique (Exploitation de co-occurrence)
         // Éjecter le numéro qui a le moins d'affinité avec le reste
         let minAvgAff = Infinity;
         let minAffIdx = 0;
@@ -948,9 +965,11 @@ export const generateCombination = async (
     const HurstRef = Math.max(0.01, Math.min(0.99, hurst));
     const hurstMultiplier = 1.0 / (2.0 * HurstRef); // HurstRef = 0.5 => 1.0, HurstRef = 0.8 => 0.625, HurstRef = 0.2 => 2.5
     
-    // Le taux de refroidissement de base est ajusté de manière continue par Hurst (sans nombres magiques)
+    // Le taux de refroidissement de base est ajusté de manière continue par Hurst et le régime SNR
     const baseCoolingRate = 0.85 * Math.pow(0.99, hurstMultiplier);
-    const adaptiveCoolingRate = Math.max(0.75, Math.min(0.995, baseCoolingRate + (0.14 * coolingSignal * hurstMultiplier)));
+    // En exploitation (fort SNR), accélération continue de la convergence vers l'optimum
+    const exploitationCoolingBoost = 0.04 * (exploitationBeta - 0.5);
+    const adaptiveCoolingRate = Math.max(0.75, Math.min(0.995, baseCoolingRate + (0.14 * coolingSignal * hurstMultiplier) - exploitationCoolingBoost));
     
     temperature *= adaptiveCoolingRate;
   }

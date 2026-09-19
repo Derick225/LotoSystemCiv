@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
-import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights } from '../services/predictionEngine';
+import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights, generateEmpiricalCalibration } from '../services/predictionEngine';
 import { savePredictionToHistory, getLatestPredictionForDraw } from '../services/predictionHistoryService';
 import { calculateShannonEntropy, detectGameRegime } from '../services/mathService';
 import { getLocalForensicReports } from '../services/postPredictionAnalysisService';
@@ -21,6 +21,7 @@ export const usePredictionGenerator = (drawName: string) => {
     const history = useDeferredValue(rawHistory);
     const temporalDepth = useNexusStore(state => state.temporalDepth);
     const setLastPrediction = useNexusStore(state => state.setLastPrediction);
+    const setEmpiricalCalibration = useNexusStore(state => state.setEmpiricalCalibration);
     const globalWeights = useNexusStore(state => state.globalWeights);
     const updateGlobalWeights = useNexusStore(state => state.updateGlobalWeights);
     const spectral = useNexusStore(state => state.spectral);
@@ -165,6 +166,18 @@ export const usePredictionGenerator = (drawName: string) => {
             isMounted = false;
         };
     }, [drawName, setLastPrediction]);
+
+    // Synchronisation automatique de la calibration empirique temporelle du tirage actif
+    useEffect(() => {
+        if (activeHistory && activeHistory.length >= 5) {
+            const hurst = (fractal && fractal.length > 0)
+                ? fractal.reduce((acc, f) => acc + (typeof f.hurst === 'number' ? f.hurst : 0.5), 0) / fractal.length
+                : 0.5;
+            const entropyRatio = currentEntropy ?? 0.95;
+            const calibration = generateEmpiricalCalibration(activeHistory, hurst, entropyRatio);
+            setEmpiricalCalibration(calibration);
+        }
+    }, [activeHistory, fractal, currentEntropy, setEmpiricalCalibration]);
 
     useEffect(() => {
         if (globalWeights) setActiveDNA(getStrategyName(globalWeights));

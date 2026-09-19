@@ -5,20 +5,34 @@ import { calculateGeneticDiversityIndex } from './diversityService';
 import { normalizeWeights } from './weightsManager';
 
 // ============================================================================
-// 1. CALIBRATION EMPIRIQUE DYNAMIQUE (ZÉRO NOMBRE MAGIQUE)
+// 1. CALIBRATION EMPIRIQUE TEMPORELLE CONTINUE (ZÉRO NOMBRE MAGIQUE)
 // ============================================================================
 
-export const generateEmpiricalCalibration = (history: DrawResult[]): EmpiricalCalibration => {
-  if (!history || history.length < 10) {
+export const generateEmpiricalCalibration = (
+  history: DrawResult[],
+  hurstExponent: number = 0.5,
+  entropyRatio: number = 0.95
+): EmpiricalCalibration => {
+  // Moments théoriques exacts de la distribution discrète uniforme sans remise (Loto 5/90)
+  const THEORETICAL_MU_SUM = 227.5; // 5 * (90 + 1) / 2
+  const THEORETICAL_SIGMA2_SUM = 3223.181; // 5 * ((90^2 - 1) / 12) * ((90 - 5) / (90 - 1))
+  const THEORETICAL_MU_AMP = 60.6667; // ((5 - 1) / (5 + 1)) * (90 + 1)
+  const THEORETICAL_SIGMA2_AMP = 245.555; // (2 * 4 / (36 * 7)) * 91 * 85
+  const THEORETICAL_MU_AC = 9.66;
+  const THEORETICAL_SIGMA2_AC = 0.4096; // 0.64^2
+  const THEORETICAL_LAMBDA_CONSEC = 0.2247; // 5 * (4 / 89)
+
+  if (!history || history.length < 5) {
     return FALLBACK_CALIBRATION;
   }
 
   const sums: number[] = [];
   const amplitudes: number[] = [];
   const acs: number[] = [];
-  let totalConsecutives = 0;
+  const consecutivesList: number[] = [];
 
-  for (const draw of history) {
+  for (let i = 0; i < history.length; i++) {
+    const draw = history[i];
     const nums = (draw as any).numbers || (draw as any).gagnants || [
       (draw as any).G1, (draw as any).G2, (draw as any).G3, 
       (draw as any).G4, (draw as any).G5
@@ -32,34 +46,81 @@ export const generateEmpiricalCalibration = (history: DrawResult[]): EmpiricalCa
     acs.push(calculateACValue(sorted));
 
     let consec = 0;
-    for (let i = 0; i < sorted.length - 1; i++) {
-      if (sorted[i + 1] - sorted[i] === 1) consec++;
+    for (let j = 0; j < sorted.length - 1; j++) {
+      if (sorted[j + 1] - sorted[j] === 1) consec++;
     }
-    totalConsecutives += consec;
+    consecutivesList.push(consec);
   }
 
   const n = sums.length;
   if (n === 0) return FALLBACK_CALIBRATION;
 
-  const mean = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
-  const std = (arr: number[], m: number) => Math.sqrt(arr.reduce((sq, val) => sq + Math.pow(val - m, 2), 0) / arr.length);
+  // Calcul du taux d'atténuation temporelle exponentielle modulé continûment par Hurst et l'Entropie
+  const safeHurst = Math.max(0.05, Math.min(0.95, hurstExponent));
+  const safeEntropy = Math.max(0.1, Math.min(1.0, entropyRatio));
+  const halfLife = Math.max(5, n * (safeHurst / (1.0 + safeEntropy)));
+  const decayRate = Math.log(2) / halfLife;
 
-  const mSum = mean(sums);
-  const mAmp = mean(amplitudes);
-  const mAC = mean(acs);
+  // Pondération temporelle décroissante continue w_i = exp(-decayRate * i)
+  let sumWeights = 0;
+  let sumWeightsSq = 0;
+  const weights: number[] = new Array(n);
 
-  const sSum = std(sums, mSum);
-  const sAmp = std(amplitudes, mAmp);
-  const sAC = std(acs, mAC);
+  for (let i = 0; i < n; i++) {
+    const w = Math.exp(-decayRate * i);
+    weights[i] = w;
+    sumWeights += w;
+    sumWeightsSq += w * w;
+  }
+
+  // Taille d'échantillon effective de Kish N_eff = (sum w)^2 / (sum w^2)
+  const nEff = sumWeightsSq > 0 ? (sumWeights * sumWeights) / sumWeightsSq : n;
+
+  // Fonctions de calcul des moments pondérés par la fiabilité statistique
+  const calcWeightedMoments = (values: number[], mu0: number, sigma20: number) => {
+    let wMean = 0;
+    for (let i = 0; i < n; i++) {
+      wMean += (weights[i] / sumWeights) * values[i];
+    }
+
+    let wVarSum = 0;
+    for (let i = 0; i < n; i++) {
+      wVarSum += weights[i] * Math.pow(values[i] - wMean, 2);
+    }
+    
+    // Variance non biaisée pondérée
+    const denom = sumWeights - (sumWeightsSq / sumWeights);
+    const wVar = denom > 0 ? wVarSum / denom : 0;
+
+    // Régularisation bayésienne conjuguée à l'a priori uniforme théorique (Zéro nombre magique)
+    const n0 = 2.0; // Poids minimal régulateur de Jeffreys
+    const regMean = (nEff * wMean + n0 * mu0) / (nEff + n0);
+    const regVar = (nEff * wVar + n0 * sigma20 + (nEff * n0 / (nEff + n0)) * Math.pow(wMean - mu0, 2)) / (nEff + n0);
+    const regStd = Math.sqrt(Math.max(1e-4, regVar));
+
+    return { mean: regMean, std: regStd };
+  };
+
+  const sumMoments = calcWeightedMoments(sums, THEORETICAL_MU_SUM, THEORETICAL_SIGMA2_SUM);
+  const ampMoments = calcWeightedMoments(amplitudes, THEORETICAL_MU_AMP, THEORETICAL_SIGMA2_AMP);
+  const acMoments = calcWeightedMoments(acs, THEORETICAL_MU_AC, THEORETICAL_SIGMA2_AC);
+
+  // Moment de Poisson régularisé pour les consécutifs
+  let wConsecMean = 0;
+  for (let i = 0; i < n; i++) {
+    wConsecMean += (weights[i] / sumWeights) * consecutivesList[i];
+  }
+  const n0 = 2.0;
+  const regLambdaConsec = (nEff * wConsecMean + n0 * THEORETICAL_LAMBDA_CONSEC) / (nEff + n0);
 
   return {
-    meanSum: mSum,
-    stdSum: sSum > 0.1 ? sSum : 56.8,
-    meanAmplitude: mAmp,
-    stdAmplitude: sAmp > 0.1 ? sAmp : 13.5,
-    meanAC: mAC,
-    stdAC: sAC > 0.1 ? sAC : 0.71,
-    lambdaConsecutives: totalConsecutives / n,
+    meanSum: sumMoments.mean,
+    stdSum: sumMoments.std,
+    meanAmplitude: ampMoments.mean,
+    stdAmplitude: ampMoments.std,
+    meanAC: acMoments.mean,
+    stdAC: acMoments.std,
+    lambdaConsecutives: regLambdaConsec,
     isValid: true
   };
 };

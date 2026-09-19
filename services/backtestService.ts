@@ -4,7 +4,9 @@ import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { generateMasterPrediction } from "./prediction/predictionFacade";
 import { useNexusStore } from "../store/useNexusStore";
 import { detectGameRegime } from "./mathService";
-import { getAlgoWeights } from "./prediction/weightsManager";
+import { getAlgoWeights, normalizeWeights } from "./prediction/weightsManager";
+import { drawHasMachineNumbers } from "../constants";
+import { AlgoKey } from "../shared/prediction.types";
 import type {
   TrainingReport,
   TrainingResult,
@@ -201,7 +203,20 @@ export const runBacktestTraining = async (
   let hwrl_total = 0;
   const confidencesAndOutcomes: { conf: number; outcome: number }[] = [];
   
-  const weightsToUse = customWeights || (await getAlgoWeights(drawName));
+  const storeState = useNexusStore?.getState?.();
+  const baseWeights = customWeights || 
+    (storeState?.globalWeights && Object.keys(storeState.globalWeights).length > 0 ? storeState.globalWeights : null) || 
+    (await getAlgoWeights(drawName));
+
+  const resolvedWeights = { ...baseWeights };
+  const hasMachine = drawHasMachineNumbers(drawName, allResults);
+  if (!hasMachine) {
+    (resolvedWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+  }
+  const weightsToUse = normalizeWeights(resolvedWeights);
+
+  const isForensicOptimized = storeState?.isForensicOptimized ?? false;
+  const useSpatioTemporalHawkes = storeState?.useSpatioTemporalHawkes ?? false;
 
   let foldScores: number[] = [];
   const windowScores: number[] = [];
@@ -219,7 +234,7 @@ export const runBacktestTraining = async (
 
     const historyAtThatTime = allResults.slice(trainDataStart);
 
-    const temporalDepth = useNexusStore?.getState()?.temporalDepth ?? 100;
+    const temporalDepth = storeState?.temporalDepth ?? 100;
     const prediction = await generateMasterPrediction(
       drawName,
       historyAtThatTime,
@@ -228,6 +243,12 @@ export const runBacktestTraining = async (
       undefined,
       undefined,
       skipTraining,
+      false,
+      0,
+      isForensicOptimized,
+      undefined,
+      undefined,
+      useSpatioTemporalHawkes
     );
 
     const predicted = prediction.suggestedNumbers;

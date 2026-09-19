@@ -20,6 +20,9 @@ import { DrawResult, AlgoWeights } from "../types";
 import { generateMasterPrediction } from "../services/predictionEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { audioEngine } from "../utils/audioEngine";
+import { drawHasMachineNumbers } from "../constants";
+import { AlgoKey } from "../shared/prediction.types";
+import { normalizeWeights } from "../services/prediction/weightsManager";
 import { useToast } from "./ui/Toast";
 import {
   buildUnifiedForensicScenario,
@@ -51,6 +54,8 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
+  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
 
   const cleanHistory = useMemo(() => {
     return purifyHistoryForDraw(drawName, history);
@@ -86,6 +91,13 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
       const generatedSteps: ReplayStepData[] = [];
       let currentBankroll = initialBankroll;
 
+      const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
+      const sanitizedWeights = { ...(globalWeights || {}) } as AlgoWeights;
+      if (!hasMachine) {
+        (sanitizedWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+      }
+      const effectiveWeights = normalizeWeights(sanitizedWeights);
+
       // Slice historical range from oldest to newest within the window
       const targetWindowHistory = cleanHistory.slice(0, replayWindow).reverse();
 
@@ -108,13 +120,16 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
           drawName,
           past,
           temporalDepth,
-          globalWeights,
+          effectiveWeights,
           undefined,
           undefined,
           true,
           false,
           0,
-          true,
+          isForensicOptimized,
+          undefined,
+          undefined,
+          useSpatioTemporalHawkes,
         );
 
         const actualGagnants = Array.isArray(target?.gagnants) ? target.gagnants : [];

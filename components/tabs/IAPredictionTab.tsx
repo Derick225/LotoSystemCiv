@@ -67,6 +67,9 @@ import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { getAlgoWeights, adjustWeightsForRegime, normalizeWeights } from "../../services/prediction/weightsManager";
 import { NumberBall } from "../NumberBall";
 import { ExportService } from "../../services/exportService";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
+import { drawHasMachineNumbers } from "../../constants";
+import { StrictDrawValidationModal } from "../StrictDrawValidationModal";
 
 interface BacktestResult {
   drawId: string;
@@ -88,6 +91,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const globalRegime = useNexusStore((state) => state.regime);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
+  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
   const useCloudEngine = useNexusStore((state) => state.useCloudEngine);
   const setUseCloudEngine = useNexusStore((state) => state.setUseCloudEngine);
 
@@ -110,6 +115,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const [showEngineComparison, setShowEngineComparison] = useState<boolean>(true);
   const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
   const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
+  const [isStrictModalOpen, setIsStrictModalOpen] = useState<boolean>(false);
 
   // Statistiques d'âge des logs pour l'optimisation du stockage local
   const oldLogsStats = useMemo(() => {
@@ -742,7 +748,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
 
   // Determinist backtesting engine
   const runBacktesting = async () => {
-    if (!history || history.length < 11) {
+    const cleanHistory = purifyHistoryForDraw(drawName, history);
+    if (!cleanHistory || cleanHistory.length < 11) {
       showToast(
         "Historique insuffisant pour lancer le backtesting (minimum 11 tirages requis).",
         "error",
@@ -756,7 +763,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     setBacktestResults(null);
     audioEngine.play("scan");
 
-    const K = Math.min(backtestDepth, history.length - 11);
+    const K = Math.min(backtestDepth, cleanHistory.length - 11);
     if (K <= 0) {
       setBacktestError(
         "La profondeur de l'historique restante n'est pas suffisante pour effectuer un découpage récursif correct.",
@@ -772,14 +779,20 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       const { generateMasterPrediction } =
         await import("../../services/prediction/predictionFacade");
 
-      const activeWeights = globalWeights && Object.keys(globalWeights).length > 0
-        ? globalWeights
+      const baseWeights = globalWeights && Object.keys(globalWeights).length > 0
+        ? { ...globalWeights }
         : await getAlgoWeights(drawName);
+
+      const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
+      if (!hasMachine) {
+        (baseWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+      }
+      const activeWeights = normalizeWeights(baseWeights);
 
       for (let i = 0; i < K; i++) {
         // Predict for targets using only past elements relative to i
-        const histSlice = history.slice(i + 1);
-        const targetDraw = history[i];
+        const histSlice = cleanHistory.slice(i + 1);
+        const targetDraw = cleanHistory[i];
 
         // Generate prediction on the sliced dataset
         const pred = await generateMasterPrediction(
@@ -792,6 +805,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           skipTraining,
           adversarialMode,
           forcedOutsiderCount,
+          isForensicOptimized,
+          undefined,
+          undefined,
+          useSpatioTemporalHawkes
         );
 
         const actual = targetDraw.gagnants;
@@ -1008,6 +1025,17 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                   {localHistory.length}
                 </span>
               )}
+            </button>
+            <button
+              id="strict-draw-validation-btn"
+              onClick={() => {
+                audioEngine.play("click");
+                setIsStrictModalOpen(true);
+              }}
+              className="flex-1 lg:flex-none px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-300 flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-600/20 to-blue-600/20 hover:from-cyan-600/40 hover:to-blue-600/40 text-cyan-300 border border-cyan-500/40 shadow-sm cursor-pointer"
+            >
+              <Scale size={14} className="text-cyan-400" />
+              <span>Validation Stricte</span>
             </button>
           </div>
         </div>
@@ -3319,6 +3347,13 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           )}
         </div>
       )}
+
+      {/* Modal de Validation Stricte du Tirage */}
+      <StrictDrawValidationModal
+        isOpen={isStrictModalOpen}
+        onClose={() => setIsStrictModalOpen(false)}
+        drawName={drawName}
+      />
     </div>
   );
 };

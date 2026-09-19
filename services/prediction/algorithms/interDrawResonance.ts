@@ -308,6 +308,70 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       targetBaseline[i] = (targetTotals[i] + laplaceAlpha * p0) / (sampleSize + laplaceAlpha);
     }
 
+    // 3c. Construction des Densités Non-Paramétriques de Transition (KDE Torique modulo 90)
+    // Calcul de la bande passante adaptative de Silverman / Scott pour chaque état source p
+    const kdeBandwidths = new Float64Array(N + 1);
+    const kdeTransitionMatrix = Array.from({ length: N + 1 }, () => new Float64Array(N + 1));
+
+    for (let p = 1; p <= N; p++) {
+      const totalP = fromTotals[p];
+      if (totalP === 0) {
+        kdeBandwidths[p] = 2.0;
+        for (let c = 1; c <= N; c++) {
+          kdeTransitionMatrix[p][c] = p0;
+        }
+        continue;
+      }
+
+      // Calcul des moments trigonométriques angulaires sur le tore S1 (Z/90Z)
+      let sumCos = 0;
+      let sumSin = 0;
+      for (let tw = 1; tw <= N; tw++) {
+        const count = transCounts[p][tw];
+        if (count > 0) {
+          const theta = (2.0 * Math.PI * (tw - 1)) / 90.0;
+          sumCos += count * Math.cos(theta);
+          sumSin += count * Math.sin(theta);
+        }
+      }
+
+      const meanCos = sumCos / totalP;
+      const meanSin = sumSin / totalP;
+      const R = Math.sqrt(meanCos * meanCos + meanSin * meanSin);
+      // Écart-type circulaire continu sur l'échelle des 90 numéros
+      const circularStd = (90.0 / (2.0 * Math.PI)) * Math.sqrt(Math.max(0.01, -2.0 * Math.log(Math.max(1e-4, R))));
+      
+      // Bande passante optimale de Silverman pour noyau gaussien h_p = 1.06 * sigma * n^(-1/5)
+      const h_p = Math.max(1.0, 1.06 * Math.max(2.0, circularStd) * Math.pow(totalP, -0.2));
+      kdeBandwidths[p] = h_p;
+
+      const twoHsq = 2.0 * h_p * h_p;
+      const normFactor = 1.0 / (Math.sqrt(2.0 * Math.PI) * h_p * totalP);
+
+      let kdeSum = 0;
+      for (let c = 1; c <= N; c++) {
+        let densityAtC = 0;
+        for (let tw = 1; tw <= N; tw++) {
+          const count = transCounts[p][tw];
+          if (count > 0) {
+            const diff = Math.abs(c - tw);
+            const distToroidal = Math.min(diff, 90 - diff);
+            densityAtC += count * Math.exp(-(distToroidal * distToroidal) / twoHsq);
+          }
+        }
+        densityAtC *= normFactor;
+        kdeTransitionMatrix[p][c] = densityAtC;
+        kdeSum += densityAtC;
+      }
+
+      // Normalisation continue de la densité de transition KDE avec lissage bayésien de Laplace
+      const blendKDE = totalP / (totalP + laplaceAlpha);
+      for (let c = 1; c <= N; c++) {
+        const rawDensity = kdeSum > 0 ? kdeTransitionMatrix[p][c] / kdeSum : p0;
+        kdeTransitionMatrix[p][c] = blendKDE * rawDensity + (1.0 - blendKDE) * p0;
+      }
+    }
+
     const stride = N + 1;
     const crossCouplingMatrix = new Float64Array(stride * stride);
 
@@ -322,14 +386,13 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
 
     for (let j = 1; j <= N; j++) {
       const rowOffset = j * stride;
-      const transDenom = fromTotals[j] + laplaceAlpha;
       const mirJ = getMirrorNumber(j);
       const compJ = getComplement90(j);
 
       for (let i = 1; i <= N; i++) {
-        // 1. Transition markovienne
-        const pTrans = transDenom > 0 ? (transCounts[j][i] + laplaceAlpha * p0) / transDenom : p0;
-        const liftTrans = Math.max(1e-4, pTrans / p0);
+        // 1. Transition markovienne non-paramétrique KDE
+        const pTransKDE = kdeTransitionMatrix[j][i];
+        const liftTrans = Math.max(1e-4, pTransKDE / p0);
 
         // 2. Report direct carry-over
         let liftCarry = 1.0;
@@ -394,13 +457,11 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       const isDirectCandidate = activePredSet.has(c);
       const flags: string[] = [];
 
-      // --- CANAL 1 : TRANSITIONS MARKOVIENNES CONDITIONNELLES D'ORDRE 1 & 2 ---
+      // --- CANAL 1 : TRANSITIONS MARKOVIENNES CONDITIONNELLES D'ORDRE 1 & 2 AVEC KDE ---
       let evidenceTrans = 0;
       for (const p of activePredWinners) {
         if (isDirectCandidate && p === c) continue; // Le report direct est traité dans son canal propre
-        const count = transCounts[p][c];
-        const denom = fromTotals[p] + laplaceAlpha;
-        const condProb = denom > 0 ? (count + laplaceAlpha * p0) / denom : p0;
+        const condProb = kdeTransitionMatrix[p][c];
 
         if (isDirectCandidate) {
           const transLift = Math.max(1.0, condProb / p0);
