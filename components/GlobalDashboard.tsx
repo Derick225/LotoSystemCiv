@@ -506,6 +506,30 @@ const NextDrawWidget = React.memo(
   },
 );
 
+const calculateNextDrawSnapshot = () => {
+  const next = getNextScheduledDraw();
+  if (!next) return null;
+  const now = new Date();
+  const [h, m] = next.time.split(":").map(Number);
+  const targetDate = new Date();
+  targetDate.setHours(h, m, 0, 0);
+  if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
+
+  const diffMs = targetDate.getTime() - now.getTime();
+  const isUrgent = diffMs < 600000;
+  const hh = Math.floor(diffMs / 3600000);
+  const mm = Math.floor((diffMs % 3600000) / 60000);
+  const ss = Math.floor((diffMs % 60000) / 1000);
+
+  return {
+    name: next.name,
+    timeLeft: `${hh.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`,
+    isUrgent,
+    time: next.time,
+    day: next.day,
+  };
+};
+
 const IsolatedNextDrawWidget = React.memo(() => {
   const [nextDraw, setNextDraw] = useState<{
     name: string;
@@ -513,34 +537,12 @@ const IsolatedNextDrawWidget = React.memo(() => {
     isUrgent: boolean;
     time: string;
     day: string;
-  } | null>(null);
+  } | null>(calculateNextDrawSnapshot);
 
   useEffect(() => {
-    // Initial call to avoid 1s delay
     const updateDraw = () => {
-      const next = getNextScheduledDraw();
-      if (next) {
-        const now = new Date();
-        const [h, m] = next.time.split(":").map(Number);
-        const targetDate = new Date();
-        targetDate.setHours(h, m, 0, 0);
-        if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
-
-        const diffMs = targetDate.getTime() - now.getTime();
-
-        const isUrgent = diffMs < 600000;
-        const hh = Math.floor(diffMs / 3600000);
-        const mm = Math.floor((diffMs % 3600000) / 60000);
-        const ss = Math.floor((diffMs % 60000) / 1000);
-
-        setNextDraw({
-          name: next.name,
-          timeLeft: `${hh.toString().padStart(2, "0")}:${mm.toString().padStart(2, "0")}:${ss.toString().padStart(2, "0")}`,
-          isUrgent,
-          time: next.time,
-          day: next.day,
-        });
-      }
+      const snap = calculateNextDrawSnapshot();
+      if (snap) setNextDraw(snap);
     };
     updateDraw();
     const timer = setInterval(updateDraw, 1000);
@@ -724,10 +726,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
       "Samedi",
       "Dimanche",
     ];
-    const isEmptyState =
-      history.length === 0 &&
-      !loadingSummary &&
-      summary.every((s: SummaryItem) => s.result === null);
 
     // Couleur de l'indicateur de pouls global
     const pulseColor =
@@ -826,50 +824,16 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           </div>
         </div>
 
-        {isEmptyState ? (
-          <div className="glass-card neural-border p-8 md:p-12 rounded-[2.5rem] md:rounded-[4rem] text-center shadow-2xl relative overflow-hidden mx-auto w-full">
-            <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-[120px] -mr-32 -mt-32"></div>
-            <div className="relative z-10 flex flex-col items-center gap-6">
-              <div className="p-6 bg-white/5 rounded-full mb-4 animate-bounce-subtle">
-                <Database
-                  size={40}
-                  className="text-indigo-400 md:w-12 md:h-12"
-                />
-              </div>
-              <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter">
-                Base Vierge
-              </h2>
-              <p className="text-slate-400 max-w-lg mx-auto text-xs md:text-sm font-medium">
-                Le noyau Nexus ne détecte aucune donnée historique.
-              </p>
-              <button
-                onClick={handleManualSync}
-                disabled={fullSyncing}
-                className="px-6 md:px-8 py-3 md:py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] md:text-xs uppercase tracking-widest shadow-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-3"
-              >
-                {fullSyncing ? (
-                  <RefreshCw className="animate-spin" size={16} />
-                ) : (
-                  <RefreshCw size={16} />
-                )}
-                Synchroniser les données
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-6 w-full">
-            <MetaLearningIndicator />
-          </div>
-        )}
+        <div className="flex flex-col gap-6 w-full">
+          <MetaLearningIndicator />
+        </div>
 
-        {!isEmptyState && (
-          <>
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-10">
-              {/* PROCHAIN TIRAGE WIDGET */}
-              <IsolatedNextDrawWidget />
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 md:gap-10">
+          {/* PROCHAIN TIRAGE WIDGET */}
+          <IsolatedNextDrawWidget />
+        </div>
 
-            <section className="mt-12 md:mt-16">
+        <section className="mt-12 md:mt-16">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-5 mb-8 md:mb-10 px-2 md:px-4">
                   <div className="text-center md:text-left w-full">
                     <h2 className="text-2xl md:text-3xl font-black text-white tracking-tighter uppercase leading-none">
@@ -943,9 +907,9 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                         return (
                           <motion.div
                             key={item.name}
-                            initial={{ opacity: 0, y: 30 }}
+                            initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: idx * 0.1 }}
+                            transition={{ duration: 0.15 }}
                             onClick={() => {
                               audioEngine.play("click");
                               onSelectDraw({
@@ -1049,10 +1013,6 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                       })}
                 </div>
               </section>
-
-            {/* Removed patterns and meta learning sections */}
-          </>
-        )}
       </div>
     );
   },

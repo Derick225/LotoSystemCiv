@@ -169,6 +169,14 @@ const AppContent: React.FC = () => {
     setSelectedDraw(draw);
     setViewMode('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('draw', draw.name);
+      window.history.pushState({ drawName: draw.name }, '', url.toString());
+    } catch {
+      // Ignoré en iframe restreint
+    }
   }, [setDrawName, refreshData]);
 
   const handleReset = useCallback(() => {
@@ -176,7 +184,40 @@ const AppContent: React.FC = () => {
     setSelectedDraw(null);
     setViewMode('home');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('draw')) {
+        url.searchParams.delete('draw');
+        window.history.pushState({}, '', url.toString());
+      }
+    } catch {
+      // Ignoré en iframe restreint
+    }
   }, []);
+
+  // Synchronisation avec l'historique du navigateur (support du bouton Retour physique / mobile)
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const drawParam = params.get('draw');
+      if (drawParam) {
+        const foundDraw = ALL_DRAWS.find(d => d.name.toLowerCase() === drawParam.toLowerCase());
+        if (foundDraw) {
+          setSelectedDraw(foundDraw);
+          setDrawName(foundDraw.name);
+          refreshData(foundDraw.name, false);
+          setViewMode('home');
+          return;
+        }
+      }
+      setSelectedDraw(null);
+      setViewMode('home');
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [setDrawName, refreshData]);
 
   const handleLogout = async () => {
     await authService.logout();
@@ -225,7 +266,7 @@ const AppContent: React.FC = () => {
     const renderContent = () => {
     let content;
     let key;
-    if (selectedDraw) { content = <DrawDetails />; key = 'draw'; }
+    if (selectedDraw) { content = <DrawDetails onBack={handleReset} />; key = 'draw'; }
     else {
         switch (viewMode) {
           case 'home': content = <GlobalDashboard onSelectDraw={handleSelectDraw} />; key = 'home'; break;
@@ -238,10 +279,10 @@ const AppContent: React.FC = () => {
         <AnimatePresence mode="wait">
             <motion.div
                 key={key}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 10 }}
-                transition={{ duration: 0.18, ease: 'easeOut' }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.12, ease: 'easeOut' }}
             >
                 <LocalErrorBoundary key={key}>
                     <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /></div>}>

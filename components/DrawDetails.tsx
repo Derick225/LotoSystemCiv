@@ -16,6 +16,7 @@ import {
   Brain,
   Dna,
   GitBranch,
+  ArrowLeft,
 } from "lucide-react";
 import { getPrimaryInterDrawFamily } from "../constants";
 import { useToast } from "./ui/Toast";
@@ -68,7 +69,7 @@ type MainTab =
   | "Genomique"
   | "DnaHistory";
 
-export const DrawDetails: React.FC = () => {
+export const DrawDetails: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
   const drawName = useNexusStore((state) => state.drawName);
   const history = useNexusStore((state) => state.history);
   const loading = useNexusStore((state) => state.loading);
@@ -176,7 +177,26 @@ export const DrawDetails: React.FC = () => {
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none"></div>
 
         <div className="space-y-2 md:space-y-3 w-full md:w-auto relative z-10">
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                if (onBack) {
+                  onBack();
+                } else {
+                  window.dispatchEvent(
+                    new CustomEvent("CROSS_MODULE_NAVIGATE", {
+                      detail: { view: "home" },
+                    }),
+                  );
+                }
+              }}
+              className="px-2.5 py-1 bg-white/5 hover:bg-white/10 active:scale-95 border border-white/10 rounded-full text-[10px] md:text-xs font-black uppercase tracking-wider text-slate-300 transition-all flex items-center gap-1.5 group cursor-pointer"
+              title="Retourner à la Station principale"
+            >
+              <ArrowLeft size={12} className="group-hover:-translate-x-0.5 transition-transform text-indigo-400" />
+              <span>Station</span>
+            </button>
             <span className="px-2.5 py-0.5 md:px-3 md:py-1 bg-indigo-600 text-white text-[10px] md:text-xs font-black uppercase tracking-widest rounded-full shadow-lg shadow-indigo-600/20 flex items-center gap-1.5 md:gap-2">
               <Navigation size={10} /> Session Active
             </span>

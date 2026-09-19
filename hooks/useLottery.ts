@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult } from '../types';
 import { normalizeDate, fetchResults, fetchRecentStats, getDailySummary } from '../services/lotteryService';
+import { DRAW_SCHEDULE } from '../constants';
 import { 
     calculateSpectralMetricsAsync, 
     calculateWaveletMetricsAsync, 
@@ -83,11 +84,23 @@ export const useDrawHistory = (drawName: string) => {
   });
 };
 
+export const getInitialDailySummary = (day: string) => {
+  const draws = DRAW_SCHEDULE[day] || {};
+  const sortedTimes = Object.keys(draws).sort();
+  return sortedTimes.map((time) => ({
+    time,
+    name: draws[time],
+    result: null as DrawResult | null,
+  }));
+};
+
 export const useDailySummary = (day: string) => {
     return useQuery({
         queryKey: lotteryKeys.dailySummary(day),
         queryFn: () => getDailySummary(day),
-        staleTime: 1000 * 60 * 2, 
+        placeholderData: (previousData) => previousData || getInitialDailySummary(day),
+        staleTime: 1000 * 60 * 5, 
+        gcTime: 1000 * 60 * 30,
         refetchInterval: 1000 * 60 * 5, 
     });
 };
