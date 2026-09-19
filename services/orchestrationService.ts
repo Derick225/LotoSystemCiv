@@ -2,6 +2,7 @@ import { EmpiricalCalibration, FALLBACK_CALIBRATION, AlgoKey } from "../shared/p
 import { DrawResult, DetectedPattern, PatternType, OrchestrationMetrics, MimicryMetric, ScoreComposition, AlgoWeights, FeatureVector } from '../types';
 import { calculateACValue, calculateShannonEntropy, calculateFractalIndex } from './mathService';
 import { normalizeWeights, getDefaultWeights } from './prediction/weightsManager';
+import { LOTTERY_CONSTANTS } from './lotteryService';
 import { drawHasMachineNumbers } from '../constants';
 
 
@@ -728,6 +729,13 @@ export const runOrchestrationPipeline = (
     familyCounts: Record<string, number>;
   }
 
+  // Les 4 macro-familles de features. La répartition uniforme attendue (1/N) est DÉRIVÉE
+  // de leur nombre au lieu d'être écrite en dur (zéro nombre magique, AGENTS.md règle #1).
+  const MACRO_FAMILY_KEYS = ["inertia", "structure", "transition", "seasonal"];
+  // Asymptote (plancher) de la pénalité de concentration macro-familiale : l'ancienne valeur
+  // discrète 0.35 devient une borne douce atteinte continûment et jamais franchie.
+  const FAMILY_PENALTY_FLOOR = 0.35;
+
   let beams: BeamBranch[] = [];
   const firstStepScores: { num: number; score: number; dominantFamily: string }[] = [];
 
@@ -740,7 +748,7 @@ export const runOrchestrationPipeline = (
     const famSeasonal = f.seasonal;
     const famVals = [famInertia, famStructure, famTransition, famSeasonal];
     const maxIdx = famVals.indexOf(Math.max(...famVals));
-    const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
+    const dominantFamily = MACRO_FAMILY_KEYS[maxIdx];
 
     firstStepScores.push({ num, score, dominantFamily });
   }
@@ -770,6 +778,12 @@ export const runOrchestrationPipeline = (
         b.selected.some(other => other !== sel && Math.abs(sel - other) === 1)
       ).length / 2;
 
+      // Amplification CONTINUE et sans constante de la pénalité de consécutivité : plus le
+      // beam contient déjà de paires voisines, plus une nouvelle paire est pénalisée.
+      // 1/(1+n) vaut 1.0 à n=0 et 0.5 à n=1 — reproduit l'ancien palier `n>0 ? *0.5` de
+      // façon différentiable (AGENTS.md règle #3) au lieu d'un saut binaire.
+      const neighborAmplifier = 1.0 / (1.0 + neighborsCount);
+
       for (let num = 1; num <= 90; num++) {
         if (b.selected.includes(num)) continue;
 
@@ -781,12 +795,19 @@ export const runOrchestrationPipeline = (
         const famSeasonal = f.seasonal;
         const famVals = [famInertia, famStructure, famTransition, famSeasonal];
         const maxIdx = famVals.indexOf(Math.max(...famVals));
-        const dominantFamily = ["inertia", "structure", "transition", "seasonal"][maxIdx];
+        const dominantFamily = MACRO_FAMILY_KEYS[maxIdx];
 
-        let familyPenalty = 1.0;
-        if (b.familyCounts[dominantFamily] >= 2) {
-          familyPenalty = 0.35;
-        }
+        // Taille de la combinaison si ce candidat est retenu.
+        const picksSoFar = b.selected.length + 1;
+
+        // Pénalité de concentration macro-familiale (AGENTS.md règles #1 & #3) :
+        // décroissance CONTINUE (1 - e^-excès) centrée sur la répartition uniforme DÉRIVÉE
+        // (NUMBERS_PER_DRAW / nbMacroFamilles), asymptote à FAMILY_PENALTY_FLOOR. Remplace le
+        // palier binaire `if (count >= 2) penalty = 0.35` et son seuil magique "2".
+        const famCount = b.familyCounts[dominantFamily] || 0;
+        const expectedFamilyCount = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / MACRO_FAMILY_KEYS.length;
+        const famExcess = Math.max(0, (famCount + 1) - expectedFamilyCount);
+        const familyPenalty = 1.0 + (FAMILY_PENALTY_FLOOR - 1.0) * (1.0 - Math.exp(-famExcess));
 
         let decadePenalty = 1.0;
         let lastDigitPenalty = 1.0;
@@ -807,7 +828,7 @@ export const runOrchestrationPipeline = (
             lastDigitPenalty -= pLastDigitPenaltyCoeff;
           }
           if (Math.abs(num - sel) === 1) {
-            consecutivePenalty *= (neighborsCount > 0 ? pConsecutiveCoeff * 0.5 : pConsecutiveCoeff);
+            consecutivePenalty *= pConsecutiveCoeff * neighborAmplifier;
           }
           if (num === 91 - sel) {
             mirrorPenalty *= pMirrorCoeff;
@@ -819,9 +840,12 @@ export const runOrchestrationPipeline = (
 
         let t1Penalty = 1.0;
         if (history[0].gagnants.includes(num)) {
-          if (t1Count >= 2) {
-            t1Penalty = pT1PenaltyCoeff;
-          }
+          // Pénalité de report T-1 CONTINUE : décroît de 1.0 vers pT1PenaltyCoeff (déjà dérivé
+          // empiriquement) selon l'excès de reports vs l'attente hypergéométrique DÉRIVÉE des
+          // données. Remplace le palier binaire `if (t1Count >= 2)` et son seuil magique.
+          const expectedT1Repeats = picksSoFar * (history[0].gagnants.length / LOTTERY_CONSTANTS.TOTAL_NUMBERS);
+          const t1Excess = Math.max(0, (t1Count + 1) - expectedT1Repeats);
+          t1Penalty = 1.0 + (pT1PenaltyCoeff - 1.0) * (1.0 - Math.exp(-t1Excess));
         }
 
         const totalPenalty = familyPenalty * decadePenalty * lastDigitPenalty * consecutivePenalty * mirrorPenalty * t1Penalty;
