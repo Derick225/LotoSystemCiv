@@ -520,7 +520,11 @@ export const interMonthlyResonancePlugin: AlgorithmPlugin = {
         // Boules machine projetées UNIQUEMENT si le tirage supporte les numéros machine
         if (hasMachineData && Array.isArray(projectedCurrent.machine)) {
           const projectedMachine = uniqueValidNumbers(projectedCurrent.machine);
-          const machineRatio = projectedWinners.length > 0 ? 0.5 : 0.0;
+          // Poids machine CONTINU dérivé de la masse relative projetée (machine / total projeté) :
+          // remplace le palier binaire `projectedWinners.length > 0 ? 0.5 : 0.0` et sa constante 0.5
+          // par une proportion réelle (0.5 dans le cas équilibré 5 gagnants / 5 machine). (AGENTS.md #1 & #3)
+          const projectedDenom = projectedWinners.length + projectedMachine.length;
+          const machineRatio = projectedDenom > 0 ? projectedMachine.length / projectedDenom : 0.0;
           for (const num of projectedMachine) {
             const mWeight = periodWeight * machineRatio;
             rawScores[num] += mWeight;

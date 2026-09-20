@@ -175,8 +175,11 @@ const evaluateTensor = (
   coeffs: AdaptiveCoeffs
 ): number => {
   const numTensors = tensors.length;
-  // Train/Val split (75% / 25%) si on a assez de tirages historiques pour prévenir le surapprentissage de façon cybernétique
-  const trainRatio = numTensors >= 8 ? 0.75 : 1.0;
+  // Train/Val split cybernétique : la fraction de validation cible (0.25) pilote une rampe CONTINUE
+  // de trainRatio — pas de hold-out quand les échantillons sont trop peu nombreux, saturation vers
+  // 0.75 quand l'historique grandit. Remplace le palier binaire `numTensors >= 8` (AGENTS.md #1 & #3).
+  const validationFraction = 0.25;
+  const trainRatio = 1.0 - validationFraction * (1.0 - Math.exp(-Math.max(0, numTensors - 1) * validationFraction));
   const splitIndex = Math.floor(numTensors * trainRatio);
 
   if (splitIndex > 0 && splitIndex < numTensors) {

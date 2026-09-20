@@ -406,7 +406,7 @@ export async function generatePlatinumPredictionCore(
             { key: 'TEMPORAL_HAWKES', name: 'Temporel & Hawkes', getVal: (n: number) => stdMomentum[n] },
             { key: 'SPECTRAL_FOURIER', name: 'Spectral & Harmonique', getVal: (n: number) => stdSpectral[n] },
             { key: 'SPATIAL_FRACTAL', name: 'Spatial & Fractal', getVal: (n: number) => (stdSpatial[n] + stdFractal[n]) / 2.0 },
-            { key: 'MACHINE_BAYES', name: 'Machine & Bayes', getVal: (n: number) => (stdBayes[n] + (rawDeltaSieve[n] > 0 ? 0.5 : 0)) }
+            { key: 'MACHINE_BAYES', name: 'Machine & Bayes', getVal: (n: number) => (stdBayes[n] + 0.5 * (rawDeltaSieve[n] / maxDeltaSieve)) }
         ];
         
         let totalEnergy = 0;

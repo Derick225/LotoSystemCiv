@@ -313,10 +313,11 @@ export const calculateCombinationEnergyDetailed = (
     const expectedConsecutive = 1.0 + lambda * ((len - 1) / 4.0);
     const stdConsecutive = Math.max(0.1, Math.sqrt(lambda));
     const zConsecutive = Math.max(0.0, maxConsecutive - expectedConsecutive) / stdConsecutive;
-    consecutivePenalty = Math.pow(zConsecutive, 2.0);
-    if (maxConsecutive >= 3) {
-      consecutivePenalty += 5.0 * (maxConsecutive - 2);
-    }
+    // Escalade CONTINUE des longues séquences : l'excès au-delà de l'attente empirique est
+    // pondéré par le z-score lui-même (dérivé des données), reproduisant l'ancienne pente forte
+    // sans le palier binaire `if (maxConsecutive >= 3)` ni ses constantes 5.0/3/2 (AGENTS.md #1 & #3).
+    const consecutiveExcess = Math.max(0.0, maxConsecutive - expectedConsecutive);
+    consecutivePenalty = Math.pow(zConsecutive, 2.0) + consecutiveExcess * zConsecutive;
     consecutivePenalty = Math.min(20.0, consecutivePenalty);
   }
 

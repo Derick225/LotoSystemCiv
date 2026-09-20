@@ -171,10 +171,19 @@ export const calculateStochasticEntropyForensics = (
     let regime: UnpredictabilityRegime = 'TRANSITIONAL_STOCHASTIC';
     let regimeLabel = 'Régime Transitionnel';
 
-    if (unpredictabilityScore < 38 && safeDKL < 1.2) {
+    // Coordonnée de régime CONTINUE sur le domaine borné [0,100] : on rappelle la contribution KL
+    // (déjà intégrée au score via ×15) bornée à 100, puis on coupe aux TERTILES du domaine plutôt
+    // qu'aux seuils arbitraires 38/62/1.2/2.5 (AGENTS.md règle #1). L'étiquette reste catégorielle
+    // (lisible), mais ses frontières dérivent désormais de l'échelle réelle du score.
+    const dklContribution = Math.min(100.0, safeDKL * 15.0);
+    const regimeCoordinate = (unpredictabilityScore + dklContribution) / 2.0;
+    const lowTertile = 100.0 / 3.0;
+    const highTertile = 200.0 / 3.0;
+
+    if (regimeCoordinate < lowTertile) {
       regime = 'LOW_ENTROPY_ATTRACTOR';
       regimeLabel = 'Attracteur à Basse Entropie (Haute Cohérence)';
-    } else if (unpredictabilityScore > 62 || safeDKL > 2.5) {
+    } else if (regimeCoordinate > highTertile) {
       regime = 'HIGH_ENTROPY_DIFFUSION';
       regimeLabel = 'Diffusion Chaotique (Dispersion Maximale)';
     }

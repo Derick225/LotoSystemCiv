@@ -370,7 +370,7 @@ export const finalizePredictionPayload = async (
     analysis: analysisText,
     breakdown: breakdownRecord,
     timestamp: Date.now(),
-    symbiosisFactor: context.symbioticContext ? Math.min(2.0, 1.0 + (Object.keys(context.symbioticContext.orchestrationBoosts || {}).length > 0 ? 0.5 : 0.0)) : 1.0,
+    symbiosisFactor: context.symbioticContext ? Math.min(2.0, 1.0 + 0.5 * (1.0 - Math.exp(-Object.keys(context.symbioticContext.orchestrationBoosts || {}).length))) : 1.0,
     realityAlignment,
     realityAlignmentNote: HONEST_NOTE,
     adversarialApplied: context.adversarialMode,
