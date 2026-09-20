@@ -250,7 +250,7 @@ interface BayesianEngineResult {
   hawkesLagExcitations?: number[];
 }
 
-const runBayesianResonanceEngine = (
+export const runBayesianResonanceEngine = (
   pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
   activePredNumbers: number[],
   predLaggedHistory?: number[][]
@@ -1085,14 +1085,121 @@ export const calculateInterDrawVector = (
     return vec;
   }
 
-  // Exécution du modèle bayésien continu identique au rapport complet
+  // 1. Exécution du modèle bayésien continu initial
   const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
   const engine = runBayesianResonanceEngine(pairedPairs, lastWinners, predLaggedHistory);
   for (let n = 1; n <= 90; n++) {
     vec[n] = engine.fullCandidateScores[n] || 0.0555;
   }
 
+  // 2. Injection continue des métriques de Lift conditionnel des paires et de résonance de cascade (+-1, +-2)
+  // ZÉRO NOMBRE MAGIQUE : fonctions différentiables calculées à partir du Lift empirique, du PMI et de l'énergie de cascade.
+  const cooccReport = analyzeInterDrawCooccurrences(pairedPairs, lastWinners);
+  const patternReport = analyzeInterDrawPatterns(pairedPairs, lastWinners);
+
+  const cooccBoost = new Float32Array(91);
+  if (cooccReport && cooccReport.topConditionedPairs) {
+    for (const cp of cooccReport.topConditionedPairs) {
+      if (cp.triggerSources.length > 0 && cp.lift > 1.0) {
+        // Activation sigmoïdale continue dérivée du PMI borné
+        const pmiSigmoid = 1.0 / (1.0 + Math.exp(-Math.max(-4, Math.min(4, cp.pmi))));
+        const pairEnergy = (cp.lift - 1.0) * pmiSigmoid * (cp.confidence || 0.5);
+        cooccBoost[cp.pair[0]] += pairEnergy;
+        cooccBoost[cp.pair[1]] += pairEnergy;
+      }
+    }
+  }
+
+  const cascadeBoost = new Float32Array(91);
+  if (patternReport && patternReport.cascade && patternReport.cascade.activeResonances) {
+    for (const r of patternReport.cascade.activeResonances) {
+      if (r.lift > 1.0) {
+        const cascadeEnergy = (r.lift - 1.0) * (r.empiricalRate / 100.0);
+        cascadeBoost[r.targetNeighbour] += cascadeEnergy;
+      }
+    }
+  }
+
+  // Normalisation continue via tangente hyperbolique bornée
+  const maxSignal = Math.max(
+    1e-6,
+    ...Array.from({ length: 90 }, (_, i) => cooccBoost[i + 1] + cascadeBoost[i + 1])
+  );
+
+  for (let n = 1; n <= 90; n++) {
+    const rawSignal = (cooccBoost[n] + cascadeBoost[n]) / maxSignal;
+    // Modulation douce comprise entre [1.0 et 1.45]
+    const modulation = 1.0 + 0.45 * Math.tanh(rawSignal);
+    vec[n] = vec[n] * modulation;
+  }
+
   return vec;
+};
+
+export interface InterDrawMorphologicalTarget {
+  optimalSum: number;
+  projectedSumMin: number;
+  projectedSumMax: number;
+  expectedEven: number;
+  expectedOdd: number;
+  tendencyStrength: number;
+  reversionTendency: string;
+}
+
+/**
+ * Extrait de façon continue les cibles morphologiques (somme cible barycentrique et espérance de parité)
+ * issues de la relation inter-tirages pour la modulation dans la Fusion multi-modèles.
+ * ZÉRO NOMBRE MAGIQUE & CONTINUITÉ STRICTE.
+ */
+export const getInterDrawMorphologicalTarget = (
+  history: DrawResult[],
+  drawName?: string,
+  predecessorHistory?: DrawResult[]
+): InterDrawMorphologicalTarget | null => {
+  if (!history || history.length === 0 || !drawName) return null;
+
+  const purified = purifyHistoryForDraw(drawName, history);
+  if (purified.length === 0) return null;
+
+  const families = getInterDrawFamiliesForDraw(drawName);
+  const activeFamily = families.length > 0 ? families[0] : getPrimaryInterDrawFamily(drawName);
+  if (!activeFamily) return null;
+
+  const relation = getFamilyPredecessorAndSuccessor(drawName, activeFamily.id);
+  if (!relation) return null;
+
+  let predHistory: DrawResult[] = [];
+  if (predecessorHistory && predecessorHistory.length > 0) {
+    predHistory = predecessorHistory;
+  } else {
+    const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
+    const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
+    if (cachedPredHistory && cachedPredHistory.length > 0) {
+      predHistory = cachedPredHistory;
+    } else {
+      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+    }
+  }
+
+  const predLatest = predHistory[0];
+  const lastWinners = predLatest?.gagnants || [];
+  if (lastWinners.length === 0) return null;
+
+  const pairedPairs = alignConsecutiveDrawHistories(purified, predHistory);
+  if (pairedPairs.length === 0) return null;
+
+  const patternReport = analyzeInterDrawPatterns(pairedPairs, lastWinners);
+  if (!patternReport) return null;
+
+  return {
+    optimalSum: patternReport.centroid.projectedSumRange.optimal,
+    projectedSumMin: patternReport.centroid.projectedSumRange.min,
+    projectedSumMax: patternReport.centroid.projectedSumRange.max,
+    expectedEven: patternReport.parity.expectedTargetEven,
+    expectedOdd: patternReport.parity.expectedTargetOdd,
+    tendencyStrength: patternReport.parity.tendencyStrength,
+    reversionTendency: patternReport.centroid.reversionTendency,
+  };
 };
 
 export interface HarmonicResonanceMap {

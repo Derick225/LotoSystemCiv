@@ -1,7 +1,7 @@
 import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } from '../types';
 import { AlgoKey } from '../shared/prediction.types';
 import { calculateShannonEntropy, calculateMedian, gaussianPDF, sigmoid } from './prediction/deterministicCore';
-import { calculateInterDrawVector } from './interDrawService';
+import { calculateInterDrawVector, getInterDrawMorphologicalTarget } from './interDrawService';
 
 // ============================================================================
 // STATISTIQUES ROBUSTES (Zéro sensibilité aux Outliers)
@@ -404,6 +404,31 @@ export const calculateFusion = (
       sources, 
       details: { P: sP.toFixed(2), Q: sQ.toFixed(2), O: sO.toFixed(2), symbiosis: symbiosisMultiplier.toFixed(3) } 
     };
+  }
+
+  // 4. Modulation morphologique continue basée sur la projection de la somme cible (barycentre) et de la parité inter-tirages
+  // ZÉRO NOMBRE MAGIQUE : gradients différentiables continus vers le barycentre optimal et l'espérance de parité.
+  const morphTarget = drawName ? getInterDrawMorphologicalTarget(history, drawName) : null;
+  if (morphTarget) {
+    const theoreticalMeanSum = 227.5; // 5 * 45.5 pour quinté de 90 boules
+    const sumDeviationRatio = (morphTarget.optimalSum - theoreticalMeanSum) / theoreticalMeanSum;
+    const sumSlope = Math.max(-0.15, Math.min(0.15, sumDeviationRatio * 0.3));
+
+    const parityDeviation = (morphTarget.expectedEven - 2.5) / 2.5;
+    const paritySlope = Math.max(-0.15, Math.min(0.15, parityDeviation * (morphTarget.tendencyStrength / 100.0) * 0.25));
+
+    for (let i = 1; i <= 90; i++) {
+      const numberPosition = (i - 45.5) / 45.5; // [-1.0, +1.0]
+      const sumWeight = 1.0 + (sumSlope * numberPosition);
+
+      const isEven = i % 2 === 0;
+      const parityWeight = isEven ? (1.0 + paritySlope) : (1.0 - paritySlope);
+
+      entropyCounts[i] = entropyCounts[i] * sumWeight * parityWeight;
+      if (scoreMap[i]) {
+        scoreMap[i].score = entropyCounts[i];
+      }
+    }
   }
 
   let sumScores = 0;

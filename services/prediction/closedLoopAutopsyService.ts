@@ -14,6 +14,7 @@ import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './d
 import { parseDateSafely } from '../../utils/dateUtils';
 import { generateProbabilisticScenarioMatrix, SimulationScenarioItem } from './predictionScenarios';
 import { extractMathProofMetadata, MathematicalProofMetadata } from '../forensic/forensicProofStandard';
+import { auditInterDrawPatternsPostMortem, InterDrawPostMortemAudit } from './interDrawPostMortemService';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -74,6 +75,7 @@ export interface ClosedLoopAutopsyReport {
   scenarioEvaluations?: ScenarioPostMortemEvaluation[];
   bestPerformingScenario?: ScenarioPostMortemEvaluation;
   mathProofMetadata?: MathematicalProofMetadata;
+  interDrawAudit?: InterDrawPostMortemAudit;
 }
 
 /**
@@ -475,6 +477,13 @@ export const executeClosedLoopAutopsy = async (
     brierScore,
   });
 
+  // Audit Rétrospectif des Signaux Inter-Tirages & Calibration Bayesienne (Famille étanche)
+  const interDrawAudit = auditInterDrawPatternsPostMortem(
+    drawName,
+    targetDrawIndex,
+    rawHistory
+  ) || undefined;
+
   return {
     drawName,
     targetDrawDate: targetDraw.date,
@@ -501,6 +510,7 @@ export const executeClosedLoopAutopsy = async (
     scenarioEvaluations,
     bestPerformingScenario,
     mathProofMetadata,
+    interDrawAudit,
   };
 };
 

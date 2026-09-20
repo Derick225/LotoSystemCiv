@@ -39,6 +39,7 @@ import {
   extractMathProofMetadata,
 } from "../services/forensic/forensicProofStandard";
 import { generateUnifiedForensicScenarioPDF } from "../services/exportService";
+import { InterDrawPostMortemAuditView } from "./forensic/InterDrawPostMortemAuditView";
 
 export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
   drawName,
@@ -572,6 +573,11 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
                 </div>
               )}
             </div>
+          )}
+
+          {/* AUDIT RÉTROSPECTIF DES SIGNAUX INTER-TIRAGES & CALIBRATION CONTINUE */}
+          {report.interDrawAudit && (
+            <InterDrawPostMortemAuditView audit={report.interDrawAudit} />
           )}
 
           {/* COMPARAISON NUMÉROS SORTIS VS TOP PRÉDITS */}

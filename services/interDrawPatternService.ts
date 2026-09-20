@@ -120,6 +120,8 @@ export interface InterDrawCascadeNeighbour {
   score: number;
 }
 
+export type InterDrawCascadeResonance = InterDrawCascadeNeighbour;
+
 export interface InterDrawCascadePattern {
   activeResonances: InterDrawCascadeNeighbour[];
   overallCascadeRate: number;
@@ -268,8 +270,8 @@ export const getDecadeTheoreticalCapacity = (decade: number): number => {
 export const analyzeInterDrawCooccurrences = (
   pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
   activePredNumbers: number[],
-  sampleSize: number,
-  laplaceAlpha: number
+  sampleSize: number = pairedPairs.length,
+  laplaceAlpha: number = 1.0
 ): InterDrawCooccurrenceReport => {
   const activePredSet = new Set(activePredNumbers.filter(n => n >= 1 && n <= 90));
 
@@ -507,8 +509,8 @@ export const analyzeInterDrawCooccurrences = (
 export const analyzeInterDrawPatterns = (
   pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
   activePredNumbers: number[],
-  sampleSize: number,
-  laplaceAlpha: number
+  sampleSize: number = pairedPairs.length,
+  laplaceAlpha: number = 1.0
 ): InterDrawPatternReport => {
   const activePred = activePredNumbers.filter(n => n >= 1 && n <= 90);
 
