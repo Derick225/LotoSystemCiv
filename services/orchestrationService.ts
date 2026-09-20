@@ -821,11 +821,16 @@ export const runOrchestrationPipeline = (
           const selDecade = Math.floor((sel - 1) / 10);
           const selLastDigit = sel % 10;
 
+          // Pénalités de décennie / chiffre final CONTINUES : décroissance géométrique
+          // multiplicative `*= (1 - coeff)` (coeff ∈ [0.15,0.5] dérivé empiriquement, donc
+          // facteur ∈ [0.5,0.85] strictement positif) au lieu d'une soustraction écrêtée par un
+          // plancher magique `Math.max(0.15, …)`. Chaque collision rapproche la pénalité de 0 sans
+          // jamais le franchir ni créer de palier (AGENTS.md règles #1 & #3).
           if (numDecade === selDecade) {
-            decadePenalty -= pDecadePenaltyCoeff;
+            decadePenalty *= (1.0 - pDecadePenaltyCoeff);
           }
           if (numLastDigit === selLastDigit) {
-            lastDigitPenalty -= pLastDigitPenaltyCoeff;
+            lastDigitPenalty *= (1.0 - pLastDigitPenaltyCoeff);
           }
           if (Math.abs(num - sel) === 1) {
             consecutivePenalty *= pConsecutiveCoeff * neighborAmplifier;
@@ -834,9 +839,6 @@ export const runOrchestrationPipeline = (
             mirrorPenalty *= pMirrorCoeff;
           }
         });
-
-        decadePenalty = Math.max(0.15, decadePenalty);
-        lastDigitPenalty = Math.max(0.15, lastDigitPenalty);
 
         let t1Penalty = 1.0;
         if (history[0].gagnants.includes(num)) {

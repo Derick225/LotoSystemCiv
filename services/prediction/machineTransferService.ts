@@ -212,7 +212,11 @@ export const calculateMachineTransferReport = (
     const totalApps = machineAppearances[m] || 1;
     const directTrans = transferCounts[m] || 0;
     const convRate = (directTrans / totalApps) * 100;
-    const conf = Math.min(99, Math.round(convRate * 1.5 + (directTrans >= 2 ? 25 : 10)));
+    // Bonus de confiance CONTINU : rampe saturante (1 - e^-directTrans) de la base 10 vers le
+    // plafond 25, au lieu du palier binaire `directTrans >= 2 ? 25 : 10` et de son seuil magique
+    // (AGENTS.md règles #1 & #3). Chaque transfert supplémentaire rapproche du plafond sans saut.
+    const transferEvidenceBonus = 10.0 + 15.0 * (1.0 - Math.exp(-directTrans));
+    const conf = Math.min(99, Math.round(convRate * 1.5 + transferEvidenceBonus));
 
     let tag: 'CANDIDAT MAJEUR' | 'RÉSONANCE FORTE' | 'SURVEILLANCE' | 'MIROIR MACHINE' = 'SURVEILLANCE';
     if (directTrans >= 3 || convRate >= 40) tag = 'CANDIDAT MAJEUR';

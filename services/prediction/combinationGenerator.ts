@@ -404,9 +404,11 @@ export const calculateCombinationEnergyDetailed = (
       for (let j = i + 1; j < len; j++) {
         if (sortedCombo[j] - sortedCombo[i] <= windowSize) countInWindow++;
       }
-      if (countInWindow >= 3) {
-        spatialClusteringPenalty += clusterPenaltyUnit * 15.0 * (countInWindow - 2);
-      }
+      // Amas CONTINU : l'excès au-delà de 2 numéros par fenêtre est pénalisé linéairement via
+      // Math.max(0, …) au lieu du palier binaire `if (countInWindow >= 3)` (AGENTS.md règle #3).
+      // Strictement identique pour des comptes entiers, mais sans seuil d'activation discret.
+      const clusterExcess = Math.max(0, countInWindow - 2);
+      spatialClusteringPenalty += clusterPenaltyUnit * 15.0 * clusterExcess;
     }
     spatialClusteringPenalty = Math.min(15.0, spatialClusteringPenalty);
   }
