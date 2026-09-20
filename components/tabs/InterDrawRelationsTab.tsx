@@ -22,6 +22,8 @@ import { audioEngine } from "../../utils/audioEngine";
 import { formatDateSafely, isDrawToday } from "../../utils/dateUtils";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
+import { InterDrawCooccurrenceView } from "../interdraw/InterDrawCooccurrenceView";
+import { InterDrawPatternView } from "../interdraw/InterDrawPatternView";
 import {
   GitBranch,
   ArrowRight,
@@ -39,7 +41,10 @@ import {
   Clock,
   Info,
   Network,
-  Activity
+  Activity,
+  BarChart3,
+  Repeat,
+  Gauge
 } from "lucide-react";
 
 interface InterDrawRelationsTabProps {
@@ -78,9 +83,12 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
 
   // Tirage actuellement ciblé dans la famille (si le tirage actif n'est pas dans la famille, prendre le 1er)
   const effectiveTargetDraw = useMemo(() => {
+    if (!activeFamily?.sequence || activeFamily.sequence.length === 0) {
+      return drawName || '';
+    }
     const norm = normalizeDrawName(drawName);
-    const inFamily = activeFamily.sequence.some(s => normalizeDrawName(s.name) === norm);
-    return inFamily ? drawName : activeFamily.sequence[0].name;
+    const inFamily = activeFamily.sequence.some(s => s && normalizeDrawName(s.name) === norm);
+    return inFamily ? drawName : (activeFamily.sequence[0]?.name || drawName);
   }, [drawName, activeFamily]);
 
   const [targetDraw, setTargetDraw] = useState<string>(effectiveTargetDraw);
@@ -93,6 +101,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   const [report, setReport] = useState<InterDrawReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [subView, setSubView] = useState<'OVERVIEW' | 'COOCCURRENCES' | 'PATTERNS' | 'SIMULATOR'>('OVERVIEW');
 
   const loadReport = useCallback(async (forcedTarget: string, famId: InterDrawFamilyId, forceRefresh: boolean = false) => {
     setLoading(true);
@@ -123,13 +132,13 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   useEffect(() => {
     if (!storeSignature) return;
     const storeNorm = normalizeDrawName(storeDrawName);
-    const isFamilyDraw = activeFamily.sequence.some(
-      (s) => normalizeDrawName(s.name) === storeNorm
+    const isFamilyDraw = activeFamily?.sequence?.some(
+      (s) => s && normalizeDrawName(s.name) === storeNorm
     );
     if (isFamilyDraw) {
       loadReport(targetDraw, selectedFamilyId, true);
     }
-  }, [storeSignature, activeFamily.sequence, storeDrawName, targetDraw, selectedFamilyId, loadReport]);
+  }, [storeSignature, activeFamily, storeDrawName, targetDraw, selectedFamilyId, loadReport]);
 
   // Rafraîchissement réseau forcé (Bypass cache)
   const handleRefresh = async () => {
@@ -156,6 +165,8 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
     candidates: InterDrawCandidateScore[];
     recommendedPairs: InterDrawPairCombination[];
     harmonicResonances: { from: number; to: number; type: 'MIROIR' | 'COMPLEMENT' }[];
+    cooccurrenceMetrics?: any;
+    patternMetrics?: any;
   } | null>(null);
   const [simulating, setSimulating] = useState<boolean>(false);
 
@@ -244,7 +255,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   if (isDrawInFam) {
                     setTargetDraw(drawName);
                   } else {
-                    setTargetDraw(fam.sequence[0].name);
+                    setTargetDraw(fam.sequence[0]?.name || drawName);
                   }
                 }}
                 className={`
@@ -299,10 +310,10 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
 
         <div className="overflow-x-auto scrollbar-hide py-2">
           <div className="flex items-center gap-2 min-w-max">
-            {activeFamily.sequence.map((item, idx) => {
+            {activeFamily?.sequence?.map((item, idx) => {
               const isTarget = normalizeDrawName(item.name) === normalizeDrawName(targetDraw);
-              const isPred = report && normalizeDrawName(item.name) === normalizeDrawName(report.predecessor.name);
-              const isSucc = report && normalizeDrawName(item.name) === normalizeDrawName(report.successor.name);
+              const isPred = !!report?.predecessor?.name && normalizeDrawName(item.name) === normalizeDrawName(report.predecessor.name);
+              const isSucc = !!report?.successor?.name && normalizeDrawName(item.name) === normalizeDrawName(report.successor.name);
 
               return (
                 <React.Fragment key={`${item.day}-${item.time}-${item.name}`}>
@@ -361,6 +372,77 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
         </div>
       </div>
 
+      {/* 2. SUB-NAVIGATION : VUE GLOBALE / COOCCURRENCES / PATTERNS / SIMULATEUR */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <button
+          onClick={() => {
+            audioEngine.play("click");
+            setSubView('OVERVIEW');
+          }}
+          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'OVERVIEW'
+              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
+              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+          }`}
+        >
+          <Sparkles size={14} className={subView === 'OVERVIEW' ? 'animate-pulse' : 'text-amber-500'} />
+          <span>Vue d'Ensemble & Inférence</span>
+        </button>
+
+        <button
+          onClick={() => {
+            audioEngine.play("click");
+            setSubView('COOCCURRENCES');
+          }}
+          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'COOCCURRENCES'
+              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
+              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+          }`}
+        >
+          <Zap size={14} className={subView === 'COOCCURRENCES' ? 'animate-pulse' : 'text-amber-500'} />
+          <span>Détecteur de Cooccurrences</span>
+          {report?.cooccurrenceMetrics && (
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[9px] font-mono font-bold">
+              {report.cooccurrenceMetrics.topConditionedPairs.length} paires
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            audioEngine.play("click");
+            setSubView('PATTERNS');
+          }}
+          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'PATTERNS'
+              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
+              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+          }`}
+        >
+          <Network size={14} className={subView === 'PATTERNS' ? 'animate-pulse' : 'text-purple-500'} />
+          <span>Détecteur de Patterns Structurels</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-700 dark:text-purple-300 text-[9px] font-mono font-bold">
+            5 Modules
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            audioEngine.play("click");
+            setSubView('SIMULATOR');
+          }}
+          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'SIMULATOR'
+              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
+              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+          }`}
+        >
+          <Sliders size={14} className={subView === 'SIMULATOR' ? 'animate-pulse' : 'text-indigo-400'} />
+          <span>Simulateur Stochastique</span>
+        </button>
+      </div>
+
       {loading && !report ? (
         <div className="p-12 text-center bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-white/5">
           <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -382,10 +464,10 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   <Clock size={13} className="text-amber-500" />
                 </div>
                 <h4 className="text-lg font-black text-slate-900 dark:text-white mt-2">
-                  {report.predecessor.name}
+                  {report.predecessor?.name || 'Prédécesseur'}
                 </h4>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {report.predecessor.day} à {report.predecessor.time}
+                  {report.predecessor?.day || ''} {report.predecessor?.time ? `à ${report.predecessor.time}` : ''}
                 </p>
 
                 <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/5 space-y-2.5">
@@ -515,10 +597,10 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   <Clock size={13} className="text-sky-500" />
                 </div>
                 <h4 className="text-lg font-black text-slate-900 dark:text-white mt-2">
-                  {report.successor.name}
+                  {report.successor?.name || 'Successeur'}
                 </h4>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {report.successor.day} à {report.successor.time}
+                  {report.successor?.day || ''} {report.successor?.time ? `à ${report.successor.time}` : ''}
                 </p>
 
                 <div className="mt-4 pt-3 border-t border-slate-200 dark:border-white/5">
@@ -526,7 +608,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                     Rôle dans la boucle
                   </span>
                   <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                    Les numéros tirés dans <strong className="text-slate-800 dark:text-slate-200">{report.targetDraw}</strong> transmettront immédiatement leur dynamique markovienne à <strong className="text-slate-800 dark:text-slate-200">{report.successor.name}</strong>.
+                    Les numéros tirés dans <strong className="text-slate-800 dark:text-slate-200">{report.targetDraw}</strong> transmettront immédiatement leur dynamique markovienne à <strong className="text-slate-800 dark:text-slate-200">{report.successor?.name || 'Successeur'}</strong>.
                   </p>
                 </div>
               </div>
@@ -584,6 +666,108 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               </div>
             </div>
           )}
+
+          {/* SPOTLIGHTS VUE GLOBALE : COOCCURRENCES & PATTERNS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* SPOTLIGHT COOCCURRENCES */}
+            <div className="p-5 bg-gradient-to-br from-amber-500/5 via-white/80 to-transparent dark:from-amber-500/10 dark:via-slate-900/80 dark:to-transparent rounded-3xl border border-amber-500/20 shadow-lg flex flex-col justify-between gap-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                    Synergies d'Ordre 2
+                  </span>
+                  <Zap size={15} className="text-amber-500" />
+                </div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white mt-2">
+                  Top Cooccurrences Activées
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Paires dans {report.targetDraw} hautement catalysées par les numéros du prédécesseur.
+                </p>
+
+                {report.cooccurrenceMetrics && report.cooccurrenceMetrics.topConditionedPairs.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {report.cooccurrenceMetrics.topConditionedPairs.slice(0, 3).map((cp) => (
+                      <div
+                        key={`spot-cp-${cp.label}`}
+                        className="px-2.5 py-1.5 bg-white/90 dark:bg-slate-800/90 rounded-xl border border-amber-500/20 flex items-center gap-1.5 text-xs shadow-xs"
+                      >
+                        <NumberBall number={cp.pair[0]} size="xs" />
+                        <span className="text-slate-400 font-bold">+</span>
+                        <NumberBall number={cp.pair[1]} size="xs" />
+                        <span className="font-mono font-black text-amber-600 dark:text-amber-400 ml-1">
+                          {cp.lift}x
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setSubView('COOCCURRENCES');
+                }}
+                className="w-full py-2 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-1.5 cursor-pointer border border-amber-500/20"
+              >
+                <span>Explorer le Détecteur de Cooccurrences</span>
+                <ArrowRight size={13} />
+              </button>
+            </div>
+
+            {/* SPOTLIGHT PATTERNS */}
+            <div className="p-5 bg-gradient-to-br from-purple-500/5 via-white/80 to-transparent dark:from-purple-500/10 dark:via-slate-900/80 dark:to-transparent rounded-3xl border border-purple-500/20 shadow-lg flex flex-col justify-between gap-3">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                    Morphologie Combinatoire
+                  </span>
+                  <Network size={15} className="text-purple-500" />
+                </div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white mt-2">
+                  Patterns & Invariances Structurelles
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Dynamique de parité, flux de dizaines, cascades ±1 et régression barycentrique.
+                </p>
+
+                {report.patternMetrics && (
+                  <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+                    <div className="p-1.5 bg-white/90 dark:bg-slate-800/90 rounded-xl border border-purple-500/20">
+                      <span className="text-[8px] uppercase text-slate-400 font-bold block">Tendance Parité</span>
+                      <span className="text-xs font-black text-purple-700 dark:text-purple-300 truncate block">
+                        {report.patternMetrics.parity.tendencyLabel}
+                      </span>
+                    </div>
+                    <div className="p-1.5 bg-white/90 dark:bg-slate-800/90 rounded-xl border border-purple-500/20">
+                      <span className="text-[8px] uppercase text-slate-400 font-bold block">Cascade ±1</span>
+                      <span className="text-xs font-black text-purple-700 dark:text-purple-300 block">
+                        {report.patternMetrics.cascade.overallCascadeLift}x
+                      </span>
+                    </div>
+                    <div className="p-1.5 bg-white/90 dark:bg-slate-800/90 rounded-xl border border-purple-500/20">
+                      <span className="text-[8px] uppercase text-slate-400 font-bold block">Somme Cible</span>
+                      <span className="text-xs font-black text-purple-700 dark:text-purple-300 block">
+                        {report.patternMetrics.centroid.projectedSumRange.optimal}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => {
+                  audioEngine.play("click");
+                  setSubView('PATTERNS');
+                }}
+                className="w-full py-2 px-3 bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-1.5 cursor-pointer border border-purple-500/20"
+              >
+                <span>Explorer le Détecteur de Patterns</span>
+                <ArrowRight size={13} />
+              </button>
+            </div>
+          </div>
 
           {/* 4. TOP NUMÉROS RECOMMANDÉS PAR FLUX INTER-TIRAGES */}
           <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
@@ -679,7 +863,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                     Probabilités Conditionnelles & Flux de Transition (W(t-1) → W(t))
                   </h4>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Décomposition unitaire des attracteurs stochastiques : chaque numéro sorti au tirage prédécesseur ({report.predecessor.name}) polarise les probabilités d'apparition du tirage cible ({report.targetDraw}).
+                    Décomposition unitaire des attracteurs stochastiques : chaque numéro sorti au tirage prédécesseur ({report.predecessor?.name || 'Prédécesseur'}) polarise les probabilités d'apparition du tirage cible ({report.targetDraw}).
                   </p>
                 </div>
 
@@ -733,7 +917,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                           <NumberBall number={activeSource.sourceNumber} size="md" />
                           <div>
                             <span className="text-xs font-black uppercase text-indigo-950 dark:text-indigo-200 block">
-                              Numéro Source : {activeSource.sourceNumber} ({report.predecessor.name})
+                              Numéro Source : {activeSource.sourceNumber} ({report.predecessor?.name || 'Prédécesseur'})
                             </span>
                             <span className="text-[11px] text-indigo-600 dark:text-indigo-400">
                               Top cibles historiques projetées dans {report.targetDraw} (ordonnées par Lift conditionnel)
@@ -1045,7 +1229,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   Simulateur de Réverbération Stochastique Inter-Tirages
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Modifiez les 5 numéros sortis au tirage précédent ({report.predecessor.name}) pour projeter instantanément leur impact sur {report.targetDraw}.
+                  Modifiez les 5 numéros sortis au tirage précédent ({report.predecessor?.name || 'Prédécesseur'}) pour projeter instantanément leur impact sur {report.targetDraw}.
                 </p>
               </div>
 
@@ -1102,6 +1286,127 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
           </div>
         </>
       ) : null}
+
+      {/* VUES DÉDIÉES COOCCURRENCES ET PATTERNS */}
+      {report && subView === 'COOCCURRENCES' && (
+        <InterDrawCooccurrenceView
+          cooccurrences={report.cooccurrenceMetrics}
+          targetDraw={report.targetDraw}
+          predecessorName={report.predecessor?.name || 'Prédécesseur'}
+          predecessorNumbers={report.predecessorResult?.gagnants || []}
+        />
+      )}
+
+      {report && subView === 'PATTERNS' && (
+        <InterDrawPatternView
+          patterns={report.patternMetrics}
+          targetDraw={report.targetDraw}
+          predecessorName={report.predecessor?.name || 'Prédécesseur'}
+          predecessorNumbers={report.predecessorResult?.gagnants || []}
+        />
+      )}
+
+      {report && subView === 'SIMULATOR' && (
+        <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 font-black text-[10px] rounded-lg uppercase tracking-wider">
+                <Sliders size={13} className="animate-pulse" />
+                Atelier Interactif
+              </div>
+              <h3 className="text-lg md:text-xl font-black text-slate-900 dark:text-white mt-1">
+                Simulateur de Réverbération Stochastique Inter-Tirages
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Modifiez les 5 numéros sortis au tirage précédent ({report.predecessor?.name || 'Prédécesseur'}) pour projeter instantanément leur impact sur {report.targetDraw}.
+              </p>
+            </div>
+
+            <button
+              onClick={handleLoadRealPredecessor}
+              className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl border border-slate-200 dark:border-white/5 transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw size={13} />
+              <span>Restaurer les 5 réels</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              value={simInput}
+              onChange={(e) => setSimInput(e.target.value)}
+              placeholder="Ex: 12, 34, 56, 78, 90"
+              className="flex-1 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <button
+              onClick={runSimulation}
+              disabled={simulating}
+              className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <Play size={14} />
+              <span>Calculer Transmission</span>
+            </button>
+          </div>
+
+          {simResult && (
+            <div className="pt-4 border-t border-slate-200 dark:border-white/5 space-y-6">
+              <div>
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500 block mb-3">
+                  Top Numéros Projetés par Réverbération :
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                  {simResult.candidates.slice(0, 10).map((c, idx) => (
+                    <div
+                      key={`sim-cand-full-${c.number}`}
+                      className="p-3 bg-slate-100 dark:bg-slate-800/90 rounded-2xl border border-indigo-500/30 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono text-slate-400">#{idx + 1}</span>
+                        <NumberBall number={c.number} size="sm" />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[9px] text-slate-400 font-bold block uppercase">Score</span>
+                        <span className="text-sm font-black font-mono text-indigo-600 dark:text-indigo-400">
+                          {c.compositeScore}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {simResult.recommendedPairs && simResult.recommendedPairs.length > 0 && (
+                <div>
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-500 block mb-3">
+                    Paires Conjointes Simulées (Couplages 2-sur-2) :
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {simResult.recommendedPairs.slice(0, 6).map((pair, pidx) => (
+                      <div
+                        key={`sim-pair-${pidx}`}
+                        className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-white/5 flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2">
+                          <NumberBall number={pair.numbers[0]} size="xs" />
+                          <span className="text-slate-400 font-black text-xs">+</span>
+                          <NumberBall number={pair.numbers[1]} size="xs" />
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[9px] text-slate-400 font-bold uppercase block">Affinité</span>
+                          <span className="text-xs font-black font-mono text-emerald-600 dark:text-emerald-400">
+                            {pair.affinity}%
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

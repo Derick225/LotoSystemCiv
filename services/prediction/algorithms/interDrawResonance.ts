@@ -148,11 +148,9 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     }
 
     // Clé de cache canonique conforme à la directive d'isolation stricte des familles.
-    // Doit être octet-pour-octet identique à celle produite par calculateInterDrawVector
-    // (interDrawService) pour la même famille+tirage : on repasse par getInterDrawKey avec
-    // le nom normalisé, sinon les espaces/accents génèrent une clé divergente et le cache
-    // inter-tirages est dupliqué au lieu d'être partagé.
-    const canonicalCacheKey = globalCache.getInterDrawKey(family.id, normalizeDrawName(drawName));
+    // Utilise un sous-secteur 'plugin' pour ne jamais écraser ni entrer en collision
+    // avec le rapport complet InterDrawReport généré par interDrawService.
+    const canonicalCacheKey = globalCache.getInterDrawKey(family.id, normalizeDrawName(drawName), 'plugin');
 
     // 1. Récupération de l'historique du prédécesseur direct au sein de la famille étanche
     const predName = relation.predecessor.name;

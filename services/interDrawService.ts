@@ -19,6 +19,37 @@ import {
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 import { wasmMatrixEngine } from './wasm/wasmMatrixCore';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import {
+  analyzeInterDrawCooccurrences,
+  analyzeInterDrawPatterns,
+  InterDrawCooccurrenceReport,
+  InterDrawPatternReport,
+  InterDrawTargetPairCooccurrence,
+  InterDrawCrossDyad,
+  InterDrawBivariateTrigger,
+  InterDrawParityPattern,
+  InterDrawDecadePattern,
+  InterDrawDecadeFlux,
+  InterDrawCascadePattern,
+  InterDrawCascadeNeighbour,
+  InterDrawCentroidPattern,
+  InterDrawRetentionPattern
+} from './interDrawPatternService';
+
+export type {
+  InterDrawCooccurrenceReport,
+  InterDrawPatternReport,
+  InterDrawTargetPairCooccurrence,
+  InterDrawCrossDyad,
+  InterDrawBivariateTrigger,
+  InterDrawParityPattern,
+  InterDrawDecadePattern,
+  InterDrawDecadeFlux,
+  InterDrawCascadePattern,
+  InterDrawCascadeNeighbour,
+  InterDrawCentroidPattern,
+  InterDrawRetentionPattern
+};
 
 export interface InterDrawCandidateScore {
   number: number;
@@ -107,6 +138,8 @@ export interface InterDrawReport {
     betaDecay: number;
     lagExcitations: number[];
   };
+  cooccurrenceMetrics?: InterDrawCooccurrenceReport;
+  patternMetrics?: InterDrawPatternReport;
   generationTimestamp: number;
 }
 
@@ -649,10 +682,14 @@ export const generateInterDrawReport = async (
   if (!forceRefresh) {
     // Accès ultra-rapide L1 synchrone (< 0.1 ms) pour éliminer la latence
     const fastSync = globalCache.getSync<InterDrawReport>(cacheKey, targetDrawName);
-    if (fastSync) return fastSync;
+    if (fastSync && fastSync.predecessor?.name && fastSync.successor?.name && Array.isArray(fastSync.topCandidates)) {
+      return fastSync;
+    }
 
     const cached = await globalCache.get<InterDrawReport>(cacheKey, targetDrawName);
-    if (cached) return cached;
+    if (cached && cached.predecessor?.name && cached.successor?.name && Array.isArray(cached.topCandidates)) {
+      return cached;
+    }
   }
 
   // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans la famille
@@ -811,6 +848,21 @@ export const generateInterDrawReport = async (
   transitionCells.sort((a, b) => b.occurrences - a.occurrences || b.probability - a.probability);
   const topTransitions = transitionCells.slice(0, 10);
 
+  // 8. Calcul approfondi des Cooccurrences et Patterns Structurels Inter-Tirages
+  const cooccurrenceMetrics = analyzeInterDrawCooccurrences(
+    pairedPairs,
+    activePredNumbers,
+    sampleSize,
+    laplaceAlpha
+  );
+
+  const patternMetrics = analyzeInterDrawPatterns(
+    pairedPairs,
+    activePredNumbers,
+    sampleSize,
+    laplaceAlpha
+  );
+
   const report: InterDrawReport = {
     targetDraw: targetDrawName,
     family: activeFamily,
@@ -846,6 +898,8 @@ export const generateInterDrawReport = async (
       betaDecay: engine.hawkesBetaDecay || 0.4621,
       lagExcitations: engine.hawkesLagExcitations || []
     } : undefined,
+    cooccurrenceMetrics,
+    patternMetrics,
     generationTimestamp: Date.now()
   };
 
@@ -867,6 +921,8 @@ export const simulateInterDrawTransmission = async (
   candidates: InterDrawCandidateScore[];
   recommendedPairs: InterDrawPairCombination[];
   harmonicResonances: { from: number; to: number; type: 'MIROIR' | 'COMPLEMENT' }[];
+  cooccurrenceMetrics?: InterDrawCooccurrenceReport;
+  patternMetrics?: InterDrawPatternReport;
 } | null> => {
   if (!predecessorNumbers || predecessorNumbers.length === 0) return null;
 
@@ -923,10 +979,26 @@ export const simulateInterDrawTransmission = async (
     }
   }
 
+  const laplaceAlpha = 1.0 / (1.0 + Math.log(1.0 + pairedPairs.length));
+  const cooccurrenceMetrics = analyzeInterDrawCooccurrences(
+    pairedPairs,
+    validNumbers,
+    pairedPairs.length,
+    laplaceAlpha
+  );
+  const patternMetrics = analyzeInterDrawPatterns(
+    pairedPairs,
+    validNumbers,
+    pairedPairs.length,
+    laplaceAlpha
+  );
+
   return {
     candidates: candidates.slice(0, 10),
     recommendedPairs,
-    harmonicResonances
+    harmonicResonances,
+    cooccurrenceMetrics,
+    patternMetrics
   };
 };
 
