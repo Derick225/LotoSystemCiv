@@ -21,6 +21,7 @@ import { TUNING, applyDeterministicMicroSgd, hashHistoryContent, getMedian, getS
 import { resolveForensicAdjustments } from "./forensicAdjustments";
 import { getStoreStateSafely, handleScenarioADegradedPrediction, tryCloudPrediction } from "./predictionScenarios";
 import { finalizePredictionPayload } from "./predictionFinalize";
+import { SHRINKAGE_CALIBRATION } from "./calibrationConstants";
 import { calculatePoissonScores, calculateBayesianScore, calculateTemporalScores, calculateDigitalRootAnalysis, calculateResistanceScores, calculateGapVelocityScores, calculateLeaderSuccession, calculateAiIntuition, calculateFractalResonance, calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores, calculateHawkesExcitation, calculateTopologicalLyapunov } from '../advancedMathService';
 import { calculateSpatioTemporalHawkes } from '../../utils/engine/hawkesEngine';
 import { calculateDnaSieveWeights } from '../temporalAnalysisService';
@@ -512,11 +513,13 @@ export const selectPredictionNumbers = async (
   const stdDevScore = Math.sqrt(sumSqDiff / Math.max(1, nScores));
   const cvScore = stdDevScore / (meanScore + 1e-6);
 
-  // Fonction sigmoïdale continue de shrinkage (modulation entre 0.70 et 1.00 selon la clarté du signal)
-  // Lorsque les scores sont plats/indécis (faible CV), le facteur de shrinkage se contracte continûment vers 0.70
-  const shrinkageSigmoid = 1.0 / (1.0 + Math.exp(-10.0 * (cvScore - 0.22)));
-  const shrinkageFactor = parseFloat((0.70 + 0.30 * shrinkageSigmoid).toFixed(4));
-  const shrinkageApplied = shrinkageFactor < 0.985;
+  // Fonction sigmoïdale continue de shrinkage : le facteur varie entre FACTOR_FLOOR et 1.00
+  // selon la clarté du signal (CV des scores). Lorsque les scores sont plats/indécis (faible
+  // CV), le facteur se contracte continûment vers FACTOR_FLOOR.
+  // Constantes centralisées et documentées dans calibrationConstants.SHRINKAGE_CALIBRATION.
+  const shrinkageSigmoid = 1.0 / (1.0 + Math.exp(-SHRINKAGE_CALIBRATION.SIGMOID_STEEPNESS * (cvScore - SHRINKAGE_CALIBRATION.CV_MIDPOINT)));
+  const shrinkageFactor = parseFloat((SHRINKAGE_CALIBRATION.FACTOR_FLOOR + SHRINKAGE_CALIBRATION.FACTOR_SPAN * shrinkageSigmoid).toFixed(4));
+  const shrinkageApplied = shrinkageFactor < SHRINKAGE_CALIBRATION.APPLIED_THRESHOLD;
 
   if (shrinkageApplied) {
     logger.info(

@@ -10,6 +10,7 @@ import { evaluateAdversarialSurvival } from "./adversarialProxy";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { TUNING } from "./microSgd";
 import { HONEST_NOTE, generateProbabilisticScenarioMatrix } from "./predictionScenarios";
+import { STABILITY_POLYHARMONIC_WEIGHTS, REALITY_ALIGNMENT_WEIGHTS } from "./calibrationConstants";
 import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { generateXAPNarratives } from "./xapExplainabilityService";
@@ -155,9 +156,12 @@ export const evaluatePredictionStability = (
   const normalizedEntropy = maxEntropy > 0 ? entropy / maxEntropy : 1.0;
   const S_sharpness = Math.max(0.0, Math.min(1.0, 1.0 - normalizedEntropy));
 
-  // 5. Agrégation Poly-Harmonique Continue : R_inf = 100 * (S_perturb^0.5 * S_snr^0.3 * S_sharpness^0.2)
+  // 5. Agrégation Poly-Harmonique Continue (moyenne géométrique pondérée en log-espace).
+  // Exposants centralisés dans calibrationConstants.STABILITY_POLYHARMONIC_WEIGHTS.
   const combinedStability =
-    Math.pow(S_perturb, 0.5) * Math.pow(S_snr, 0.3) * Math.pow(S_sharpness, 0.2);
+    Math.pow(S_perturb, STABILITY_POLYHARMONIC_WEIGHTS.PERTURBATION) *
+    Math.pow(S_snr, STABILITY_POLYHARMONIC_WEIGHTS.SNR) *
+    Math.pow(S_sharpness, STABILITY_POLYHARMONIC_WEIGHTS.SHARPNESS);
 
   return Math.round(Math.max(1, Math.min(99, combinedStability * 100)));
 };
@@ -304,10 +308,11 @@ export const finalizePredictionPayload = async (
   const stdEvens = Math.sqrt(TICKET_SIZE * pEven * (1.0 - pEven));
   const parityLikelihood = Math.exp(-0.5 * Math.pow((evens - expectedEvens) / (stdEvens || 1.0), 2));
 
-  const wStability = 0.40;
-  const wSum = 0.30;
-  const wParity = 0.20;
-  const wDiv = 0.10;
+  // Pondération centralisée dans calibrationConstants.REALITY_ALIGNMENT_WEIGHTS.
+  const wStability = REALITY_ALIGNMENT_WEIGHTS.STABILITY;
+  const wSum = REALITY_ALIGNMENT_WEIGHTS.SUM_LIKELIHOOD;
+  const wParity = REALITY_ALIGNMENT_WEIGHTS.PARITY_LIKELIHOOD;
+  const wDiv = REALITY_ALIGNMENT_WEIGHTS.DIVERSITY;
   const normSumLikelihood = sumLikelihood * 100.0;
   const normParityLikelihood = parityLikelihood * 100.0;
   const normDiversity = diversityMetrics?.diversityScore ? diversityMetrics.diversityScore : 80.0;
@@ -334,12 +339,14 @@ export const finalizePredictionPayload = async (
     (Math.max(0, 100.0 - stabilityScore) * (1.0 - (diversityMetrics?.meanSimilarity ?? 0.5))).toFixed(2)
   );
 
-  const effectiveSampleSize = Math.max(10, context.validTemporalDepth);
-  const pConf = finalConfidence / 100.0;
-  const standardError = Math.sqrt((pConf * (1.0 - pConf)) / effectiveSampleSize) * 100.0;
-  const marginOfError = 1.96 * standardError;
-  const ciLower = Math.max(1, Math.round(finalConfidence - marginOfError));
-  const ciUpper = Math.min(99, Math.round(finalConfidence + marginOfError));
+  // Intervalle de cohérence (HONNÊTE) : `finalConfidence` est un indicateur interne déterministe,
+  // PAS une proportion empirique. L'ancien intervalle de Wald binomial (p ± 1.96·√(p(1−p)/n)) était
+  // donc invalide — il traitait un score de cohérence comme une fréquence d'échantillon et introduisait
+  // la constante magique 1.96. On borne plutôt la bande par l'incertitude ÉPISTÉMIQUE réelle du modèle
+  // (désaccord interne déjà calculé ci-dessus) : moins le vecteur est stable/divers, plus la bande est large.
+  const coherenceHalfWidth = Math.max(0, Math.min(99, epistemicUncertainty));
+  const ciLower = Math.max(1, Math.round(finalConfidence - coherenceHalfWidth));
+  const ciUpper = Math.min(99, Math.round(finalConfidence + coherenceHalfWidth));
 
   const uncertaintyQuantification = {
     epistemicUncertainty,

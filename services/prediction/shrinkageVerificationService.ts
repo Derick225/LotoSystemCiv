@@ -4,6 +4,7 @@ import { detectGameRegime, calculateStatisticalBounds } from "../mathService";
 import { calculateScores } from "./scoringEngine";
 import { extractFeatures } from "./featureExtractor";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
+import { INTEGRITY_INDEX_CALIBRATION } from "./calibrationConstants";
 
 /**
  * Catégories de dérives arithmétiques d'inférence ou d'exactitude
@@ -201,12 +202,17 @@ export const verifyActivePrediction = (
   }
 
   // --- CALCUL DE L'INDICE GLOBAL D'INTÉGRITÉ ---
+  // Barème centralisé dans calibrationConstants.INTEGRITY_INDEX_CALIBRATION.
   let integrityReduction = 0;
   detectedDrifts.forEach((issue) => {
-    const weight = issue.severity === "critical" ? 40 : (issue.severity === "warning" ? 15 : 5);
+    const weight = issue.severity === "critical"
+      ? INTEGRITY_INDEX_CALIBRATION.SEVERITY_CRITICAL
+      : (issue.severity === "warning"
+        ? INTEGRITY_INDEX_CALIBRATION.SEVERITY_WARNING
+        : INTEGRITY_INDEX_CALIBRATION.SEVERITY_INFO);
     integrityReduction += weight * Math.tanh(issue.continuousValue);
   });
-  const integrityIndex = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-integrityReduction / 50.0))));
+  const integrityIndex = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-integrityReduction / INTEGRITY_INDEX_CALIBRATION.DECAY_SCALE))));
 
   let remediationAction: string | undefined;
   if (integrityIndex < 50) {
@@ -275,17 +281,9 @@ export const runHistoricalShrinkageBacktest = async (
   let shrunkWinnersRankSum = 0;
   let validEvaluationDraws = 0;
   
-  const macroFrequency = new Float32Array(91);
-  purifiedHistory.forEach(d => {
-    d.gagnants?.forEach(num => {
-      if (num >= 1 && num <= 90) macroFrequency[num]++;
-    });
-  });
-  const macroSum = macroFrequency.reduce((a, b) => a + b, 0);
-  const macroScores: Record<number, number> = {};
-  for (let i = 1; i <= 90; i++) {
-    macroScores[i] = macroSum > 0 ? (macroFrequency[i] / macroSum) * 100.0 : 50.0;
-  }
+  // NOTE (anti-fuite) : le prior macro James-Stein est désormais recalculé DANS la boucle sur la
+  // tranche causale `subHistory` uniquement. Le construire ici sur `purifiedHistory` entier
+  // incluait les gagnants du tirage cible évalué → fuite de données rendant le backtest optimiste.
 
   // Boucle de backtesting chronologique glissante
   for (let t = 0; t < validationDepth; t++) {
@@ -297,6 +295,20 @@ export const runHistoricalShrinkageBacktest = async (
     if (!winners || winners.length === 0) continue;
 
     try {
+      // Prior macro-fréquentiel CAUSAL : estimé exclusivement sur les tirages antérieurs à la cible
+      // (subHistory = tout ce qui précède purifiedHistory[t]). Aucune information future n'y entre.
+      const macroFrequency = new Float32Array(91);
+      subHistory.forEach(d => {
+        d.gagnants?.forEach(num => {
+          if (num >= 1 && num <= 90) macroFrequency[num]++;
+        });
+      });
+      const macroSum = macroFrequency.reduce((a, b) => a + b, 0);
+      const macroScores: Record<number, number> = {};
+      for (let i = 1; i <= 90; i++) {
+        macroScores[i] = macroSum > 0 ? (macroFrequency[i] / macroSum) * 100.0 : 50.0;
+      }
+
       const features = await extractFeatures(drawName, subHistory);
       
       const statisticalBounds = calculateStatisticalBounds(subHistory);

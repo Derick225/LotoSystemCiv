@@ -1,5 +1,6 @@
 import { AlgoKey, AlgoWeights } from "../../types";
 import { computeWassersteinDistance } from "../mathCore";
+import { DNA_LEARNING_CALIBRATION } from "../prediction/calibrationConstants";
 
 export interface DNAProfile {
   algoKeys: AlgoKey[];
@@ -399,7 +400,6 @@ export class DNAOptimizer {
     // Zero-magic continuous damping
     const gridDamping = Math.exp(-0.5 * entropy);
     const symmetryDamping = hurstExponent;
-    const revDamping = 1.0 - entropy;
 
     candidateNumbers.forEach((c) => {
       let maxSim = 0.0;
@@ -419,11 +419,10 @@ export class DNAOptimizer {
         const circularDiff = Math.min(Math.abs(c - w), 90 - Math.abs(c - w));
         const distanceAffinity = Math.exp(-Math.pow(circularDiff, 2) / 2.0); // Gaussienne
 
-        let mirrorSim = distanceAffinity * symmetryDamping;
-        const revC = parseInt(c.toString().split("").reverse().join(""), 10);
-        const revDiff = Math.abs(revC - w);
-        const revAffinity = Math.exp(-Math.pow(revDiff, 2) / 2.0);
-        mirrorSim = Math.max(mirrorSim, revAffinity * revDamping);
+        // Affinité de symétrie circulaire : proximité numérique réelle sur le tore [1,90].
+        // L'ancien terme "miroir décimal" (inversion des chiffres, ex. 12 -> 21) a été retiré :
+        // la numération décimale est une convention humaine sans aucun lien causal avec le tirage.
+        const mirrorSim = distanceAffinity * symmetryDamping;
 
         const sim = Math.max(gridSim, mirrorSim);
         if (sim > maxSim) maxSim = sim;
@@ -1014,7 +1013,8 @@ export class DNAOptimizer {
     // 3. Déterminer la dérive (erreur) et l'injecter sous forme d'ajustements continus
     // Taux d'apprentissage auto-calibré basé sur la concentration (plus Gini est fort/Entropy est faible,
     // plus le signal est pur, donc on peut ajuster plus fermement).
-    const learningFactor = 0.12 * (1.0 + globalGini - globalEntropy);
+    // Facteur de base centralisé dans calibrationConstants.DNA_LEARNING_CALIBRATION.
+    const learningFactor = DNA_LEARNING_CALIBRATION.BASE_LEARNING_FACTOR * (1.0 + globalGini - globalEntropy);
 
     this.algoKeys.forEach((key) => {
       const currentVal = currentWeights[key] ?? (1.0 / this.numAlgos);

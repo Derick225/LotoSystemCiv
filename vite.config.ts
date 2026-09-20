@@ -183,10 +183,13 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 2000,
       rollupOptions: {
         output: {
+          // NB : jspdf/html2canvas (ex-`vendor-utils`) et recharts ne sont PAS listés ici.
+          // Ils ne sont consommés que via des `await import()` / onglets lazy : laisser Rollup les
+          // placer dans des chunks asynchrones évite de les précharger au boot (~300 KB gzip économisés).
+          // `lucide-react` reste groupé car réellement utilisé dès le démarrage.
           manualChunks: {
             'vendor-react': ['react', 'react-dom', 'react-is', 'framer-motion'],
-            'vendor-ui': ['lucide-react', 'recharts', 'clsx', 'tailwind-merge'],
-            'vendor-utils': ['jspdf', 'html2canvas'],
+            'vendor-ui': ['lucide-react', 'clsx', 'tailwind-merge'],
             'vendor-core': ['@supabase/supabase-js', '@tanstack/react-query'],
             'vendor-3d': ['three']
           }

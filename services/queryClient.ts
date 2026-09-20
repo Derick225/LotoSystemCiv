@@ -7,8 +7,10 @@ import LZString from 'lz-string';
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Prioritize fresh data as requested
-      staleTime: 1000 * 30, // Data fresh for 30 seconds only
+      // Les nouveaux tirages arrivent en push via les canaux Realtime ; un staleTime court ne
+      // faisait que re-refetch tout à chaque retour de focus. 5 min réduit la tempête réseau
+      // sans sacrifier la fraîcheur (realtime + background sync prennent le relais).
+      staleTime: 1000 * 60 * 5, // Data fresh for 5 minutes
       gcTime: 1000 * 60 * 60 * 24 * 7, // Keep in local memory for 7 days
       
       refetchOnWindowFocus: true, 

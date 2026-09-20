@@ -3,12 +3,33 @@ import { AlgoKey, EmpiricalCalibration, FALLBACK_CALIBRATION } from "../../share
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { getPrimaryInterDrawFamily, drawHasMachineNumbers } from "../../constants";
-import { getAlgoWeights, normalizeWeights, validateAlgoWeightsByProof, AlgoWeightsProofReport } from "./weightsManager";
+import { getAlgoWeights, getDefaultWeights, normalizeWeights, validateAlgoWeightsByProof, AlgoWeightsProofReport } from "./weightsManager";
 import { useNexusStore } from "../../store/useNexusStore";
 import { calculateShannonEntropy, calculateFractalIndex } from "../mathService";
 import { calculateACValue } from "../mathCore";
 import { generateMasterPrediction } from "./predictionFacade";
 import { calculateGeneticDiversityIndex } from "./diversityService";
+
+// Coefficient binomial exact (arrondi entier, valeurs < Number.MAX_SAFE_INTEGER ici).
+const binomialCoeff = (n: number, k: number): number => {
+  if (k < 0 || k > n) return 0;
+  let r = 1;
+  for (let i = 0; i < k; i++) r = (r * (n - i)) / (i + 1);
+  return Math.round(r);
+};
+
+/**
+ * Probabilité EXACTE d'au moins un succès direct pour un ticket de `ticketSize` numéros dans un
+ * tirage équitable 5/90 (loi hypergéométrique) : P(≥1) = 1 − C(85, ticketSize)/C(90, ticketSize).
+ * C'est la seule prévision probabiliste honnête pour un tirage aléatoire : le score de cohérence
+ * interne du moteur n'est PAS une probabilité et ne doit jamais être noté comme telle (Brier).
+ */
+const hypergeometricAtLeastOneHit = (ticketSize: number): number => {
+  const k = Math.max(0, Math.min(90, ticketSize));
+  const total = binomialCoeff(90, k);
+  if (total <= 0) return 0;
+  return 1 - binomialCoeff(85, k) / total;
+};
 
 export interface DrawAlgorithmicParameters {
   drawName: string;
@@ -138,18 +159,29 @@ export interface StrictValidationOptions {
 
 /**
  * 1. Extrait et certifie l'ensemble des paramètres algorithmiques actifs du tirage choisi.
+ *
+ * @param causalBacktest Quand vrai, les paramètres sont résolus SANS état persistant appris :
+ *   les poids repartent de la base neutre par défaut (les poids store/DB ont été accordés sur un
+ *   historique qui contient les tirages cibles → fuite), et calibration/preuves sont recalculées
+ *   sur `rawHistory` qui doit alors être la tranche strictement causale (antérieure à la cible).
  */
 export const extractDrawAlgorithmicParameters = async (
   drawName: string,
-  rawHistory: DrawResult[]
+  rawHistory: DrawResult[],
+  causalBacktest: boolean = false
 ): Promise<DrawAlgorithmicParameters> => {
   const storeState = useNexusStore.getState();
   const cleanHistory = purifyHistoryForDraw(drawName, rawHistory);
   
-  // 1. Récupération des poids actifs (priorité aux poids customisés du store si cohérents, sinon DB/defaults)
-  let activeWeights = storeState.globalWeights && Object.keys(storeState.globalWeights).length > 0
-    ? { ...storeState.globalWeights } as AlgoWeights
-    : await getAlgoWeights(drawName);
+  // 1. Récupération des poids actifs.
+  //    Mode causal (backtest) : base NEUTRE obligatoire — jamais les poids persistants accordés,
+  //    qui ont mémorisé l'historique complet et biaiseraient l'évaluation out-of-sample.
+  //    Mode nominal : priorité aux poids customisés du store si cohérents, sinon DB/defaults.
+  let activeWeights = causalBacktest
+    ? getDefaultWeights()
+    : (storeState.globalWeights && Object.keys(storeState.globalWeights).length > 0
+        ? { ...storeState.globalWeights } as AlgoWeights
+        : await getAlgoWeights(drawName));
 
   // 2. Détection de la présence de numéros machine
   const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
@@ -444,6 +476,12 @@ export const runStrictDrawValidation = async (
   let totalTopologicalLoss = 0;
   let totalBrierSquaredErr = 0;
 
+  // Paramètres CAUSAUX pour le walk-forward : base de poids neutre (aucun état persistant appris sur
+  // l'historique complet, qui contiendrait les tirages cibles). `generateMasterPrediction` ré-extrait
+  // ses features causalement depuis `histSlice` à chaque itération ; seul le vecteur de poids doit
+  // être purgé du réglage mémorisé pour que l'évaluation out-of-sample soit honnête.
+  const causalParameters = await extractDrawAlgorithmicParameters(drawName, cleanHistory, true);
+
   for (let i = 0; i < safeDepth; i++) {
     const currentProgress = Math.round(35 + ((i + 1) / safeDepth) * 55);
     onProgress?.(currentProgress, `Simulation stricte tirage ${i + 1}/${safeDepth}...`);
@@ -452,21 +490,21 @@ export const runStrictDrawValidation = async (
     const targetDraw = cleanHistory[i];
     const actualGagnants = targetDraw.gagnants || [];
 
-    // Inférence déterministe avec les EXACTS paramètres actuels du tirage
+    // Inférence déterministe en configuration causale (poids neutres, tranche strictement antérieure)
     const pred = await generateMasterPrediction(
       drawName,
       histSlice,
-      parameters.temporalDepth,
-      parameters.activeWeights,
+      causalParameters.temporalDepth,
+      causalParameters.activeWeights,
       undefined,
       undefined,
       true, // skipTraining pour évaluation stricte de la configuration actuelle
       false, // adversarialMode standard
       0, // forcedOutsiderCount
-      parameters.isForensicOptimized,
+      causalParameters.isForensicOptimized,
       undefined,
       undefined,
-      parameters.useSpatioTemporalHawkes
+      causalParameters.useSpatioTemporalHawkes
     );
 
     const sugg = pred.suggestedNumbers || [];
@@ -496,8 +534,10 @@ export const runStrictDrawValidation = async (
     }
     totalTopologicalLoss += stepTopoLoss;
 
-    // Calcul de Brier (probabilité de confiance vs hit)
-    const probPred = (pred.confidence || 75) / 100.0;
+    // Brier HONNÊTE : la prévision probabiliste d'« au moins un succès » est le taux de base exact
+    // (hypergéométrique 5/90) pour la taille du ticket, pas le score de cohérence interne du moteur.
+    // Noter `confidence/100` comme une probabilité était une erreur de catégorie qui gonflait le Brier.
+    const probPred = hypergeometricAtLeastOneHit(sugg.length);
     const outcome = directHits.length >= 1 ? 1.0 : 0.0;
     totalBrierSquaredErr += Math.pow(probPred - outcome, 2);
 

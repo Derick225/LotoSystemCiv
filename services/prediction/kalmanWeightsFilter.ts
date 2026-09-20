@@ -1,7 +1,6 @@
 import { AlgoWeights, DrawResult } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { normalizeWeights, getDefaultWeights } from './weightsManager';
-import { computeLocalLyapunovExponent } from './adaptiveLearningRate';
 import { calculateShannonEntropy, calculateVariance } from './deterministicCore';
 
 export interface KalmanFilterState {
@@ -94,7 +93,7 @@ export function updateWeightsWithKalmanFilter(params: {
   predictionError?: number; // Score de Brier ou perte topologique
   empiricalVariance?: number;
 }): KalmanUpdateResult {
-  const { drawName, measuredWeights, history = [], predictionError = 0.2, empiricalVariance: customVar } = params;
+  const { drawName, measuredWeights, predictionError = 0.2, empiricalVariance: customVar } = params;
 
   let state = KALMAN_CACHE[drawName];
   if (!state) {
@@ -120,8 +119,11 @@ export function updateWeightsWithKalmanFilter(params: {
   // rBase est calculé de manière continue par la variance de l'erreur historique cumulée
   const rBase = Math.max(0.0001, errorStats.variance * (1.0 + errorStats.mean) + baseVar * 0.1);
 
-  // 2. Autotuning continu du bruit de processus Q_t (Sage-Husa + exposant de Lyapunov)
-  const lyapunov = computeLocalLyapunovExponent(history, 5);
+  // 2. Autotuning continu du bruit de processus Q_t (Sage-Husa)
+  // ALGO-7 : l'exposant de Lyapunov local ne module plus Q_t. Sur des tirages physiquement
+  // aléatoires il ne mesure aucun « régime chaotique » réel — seulement du bruit
+  // d'échantillonnage — et gonflait donc le bruit de processus de façon arbitraire. Q_t
+  // reste auto-ajusté par la dispersion légitime des corrections (variance d'innovation).
   const prevInnovationNorm = state.innovationVector
     ? Math.sqrt(Object.values(state.innovationVector).reduce((sum, v) => sum + v * v, 0))
     : 0.0;
@@ -132,8 +134,8 @@ export function updateWeightsWithKalmanFilter(params: {
   }
 
   const innovationStats = getRollingStats(state.innovationHistory, prevInnovationNorm);
-  // qBase s'auto-ajuste à l'instabilité (Lyapunov) et à la dispersion des corrections optimales (innovation)
-  const qBase = (1.0 / (K * K)) * (1.0 + Math.max(0, lyapunov) * 0.5) * (1.0 + innovationStats.variance * 10.0);
+  // qBase s'auto-ajuste à la dispersion des corrections optimales (innovation)
+  const qBase = (1.0 / (K * K)) * (1.0 + innovationStats.variance * 10.0);
 
   const currentCov = state.covarianceMatrix;
   const nextCov: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));

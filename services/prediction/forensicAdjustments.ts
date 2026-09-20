@@ -5,6 +5,7 @@ import { getLocalForensicReports } from "../postPredictionAnalysisService";
 import { detectGameRegime } from "../mathService";
 import { ScoredNumber } from "./scoringEngine";
 import { getMedian, getStdDev } from "./microSgd";
+import { parseDateSafely } from "../../utils/dateUtils";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 
 /**
@@ -12,7 +13,7 @@ import type { PredictionRuntimeContext } from "./predictionOrchestrator";
  */
 export const applyForensicAdjustments = async (
   drawName: string,
-  _history: DrawResult[],
+  history: DrawResult[],
   gameRegimeInfo: { regime: string; hurst: number; entropy: number; volatility: number; weylDiscrepancy: number; chaosDimension: number; },
   _skipTraining: boolean,
   isForensicOptimized: boolean,
@@ -55,7 +56,17 @@ export const applyForensicAdjustments = async (
     }
   }
 
-  const recentReports = (reports || []).filter(r => r.drawName === drawName);
+  // Garde anti-fuite (causalité) : en backtesting walk-forward, `history` est la tranche STRICTEMENT
+  // antérieure au tirage cible. Un rapport forensic daté après le plus récent tirage connu de cette
+  // tranche décrit le tirage cible (ou un tirage futur) et révélerait ses gagnants → on ne conserve
+  // que les rapports dont la date est ≤ celle du dernier tirage causalement disponible.
+  const causalCutoff = (history && history.length > 0)
+    ? Math.max(...history.map(d => parseDateSafely(d.date).getTime()))
+    : Number.POSITIVE_INFINITY;
+
+  const recentReports = (reports || []).filter(r =>
+    r.drawName === drawName && parseDateSafely(r.date).getTime() <= causalCutoff
+  );
 
   if (recentReports.length === 0) {
     logger.debug("[forensicAdjustments] Scénario D : Rapport forensique indisponible pour ce tirage. Ajustements neutralisés.");

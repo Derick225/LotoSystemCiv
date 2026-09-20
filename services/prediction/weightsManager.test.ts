@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeWeights, getDefaultWeights } from './weightsManager';
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 
 describe('Weights Manager & Algorithm Configuration', () => {
     
@@ -84,6 +84,32 @@ describe('Weights Manager & Algorithm Configuration', () => {
             // With 4 keys, max sum is 1.20, so 1.0 is possible
             const sum = Object.values(normalized).reduce((a: number, b: number) => a + (b || 0), 0) as number;
             expect(sum).toBeCloseTo(1.0, 1);
+        });
+    });
+
+    describe('Retired channels (ALGO-6 dedup / ALGO-7 pseudo-science)', () => {
+        it('DEFAULT_ALGO_WEIGHTS retire redundant + pseudo-science channels to exactly 0', () => {
+            RETIRED_ALGO_WEIGHT_KEYS.forEach(key => {
+                expect(DEFAULT_ALGO_WEIGHTS[key]).toBe(0);
+            });
+        });
+
+        it('normalizeWeights forces retired channels to 0 even under adversarial positive input', () => {
+            // Simule des poids persistés/recalibrés qui tenteraient de réactiver un canal retiré.
+            const adversarial = getDefaultWeights();
+            RETIRED_ALGO_WEIGHT_KEYS.forEach(key => {
+                (adversarial as Record<string, number>)[key] = 1000;
+            });
+
+            const normalized = normalizeWeights(adversarial);
+
+            RETIRED_ALGO_WEIGHT_KEYS.forEach(key => {
+                expect(normalized[key]).toBe(0);
+            });
+
+            // La masse de pondération restante est toujours une norme L1 valide sur les canaux actifs.
+            const sum = Object.values(normalized).reduce((a: number, b: number) => a + (b || 0), 0) as number;
+            expect(sum).toBeCloseTo(1.0, 5);
         });
     });
 });

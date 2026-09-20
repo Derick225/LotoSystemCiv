@@ -22,6 +22,10 @@ export interface ScoredNumber {
     topologicalTension: number;
     dnaOrbitingIndex: number;
     narrativeInterpretation?: string;
+    // Poids effectif figé par (numéro, algo) tel qu'appliqué dans la passe nominale : intègre déjà
+    // les modifiers dynamiques, la phase cyclique, la résonance Micro-ADN et la mise à zéro des algos
+    // en échec. Le re-score PCA le réutilise pour garantir une pondération IDENTIQUE entre les deux passes.
+    effectiveWeights?: Record<string, number>;
   };
 }
 
@@ -185,6 +189,7 @@ export const calculateScores = (
     const breakdown = rawBreakdowns[num];
     let finalScore = 0;
     const shapValues: Record<string, number> = {};
+    const effectiveWeightsPerNum: Record<string, number> = {};
     
     // Gradient multiplicatif de résonance continue selon le Micro-ADN du numéro
     const microDnaResonanceModulator = microDnaCache[num] 
@@ -211,8 +216,10 @@ export const calculateScores = (
         const contribution = squashed * baseWeight;
         finalScore += contribution;
         shapValues[key] = contribution;
+        effectiveWeightsPerNum[key] = baseWeight;
       } else {
         shapValues[key] = 0;
+        effectiveWeightsPerNum[key] = 0;
       }
     });
 
@@ -227,7 +234,8 @@ export const calculateScores = (
         explainability: {
             shapValues,
             topologicalTension,
-            dnaOrbitingIndex
+            dnaOrbitingIndex,
+            effectiveWeights: effectiveWeightsPerNum
         }
     });
   }
@@ -321,10 +329,12 @@ export const applyPCADenoising = async (
         
         masterScores.forEach(m => {
           const val = Number(m.breakdown[k]) || 0;
-          let weight = Number(weights[k]) || 0;
-          
-          const weightModifier = enhancedMetrics?.dynamicWeightModifiers?.[m.num]?.[k] || 0;
-          weight *= Math.exp(weightModifier);
+          // Réutilise le poids effectif figé par la passe nominale (modifiers dynamiques + phase
+          // cyclique + résonance Micro-ADN + algos en échec mis à zéro). Sans cela, la passe PCA
+          // appliquait une pondération différente (uniquement Math.exp(weightModifier)), ce qui
+          // modifiait silencieusement le classement entre les deux passes. Repli sur le poids brut
+          // si la passe nominale n'a pas été exécutée pour ce numéro.
+          const weight = m.explainability?.effectiveWeights?.[k] ?? (Number(weights[k]) || 0);
 
           if (weight > 0) {
             const robustZ = getModifiedZScore(val, median, mad);

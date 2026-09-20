@@ -1,5 +1,5 @@
 import { AlgoWeights, DrawResult, ForensicReport } from '../../types';
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from '../../shared/prediction.types';
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
@@ -35,6 +35,10 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
   keys.forEach(key => {
     let val = weights[key];
     if (typeof val !== 'number' || isNaN(val) || val < 0) val = 0;
+    // Déduplication ALGO-6 / refonte ALGO-7 : les canaux retirés (redondants ou
+    // pseudo-scientifiques) sont forcés à zéro ici, au point de passage unique de toute
+    // pondération, afin qu'aucun poids persisté ou recalibré ne puisse les réactiver.
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(key)) val = 0;
     w[key] = val;
     initialSum += val;
   });
@@ -42,8 +46,11 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
   if (initialSum > 0) {
     keys.forEach(key => { w[key] = w[key] / initialSum; });
   } else {
-    const uniform = 1.0 / numAlgos;
-    keys.forEach(key => { w[key] = uniform; });
+    // Repli uniforme : les canaux retirés (ALGO-6 / ALGO-7) restent exclus même si toutes
+    // les pondérations d'entrée sont nulles, pour éviter toute réactivation accidentelle.
+    const activeKeys = keys.filter(key => !RETIRED_ALGO_WEIGHT_KEYS.has(key));
+    const uniform = 1.0 / Math.max(1, activeKeys.length);
+    keys.forEach(key => { w[key] = RETIRED_ALGO_WEIGHT_KEYS.has(key) ? 0 : uniform; });
   }
 
   const maxProjectIterations = Math.max(10, numAlgos * 2);
@@ -164,9 +171,38 @@ export interface AlgoProofMetric {
   empiricalHitRate: number;
   baselineRate: number;
   confidence: number;
+  // p-value unilatérale brute (queue supérieure) du z-score du canal sous H0.
+  pValue?: number;
+  // p-value ajustée Benjamini-Hochberg (FDR) sur la famille des canaux testés.
+  qValue?: number;
 }
 
 const algoEmpiricalProofCache = new Map<string, Record<AlgoKey, AlgoProofMetric>>();
+
+/**
+ * Effectif minimal attendu pour la validité de l'approximation normale d'une binomiale
+ * (règle de Cochran, 1954 : np ≥ 5). Constante statistique PUBLIÉE — même statut que le facteur
+ * de consistance MAD 1.4826 ou l'approximation logistique 1.702 déjà utilisés dans le moteur —
+ * et non un seuil de décision arbitraire réglable. Sert uniquement à atténuer continûment les
+ * canaux dont l'échantillon est trop mince pour que le z-score soit fiable.
+ */
+const COCHRAN_MIN_EXPECTED_COUNT = 5.0;
+
+/**
+ * Fonction de survie normale standard P(Z > z) = ½·(1 − erf(z/√2)).
+ * erf approché par Abramowitz & Stegun 7.1.26 (précision ~1.5e-7). Les coefficients sont des
+ * constantes mathématiques publiées (même statut que le facteur de consistance MAD 1.4826),
+ * aucun réglage arbitraire. 100 % déterministe.
+ */
+const normalUpperTail = (z: number): number => {
+  const x = z / Math.SQRT2;
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1.0 / (1.0 + 0.3275911 * ax);
+  const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+  const erf = sign * (1.0 - poly * Math.exp(-ax * ax));
+  return Math.max(0, Math.min(1, 0.5 * (1.0 - erf)));
+};
 
 /**
  * ÉVALUATION EMPIRIQUE DE LA VALEUR PRÉDICTIVE D'UN ALGORITHME
@@ -308,11 +344,14 @@ export const evaluateAlgoEmpiricalProof = (
     hits[AlgoKey.GAP_CADENCE] += topCadence.filter(n => actualDraw.includes(n)).length * tWeight;
     trials[AlgoKey.GAP_CADENCE] += 10 * tWeight;
 
-    // 6. Canal GAP_PATTERN (Signature de gap successif)
+    // 6. Canal GAP_PATTERN (signature de gap successif) — canal retiré (ALGO-6), proxy
+    // conservé uniquement pour l'affichage d'audit. L'ancien bonus « g % 5 === 0 » (nombre
+    // magique + porte binaire, et pure numérologie : rien ne rend les écarts multiples de 5
+    // spéciaux) a été supprimé au profit du seul ratio fréquence/écart, continu et justifié.
     const gapPatternScores = new Float32Array(91);
     for (let n = 1; n <= 90; n++) {
       const g = subGaps[n];
-      gapPatternScores[n] = (g % 5 === 0 ? 1.5 : 1.0) * (subFreq[n] / (g + 1));
+      gapPatternScores[n] = subFreq[n] / (g + 1);
     }
     const topGapPattern = [...numIndices].sort((a, b) => gapPatternScores[b] - gapPatternScores[a]).slice(0, 10);
     hits[AlgoKey.GAP_PATTERN] += topGapPattern.filter(n => actualDraw.includes(n)).length * tWeight;
@@ -589,29 +628,74 @@ export const evaluateAlgoEmpiricalProof = (
   // Vérification stricte de la présence de numéros machine sur le tirage
   const hasMachine = drawHasMachineNumbers(drawName, sample);
 
-  // Calcul du score de preuve empirique objectif Z-score
+  // --- PASSE 1 : statistiques brutes par canal (z-score, p-value bilatérale, profondeur) ---
+  // Sous H0 (aucun pouvoir prédictif réel), les 24 canaux produisent des z-scores ~N(0,1) : la moitié
+  // dépassent 0 par pur bruit. L'ancien test `proofScore > 0` les "boostait" donc à tort (fléau des
+  // comparaisons multiples). On calcule d'abord les statistiques individuelles, puis on corrige.
+  interface ChannelStat { z: number; rate: number; pTwo: number; depth: number; tested: boolean; }
+  const stats: Record<string, ChannelStat> = {};
   validKeys.forEach(k => {
     // Sécurité si aucune donnée machine sur ce tirage : essais forcés pour certifier zScore négatif / nul
     if (k === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
       hits[k] = 0;
       trials[k] = Math.max(10, sample.length * 10);
     }
-
-    const t = trials[k] || 1;
+    const t = trials[k] || 0;
+    const tested = t > 0;
     const h = hits[k] || 0;
-    const rate = h / t;
-    const effectiveTrials = Math.max(1, (t / sumWeights) * nEff);
-    const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / effectiveTrials) || 0.01;
-    const zScore = (rate - baselineRate) / stdErr;
-    const proofScore = zScore * confidence;
-    const hasProof = proofScore > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
+    const rate = tested ? h / t : 0;
+    const effectiveTrials = Math.max(1, (t / (sumWeights || 1)) * nEff);
+    const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / effectiveTrials) || Number.EPSILON;
+    const z = (rate - baselineRate) / stdErr;
+    // p-value bilatérale exacte (loi normale) : probabilité d'un |z| au moins aussi extrême sous H0.
+    const pTwo = Math.min(1, 2 * normalUpperTail(Math.abs(z)));
+    // Adéquation de profondeur (règle de Cochran, effectif attendu ≥ 5 succès sous H0) : facteur
+    // continu saturant, nul sur échantillon trop mince pour que l'approximation normale soit valide.
+    const expectedSuccesses = effectiveTrials * baselineRate;
+    const depth = 1.0 - Math.exp(-expectedSuccesses / COCHRAN_MIN_EXPECTED_COUNT);
+    stats[k] = { z, rate, pTwo, depth, tested };
+  });
+
+  // --- PASSE 2 : correction Benjamini-Hochberg (FDR) sur la famille des canaux testés ---
+  const testedKeys = validKeys.filter(k => stats[k].tested);
+  const m = testedKeys.length;
+  const qValues: Record<string, number> = {};
+  if (m > 0) {
+    const ascending = [...testedKeys].sort((a, b) => stats[a].pTwo - stats[b].pTwo);
+    let runningMin = 1.0;
+    // q-value step-up : q_(i) = min(q_(i+1), (m/i)·p_(i)), borné à [0,1] et monotone.
+    for (let i = m - 1; i >= 0; i--) {
+      const rank = i + 1;
+      const adj = Math.min(1.0, (m / rank) * stats[ascending[i]].pTwo);
+      runningMin = Math.min(runningMin, adj);
+      qValues[ascending[i]] = runningMin;
+    }
+  } else {
+    validKeys.forEach(k => { qValues[k] = 1.0; });
+  }
+
+  // Tolérance FDR dérivée de la structure du jeu (aucun seuil de décision arbitraire type 0.05) :
+  // la proportion neutre de numéros gagnants (5/90) sert d'échelle de risque intrinsèque.
+  const fdrTolerance = baselineRate;
+
+  // --- PASSE 3 : assemblage honnête. Sous H0, q→1 donc proofScore→0 : poids uniformes par défaut. ---
+  validKeys.forEach(k => {
+    const s = stats[k];
+    const q = qValues[k] ?? 1.0;
+    // Atténuation continue par (1 − q) : conserve le SIGNE (boost si meilleur, dampening si pire)
+    // mais réduit l'amplitude vers 0 quand la preuve n'est pas distinguable du bruit.
+    const proofScore = s.z * confidence * s.depth * (1.0 - q);
+    // Preuve (boost) = rejet de H0 par BH (q ≤ tolérance), dans le sens supérieur, garde machine.
+    const hasProof = s.tested && q <= fdrTolerance && s.z > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
 
     result[k] = {
       hasProof,
       proofScore: parseFloat(proofScore.toFixed(4)),
-      empiricalHitRate: parseFloat(rate.toFixed(4)),
+      empiricalHitRate: parseFloat(s.rate.toFixed(4)),
       baselineRate: parseFloat(baselineRate.toFixed(4)),
-      confidence: parseFloat(confidence.toFixed(4))
+      confidence: parseFloat(confidence.toFixed(4)),
+      pValue: parseFloat(s.pTwo.toFixed(6)),
+      qValue: parseFloat(q.toFixed(6))
     };
   });
 

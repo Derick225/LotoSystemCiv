@@ -6,6 +6,7 @@ import { computeAdvancedMetrics } from './predictionOrchestrator';
 import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
 import { calculateStatisticalBounds, calculateTemporalDriftLearningRate, TemporalDriftLearningRateResult } from '../mathService';
 import { normalizeWeights, evaluateAlgoEmpiricalProof, saveAlgoWeights } from './weightsManager';
+import { AUTOPSY_CALIBRATION } from './calibrationConstants';
 import { recordModelDnaVersion, ModelDnaRecord } from './modelDnaKnowledgeBase';
 import { applyOptimizedWeights } from './optimizationController';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
@@ -280,7 +281,8 @@ export const executeClosedLoopAutopsy = async (
   }
 
   const brierScore = brierSum / 90.0;
-  const calibrationAccuracy = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-brierScore * 20.0))));
+  // Échelle de conversion Brier -> calibration centralisée dans calibrationConstants.AUTOPSY_CALIBRATION.
+  const calibrationAccuracy = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-brierScore * AUTOPSY_CALIBRATION.BRIER_TO_ACCURACY_DECAY))));
 
   // 7. Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
   // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))

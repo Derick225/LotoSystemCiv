@@ -170,13 +170,20 @@ export const useNexusStore = create<NexusState>()(
           );
         }
 
-        // Run Cache Garbage Collection to free up IndexedDB memory
-        try {
-          const { globalCache } =
-            await import("../services/cache/CacheService");
-          await globalCache.runGarbageCollection();
-        } catch (e) {
-          console.warn("Garbage collection skipped:", e);
+        // Garbage Collection du cache différée HORS du chemin critique de démarrage : la GC lit
+        // toutes les clés/valeurs IndexedDB et bloquait le boot. On la planifie en idle (avec repli
+        // setTimeout) en fire-and-forget — elle n'a pas besoin de se terminer avant initialize().
+        const runGcWhenIdle = () => {
+          import("../services/cache/CacheService")
+            .then(({ globalCache }) => globalCache.runGarbageCollection())
+            .catch((e) => console.warn("Garbage collection skipped:", e));
+        };
+        if (typeof window !== "undefined") {
+          const ric = (window as unknown as {
+            requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+          }).requestIdleCallback;
+          if (ric) ric(runGcWhenIdle, { timeout: 5000 });
+          else setTimeout(runGcWhenIdle, 3000);
         }
 
         // Écouter l'hydratation cloud et les mises à jour de poids pour forcer le store à se synchroniser

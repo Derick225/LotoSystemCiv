@@ -97,3 +97,28 @@ export const useAuth = () => {
 
     return { session, isAdmin, loading, subscription, refreshSubscription };
 };
+
+/**
+ * Hook allégé : ne suit QUE la session Supabase (getSession + onAuthStateChange), sans
+ * checkSubscriptionStatus, hydrateUserData ni toast. À utiliser par les consommateurs qui n'ont
+ * besoin que de `session` (ex. useRealtimeSync) afin d'éviter de dupliquer tout le travail
+ * d'authentification lourd déjà effectué par le `useAuth` complet monté dans App.
+ */
+export const useSession = (): { session: Session | null } => {
+    const [session, setSession] = useState<Session | null>(null);
+
+    useEffect(() => {
+        let isMounted = true;
+        supabase.auth.getSession()
+            .then(({ data }) => { if (isMounted) setSession(data.session); })
+            .catch((e) => console.warn("[useSession] getSession error:", e));
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+            if (isMounted) setSession(newSession);
+        });
+
+        return () => { isMounted = false; subscription.unsubscribe(); };
+    }, []);
+
+    return { session };
+};

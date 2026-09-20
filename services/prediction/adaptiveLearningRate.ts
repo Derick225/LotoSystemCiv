@@ -107,9 +107,15 @@ export function computeAdaptiveContinuousLearningRate(
   const brierFactor = 1.0 / (1.0 + (recentBrierScore ?? 0.20));
 
   // 6. Taux d'apprentissage final modulé continûment
+  // ALGO-7 : l'exposant de Lyapunov local (et son persistenceModulator) est conservé
+  // UNIQUEMENT à des fins de visualisation / audit (champs retournés ci-dessous). Il ne
+  // module plus le taux d'apprentissage : qualifier de « chaotique » une suite de tirages
+  // physiquement aléatoires revient à injecter du bruit d'échantillonnage dans l'adaptation
+  // des poids. Seuls des facteurs statistiquement justifiés (taille d'échantillon via eta0,
+  // entropie, variance empirique, fiabilité de Brier) pilotent désormais eta(t).
   const finalLearningRate = Math.max(
     0.001,
-    Math.min(0.25, eta0 * persistenceModulator * entropyDamping * brierFactor * (1.0 + Math.sqrt(empiricalVariance)))
+    Math.min(0.25, eta0 * entropyDamping * brierFactor * (1.0 + Math.sqrt(empiricalVariance)))
   );
 
   return {

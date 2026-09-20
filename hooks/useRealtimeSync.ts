@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { useNexusStore } from '../store/useNexusStore';
-import { useAuth } from './useAuth';
+import { useSession } from './useAuth';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
 
 export const useRealtimeSync = () => {
-    const { session } = useAuth();
+    const { session } = useSession();
     const { showToast } = useToast();
     const refreshData = useNexusStore((state) => state.refreshData);
     const drawName = useNexusStore((state) => state.drawName);
@@ -54,10 +54,9 @@ export const useRealtimeSync = () => {
         document.addEventListener('visibilitychange', handleVisibilityChange);
         window.addEventListener('focus', handleFocus);
 
-        // Immediate check if already visible
-        if (document.visibilityState === 'visible') {
-            triggerBackgroundSync();
-        }
+        // NB : pas de sync forcé au montage. Le chargement initial est déjà assuré par le SWR de
+        // useDrawHistory et les canaux Realtime ci-dessous ; un trigger immédiat ici ne faisait que
+        // dupliquer une requête complète (refreshData force) au démarrage.
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibilityChange);

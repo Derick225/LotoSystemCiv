@@ -1,7 +1,5 @@
 import { AlgoKey } from '../../shared/prediction.types';
 import { AlgoWeights } from '../../types';
-import { normalizeWeights } from '../prediction/weightsManager';
-import { LCG } from '../../utils/mathUtils';
 
 export interface MultiHeadPrediction {
   /** Head 1: Probabilités de présence globale sur la grille [1-90] */
@@ -243,48 +241,3 @@ export const computeIntegratedGradients = (
   };
 };
 
-/**
- * Closed-Loop Injection Régulée avec Répartition Dirichlet
- * Distribue la correction sur l'ensemble des 20 algorithmes via un lissage Softmax avec régularisation Dirichlet.
- */
-export const applyDirichletClosedLoopInjection = (
-  currentWeights: AlgoWeights,
-  gradientUpdates: Record<AlgoKey, number>,
-  learningRate: number = 0.05,
-  dirichletAlpha: number = 0.8
-): AlgoWeights => {
-  const algoKeys = Object.keys(currentWeights) as AlgoKey[];
-  const prng = new LCG(`dirichlet_injection_${Date.now()}`);
-
-  // 1. Échantillonnage d'un vecteur Dirichlet continu
-  const dirichletVector: Record<string, number> = {};
-  let dirichletSum = 0;
-
-  algoKeys.forEach(k => {
-    // Échantillon gamma d'ordre alpha via approximation Box-Muller
-    const u1 = Math.max(1e-6, prng.next());
-    const u2 = Math.max(1e-6, prng.next());
-    const g = Math.pow(-Math.log(u1), 1 / dirichletAlpha) * Math.abs(Math.sin(2 * Math.PI * u2));
-    dirichletVector[k] = Math.max(1e-4, g);
-    dirichletSum += dirichletVector[k];
-  });
-
-  // Normaliser Dirichlet
-  algoKeys.forEach(k => {
-    dirichletVector[k] /= (dirichletSum || 1);
-  });
-
-  // 2. Softmax-space smooth updating
-  const unnormalizedNewWeights: Record<string, number> = {};
-  algoKeys.forEach(k => {
-    const currentW = Math.max(1e-4, currentWeights[k] || 0.05);
-    const gradDelta = (gradientUpdates[k] || 0) * learningRate;
-    const dirichletNoise = (dirichletVector[k] - (1 / algoKeys.length)) * 0.15;
-
-    // Log-space transition for smooth positivity
-    const logWeight = Math.log(currentW) + gradDelta + dirichletNoise;
-    unnormalizedNewWeights[k] = Math.exp(logWeight);
-  });
-
-  return normalizeWeights(unnormalizedNewWeights as AlgoWeights);
-};

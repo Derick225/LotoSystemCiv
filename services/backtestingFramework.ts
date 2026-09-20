@@ -7,6 +7,27 @@ import { getPayoutMultiplier, drawHasMachineNumbers } from "../constants";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { normalizeWeights } from "./prediction/weightsManager";
 
+// Coefficient binomial exact (arrondi entier : les valeurs restent bien sous Number.MAX_SAFE_INTEGER ici).
+const binomialCoeff = (n: number, k: number): number => {
+  let result = 1;
+  for (let i = 0; i < k; i++) result = (result * (n - i)) / (i + 1);
+  return Math.round(result);
+};
+
+// Probabilités hypergéométriques EXACTES d'obtenir k bons numéros dans un tirage équitable 5/90 :
+//   P(k) = C(5,k) · C(85,5−k) / C(90,5)
+// Aucune approximation, aucun "drift" ajouté : un tirage équitable est équiprobable et aucun
+// prédicteur ne peut augmenter la probabilité réelle d'un évènement. Ces valeurs servent de référence
+// honnête au Monte-Carlo et au dimensionnement Kelly (qui conclut alors à une espérance négative).
+const HYPERGEOMETRIC_5_90: Record<number, number> = (() => {
+  const denom = binomialCoeff(90, 5);
+  const table: Record<number, number> = {};
+  for (let k = 0; k <= 5; k++) {
+    table[k] = (binomialCoeff(5, k) * binomialCoeff(85, 5 - k)) / denom;
+  }
+  return table;
+})();
+
 export interface WalkForwardMetric {
   strategyName: string;
   totalDraws: number;
@@ -294,11 +315,17 @@ export class BacktestingFramework {
           const maxAllowedBet = currentBalance * Math.exp(-maxDrawdowns[s.name] * 4.0);
           if (bet > maxAllowedBet) bet = Math.floor(maxAllowedBet);
         } else if (strategyType === "KELLY") {
-          // Theoretical kelly multiplier adapted recursively
-          const pEst = 0.0224; // theoretical draw probability of ranger-2 5/90
-          const payoutOdds = 15; // 2-hit multiplier
-          const f = (payoutOdds * pEst - (1 - pEst)) / payoutOdds;
-          const kFraction = Math.max(0.01, f * Math.exp(-maxDrawdowns[s.name] * 3.0));
+          // Kelly honnête : f* = (b·p − q) / b, avec b = cote NETTE (multiplicateur de gain − 1)
+          // et p = probabilité hypergéométrique EXACTE du rang ciblé (2 sur 5, tirage 5/90).
+          // Sur un tirage équitable l'espérance est structurellement négative ⇒ f* ≤ 0 ⇒ le critère
+          // de Kelly recommande de ne pas miser. On borne donc f à [0,1] sans plancher artificiel :
+          // la mise retombe alors sur l'unité minimale (gérée plus bas), ce qui est le comportement
+          // honnête — l'ancien Math.max(0.01, …) masquait l'avantage-maison réel de l'opérateur.
+          const pEst = HYPERGEOMETRIC_5_90[2];
+          const netOdds = Math.max(Number.EPSILON, getPayoutMultiplier(payoutModel, 2) - 1);
+          const rawKelly = (netOdds * pEst - (1 - pEst)) / netOdds;
+          const drawdownTaper = Math.exp(-maxDrawdowns[s.name] * 3.0);
+          const kFraction = Math.min(1.0, Math.max(0.0, rawKelly * drawdownTaper));
           bet = Math.floor(currentBalance * kFraction);
         }
 
@@ -432,12 +459,13 @@ export class BacktestingFramework {
     // Select up to 5 representative trajectories for UI rendering
     const sampleIndices = new Set([0, Math.floor(runs * 0.25), Math.floor(runs * 0.5), Math.floor(runs * 0.75), runs - 1]);
 
-    // Theoretical distribution of hits in structured predictor
-    // Probability of hitting: 2-hit ~ 0.0224, 3-hit ~ 0.0012, 4-hit ~ 0.00003, 5-hit ~ 1.1e-7
-    const p2 = 0.025; // augmented by 12% drift prediction accuracy
-    const p3 = 0.0016; // scaled up similarly
-    const p4 = 0.00005;
-    const p5 = 0.000001;
+    // Distribution théorique exacte des gains (hypergéométrique 5/90, voir HYPERGEOMETRIC_5_90).
+    // Probabilités honnêtes — aucun "drift de précision" ajouté : elles reflètent la réalité d'un
+    // tirage équitable, donc une espérance de gain négative (avantage structurel de l'opérateur).
+    const p2 = HYPERGEOMETRIC_5_90[2];
+    const p3 = HYPERGEOMETRIC_5_90[3];
+    const p4 = HYPERGEOMETRIC_5_90[4];
+    const p5 = HYPERGEOMETRIC_5_90[5];
 
     for (let r = 0; r < runs; r++) {
       let balance = initialBankroll;

@@ -33,6 +33,66 @@ export enum AlgoKey {
 export type AlgoWeights = Record<AlgoKey, number>;
 
 /**
+ * CANAUX D'ÉCARTS REDONDANTS RETIRÉS DE L'ENSEMBLE ACTIF (déduplication ALGO-6).
+ *
+ * GAP_SEQUENCE (autocorrélation lag-1 + retour à la moyenne), GAP_PATTERN (AR(1) lag-1)
+ * et SEQUENCE_PATTERN (fenêtre glissante) modélisent tous le MÊME signal : la dynamique
+ * d'autocorrélation de la séquence d'écarts individuelle de chaque numéro. Cette
+ * colinéarité faisait compter un signal unique ~4x dans l'ensemble pondéré, gonflant
+ * artificiellement sa confiance. GAP_TREND (lissage de Holt niveau + tendance, paramètres
+ * optimisés par SSE) est conservé comme représentant orthogonal et plus rigoureux de cette
+ * famille ; GAPS (niveau statique), GAP_BAND_SEQUENCE (Markov collectif sur tranches) et
+ * GAP_CADENCE (régime collectif) couvrent des signaux structurellement distincts.
+ *
+ * Les clés sont mises à zéro (et non supprimées de l'enum) afin de préserver les types,
+ * les ScoreBreakdown persistés et l'affichage UI : les plugins restent enregistrés et
+ * continuent de produire leurs scores bruts pour les tableaux de diagnostic (matrice de
+ * corrélation des écarts, dashboards), mais ne contribuent plus au score final.
+ */
+export const RETIRED_REDUNDANT_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
+    AlgoKey.GAP_SEQUENCE,
+    AlgoKey.GAP_PATTERN,
+    AlgoKey.SEQUENCE_PATTERN,
+]);
+
+/**
+ * CANAUX PSEUDO-SCIENTIFIQUES RETIRÉS DE L'ENSEMBLE ACTIF (refonte ALGO-7, changement
+ * produit autorisé par l'utilisateur).
+ *
+ * INTER_MONTHLY_RESONANCE prétend détecter des « périodicités calendaires mensuelles,
+ * trimestrielles, lunaires/synodiques et multi-annuelles ». Un tirage de loto physique est
+ * un processus aléatoire : la phase lunaire, le mois civil ou l'anniversaire de tirages
+ * passés n'ont AUCUN mécanisme causal sur les boules tirées. Ces corrélations sont du
+ * bruit d'échantillonnage (sur-apprentissage), et leur présence dans l'ensemble donnait une
+ * crédibilité indue à une prédiction qui n'en a pas. Ce canal n'est PAS l'une des trois
+ * relations inter-tirages sanctionnées par AGENTS.md (Markov, report direct carry-over,
+ * résonances harmoniques au sein des familles étanches) — il est donc retiré sans violer
+ * l'invariant architectural.
+ *
+ * Comme pour les canaux redondants, la clé est mise à zéro plutôt que supprimée : le plugin
+ * reste enregistré et continue d'alimenter l'affichage UI / les tableaux de diagnostic, mais
+ * ne contribue plus au score final.
+ *
+ * NOTE : INTER_DRAW_RESONANCE (miroirs décimaux / compléments 91) n'est PAS retirée ici car
+ * AGENTS.md autorise explicitement les « résonances harmoniques » inter-tirages au sein des
+ * familles étanches ; la supprimer violerait un invariant non négociable du projet.
+ */
+export const RETIRED_PSEUDOSCIENCE_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
+    AlgoKey.INTER_MONTHLY_RESONANCE,
+]);
+
+/**
+ * Union des canaux retirés (redondants + pseudo-scientifiques). C'est cet ensemble qui fait
+ * foi pour l'annulation des poids, tant dans les poids par défaut que dans le point de
+ * passage unique de normalisation (normalizeWeights), afin qu'aucun poids persisté ou
+ * recalibré ne puisse réactiver un canal retiré.
+ */
+export const RETIRED_ALGO_WEIGHT_KEYS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
+    ...RETIRED_REDUNDANT_ALGOS,
+    ...RETIRED_PSEUDOSCIENCE_ALGOS,
+]);
+
+/**
  * STRATÉGIE DE NORMALISATION DES POIDS:
  * Tous les poids sont relatifs. Avant l'exécution, le moteur normalise (L1 norm) :
  * `normalized_w_i = w_i / sum(w_j)`
@@ -43,7 +103,7 @@ export type AlgoWeights = Record<AlgoKey, number>;
  * redistribuant l'influence sur l'analyse de signaux (Spectral/Markov/Bayes).
  */
 export const DEFAULT_ALGO_WEIGHTS: AlgoWeights = Object.values(AlgoKey).reduce((acc, key) => {
-    acc[key] = 1.0;
+    acc[key] = RETIRED_ALGO_WEIGHT_KEYS.has(key) ? 0.0 : 1.0;
     return acc;
 }, {} as AlgoWeights);
 
