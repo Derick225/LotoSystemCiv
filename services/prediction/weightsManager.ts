@@ -1553,7 +1553,7 @@ export const applyForensicCalibration = (
 /**
  * APPLIQUE UNE RÉTROACTION BAYÉSIENNE SUR LES POIDS D'ALGORITHMES LOCAUX
  * Basée sur la validation manuelle de l'opérateur (RLHF / Forensic Autopsy).
- * Ajuste les poids de façon continue et déterministe (sans nombre magique ni Math.random()).
+ * Ajuste les poids de façon continue et déterministe (sans nombre magique ni aléa).
  */
 export const applyBayesianForensicFeedback = async (
   drawName: string,

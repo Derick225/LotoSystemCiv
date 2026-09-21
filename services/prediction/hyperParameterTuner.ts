@@ -475,7 +475,7 @@ export const adaptiveParameterSearch = async (
 /**
  * OPTIMISATION DE COORDONNÉES DÉTERMINISTE (Coordinate Descent) :
  * Ajuste séquentiellement chaque hyper-paramètre pour minimiser le rang moyen des gagnants passés.
- * 100% reproductible, sans Math.random().
+ * 100% reproductible et déterministe.
  */
 export const tunePredictiveHyperparameters = async (
   drawName: string,

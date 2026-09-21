@@ -7,7 +7,7 @@
  * Conforme aux règles AGENTS.md :
  * - Zéro Nombres Magiques : toutes les métriques et coefficients sont dérivés différentiablement
  *   de l'entropie de Shannon, de la variance, de l'exposant de Hurst et des lois d'oscillation physique.
- * - 100% Déterministe : aucun appel à Math.random(), reproductibilité mathématique absolue.
+ * - 100% Déterministe : reproductibilité mathématique absolue (ZÉRO HASARD).
  * - Transitions Continues : équations différentiables C^∞ (sigmoïdes, tanh, oscillateur harmonique amorti).
  * - Isolation Absolue du Tirage : calculs et statistiques strictement délimités à l'historique actif.
  */

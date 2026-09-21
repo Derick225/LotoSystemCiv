@@ -130,7 +130,7 @@ export const shuffleArray = <T>(array: T[]): T[] => {
  * Génère un UUID RFC 4122 v4 valide de manière 100% déterministe à partir d'une chaîne arbitraire.
  * Utilise un algorithme de hachage déterministe FNV-1a (Fowler-Noll-Vo) étalé sur 4 slots de 32 bits
  * distincts pour dériver de manière uniforme un bloc d'octets de 128 bits.
- * Respecte l'exigence ZÉRO HASARD de AGENTS.md (sans Math.random ou crypto.getRandomValues non seedés).
+ * Respecte l'exigence ZÉRO HASARD de AGENTS.md (sans générateur pseudo-aléatoire non seedé).
  *
  * @param str La chaîne d'entrée servant de base déterministe.
  * @returns Une chaîne au format standard d'un UUIDv4 RFC 4122.

@@ -36,6 +36,10 @@ import {
   InterDrawRetentionPattern
 } from './interDrawPatternService';
 
+// Probabilité marginale théorique exacte d'un numéro : 5/90.
+const THEORETICAL_SINGLE_PROB =
+  LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
+
 export type {
   InterDrawCooccurrenceReport,
   InterDrawPatternReport,
@@ -619,7 +623,7 @@ export const runBayesianResonanceEngine = (
   scoredCandidates.sort((a, b) => b.compositeScore - a.compositeScore || a.number - b.number);
 
   // Vecteur complet d'inférence 1..90 normalisé [0.01, 0.99]
-  const fullCandidateScores = new Array(91).fill(0.0555);
+  const fullCandidateScores = new Array(91).fill(THEORETICAL_SINGLE_PROB);
   for (const item of scoredCandidates) {
     fullCandidateScores[item.number] = Math.max(0.01, Math.min(0.99, item.compositeScore / 100));
   }
@@ -1015,7 +1019,7 @@ export const calculateInterDrawVector = (
 ): Float32Array => {
   const vec = new Float32Array(91);
   if (!history || history.length === 0 || !drawName) {
-    vec.fill(0.0555); // 5/90 uniforme
+    vec.fill(THEORETICAL_SINGLE_PROB); // 5/90 uniforme
     return vec;
   }
 
@@ -1024,7 +1028,7 @@ export const calculateInterDrawVector = (
   // passerait un historique mixte/actif (ex. fusionService), source de pollution inter-familles.
   history = purifyHistoryForDraw(drawName, history);
   if (history.length === 0) {
-    vec.fill(0.0555);
+    vec.fill(THEORETICAL_SINGLE_PROB);
     return vec;
   }
 
@@ -1034,13 +1038,13 @@ export const calculateInterDrawVector = (
     : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(drawName));
 
   if (!activeFamily) {
-    vec.fill(0.0555);
+    vec.fill(THEORETICAL_SINGLE_PROB);
     return vec;
   }
 
   const relation = getFamilyPredecessorAndSuccessor(drawName, activeFamily.id);
   if (!relation) {
-    vec.fill(0.0555);
+    vec.fill(THEORETICAL_SINGLE_PROB);
     return vec;
   }
 
@@ -1074,14 +1078,14 @@ export const calculateInterDrawVector = (
   const predLatest = predHistory[0];
   const lastWinners = predLatest?.gagnants || [];
   if (lastWinners.length === 0) {
-    vec.fill(0.0555);
+    vec.fill(THEORETICAL_SINGLE_PROB);
     return vec;
   }
 
   // Alignement temporel des couples consécutifs
   const pairedPairs = alignConsecutiveDrawHistories(history, predHistory);
   if (pairedPairs.length === 0) {
-    vec.fill(0.0555);
+    vec.fill(THEORETICAL_SINGLE_PROB);
     return vec;
   }
 
@@ -1089,7 +1093,7 @@ export const calculateInterDrawVector = (
   const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
   const engine = runBayesianResonanceEngine(pairedPairs, lastWinners, predLaggedHistory);
   for (let n = 1; n <= 90; n++) {
-    vec[n] = engine.fullCandidateScores[n] || 0.0555;
+    vec[n] = engine.fullCandidateScores[n] || THEORETICAL_SINGLE_PROB;
   }
 
   // 2. Injection continue des métriques de Lift conditionnel des paires et de résonance de cascade (+-1, +-2)
@@ -1103,7 +1107,7 @@ export const calculateInterDrawVector = (
       if (cp.triggerSources.length > 0 && cp.lift > 1.0) {
         // Activation sigmoïdale continue dérivée du PMI borné
         const pmiSigmoid = 1.0 / (1.0 + Math.exp(-Math.max(-4, Math.min(4, cp.pmi))));
-        const pairEnergy = (cp.lift - 1.0) * pmiSigmoid * (cp.confidence || 0.5);
+        const pairEnergy = (cp.lift - 1.0) * pmiSigmoid * cp.confidence;
         cooccBoost[cp.pair[0]] += pairEnergy;
         cooccBoost[cp.pair[1]] += pairEnergy;
       }
@@ -1126,10 +1130,14 @@ export const calculateInterDrawVector = (
     ...Array.from({ length: 90 }, (_, i) => cooccBoost[i + 1] + cascadeBoost[i + 1])
   );
 
+  // Amplitude de modulation dérivée de l'incertitude d'échantillonnage (1/√n, erreur
+  // standard canonique) : l'écart maximal de modulation décroît avec la taille
+  // d'échantillon — modulation ∈ [1, 1 + 1/√n], sans échelle fixe.
+  const modulationAmplitude = 1.0 / Math.sqrt(Math.max(1, pairedPairs.length));
+
   for (let n = 1; n <= 90; n++) {
     const rawSignal = (cooccBoost[n] + cascadeBoost[n]) / maxSignal;
-    // Modulation douce comprise entre [1.0 et 1.45]
-    const modulation = 1.0 + 0.45 * Math.tanh(rawSignal);
+    const modulation = Math.pow(1.0 + modulationAmplitude, Math.tanh(rawSignal));
     vec[n] = vec[n] * modulation;
   }
 
@@ -1373,7 +1381,7 @@ export const calculateInterDrawMonthlyCoupling = (
   carryOverLift?: number;
   harmonicCount?: number;
 } => {
-  const defaultVector = new Float32Array(91).fill(0.0555);
+  const defaultVector = new Float32Array(91).fill(THEORETICAL_SINGLE_PROB);
   if (!history || history.length === 0 || !drawName) {
     return { vector: defaultVector };
   }

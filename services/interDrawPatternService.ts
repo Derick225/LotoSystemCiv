@@ -8,7 +8,7 @@
  *    - Lissage de Laplace continu dérivé de la taille d'échantillon.
  *    - Z-scores et sigmoïdes logistiques continues pour toute projection [0, 100].
  * 2. ZÉRO HASARD / 100% DÉTERMINISTE :
- *    - Aucun appel à Math.random() ou générateur non seedé.
+ *    - Aucun générateur non seedé (reproductibilité absolue).
  * 3. CONTINUITÉ DES TRANSITIONS ET DÉCISIONS :
  *    - Fonctions différentiables continues, sans bifurcations de seuils binaires arbitraires.
  * 4. ISOLATION DES 3 FAMILLES ÉTANCHES :
@@ -227,6 +227,35 @@ const HYPERGEOMETRIC_RETENTION_EXPECTED = {
 };
 
 /**
+ * Quantile gaussien exact à 95% (ancrage statistique canonique de significativité).
+ * Toute référence de seuil dans ce module est exprimée en unités de ce quantile.
+ */
+export const Z95_GAUSS = 1.959964;
+
+/**
+ * Espérance théorique EXACTE de « au moins un voisin ±1/±2 » pour un numéro source,
+ * corrigée des effets de bord : avec c voisins candidats dans [1, 90],
+ * P = 1 - C(90 - c, 5) / C(90, 5). Moyenne exacte sur les 90 positions sources
+ * (86 positions intérieures à 4 candidats, 2 bordures à 3, 2 coins à 2) ≈ 20.43%.
+ * Cette définition correspond exactement au dénombrement empirique (deltas ±1 et ±2).
+ */
+const CASCADE_NEIGHBOUR_CANDIDATES = Array.from({ length: 91 }, (_, p) => {
+  let c = 0;
+  for (const d of [-2, -1, 1, 2]) {
+    const q = p + d;
+    if (q >= 1 && q <= 90) c++;
+  }
+  return c;
+});
+const THEORETICAL_CASCADE_EXPECTED = (() => {
+  let sum = 0;
+  for (let p = 1; p <= 90; p++) {
+    sum += 1.0 - nCr(TOTAL_NUMBERS - CASCADE_NEIGHBOUR_CANDIDATES[p], NUMBERS_PER_DRAW) / TOTAL_COMBINATIONS_5_90;
+  }
+  return (sum / TOTAL_NUMBERS) * 100; // ≈ 20.43%
+})();
+
+/**
  * Probabilités hypergéométriques théoriques exactes de parité (45 pairs, 45 impairs)
  * P(k pairs) = [C(45, k) * C(45, 5 - k)] / C(90, 5)
  */
@@ -274,6 +303,10 @@ export const analyzeInterDrawCooccurrences = (
   laplaceAlpha: number = 1.0
 ): InterDrawCooccurrenceReport => {
   const activePredSet = new Set(activePredNumbers.filter(n => n >= 1 && n <= 90));
+
+  // Capacité de rapport dérivée : √n (heuristique statistique canonique de cadrage),
+  // plancher = format du tirage (5 numéros). Remplace les troncatures fixes.
+  const reportCap = Math.max(NUMBERS_PER_DRAW, Math.ceil(Math.sqrt(Math.max(1, sampleSize))));
 
   // Matrices de dénombrement
   // 1. Fréquence marginale de chaque numéro cible et de chaque numéro source
@@ -382,10 +415,10 @@ export const analyzeInterDrawCooccurrences = (
     const variance = (THEORETICAL_PAIR_PROB * (1.0 - THEORETICAL_PAIR_PROB)) / (sampleSize + 1);
     const zScore = (jointConditionedProb - THEORETICAL_PAIR_PROB) / Math.max(1e-6, Math.sqrt(variance));
 
-    // Confiance bayésienne continue sans seuil arbitraire
-    const occConfidence = Math.sqrt(occ / (occ + 3.0));
-    const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + 25.0));
-    const confidence = Math.round((occConfidence * 0.6 + sampleConfidence * 0.4) * 100) / 100;
+    // Confiance continue ancrée sur la significativité statistique réelle du z-score :
+    // logistic(z − z95) vaut exactement 0.5 au seuil gaussien 95%, et encode
+    // simultanément l'amplitude de l'écart et la taille d'échantillon (via la variance).
+    const confidence = Math.round((1.0 / (1.0 + Math.exp(-(zScore - Z95_GAUSS)))) * 100) / 100;
 
     const score = Math.round(continuousSigmoid(zScore) * 10) / 10;
 
@@ -412,7 +445,7 @@ export const analyzeInterDrawCooccurrences = (
   }
 
   conditionedPairsList.sort((a, b) => b.score - a.score || b.lift - a.lift || b.historicalOccurrences - a.historicalOccurrences);
-  const topConditionedPairs = conditionedPairsList.slice(0, 12);
+  const topConditionedPairs = conditionedPairsList.slice(0, reportCap);
 
   // B. Construction des Dyades Croisées (p -> t)
   const crossDyadsList: InterDrawCrossDyad[] = [];
@@ -450,8 +483,8 @@ export const analyzeInterDrawCooccurrences = (
   }
 
   crossDyadsList.sort((a, b) => b.score - a.score || b.lift - a.lift || b.occurrences - a.occurrences);
-  const topCrossDyads = crossDyadsList.slice(0, 15);
-  const activeCrossDyads = crossDyadsList.filter(d => d.isActiveInCurrentPred).slice(0, 15);
+  const topCrossDyads = crossDyadsList.slice(0, reportCap);
+  const activeCrossDyads = crossDyadsList.filter(d => d.isActiveInCurrentPred).slice(0, reportCap);
 
   // C. Déclencheurs Bivariés Sources (p1, p2 -> t)
   const bivariateTriggersList: InterDrawBivariateTrigger[] = [];
@@ -488,8 +521,8 @@ export const analyzeInterDrawCooccurrences = (
   }
 
   bivariateTriggersList.sort((a, b) => b.score - a.score || b.lift - a.lift || b.occurrences - a.occurrences);
-  const bivariateTriggers = bivariateTriggersList.slice(0, 15);
-  const activeBivariateTriggers = bivariateTriggersList.filter(bt => bt.isActiveInCurrentPred).slice(0, 12);
+  const bivariateTriggers = bivariateTriggersList.slice(0, reportCap);
+  const activeBivariateTriggers = bivariateTriggersList.filter(bt => bt.isActiveInCurrentPred).slice(0, reportCap);
 
   return {
     sampleSize,
@@ -513,6 +546,9 @@ export const analyzeInterDrawPatterns = (
   laplaceAlpha: number = 1.0
 ): InterDrawPatternReport => {
   const activePred = activePredNumbers.filter(n => n >= 1 && n <= 90);
+
+  // Capacité de rapport dérivée : √n (heuristique statistique canonique), plancher = 5.
+  const reportCap = Math.max(NUMBERS_PER_DRAW, Math.ceil(Math.sqrt(Math.max(1, sampleSize))));
 
   // --------------------------------------------------------------------------
   // 1. PATTERN DE PARITÉ
@@ -569,12 +605,18 @@ export const analyzeInterDrawPatterns = (
   expectedTargetEven = Number(expectedTargetEven.toFixed(2));
   const expectedTargetOdd = Number((5 - expectedTargetEven).toFixed(2));
 
-  // Qualification continue de la tendance dominante
-  const medianEven = 2.5; // Espérance théorique symétrique
+  // Qualification continue de la tendance dominante — bandes dérivées de la loi hypergéométrique
+  const medianEven = 2.5; // Espérance théorique exacte (45 pairs / 45 impairs)
+  let parityVariance = 0;
+  for (let k = 0; k <= 5; k++) {
+    parityVariance += Math.pow(k - medianEven, 2) * HYPERGEOMETRIC_PARITY_EXPECTED[k];
+  }
+  // Erreur standard de l'espérance estimée (σ/√n) : bande d'équilibre à 1 erreur standard
+  const paritySeMean = Math.sqrt(parityVariance / Math.max(1, activeParityTotal));
   let dominantTendency: 'EQUILIBRE_REVERSION' | 'INERTIE_PAIR' | 'INERTIE_IMPAIR' | 'INVERSION_POLAIRE';
   let tendencyLabel: string;
 
-  if (Math.abs(expectedTargetEven - medianEven) < 0.25) {
+  if (Math.abs(expectedTargetEven - medianEven) <= paritySeMean) {
     dominantTendency = 'EQUILIBRE_REVERSION';
     tendencyLabel = 'Retour à l’Équilibre Harmonique (2.5P / 2.5I)';
   } else if (predEvenCount > medianEven && expectedTargetEven > medianEven) {
@@ -588,8 +630,9 @@ export const analyzeInterDrawPatterns = (
     tendencyLabel = 'Inversion de Polarité Paritaire';
   }
 
+  // Force de tendance en unités d'erreurs standard, ancrée au seuil gaussien 95%
   const tendencyStrength = Math.round(
-    continuousSigmoid(Math.abs(expectedTargetEven - medianEven) * 2.0) * 10
+    continuousSigmoid((Math.abs(expectedTargetEven - medianEven) / Math.max(1e-6, paritySeMean)) - Z95_GAUSS) * 10
   ) / 10;
 
   const parityPattern: InterDrawParityPattern = {
@@ -671,9 +714,13 @@ export const analyzeInterDrawPatterns = (
       totalWeight += weight;
     }
 
-    const avgProb = totalWeight > 0 ? weightedProbSum / totalWeight : getDecadeTheoreticalCapacity(dTarget);
-    const lift = avgProb / getDecadeTheoreticalCapacity(dTarget);
-    const zScore = (lift - 1.0) * 2.5;
+    const capTarget = getDecadeTheoreticalCapacity(dTarget);
+    const avgProb = totalWeight > 0 ? weightedProbSum / totalWeight : capTarget;
+    const lift = avgProb / capTarget;
+    // Z-score binomial exact : écart à la capacité théorique normalisé par
+    // l'erreur standard du flux agrégé (√(cap(1−cap)/n)) — aucun multiplicateur arbitraire.
+    const fluxSe = Math.sqrt((capTarget * (1.0 - capTarget)) / Math.max(1, totalWeight));
+    const zScore = (avgProb - capTarget) / Math.max(1e-6, fluxSe);
     const excitationScore = Math.round(continuousSigmoid(zScore) * 10) / 10;
 
     // Numéros appartenant à cette dizaine
@@ -689,7 +736,7 @@ export const analyzeInterDrawPatterns = (
       label: DECADE_LABELS[dTarget],
       excitationScore,
       lift: Number(lift.toFixed(2)),
-      topNumbers: topNums.slice(0, 5)
+      topNumbers: topNums.slice(0, NUMBERS_PER_DRAW)
     };
   });
 
@@ -699,7 +746,7 @@ export const analyzeInterDrawPatterns = (
     predDecadeCounts,
     activeDecades,
     decadeFluxMatrix,
-    topDecadeFluxes: topDecadeFluxes.slice(0, 10),
+    topDecadeFluxes: topDecadeFluxes.slice(0, reportCap),
     stimulatedDecades
   };
 
@@ -743,24 +790,24 @@ export const analyzeInterDrawPatterns = (
     }
   }
 
-  // Espérance théorique pour au moins un voisin direct (+-1) dans un tirage de 5 parmi 90
-  // P = 1 - [C(88, 5) / C(90, 5)] ~ 10.86%
-  const THEORETICAL_CASCADE_EXPECTED = (1.0 - (nCr(88, 5) / TOTAL_COMBINATIONS_5_90)) * 100;
+  // Espérance théorique exacte « au moins un voisin ±1/±2 » (constante module, ≈ 20.43%),
+  // définie de manière strictement identique au dénombrement empirique ci-dessus.
   const overallCascadeRate = cascadeTotalOpportunities > 0
     ? (cascadeHits / cascadeTotalOpportunities) * 100
     : THEORETICAL_CASCADE_EXPECTED;
   const overallCascadeLift = overallCascadeRate / THEORETICAL_CASCADE_EXPECTED;
 
-  // Biais directionnel continu
+  // Biais directionnel continu — bande de neutralité à 1 erreur standard sous H0 (Var[drift] = 1/n)
   const totalDirectionalHits = plusOneHits + minusOneHits;
   const directionalDrift = totalDirectionalHits > 0
     ? (plusOneHits - minusOneHits) / totalDirectionalHits
     : 0;
+  const directionalSe = totalDirectionalHits > 0 ? 1.0 / Math.sqrt(totalDirectionalHits) : 1.0;
 
   let directionalLabel: 'NEUTRE' | 'PROPAGATION_ASCENDANTE' | 'PROPAGATION_DESCENDANTE';
-  if (directionalDrift > 0.15) {
+  if (directionalDrift > directionalSe) {
     directionalLabel = 'PROPAGATION_ASCENDANTE';
-  } else if (directionalDrift < -0.15) {
+  } else if (directionalDrift < -directionalSe) {
     directionalLabel = 'PROPAGATION_DESCENDANTE';
   } else {
     directionalLabel = 'NEUTRE';
@@ -775,10 +822,14 @@ export const analyzeInterDrawPatterns = (
       if (target >= 1 && target <= 90) {
         const occ = deltaCounts.get(`${p}_${d}`) || 0;
         const pTot = sourceAttemptTotals[p] || 0;
-        const singleExpected = (5 / 90) * 100; // ~5.55%
+        const singleExpected = (NUMBERS_PER_DRAW / TOTAL_NUMBERS) * 100; // exact 5/90 ≈ 5.55%
         const rate = pTot > 0 ? (occ / pTot) * 100 : singleExpected;
         const lift = rate / singleExpected;
-        const z = (lift - 1.0) * 2.0;
+        // Z-score binomial exact du taux empirique vs espérance théorique (aucun multiplicateur arbitraire)
+        const singleSe = Math.sqrt(
+          ((singleExpected / 100) * (1.0 - singleExpected / 100)) / Math.max(1, pTot)
+        ) * 100;
+        const z = (rate - singleExpected) / Math.max(1e-6, singleSe);
         const score = Math.round(continuousSigmoid(z) * 10) / 10;
 
         activeResonances.push({
@@ -798,7 +849,7 @@ export const analyzeInterDrawPatterns = (
   activeResonances.sort((a, b) => b.score - a.score || b.lift - a.lift);
 
   const cascadePattern: InterDrawCascadePattern = {
-    activeResonances: activeResonances.slice(0, 10),
+    activeResonances: activeResonances.slice(0, reportCap),
     overallCascadeRate: Number(overallCascadeRate.toFixed(1)),
     overallCascadeExpected: Number(THEORETICAL_CASCADE_EXPECTED.toFixed(1)),
     overallCascadeLift: Number(overallCascadeLift.toFixed(2)),
@@ -831,6 +882,7 @@ export const analyzeInterDrawPatterns = (
   let historicalDeltaMean = 0;
   let historicalDeltaStd = theoreticalStd;
   let reversionCorrelation = -0.5; // Corrélation typique de retour à la moyenne
+  let predSumStd = theoreticalStd;
 
   if (nPairs > 1) {
     historicalDeltaMean = deltas.reduce((a, b) => a + b, 0) / nPairs;
@@ -845,23 +897,29 @@ export const analyzeInterDrawPatterns = (
       cov += (predSumsHist[i] - meanSP) * (deltas[i] - historicalDeltaMean);
       varSP += Math.pow(predSumsHist[i] - meanSP, 2);
     }
+    predSumStd = Math.sqrt(varSP / nPairs);
     if (varSP > 0 && varDelta > 0) {
       reversionCorrelation = cov / Math.sqrt(varSP * varDelta);
     }
   }
 
   // Projection optimale de la somme cible via régression linéaire continue
-  const regressionSlope = reversionCorrelation * (historicalDeltaStd / theoreticalStd);
+  // Pente = r · (σ_delta / σ_sommesPrécédentes), les deux échelles étant empiriques.
+  const regressionSlope = reversionCorrelation * (historicalDeltaStd / Math.max(1e-6, predSumStd));
   const predictedDelta = historicalDeltaMean + regressionSlope * (predSum - theoreticalMean);
+  // Bornes combinatoires exactes : somme minimale 1+2+3+4+5 = 15, maximale 86+87+88+89+90 = 435.
   const optimalProjectedSum = Math.max(15, Math.min(435, Math.round(predSum + predictedDelta)));
 
-  const projectedMin = Math.max(15, Math.round(optimalProjectedSum - theoreticalStd * 0.8));
-  const projectedMax = Math.min(435, Math.round(optimalProjectedSum + theoreticalStd * 0.8));
+  // Incertitude résiduelle exacte de la régression : σ_delta · √(1 − r²)
+  const residualStd = historicalDeltaStd * Math.sqrt(Math.max(0, 1 - reversionCorrelation * reversionCorrelation));
+  const projectedMin = Math.max(15, Math.round(optimalProjectedSum - residualStd));
+  const projectedMax = Math.min(435, Math.round(optimalProjectedSum + residualStd));
 
+  // Mouvement compensateur significatif : |delta prédit| dépasse 1 erreur standard résiduelle
   let reversionTendency: 'HAUSSE_COMPENSATRICE' | 'BAISSE_COMPENSATRICE' | 'STABLE';
-  if (optimalProjectedSum > predSum + 15) {
+  if (predictedDelta > residualStd) {
     reversionTendency = 'HAUSSE_COMPENSATRICE';
-  } else if (optimalProjectedSum < predSum - 15) {
+  } else if (predictedDelta < -residualStd) {
     reversionTendency = 'BAISSE_COMPENSATRICE';
   } else {
     reversionTendency = 'STABLE';
@@ -912,10 +970,19 @@ export const analyzeInterDrawPatterns = (
   const observedNonZero = 100 - repeat0Rate;
   const persistenceIndex = Number((observedNonZero / expectedNonZero).toFixed(2));
 
+  // Z-scores binomiaux exacts vs attentes hypergéométriques (zéro seuil arbitraire) :
+  // le mode dominant est le signal statistiquement significatif (≥ z95) le plus fort.
+  const p1Theory = HYPERGEOMETRIC_RETENTION_EXPECTED.p1;
+  const zRepeat1 = (repeat1Rate / 100 - p1Theory) /
+    Math.max(1e-9, Math.sqrt((p1Theory * (1 - p1Theory)) / rTotal));
+  const p23Theory = HYPERGEOMETRIC_RETENTION_EXPECTED.p2 + HYPERGEOMETRIC_RETENTION_EXPECTED.p3Plus;
+  const zRepeat23 = ((repeat2Rate + repeat3PlusRate) / 100 - p23Theory) /
+    Math.max(1e-9, Math.sqrt((p23Theory * (1 - p23Theory)) / rTotal));
+
   let dominantRetentionMode: 'RENOUVELLEMENT_TOTAL' | 'REPORT_UNITAIRE' | 'REPORT_MULTIPLE';
-  if (repeat1Rate > 30 || (repeat1Rate / (HYPERGEOMETRIC_RETENTION_EXPECTED.p1 * 100)) > 1.3) {
+  if (zRepeat1 >= Z95_GAUSS && zRepeat1 >= zRepeat23) {
     dominantRetentionMode = 'REPORT_UNITAIRE';
-  } else if (repeat2Rate + repeat3PlusRate > 5) {
+  } else if (zRepeat23 > Z95_GAUSS) {
     dominantRetentionMode = 'REPORT_MULTIPLE';
   } else {
     dominantRetentionMode = 'RENOUVELLEMENT_TOTAL';

@@ -2,6 +2,7 @@ import { FusionResult, SpectralMetric, Prediction, DrawResult, AlgoWeights } fro
 import { AlgoKey } from '../shared/prediction.types';
 import { calculateShannonEntropy, calculateMedian, gaussianPDF, sigmoid } from './prediction/deterministicCore';
 import { calculateInterDrawVector, getInterDrawMorphologicalTarget } from './interDrawService';
+import { Z95_GAUSS } from './interDrawPatternService';
 
 // ============================================================================
 // STATISTIQUES ROBUSTES (Zéro sensibilité aux Outliers)
@@ -170,12 +171,12 @@ const calculateOracleVector = (
   const lastDrawNumbers = history[0].gagnants;
   const prevDrawNumbers = history[1].gagnants;
   
-  // Normalisation des poids ADN
-  const interDrawWeightRaw = (dna as any)[AlgoKey.INTER_DRAW_RESONANCE] || 0;
-  const totalDnaWeight = (dna as any)['markov'] + (dna as any)['temporal'] + (dna as any)['fractal'] + interDrawWeightRaw || 1.0;
-  const dnaMarkov = ((dna as any)['markov'] || 0) / totalDnaWeight;
-  const dnaTemporal = ((dna as any)['temporal'] || 0) / totalDnaWeight;
-  const dnaFractal = ((dna as any)['fractal'] || 0) / totalDnaWeight;
+  // Normalisation des poids ADN (accès typé via AlgoKey — aucune clé magique en chaîne)
+  const interDrawWeightRaw = dna[AlgoKey.INTER_DRAW_RESONANCE] || 0;
+  const totalDnaWeight = (dna[AlgoKey.MARKOV] || 0) + (dna[AlgoKey.TEMPORAL] || 0) + (dna[AlgoKey.FRACTAL] || 0) + interDrawWeightRaw || 1.0;
+  const dnaMarkov = (dna[AlgoKey.MARKOV] || 0) / totalDnaWeight;
+  const dnaTemporal = (dna[AlgoKey.TEMPORAL] || 0) / totalDnaWeight;
+  const dnaFractal = (dna[AlgoKey.FRACTAL] || 0) / totalDnaWeight;
   const dnaInterDraw = interDrawWeightRaw / totalDnaWeight;
   
   const maxDepth = history.length - 1; // Pas de constante arbitraire "50", parcourt tout l'historique
@@ -213,18 +214,24 @@ const calculateOracleVector = (
     const interVec = calculateInterDrawVector(history, drawName);
     const maxAssocSoFar = Math.max(Number.EPSILON, ...Array.from(associationScores));
     for (let n = 1; n <= 90; n++) {
-      associationScores[n] += (interVec[n] || 0.0555) * dnaInterDraw * maxAssocSoFar * 0.5;
+      // Amplitude d'injection entièrement déterminée par la part de poids ADN normalisée
+      associationScores[n] += (interVec[n] || (5.0 / 90.0)) * dnaInterDraw * maxAssocSoFar;
     }
   }
 
   const preds = new Set(lastPrediction?.suggestedNumbers || []);
   const candidates = new Set(lastPrediction?.candidates || []);
   const maxScore = Math.max(Number.EPSILON, ...Array.from(associationScores));
-  
-  // Dynamically scale prediction confirmations based on the confidence metric of the previous model
-  const lastConfidence = lastPrediction?.confidence || 50;
-  const dynamicPredBoost = (Math.E * 5.0) * (lastConfidence / 100.0);
-  const dynamicCandBoost = (Math.E * 1.5) * (lastConfidence / 100.0);
+
+  // Confirmation antérieure ancrée statistiquement : une suggestion passée vaut ~z95
+  // écarts-types de la dispersion réelle du signal Oracle, modulée par la confiance du
+  // modèle précédent — l'échelle suit les données, aucune amplitude fixe.
+  const assocStd = getMeanAndStdDev(Array.from(associationScores).slice(1)).std;
+  const lastConfidence = lastPrediction?.confidence ?? 0;
+  const evidenceScale = assocStd * (lastConfidence / 100.0) * Z95_GAUSS;
+  const dynamicPredBoost = evidenceScale;
+  // Les simples candidates portent la moitié du poids d'évidence des suggestions confirmées.
+  const dynamicCandBoost = evidenceScale * 0.5;
   
   const result = [];
   for (let i = 1; i <= 90; i++) {
@@ -257,10 +264,10 @@ export const calculateFusion = (
   const mQuantum = new Map(vQuantum.map(v => [v.number, v.score]));
   const mOracle = new Map(vOracle.map(v => [v.number, v.score]));
 
-  // Regroupement des poids par vecteurs normés
-  const dnaLogic = (weights.frequency || 0) + (weights.gap || 0) + (weights.momentum || 0) + (weights.temporal || 0);
-  const dnaPhysics = (weights.spectral || 0) + (weights.fractal || 0) + (weights.spatial || 0);
-  const dnaIntuition = (weights.markov || 0) + (weights.bayes || 0) + (weights.affinity || 0) + ((weights as any)[AlgoKey.INTER_DRAW_RESONANCE] || 0);
+  // Regroupement des poids par vecteurs normés (accès typé via AlgoKey)
+  const dnaLogic = (weights[AlgoKey.FREQUENCY] || 0) + (weights[AlgoKey.GAPS] || 0) + (weights[AlgoKey.MOMENTUM] || 0) + (weights[AlgoKey.TEMPORAL] || 0);
+  const dnaPhysics = (weights[AlgoKey.SPECTRAL] || 0) + (weights[AlgoKey.FRACTAL] || 0) + (weights[AlgoKey.SPATIAL] || 0);
+  const dnaIntuition = (weights[AlgoKey.MARKOV] || 0) + (weights[AlgoKey.BAYES] || 0) + (weights[AlgoKey.AFFINITY] || 0) + (weights[AlgoKey.INTER_DRAW_RESONANCE] || 0);
   
   // Pondération dynamique par exponentiation continue modulée par l'interactive bias
   const W_PYTHON = Math.exp(dnaLogic) * biases.logic;
@@ -407,15 +414,19 @@ export const calculateFusion = (
   }
 
   // 4. Modulation morphologique continue basée sur la projection de la somme cible (barycentre) et de la parité inter-tirages
-  // ZÉRO NOMBRE MAGIQUE : gradients différentiables continus vers le barycentre optimal et l'espérance de parité.
   const morphTarget = drawName ? getInterDrawMorphologicalTarget(history, drawName) : null;
   if (morphTarget) {
-    const theoreticalMeanSum = 227.5; // 5 * 45.5 pour quinté de 90 boules
+    const theoreticalMeanSum = 227.5; // 5 × 45.5 : espérance exacte de la somme
+    // Amplitude de modulation dérivée : demi-largeur de la bande résiduelle de projection
+    // (incertitude statistique réelle) rapportée à la moyenne théorique — aucune borne fixe.
+    const morphAmplitude =
+      Math.max(0, (morphTarget.projectedSumMax - morphTarget.projectedSumMin) / 2) / theoreticalMeanSum;
     const sumDeviationRatio = (morphTarget.optimalSum - theoreticalMeanSum) / theoreticalMeanSum;
-    const sumSlope = Math.max(-0.15, Math.min(0.15, sumDeviationRatio * 0.3));
+    const sumSlope = Math.tanh(sumDeviationRatio) * morphAmplitude;
 
+    // Écart relatif à l'espérance exacte de parité (45 pairs / 45 impairs)
     const parityDeviation = (morphTarget.expectedEven - 2.5) / 2.5;
-    const paritySlope = Math.max(-0.15, Math.min(0.15, parityDeviation * (morphTarget.tendencyStrength / 100.0) * 0.25));
+    const paritySlope = Math.tanh(parityDeviation) * morphAmplitude * (morphTarget.tendencyStrength / 100.0);
 
     for (let i = 1; i <= 90; i++) {
       const numberPosition = (i - 45.5) / 45.5; // [-1.0, +1.0]

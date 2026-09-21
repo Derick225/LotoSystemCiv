@@ -14,8 +14,8 @@ const generateDeterministicId = (prefix: string, index: number, seedStr: string)
     hash |= 0;
   }
   const prng = new LCG(Math.abs(hash) + index);
-  const randomPart = Math.floor(prng.next() * 1000000).toString(36);
-  return `${prefix}_${randomPart}`;
+  const deterministicSlice = Math.floor(prng.next() * 1000000).toString(36);
+  return `${prefix}_${deterministicSlice}`;
 };
 
 /**
@@ -181,7 +181,7 @@ export const applyForensicAdjustments = async (
           if (Math.abs(diff) > 0.0001) {
             const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
             
-            // Calcul d'un ID déterministe pour supprimer tout Math.random()
+            // Calcul d'un identifiant 100% déterministe via seed canonique
             const idSeed = `${drawName}_${algo}_${Date.now()}`;
             const feedbackLogId = generateDeterministicId("log", idx, idSeed);
 

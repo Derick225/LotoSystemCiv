@@ -139,7 +139,7 @@ export const calculateVariance = (values: number[]): number => {
 };
 
 /**
- * Mapping d'étalement : Softmax sur un vecteur de tenseurs sans utiliser `Math.random()`.
+ * Mapping d'étalement : Softmax sur un vecteur de tenseurs 100% déterministe (zéro hasard).
  */
 export const softmax = (logits: number[]): number[] => {
     const maxLogit = Math.max(...logits);

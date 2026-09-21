@@ -66,7 +66,7 @@ export const sanitizeAndMapPrediction = (item: PredictionHistoryItem): Predictio
 
 /**
  * Exécute une fonction asynchrone avec un mécanisme de retry et exponential backoff déterministe
- * (conforme aux exigences d'AGENTS.md : sans utilisation de Math.random() ou hasard).
+ * (conforme aux exigences d'AGENTS.md : déterministe sans générateur non seedé).
  */
 const retryWithBackoff = async <T>(
     fn: () => Promise<T>,

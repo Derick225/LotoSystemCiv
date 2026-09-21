@@ -16,7 +16,7 @@ import {
 } from '../../constants';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { globalCache } from '../cache/CacheService';
-import { generateDeterministicFallbackHistory } from '../lotteryService';
+import { generateDeterministicFallbackHistory, getDrawTimestamp } from '../lotteryService';
 import {
   alignConsecutiveDrawHistories,
   runBayesianResonanceEngine,
@@ -26,7 +26,8 @@ import {
   analyzeInterDrawPatterns,
   InterDrawCrossDyad,
   InterDrawTargetPairCooccurrence,
-  InterDrawCascadeResonance
+  InterDrawCascadeResonance,
+  Z95_GAUSS
 } from '../interDrawPatternService';
 
 export interface AuditedConditionedPair {
@@ -151,12 +152,14 @@ export const auditInterDrawPatternsPostMortem = (
   // Identifier le tirage du prédécesseur qui a immédiatement précédé le tirage cible
   // Dans un ordre anti-chronologique, le tirage cible est targetDraw (index targetDrawIndex).
   // Le tirage du prédécesseur associé est celui au même cycle ou le plus proche antérieur.
-  const targetDateStr = targetDraw.date || '';
+  // NB : comparaison par horodatage réel — une comparaison lexicographique de dates
+  // « jj/mm/aaaa » serait chronologiquement fausse (le jour dominerait le tri).
+  const targetTs = getDrawTimestamp(targetDraw.date || '');
   let predDrawIndex = -1;
 
   for (let p = 0; p < predHistory.length; p++) {
-    const pDate = predHistory[p].date || '';
-    if (pDate <= targetDateStr) {
+    const pTs = getDrawTimestamp(predHistory[p].date || '');
+    if (pTs > 0 && pTs <= targetTs) {
       predDrawIndex = p;
       break;
     }
@@ -181,6 +184,9 @@ export const auditInterDrawPatternsPostMortem = (
 
   if (pairedPairs.length === 0) return null;
 
+  // Capacité d'audit dérivée : √n (heuristique statistique canonique), plancher = 5.
+  const auditCap = Math.max(5, Math.ceil(Math.sqrt(Math.max(1, pairedPairs.length))));
+
   // 1. Analyse rétrospective des cooccurrences et patterns disponibles à l'instant t-1
   const cooccReport = analyzeInterDrawCooccurrences(pairedPairs, predWinners);
   const patternReport = analyzeInterDrawPatterns(pairedPairs, predWinners);
@@ -188,7 +194,7 @@ export const auditInterDrawPatternsPostMortem = (
   // 2. Audit des Dyades Croisées Actives
   const auditedDyads: AuditedCrossDyad[] = [];
   let convertedDyadsCount = 0;
-  const activeDyads = cooccReport.activeCrossDyads.slice(0, 15);
+  const activeDyads = cooccReport.activeCrossDyads.slice(0, auditCap);
 
   activeDyads.forEach((dyad: InterDrawCrossDyad) => {
     const isConverted = actualWinnersSet.has(dyad.targetNumber);
@@ -212,7 +218,7 @@ export const auditInterDrawPatternsPostMortem = (
   const auditedPairs: AuditedConditionedPair[] = [];
   let fullConvertedPairs = 0;
   let partialConvertedPairs = 0;
-  const topPairs = cooccReport.topConditionedPairs.slice(0, 12);
+  const topPairs = cooccReport.topConditionedPairs.slice(0, auditCap);
 
   topPairs.forEach((cp: InterDrawTargetPairCooccurrence) => {
     const hit1 = actualWinnersSet.has(cp.pair[0]) ? 1 : 0;
@@ -252,7 +258,7 @@ export const auditInterDrawPatternsPostMortem = (
   // 4. Audit des Résonances de Cascade (+-1, +-2)
   const auditedCascades: AuditedCascadeJump[] = [];
   let convertedCascadesCount = 0;
-  const activeCascades = patternReport.cascade.activeResonances.slice(0, 15);
+  const activeCascades = patternReport.cascade.activeResonances.slice(0, auditCap);
 
   activeCascades.forEach((res: InterDrawCascadeResonance) => {
     const isConverted = actualWinnersSet.has(res.targetNeighbour);
@@ -280,18 +286,21 @@ export const auditInterDrawPatternsPostMortem = (
   const cascadeConversionLift = cascadeConversionRate / (baselineDyadProb || Number.EPSILON);
 
   // 5. Calibration Objective Continue (Brier Score, Log-Loss et Alpha Laplace Optimal)
+  // Profondeur de retard = format du tirage (convention du moteur inter-tirages).
   const predLaggedHistory = priorPredHistory.slice(0, 5).map((d) => d.gagnants);
   const engine = runBayesianResonanceEngine(pairedPairs, predWinners, predLaggedHistory);
 
   // Vecteur de probabilité de transition pour les 90 numéros
+  // Probabilité marginale exacte d'un numéro : 5/90.
+  const uniformProb = 5.0 / 90.0;
   const probVector = new Float64Array(91);
   let totalEngineScore = 0;
   for (let n = 1; n <= 90; n++) {
-    totalEngineScore += engine.fullCandidateScores[n] || 0.0555;
+    totalEngineScore += engine.fullCandidateScores[n] || uniformProb;
   }
   for (let n = 1; n <= 90; n++) {
     // Normalisé sur une espérance de 5 numéros gagnants
-    probVector[n] = Math.min(1.0, Math.max(0.001, ((engine.fullCandidateScores[n] || 0.0555) / (totalEngineScore || 1)) * 5.0));
+    probVector[n] = Math.min(1.0, Math.max(1.0 / 90.0, ((engine.fullCandidateScores[n] || uniformProb) / (totalEngineScore || 1)) * 5.0));
   }
 
   let brierSum = 0;
@@ -308,8 +317,10 @@ export const auditInterDrawPatternsPostMortem = (
   const brierScore = brierSum / 90.0;
   const logLoss = logLossSum / 90.0;
 
-  // Efficacité de calibration continue : décroît exponentiellement avec le Brier Score
-  const calibrationEfficiency = Math.max(0, Math.min(100, Math.round(100.0 * Math.exp(-brierScore * 8.0))));
+  // Brier Skill Score exact vs prédicteur nul uniforme (p = 5/90 ⇒ BrierNull = p(1−p)) :
+  // 100% = parfaitement informé, 0% = pas meilleur que le hasard uniforme.
+  const brierNull = uniformProb * (1.0 - uniformProb);
+  const calibrationEfficiency = Math.max(0, Math.min(100, Math.round(100.0 * (brierNull - brierScore) / brierNull)));
 
   // Calcul Déterministe Continu de l'Amortissement de Laplace Optimal (alpha_opt)
   // ZÉRO NOMBRE MAGIQUE : Minimise l'erreur quadratique d'inférence en fonction
@@ -321,7 +332,13 @@ export const auditInterDrawPatternsPostMortem = (
   }
   varP /= 90.0;
 
-  const optimalLaplaceAlpha = Math.max(0.05, Math.min(2.5, (1.0 + Math.sqrt(varP)) / (1.0 + logLoss)));
+  // Bornes exactes issues de la structure de la formule : varP ≤ 0.25 (variance maximale
+  // d'une v.a. bornée sur [0,1]) ⇒ ratio ≤ (1 + 0.5)/1 = 1.5 ; plancher = lissage minimal
+  // continu 1/(1+n), cohérent avec la convention Laplace du moteur inter-tirages.
+  const optimalLaplaceAlpha = Math.max(
+    1.0 / (1.0 + pairedPairs.length),
+    Math.min(1.5, (1.0 + Math.sqrt(varP)) / (1.0 + logLoss))
+  );
 
   // 6. Validation Morphologique (Parité, Somme, Rétention)
   const actualParityEven = actualWinners.filter((n) => n % 2 === 0).length;
@@ -337,14 +354,20 @@ export const auditInterDrawPatternsPostMortem = (
   // Espérance mathématique exacte de rétention hypergéométrique sans remise : 5 * (5/90) = 25/90 ~ 0.278
   const expectedRetention = 25.0 / 90.0;
 
-  // Diagnostic synthétique objectif
+  // Diagnostic synthétique objectif — significativité binomiale exacte vs baselines hypergéométriques
   let summaryDiagnosis = `Confrontation ${relation.predecessor.name} → ${drawName} : `;
-  if (pairFullConversionRate > 0) {
-    summaryDiagnosis += `Excellente résonance couplée (${pairFullConversionRate.toFixed(1)}% paires pleines converties). `;
-  } else if (pairPartialConversionRate >= 30) {
-    summaryDiagnosis += `Bonne attraction partielle (${pairPartialConversionRate.toFixed(1)}% paires avec >=1 hit). `;
+  const pairCount = topPairs.length;
+  const expectedFull = pairCount * (hyperFullProb / 100);
+  const seFull = Math.sqrt(pairCount * (hyperFullProb / 100) * (1 - hyperFullProb / 100));
+  const expectedPartial = pairCount * (hyperPartialProb / 100);
+  const sePartial = Math.sqrt(pairCount * (hyperPartialProb / 100) * (1 - hyperPartialProb / 100));
+
+  if (pairCount > 0 && fullConvertedPairs > expectedFull + Z95_GAUSS * seFull) {
+    summaryDiagnosis += `Résonance couplée statistiquement significative (${fullConvertedPairs}/${pairCount} paires pleines converties vs ${expectedFull.toFixed(2)} attendues sous le hasard). `;
+  } else if (pairCount > 0 && partialConvertedPairs > expectedPartial + Z95_GAUSS * sePartial) {
+    summaryDiagnosis += `Attraction partielle au-dessus de la baseline aléatoire (${partialConvertedPairs}/${pairCount} paires avec >=1 hit vs ${expectedPartial.toFixed(1)} attendues). `;
   } else {
-    summaryDiagnosis += `Dispersion stochastique résiduelle observée. `;
+    summaryDiagnosis += `Dispersion stochastique cohérente avec le hasard (baselines hypergéométriques exactes). `;
   }
 
   if (withinProjectedSumRange) {
@@ -360,7 +383,7 @@ export const auditInterDrawPatternsPostMortem = (
     predecessorName: relation.predecessor.name,
     familyId: activeFamily.id,
     familyName: activeFamily.name,
-    targetDrawDate: targetDateStr,
+    targetDrawDate: targetDraw.date || '',
     targetActualWinners: actualWinners,
     predecessorWinners: predWinners,
     auditedDyads,

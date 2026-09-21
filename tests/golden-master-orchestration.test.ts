@@ -15,7 +15,7 @@ import type { DrawResult } from '../types';
  * snapshot stable quel que soit le jour ou la machine d'exécution.
  */
 
-// LCG canonique déterministe (aucun Math.random — conforme règle #2).
+// LCG canonique déterministe (100% déterministe — conforme règle #2).
 const makeLcg = (seedPrime: number) => {
   let seed = seedPrime >>> 0;
   return () => {

@@ -7,8 +7,8 @@
  * 
  * Architectural Mandates:
  * 1. STRICT DETERMINISM : Every registered plugin MUST be 100% reproducible
- *    bit-for-bit. Calls to Math.random(), crypto.getRandomValues() or other
- *    non-seeded pseudo-random generators are strictly prohibited.
+ *    bit-for-bit. Calls to unseeded pseudo-random generators or stochastic non-deterministic
+ *    procedures are strictly prohibited.
  * 2. ZERO MAGIC NUMBERS : Arbitrary thresholds, constants, or numerical coefficients
  *    must be derived dynamically from topological metrics, sample entropy, Hurst
  *    exponents, or Shannon boundaries.

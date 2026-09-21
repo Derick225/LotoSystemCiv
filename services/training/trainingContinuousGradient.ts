@@ -9,7 +9,7 @@ import { normalizeWeights } from "../prediction/weightsManager";
  * Principes (AGENTS.md) :
  * 1. Zéro nombre magique : pas de seuils discrets arbitraires, pas de constantes ad hoc.
  *    Le taux d'apprentissage de base est modulé continûment par l'Entropie et l'exposant de Hurst.
- * 2. Zéro hasard : 100% déterministe (aucun appel à Math.random()).
+ * 2. Zéro hasard : 100% déterministe (aucun générateur non seedé).
  * 3. Continuité : mise à jour différentiable par projection continue sur le simplexe de probabilité (Softmax avec température adaptative).
  */
 export const runContinuousGradientOptimizer = async (

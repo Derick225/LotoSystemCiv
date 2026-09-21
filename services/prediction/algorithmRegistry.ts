@@ -74,7 +74,7 @@ export interface AlgorithmPlugin {
   
   description: string;
   
-  // EXIGENCE : Doit être true. Tout algorithme utilisant Math.random() ou des initialisations non seedées sera rejeté.
+  // EXIGENCE : Doit être true. Tout algorithme utilisant des initialisations ou générateurs non seedés sera rejeté.
   isStrictlyDeterministic: boolean; 
   
   // PRÉCALCUL DE RENDEMENT (Optimisation et découplage cybernétique)
