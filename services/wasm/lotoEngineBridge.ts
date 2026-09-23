@@ -43,11 +43,36 @@ export async function initializeLotoEngineWasm(): Promise<boolean> {
     try {
       // Import dynamique du module compilé par wasm-pack (target web)
       // @ts-ignore - Le module compilé réside dans le dossier pkg après `wasm-pack build --target web`
-      const pkgPath = '../../crates/loto-engine/pkg/loto_engine.js';
-      const wasm = await import(/* @vite-ignore */ pkgPath).catch(() => null);
+      const wasm = await import('../../crates/loto-engine/pkg/loto_engine.js').catch(() => null);
 
       if (wasm && typeof wasm.default === 'function') {
-        await wasm.default();
+        if (typeof window !== 'undefined') {
+          // Contexte Navigateur PWA : chargement via fetch('/loto_engine_bg.wasm') ou URL relative
+          try {
+            await wasm.default('/loto_engine_bg.wasm');
+          } catch {
+            await wasm.default();
+          }
+        } else {
+          // Contexte Node.js / Vitest / SSR
+          try {
+            const fs = await import('fs');
+            const path = await import('path');
+            const wasmPath = path.resolve(process.cwd(), 'crates/loto-engine/pkg/loto_engine_bg.wasm');
+            if (fs.existsSync(wasmPath)) {
+              const buffer = fs.readFileSync(wasmPath);
+              if (typeof wasm.initSync === 'function') {
+                wasm.initSync({ module: buffer });
+              } else {
+                await wasm.default({ module: buffer });
+              }
+            } else {
+              await wasm.default();
+            }
+          } catch {
+            await wasm.default();
+          }
+        }
         wasmModuleInstance = wasm;
         isWasmLoaded = true;
         console.info('[LOTO-ENGINE] Module Rust/WASM initialisé avec succès (Accélération HPC active).');
@@ -61,6 +86,14 @@ export async function initializeLotoEngineWasm(): Promise<boolean> {
   })();
 
   return wasmLoadPromise;
+}
+
+export function isLotoEngineWasmReady(): boolean {
+  return isWasmLoaded;
+}
+
+export function getHpcEngineMode(): 'RUST_WASM' | 'SIMD_FALLBACK' {
+  return isWasmLoaded ? 'RUST_WASM' : 'SIMD_FALLBACK';
 }
 
 /**

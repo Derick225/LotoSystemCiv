@@ -41,9 +41,23 @@ export default defineConfig(({ mode }) => {
           includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'icon.svg', 'pwa-64x64.png', 'pwa-192x192.png', 'pwa-512x512.png', 'maskable-icon-512x512.png'],
           workbox: {
             maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB
-            globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,json}'],
+            globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,json,wasm}'],
             navigateFallback: '/index.html',
             runtimeCaching: [
+              {
+                urlPattern: /\.wasm$/i,
+                handler: 'CacheFirst',
+                options: {
+                  cacheName: 'wasm-binary-cache',
+                  expiration: {
+                    maxEntries: 10,
+                    maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+                  },
+                  cacheableResponse: {
+                    statuses: [0, 200],
+                  },
+                },
+              },
               {
                 urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
                 handler: 'CacheFirst',

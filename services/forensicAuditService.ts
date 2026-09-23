@@ -2152,7 +2152,11 @@ export const generateForensicReport = (
     dominantCauses,
     recommendedAdjustments,
     warnings,
-    postMortemStabilityScore
+    postMortemStabilityScore,
+    lyapunovChaosExponent: drawForensic.lyapunovChaosExponent,
+    isChaoticRegime: drawForensic.isChaoticRegime,
+    divergenceForce: drawForensic.divergenceForce,
+    topologicalEntropy: drawForensic.topologicalEntropy,
   };
 };
 

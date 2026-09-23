@@ -26,6 +26,9 @@ rustfft = "6.2.0"
 [dev-dependencies]
 wasm-bindgen-test = "0.3.42"
 
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 [profile.release]
 # Optimisations d'exécution maximales pour WebAssembly (zéro garbage collector)
 opt-level = 3

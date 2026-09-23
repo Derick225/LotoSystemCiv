@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useNexusStore } from "../store/useNexusStore";
+import { computeTopologicalLyapunovHpc } from "../services/wasm/lotoEngineBridge";
 
 interface ChaosAttractorProps {
   history: DrawResult[];
@@ -42,6 +43,21 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   const turbulence = volatility?.score || 50;
   const weylDiscrepancy = regime?.weylDiscrepancy ?? 0.18;
   const chaosDimension = regime?.chaosDimension ?? 1.84;
+
+  const lyapMetrics = useMemo(() => {
+    if (!history || history.length < 12) {
+      return { lyapunov_exponent: 0, is_chaotic: false, divergence_force: 0, topological_entropy: 0 };
+    }
+    const numDraws = Math.min(60, history.length);
+    const flatDraws = new Int32Array(numDraws * 5);
+    for (let d = 0; d < numDraws; d++) {
+      const g = history[d].gagnants;
+      for (let c = 0; c < 5; c++) {
+        flatDraws[d * 5 + c] = g[c] ?? 0;
+      }
+    }
+    return computeTopologicalLyapunovHpc(flatDraws, numDraws, 5, 25);
+  }, [history]);
 
   const status = useMemo(() => {
     if (turbulence > 75)
@@ -482,7 +498,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
       </div>
 
       {/* Advanced Chaos Invariant Indicators */}
-      <div className="grid grid-cols-2 gap-3 pt-1">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
         <div className="bg-slate-900/50 border border-slate-900 p-3 rounded-2xl flex items-center gap-3">
           <div className="p-2 bg-indigo-500/10 rounded-xl text-indigo-400">
             <Compass size={16} />
@@ -507,6 +523,34 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
             </div>
             <div className="text-xs font-black font-mono text-slate-200 mt-1">
               {chaosDimension.toFixed(3)}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-900 p-3 rounded-2xl flex items-center gap-3">
+          <div className="p-2 bg-rose-500/10 rounded-xl text-rose-400">
+            <Sparkles size={16} />
+          </div>
+          <div>
+            <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">
+              Lyapunov λ (HPC)
+            </div>
+            <div className="text-xs font-black font-mono text-slate-200 mt-1">
+              {lyapMetrics.lyapunov_exponent > 0 ? `+${lyapMetrics.lyapunov_exponent.toFixed(4)}` : lyapMetrics.lyapunov_exponent.toFixed(4)}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-900/50 border border-slate-900 p-3 rounded-2xl flex items-center gap-3">
+          <div className="p-2 bg-amber-500/10 rounded-xl text-amber-400">
+            <Gauge size={16} />
+          </div>
+          <div>
+            <div className="text-[8px] font-black text-slate-500 uppercase tracking-widest leading-none">
+              Entropie Topo (h)
+            </div>
+            <div className="text-xs font-black font-mono text-slate-200 mt-1">
+              {lyapMetrics.topological_entropy.toFixed(3)}
             </div>
           </div>
         </div>

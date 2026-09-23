@@ -288,6 +288,51 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
             </div>
           )}
 
+          {/* Chaos Dynamique Topologique (Lyapunov HPC) */}
+          {report.lyapunovChaosExponent !== undefined && (
+            <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
+                  <Sparkles size={12} className="text-rose-500" />
+                  Stabilité Topologique & Invariance du Chaos (Moteur HPC)
+                </h4>
+                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border ${
+                  report.isChaoticRegime
+                    ? 'bg-rose-500/10 text-rose-500 border-rose-500/20'
+                    : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                }`}>
+                  {report.isChaoticRegime ? 'Régime Chaotique (Sensibilité CI)' : 'Régime Stable / Attracteur'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Exposant Lyapunov (λ)</span>
+                  <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
+                    {report.lyapunovChaosExponent > 0 ? `+${report.lyapunovChaosExponent.toFixed(4)}` : report.lyapunovChaosExponent.toFixed(4)}
+                  </span>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Force Divergence</span>
+                  <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
+                    {report.divergenceForce !== undefined ? report.divergenceForce.toFixed(4) : "N/A"}
+                  </span>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Entropie Topologique</span>
+                  <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
+                    {report.topologicalEntropy !== undefined ? report.topologicalEntropy.toFixed(3) : "N/A"}
+                  </span>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Horizon Lyapunov</span>
+                  <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
+                    {report.lyapunovChaosExponent > 0.001 ? `${(1 / report.lyapunovChaosExponent).toFixed(1)} pas` : "∞ (Stable)"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Actionable Adjustments / Recommendations */}
           <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">

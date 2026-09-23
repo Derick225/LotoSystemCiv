@@ -75,6 +75,20 @@ export const UnifiedForensicRadarPanel: React.FC<
       Math.max(10, report.unifiedIntegrityIndex ?? 75),
     );
 
+    // 5. Stabilité Lyapunov (Invariance chaotique HPC)
+    const lyapExp = report.lyapunovChaosExponent ?? 0.0;
+    const lyapunovScore = Math.min(
+      100,
+      Math.max(15, Math.round(100 * Math.exp(-Math.max(0, lyapExp) * 2.5))),
+    );
+
+    // 6. Entropie Topologique (Complexité dynamique du régime)
+    const topoEnt = report.topologicalEntropy ?? 0.5;
+    const topoScore = Math.min(
+      100,
+      Math.max(20, Math.round((1 - Math.abs(topoEnt - 0.5) * 1.2) * 100)),
+    );
+
     return [
       { subject: "Précision", value: Math.round(precisionScore), target: 85 },
       {
@@ -84,6 +98,8 @@ export const UnifiedForensicRadarPanel: React.FC<
       },
       { subject: "Entropie", value: Math.round(entropyScore), target: 90 },
       { subject: "Synergie", value: Math.round(synergyScore), target: 85 },
+      { subject: "Stabilité Lyapunov", value: Math.round(lyapunovScore), target: 90 },
+      { subject: "Entropie Topo", value: Math.round(topoScore), target: 85 },
     ];
   }, [report]);
 
@@ -254,7 +270,7 @@ export const UnifiedForensicRadarPanel: React.FC<
       {level === "macro" && (
         <div className="animate-fade-in grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
           {/* Radar Chart */}
-          <div className="md:col-span-7 h-[280px] relative flex items-center justify-center">
+          <div className="md:col-span-7 h-[320px] relative flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
               <RadarChart
                 cx="50%"

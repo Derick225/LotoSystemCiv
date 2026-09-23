@@ -1,0 +1,19 @@
+{
+  "name": "loto-engine",
+  "type": "module",
+  "collaborators": [
+    "LotoPro R&D Team <hpc@lotopro.elite>"
+  ],
+  "description": "High-Performance Computing (HPC) WebAssembly Engine for LotoPro Platinum Elite v12.0",
+  "version": "1.0.0",
+  "files": [
+    "loto_engine_bg.wasm",
+    "loto_engine.js",
+    "loto_engine.d.ts"
+  ],
+  "main": "loto_engine.js",
+  "types": "loto_engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

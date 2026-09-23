@@ -388,6 +388,10 @@ export interface ForensicReport {
   topologicalTensionIndex?: number; // Tension topologique globale sur la grille de jeu
   catastropheControlParams?: CatastropheControlParams; // Paramètres d'écart catastrophe de René Thom
   gravitationalDriftVelocity?: number; // Vitesse de dérive gravitationnelle
+  lyapunovChaosExponent?: number; // Exposant de Lyapunov maximal (HPC Rust WASM)
+  isChaoticRegime?: boolean; // Indicateur de divergence de trajectoire sensible aux CI
+  divergenceForce?: number; // Taux de divergence dans l'espace des phases
+  topologicalEntropy?: number; // Entropie topologique du régime dynamique
   // New action-oriented forensic fields
   failureMode?: ForensicFailureMode;
   verdict?: ForensicFailureMode;

@@ -7,10 +7,12 @@ import {
   WifiOff,
   Maximize,
   Minimize,
+  Cpu,
 } from "lucide-react";
 import { MarqueeTicker } from "../ui/MarqueeTicker";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useSyncStatus } from "../../hooks/useSyncStatus";
+import { isLotoEngineWasmReady } from "../../services/wasm/lotoEngineBridge";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { InstallButton } from "../ui/InstallButton";
@@ -268,6 +270,17 @@ export const AppShell: React.FC<AppShellProps> = ({
                   </span>
                 </div>
               )}
+
+              {/* HPC Engine Indicator */}
+              <div
+                title={isLotoEngineWasmReady() ? "Noyau de calcul Rust WebAssembly actif" : "Moteur HPC vectoriel SIMD déterministe actif"}
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full ml-2 border bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+              >
+                <Cpu size={12} className="text-cyan-400" />
+                <span className="text-[10px] font-black tracking-widest uppercase">
+                  {isLotoEngineWasmReady() ? "HPC RUST WASM" : "HPC SIMD"}
+                </span>
+              </div>
             </div>
 
             {/* Desktop and Mobile aligned right panel elements */}
