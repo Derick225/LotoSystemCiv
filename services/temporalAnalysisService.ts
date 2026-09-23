@@ -359,6 +359,8 @@ export interface DnaSieveResult {
     dnaConcordanceMean?: number;
     entropyBits?: number;
     activeGenesBreakdown?: { gene: string; weight: number; label: string }[];
+    klDivergence?: number;
+    shrinkageFactor?: number;
 }
 
 export const calculateDnaSieveWeights = (
@@ -611,17 +613,50 @@ export const calculateDnaSieveWeights = (
     }
     const stdDevDna = Math.sqrt(varDna / 90.0) || 1e-6;
 
+    // 12. Divergence de Kullback-Leibler D_KL(P_modèle || Q_empirique) & Facteur de Shrinkage James-Stein
+    // Évalue l'écart entre la projection théorique globale et l'espace de phase empirique récent
+    const recentWindowSize = Math.min(25, history.length);
+    const recentDraws = history.slice(0, recentWindowSize);
+    const recentCounts = new Float64Array(91);
+    let totalRecentHits = 0;
+    recentDraws.forEach(d => {
+        d.gagnants.forEach(n => {
+            if (n >= 1 && n <= N) {
+                recentCounts[n]++;
+                totalRecentHits++;
+            }
+        });
+    });
+
+    const laplaceEps = 5.0 / 90.0;
+    const totalQNorm = totalRecentHits + laplaceEps * 90.0;
+    const safeSumDna = Math.max(1e-6, sumDna);
+
+    let klDiv = 0;
+    for (let n = 1; n <= N; n++) {
+        const p_n = compositeDna[n] / safeSumDna;
+        const q_n = (recentCounts[n] + laplaceEps) / totalQNorm;
+        if (p_n > 0 && q_n > 0) {
+            klDiv += p_n * Math.log(p_n / q_n);
+        }
+    }
+    const klDivergence = Math.max(0, klDiv);
+
+    // Contraction de James-Stein continue C^∞ : atténue les multiplicateurs extrêmes si forte divergence
+    const shrinkageFactor = 1.0 / (1.0 + Math.tanh(klDivergence));
+
     const baseSteepness = 1.0 + Math.sqrt(shannon.normalized || 0.5);
 
     let sumAffinity = 0;
     for (let n = 1; n <= N; n++) {
         const z = (compositeDna[n] - meanDna) / stdDevDna;
-        // Pente continue dérivée de l'entropie, avec des bornes [0.1, 1.9] naturelles (Zéro clamp binaire)
-        const mult = 0.1 + 1.8 / (1.0 + Math.exp(-baseSteepness * z));
-        multipliers[n] = mult;
+        // Pente continue dérivée de l'entropie, avec régulation par contraction de James-Stein
+        const rawMult = 0.1 + 1.8 / (1.0 + Math.exp(-baseSteepness * z));
+        const shrunkMult = 1.0 + shrinkageFactor * (rawMult - 1.0);
+        multipliers[n] = shrunkMult;
         
         // Mapping probabiliste de l'affinité sur [0, 100]
-        const aff = Math.round(100.0 / (1.0 + Math.exp(-baseSteepness * 1.2 * z)));
+        const aff = Math.round(100.0 / (1.0 + Math.exp(-baseSteepness * 1.2 * z * shrinkageFactor)));
         affinityPercent[n] = aff;
         sumAffinity += aff;
     }
@@ -638,7 +673,9 @@ export const calculateDnaSieveWeights = (
         stdDevDna,
         dnaConcordanceMean,
         entropyBits,
-        activeGenesBreakdown
+        activeGenesBreakdown,
+        klDivergence: parseFloat(klDivergence.toFixed(4)),
+        shrinkageFactor: parseFloat(shrinkageFactor.toFixed(4))
     };
 };
 

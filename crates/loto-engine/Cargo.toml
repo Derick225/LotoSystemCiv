@@ -1,0 +1,35 @@
+[package]
+name = "loto-engine"
+version = "1.0.0"
+authors = ["LotoPro R&D Team <hpc@lotopro.elite>"]
+edition = "2021"
+description = "High-Performance Computing (HPC) WebAssembly Engine for LotoPro Platinum Elite v12.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["console_error_panic_hook"]
+
+[dependencies]
+wasm-bindgen = "0.2.92"
+js-sys = "0.3.69"
+web-sys = { version = "0.3.69", features = ["console"] }
+
+# The `console_error_panic_hook` crate provides better debugging of panics by
+# logging them with `console.error`. This is great for development.
+console_error_panic_hook = { version = "0.1.7", optional = true }
+
+# High performance FFT library in pure Rust
+rustfft = "6.2.0"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.42"
+
+[profile.release]
+# Optimisations d'exécution maximales pour WebAssembly (zéro garbage collector)
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -3,6 +3,7 @@ import { ScoredNumber } from "./scoringEngine";
 import { calculateACValue } from "../mathService";
 import { ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
 import { calculateGeneticDiversityIndex } from "./diversityService";
+import { solveCombinatorialAnnealingHpc } from "../wasm/lotoEngineBridge";
 
 const DOMAIN_SIZE = 90;
 const DRAW_SIZE = 5;
@@ -717,11 +718,49 @@ export const generateCombination = async (
   const firstOutsider = outsiderPool.length > 0 ? outsiderPool[0] : topPool[topPool.length - 1];
   const seed4 = await runGreedyConstruction([firstOutsider], allCandidatesPool, targetOutsiders, true);
 
+  // Seed 5 : Optimisation combinatoire globale par Recuit Simulé HPC (Rust WASM / SIMD)
+  let seed5: number[] = [];
+  try {
+    const scores91 = new Float64Array(91);
+    scoresMap.forEach((val, key) => {
+      if (key >= 1 && key <= 90) scores91[key] = val;
+    });
+
+    const flatAffinity = new Float64Array(91 * 91);
+    for (let i = 1; i <= 90; i++) {
+      const row = affinityMap[i];
+      if (row) {
+        const offset = i * 91;
+        for (let j = 1; j <= 90; j++) {
+          flatAffinity[offset + j] = row[j] || 0;
+        }
+      }
+    }
+
+    const candidatePool = new Int32Array(allCandidatesPool);
+    const hpcAnnealingResult = solveCombinatorialAnnealingHpc({
+      candidatePool,
+      scores91,
+      affinityMatrix: flatAffinity,
+      initialTemperature: 12.0,
+      coolingRate: 0.96,
+      minTemperature: 0.05,
+      iterationsPerTemp: 40,
+      deterministicSeed: lcgSeed
+    });
+
+    if (hpcAnnealingResult?.best_combination?.length === DRAW_SIZE) {
+      seed5 = [...hpcAnnealingResult.best_combination];
+    }
+  } catch (err) {
+    // Fallback silencieux garanti par les seeds gloutonnes
+  }
+
   // Yield au navigateur avant le recuit simulé
   await new Promise(resolve => setTimeout(resolve, 0));
 
-  // Élection de la meilleure seed gloutonne selon l'énergie globale
-  const seedsList = [seed1, seed2, seed3, seed4].filter(s => s.length === DRAW_SIZE);
+  // Élection de la meilleure seed gloutonne/HPC selon l'énergie globale
+  const seedsList = [seed1, seed2, seed3, seed4, seed5].filter(s => s && s.length === DRAW_SIZE);
   let bestInitialCombo = seed1;
   let bestInitialEnergy = Infinity;
 

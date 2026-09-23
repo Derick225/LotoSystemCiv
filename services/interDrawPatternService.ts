@@ -16,6 +16,7 @@
  */
 
 import { LOTTERY_CONSTANTS } from './lotteryService';
+import { computeCooccurrenceTensorHpc } from './wasm/lotoEngineBridge';
 
 // ============================================================================
 // TYPES & INTERFACES DU DÉTECTEUR
@@ -308,63 +309,76 @@ export const analyzeInterDrawCooccurrences = (
   // plancher = format du tirage (5 numéros). Remplace les troncatures fixes.
   const reportCap = Math.max(NUMBERS_PER_DRAW, Math.ceil(Math.sqrt(Math.max(1, sampleSize))));
 
-  // Matrices de dénombrement
-  // 1. Fréquence marginale de chaque numéro cible et de chaque numéro source
+  // Préparation vectorielle pour l'accélérateur WebAssembly (WASM HPC)
+  const numDraws = pairedPairs.length;
+  const predFlat = new Int32Array(numDraws * NUMBERS_PER_DRAW);
+  const targetFlat = new Int32Array(numDraws * NUMBERS_PER_DRAW);
+  for (let d = 0; d < numDraws; d++) {
+    const pw = pairedPairs[d].predWinners;
+    const tw = pairedPairs[d].targetWinners;
+    for (let c = 0; c < NUMBERS_PER_DRAW; c++) {
+      predFlat[d * NUMBERS_PER_DRAW + c] = pw[c] ?? 0;
+      targetFlat[d * NUMBERS_PER_DRAW + c] = tw[c] ?? 0;
+    }
+  }
+
+  // Calcul tensoriel optimisé via Rust WASM (avec fallback vectorisé)
+  const hpcTensor = computeCooccurrenceTensorHpc(
+    predFlat,
+    targetFlat,
+    numDraws,
+    NUMBERS_PER_DRAW,
+    activePredNumbers
+  );
+
+  // Matrices et maps de dénombrement
   const targetNumberCounts = new Int32Array(91);
   const predNumberCounts = new Int32Array(91);
+  const dyadCounts = Array.from({ length: 91 }, (_, p) => {
+    const arr = new Int32Array(91);
+    const rowOffset = p * 91;
+    for (let t = 0; t <= 90; t++) {
+      arr[t] = hpcTensor.dyadMatrix[rowOffset + t];
+    }
+    return arr;
+  });
 
-  // 2. Fréquence d'apparition de chaque dyade (p -> t)
-  const dyadCounts = Array.from({ length: 91 }, () => new Int32Array(91));
-
-  // 3. Fréquence inconditionnelle et conditionnée des paires cibles {t1, t2}
-  // Clé compacte : t1 * 100 + t2 (avec t1 < t2)
   const targetPairCounts = new Map<number, number>();
   const activeConditionedPairHits = new Map<number, number>();
 
+  // Reconstruction des 4005 paires depuis le tenseur compact
+  let pIdx = 0;
+  for (let t1 = 1; t1 <= 89; t1++) {
+    for (let t2 = t1 + 1; t2 <= 90; t2++) {
+      const occ = hpcTensor.targetPairHits[pIdx];
+      if (occ > 0) {
+        const pairKey = t1 * 100 + t2;
+        targetPairCounts.set(pairKey, occ);
+        const condHits = hpcTensor.conditionedPairHits[pIdx];
+        if (condHits > 0) {
+          activeConditionedPairHits.set(pairKey, condHits);
+        }
+      }
+      pIdx++;
+    }
+  }
+
   // 4. Fréquence des déclencheurs bivariés (paire source p1, p2 -> t)
-  const activeBivariateHits = new Map<number, number>(); // t -> occurrences quand une paire active était présente
+  const activeBivariateHits = new Map<number, number>();
   const bivariatePairTotalObservations = new Map<string, number>();
   const bivariateTargetTransitions = new Map<string, Int32Array>();
 
-  // Évaluation chronologique stricte sur l'ensemble de l'historique apparié
+  // Évaluation chronologique des marges et déclencheurs bivariés
   for (const pair of pairedPairs) {
     const pw = pair.predWinners.filter(n => n >= 1 && n <= 90);
     const tw = pair.targetWinners.filter(n => n >= 1 && n <= 90);
 
     for (const p of pw) {
       predNumberCounts[p]++;
-      for (const t of tw) {
-        dyadCounts[p][t]++;
-      }
     }
 
     for (const t of tw) {
       targetNumberCounts[t]++;
-    }
-
-    // Paires cibles présentes à ce tirage
-    const nTargets = tw.length;
-    for (let i = 0; i < nTargets; i++) {
-      for (let j = i + 1; j < nTargets; j++) {
-        const t1 = Math.min(tw[i], tw[j]);
-        const t2 = Math.max(tw[i], tw[j]);
-        const pairKey = t1 * 100 + t2;
-        targetPairCounts.set(pairKey, (targetPairCounts.get(pairKey) || 0) + 1);
-
-        // Vérification du conditionnement par les numéros sources actifs
-        let activeOverlap = 0;
-        for (const p of pw) {
-          if (activePredSet.has(p)) {
-            activeOverlap++;
-          }
-        }
-        if (activeOverlap > 0) {
-          activeConditionedPairHits.set(
-            pairKey,
-            (activeConditionedPairHits.get(pairKey) || 0) + activeOverlap
-          );
-        }
-      }
     }
 
     // Déclencheurs bivariés sources (p1, p2)

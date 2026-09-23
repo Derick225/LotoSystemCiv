@@ -24,6 +24,7 @@ import {
   FALLBACK_CALIBRATION,
 } from "../shared/prediction.types";
 import { useNexusStore } from "../store/useNexusStore";
+import { computeTopologicalLyapunovHpc } from "./wasm/lotoEngineBridge";
 
 export class InvalidInputError extends Error {
   constructor(message: string) {
@@ -64,6 +65,10 @@ export interface ForensicAuditResult {
     discriminant: number;
     regime: string;
   };
+  lyapunovChaosExponent?: number;
+  isChaoticRegime?: boolean;
+  divergenceForce?: number;
+  topologicalEntropy?: number;
 }
 
 export interface AuditConfig {
@@ -1408,6 +1413,20 @@ export const analyzeForManipulation = (
   const tensionHealth =
     100 * Math.exp(-catastropheRes.topologicalTensionIndex / 0.5);
 
+  // Analyse de l'Exposant de Lyapunov et Chaos Topologique (HPC Rust WASM)
+  let lyapResult = { lyapunov_exponent: 0, is_chaotic: false, divergence_force: 0, topological_entropy: 0 };
+  const numDrawsLyap = Math.min(60, history.length);
+  if (numDrawsLyap >= 10) {
+    const flatDraws = new Int32Array(numDrawsLyap * 5);
+    for (let d = 0; d < numDrawsLyap; d++) {
+      const g = history[d].gagnants;
+      for (let c = 0; c < 5; c++) {
+        flatDraws[d * 5 + c] = g[c] ?? 0;
+      }
+    }
+    lyapResult = computeTopologicalLyapunovHpc(flatDraws, numDrawsLyap, 5, 25);
+  }
+
   // Expansion du Diagnostic d'Intégrité Cybernétique (UFI)
   // Combinaison pondérée continue (30% suspicion, 30% bayésien, 10% entropie, 10% benford, 10% mémoire Hurst, 10% tension)
   const UFI = Math.max(
@@ -1424,6 +1443,14 @@ export const analyzeForManipulation = (
   );
 
   // Enregistrement des diagnostics cybernétiques détaillés sans bruit d'infrastructure
+  if (lyapResult.is_chaotic) {
+    logs.push({
+      timestamp: new Date().toISOString(),
+      level: "warn",
+      indicator: "CATASTROPHE_RUPTURE",
+      message: `Régime chaotique topologique détecté (λ = ${lyapResult.lyapunov_exponent.toFixed(4)}). Forte sensibilité aux conditions initiales (divergence = ${(lyapResult.divergence_force * 100).toFixed(1)}%).`,
+    });
+  }
   if (Math.abs(H_val - 0.5) > 0.2) {
     logs.push({
       timestamp: new Date().toISOString(),
@@ -1526,6 +1553,10 @@ export const analyzeForManipulation = (
     idealAlgorithmicDriftTolerance: idealDriftTolerance,
     topologicalTensionIndex: catastropheRes.topologicalTensionIndex,
     catastropheControlParams: catastropheRes.catastropheControlParams,
+    lyapunovChaosExponent: parseFloat(lyapResult.lyapunov_exponent.toFixed(4)),
+    isChaoticRegime: lyapResult.is_chaotic,
+    divergenceForce: parseFloat(lyapResult.divergence_force.toFixed(4)),
+    topologicalEntropy: parseFloat(lyapResult.topological_entropy.toFixed(4)),
     confidenceIntervals: {
       suspicionScore: {
         lower: Math.max(0, finalSuspicionScore - scoreMargin),

@@ -7,6 +7,7 @@
  */
 
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
+import { computeTopologicalLyapunovHpc } from "../wasm/lotoEngineBridge";
 
 export class ConceptDriftDetector {
     /**
@@ -163,6 +164,8 @@ export class ConceptDriftDetector {
         severity: 'LOW' | 'MEDIUM' | 'CRITICAL';
         confidence: number;
         driftIndex?: number;
+        lyapunovExponent?: number;
+        isChaotic?: boolean;
     } {
         const activeDraw = targetDrawName || history[0]?.drawName || "Reveil";
         const purifiedHistory = purifyHistoryForDraw(activeDraw, history);
@@ -260,12 +263,33 @@ export class ConceptDriftDetector {
             ? klIndices[phResult.driftIndex] 
             : undefined;
 
+        // Analyse du Chaos Dynamique Topologique (Lyapunov HPC Rust WASM)
+        let lyapResult = { lyapunov_exponent: 0, is_chaotic: false };
+        const numDrawsLyap = Math.min(60, purifiedHistory.length);
+        if (numDrawsLyap >= 12) {
+            const flatDraws = new Int32Array(numDrawsLyap * 5);
+            for (let d = 0; d < numDrawsLyap; d++) {
+                const g = purifiedHistory[d].gagnants;
+                for (let c = 0; c < 5; c++) {
+                    flatDraws[d * 5 + c] = g[c] ?? 0;
+                }
+            }
+            const res = computeTopologicalLyapunovHpc(flatDraws, numDrawsLyap, 5, 25);
+            lyapResult = { lyapunov_exponent: res.lyapunov_exponent, is_chaotic: res.is_chaotic };
+        }
+
+        if (lyapResult.is_chaotic && severity === 'LOW') {
+            severity = 'MEDIUM';
+        }
+
         return {
             driftDetected,
             divergence: klDiv,
             severity,
             confidence,
-            driftIndex
+            driftIndex,
+            lyapunovExponent: parseFloat(lyapResult.lyapunov_exponent.toFixed(4)),
+            isChaotic: lyapResult.is_chaotic
         };
     }
 }
