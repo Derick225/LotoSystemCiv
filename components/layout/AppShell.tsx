@@ -12,10 +12,11 @@ import {
 import { MarqueeTicker } from "../ui/MarqueeTicker";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useSyncStatus } from "../../hooks/useSyncStatus";
-import { isLotoEngineWasmReady } from "../../services/wasm/lotoEngineBridge";
+import { useHpcEngineStatus } from "../../hooks/useHpcEngineStatus";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { InstallButton } from "../ui/InstallButton";
+import { useToast } from "../ui/Toast";
 
 const CommandPalette = lazy(() =>
   import("../ui/CommandPalette").then((m) => ({ default: m.CommandPalette })),
@@ -56,6 +57,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   const isFocusMode = useNexusStore((state) => state.isFocusMode);
   const setFocusMode = useNexusStore((state) => state.setFocusMode);
   const { dbConnection, isSyncing } = useSyncStatus();
+  const hpcStatus = useHpcEngineStatus();
+  const { showToast } = useToast();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -272,15 +275,30 @@ export const AppShell: React.FC<AppShellProps> = ({
               )}
 
               {/* HPC Engine Indicator */}
-              <div
-                title={isLotoEngineWasmReady() ? "Noyau de calcul Rust WebAssembly actif" : "Moteur HPC vectoriel SIMD déterministe actif"}
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full ml-2 border bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+              <button
+                type="button"
+                onClick={() => {
+                  audioEngine.play("click");
+                  showToast(
+                    hpcStatus.isReady
+                      ? "Noyau Rust WebAssembly v1.0.0 actif : Recuit Simulé, Lyapunov topologique, Hawkes multi-lags & Tenseurs en mémoire partagée (0 GC)."
+                      : "Moteur HPC vectoriel SIMD actif : Fallback déterministe haute performance.",
+                    hpcStatus.isReady ? "success" : "info"
+                  );
+                }}
+                title={hpcStatus.isReady ? "Noyau de calcul Rust WebAssembly actif (Cliquer pour diagnostic)" : "Moteur HPC vectoriel SIMD déterministe actif"}
+                className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-full ml-1 sm:ml-2 border transition-all duration-300 cursor-pointer active:scale-95 ${
+                  hpcStatus.isReady
+                    ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.25)] hover:bg-cyan-500/25"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"
+                }`}
               >
-                <Cpu size={12} className="text-cyan-400" />
-                <span className="text-[10px] font-black tracking-widest uppercase">
-                  {isLotoEngineWasmReady() ? "HPC RUST WASM" : "HPC SIMD"}
+                <Cpu size={12} className={hpcStatus.isReady ? "text-cyan-400 animate-pulse" : "text-amber-400"} />
+                <span className="text-[9px] sm:text-[10px] font-black tracking-widest uppercase font-mono">
+                  <span className="inline sm:hidden">{hpcStatus.isReady ? "WASM" : "SIMD"}</span>
+                  <span className="hidden sm:inline">{hpcStatus.isReady ? "HPC RUST WASM" : "HPC SIMD"}</span>
                 </span>
-              </div>
+              </button>
             </div>
 
             {/* Desktop and Mobile aligned right panel elements */}

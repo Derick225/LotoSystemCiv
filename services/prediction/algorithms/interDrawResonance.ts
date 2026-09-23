@@ -19,6 +19,7 @@ import {
 } from '../../lotteryService';
 import { globalCache, CACHE_TTL } from '../../cache/CacheService';
 import { wasmMatrixEngine } from '../../wasm/wasmMatrixCore';
+import { computeCrossHawkesKernelHpc } from '../../wasm/lotoEngineBridge';
 
 export interface InterDrawChannelDetail {
   transitionScore: number;
@@ -428,13 +429,12 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     // Décroissance temporelle continue du noyau de Hawkes dérivée de l'exposant de Hurst
     const betaDecay = Math.LN2 / (1.0 + 2.0 * (1.0 - hurst));
 
-    const hawkesRes = wasmMatrixEngine.vectorizedCrossHawkesKernel({
-      numStates: N,
+    const hawkesRes = computeCrossHawkesKernelHpc({
       lagCount,
-      winningCols: K,
-      predecessorLaggedOccurrences: predLaggedOccurrences,
+      winCols: K,
+      predOccurrences: predLaggedOccurrences,
       targetBaseline,
-      crossCouplingMatrix,
+      couplingMatrix: crossCouplingMatrix,
       betaDecay
     });
 

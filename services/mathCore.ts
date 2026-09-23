@@ -1,4 +1,5 @@
 import { DrawResult, ChiSquareMetric } from "../types";
+import { isLotoEngineWasmReady, computeRobustHurstHpc } from "./wasm/lotoEngineBridge";
 /**
  * Core Mathematical Algorithms for Nexus
  * Shared between Web Workers and Main Thread (Backend fallback)
@@ -144,6 +145,15 @@ export function computeHaarWaveletEnergy(signal: number[]): number {
 export function computeRobustHurst(signal: number[]): number {
     const N = signal.length;
     if (N < 10) return 0.5;
+
+    // Accélération directe HPC Rust WASM (vitesse native sans Garbage Collector)
+    if (isLotoEngineWasmReady()) {
+        try {
+            return computeRobustHurstHpc(signal);
+        } catch {
+            // Repli transparent sur le calcul local
+        }
+    }
 
     // Calcul de la volatilité locale continue de la série temporelle
     const meanVal = mean(signal);

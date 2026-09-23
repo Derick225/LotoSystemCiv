@@ -3,6 +3,19 @@ import { AppError } from '../utils/AppError';
 import { apiClient } from '../core/api/apiClient';
 import { packHistory, packMatrix, packArray, collectTransferables } from './workers/zeroCopy';
 import { isSupabaseConfigured } from './supabaseClient';
+import {
+    computeTopologicalLyapunovHpc,
+    solveCombinatorialAnnealingHpc,
+    computeCrossHawkesKernelHpc,
+    computeMarkovTransitionHpc,
+    computeCooccurrenceTensorHpc,
+    computeRobustHurstHpc,
+    computeFftPowerSpectrumHpc,
+    WasmLyapunovResult,
+    WasmAnnealingResult,
+    WasmHawkesResult,
+    WasmCooccurrenceResult
+} from './wasm/lotoEngineBridge';
 
 /**
  * NEXUS WORKER SERVICE
@@ -203,6 +216,43 @@ class WorkerService {
                 case 'TRANSFER_ENTROPY':
                     result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
                     break;
+                case 'TOPOLOGICAL_LYAPUNOV_HPC':
+                    result = computeTopologicalLyapunovHpc(
+                        p.historyDraws,
+                        p.numDraws,
+                        p.winCols || 5,
+                        p.horizonLimit || 30
+                    );
+                    break;
+                case 'COMBINATORIAL_ANNEALING_HPC':
+                    result = solveCombinatorialAnnealingHpc(p);
+                    break;
+                case 'CROSS_HAWKES_HPC':
+                    result = computeCrossHawkesKernelHpc(p);
+                    break;
+                case 'MARKOV_TRANSITIONS_HPC':
+                    result = computeMarkovTransitionHpc(
+                        p.historyDraws,
+                        p.numDraws,
+                        p.winCols || 5,
+                        p.numStates || 90
+                    );
+                    break;
+                case 'COOCCURRENCE_TENSOR_HPC':
+                    result = computeCooccurrenceTensorHpc(
+                        p.predDrawsFlat,
+                        p.targetDrawsFlat,
+                        p.numDraws,
+                        p.winCols || 5,
+                        p.activePredNumbers || []
+                    );
+                    break;
+                case 'HURST_HPC':
+                    result = computeRobustHurstHpc(p.signal);
+                    break;
+                case 'SPECTRAL_FFT_HPC':
+                    result = computeFftPowerSpectrumHpc(p.signal);
+                    break;
                 default:
                     result = { status: 'OK' };
             }
@@ -274,6 +324,89 @@ class WorkerService {
         }
         const latencyMs = Math.round(performance.now() - start);
         return { ready: true, latencyMs };
+    }
+
+    /**
+     * Exécute l'analyse topologique et chaotique de Lyapunov en arrière-plan via le Web Worker HPC
+     */
+    public async runTopologicalLyapunovHpc(
+        historyDraws: Int32Array | number[],
+        numDraws: number,
+        winCols: number = 5,
+        horizonLimit: number = 30
+    ): Promise<WasmLyapunovResult> {
+        return this.runTask<WasmLyapunovResult>('TOPOLOGICAL_LYAPUNOV_HPC', {
+            historyDraws,
+            numDraws,
+            winCols,
+            horizonLimit
+        });
+    }
+
+    /**
+     * Exécute le Recuit Simulé déterministe (Seed 5 HPC) en arrière-plan via le Web Worker HPC
+     */
+    public async runCombinatorialAnnealingHpc(params: {
+        candidatePool: Int32Array | number[];
+        scores91: Float64Array | number[];
+        affinityMatrix: Float64Array | number[];
+        initialTemperature?: number;
+        coolingRate?: number;
+        minTemperature?: number;
+        iterationsPerTemp?: number;
+        deterministicSeed?: number;
+    }): Promise<WasmAnnealingResult> {
+        return this.runTask<WasmAnnealingResult>('COMBINATORIAL_ANNEALING_HPC', params);
+    }
+
+    /**
+     * Exécute le calcul du Noyau de Hawkes Croisé en arrière-plan via le Web Worker HPC
+     */
+    public async runCrossHawkesHpc(params: {
+        predOccurrences: Int32Array;
+        lagCount: number;
+        winCols?: number;
+        targetBaseline: Float64Array;
+        couplingMatrix: Float64Array;
+        betaDecay: number;
+    }): Promise<WasmHawkesResult> {
+        return this.runTask<WasmHawkesResult>('CROSS_HAWKES_HPC', params);
+    }
+
+    /**
+     * Exécute les matrices de transition de Markov en arrière-plan via le Web Worker HPC
+     */
+    public async runMarkovHpc(
+        historyDraws: Int32Array | number[],
+        numDraws: number,
+        winCols: number = 5,
+        numStates: number = 90
+    ): Promise<Float64Array> {
+        return this.runTask<Float64Array>('MARKOV_TRANSITIONS_HPC', {
+            historyDraws,
+            numDraws,
+            winCols,
+            numStates
+        });
+    }
+
+    /**
+     * Exécute le calcul du Tenseur de Cooccurrence en arrière-plan via le Web Worker HPC
+     */
+    public async runCooccurrenceTensorHpc(
+        predDrawsFlat: Int32Array,
+        targetDrawsFlat: Int32Array,
+        numDraws: number,
+        winCols: number = 5,
+        activePredNumbers: Int32Array | number[] = []
+    ): Promise<WasmCooccurrenceResult> {
+        return this.runTask<WasmCooccurrenceResult>('COOCCURRENCE_TENSOR_HPC', {
+            predDrawsFlat,
+            targetDrawsFlat,
+            numDraws,
+            winCols,
+            activePredNumbers
+        });
     }
 }
 

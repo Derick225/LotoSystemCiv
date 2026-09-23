@@ -2,6 +2,15 @@
 
 import * as mathCore from './mathCore';
 import { unpackHistory, unpackMatrix, unpackArray, collectTransferables } from './workers/zeroCopy';
+import {
+    computeTopologicalLyapunovHpc,
+    solveCombinatorialAnnealingHpc,
+    computeCrossHawkesKernelHpc,
+    computeMarkovTransitionHpc,
+    computeCooccurrenceTensorHpc,
+    computeRobustHurstHpc,
+    computeFftPowerSpectrumHpc
+} from './wasm/lotoEngineBridge';
 
 self.onmessage = (e: MessageEvent) => {
     const { taskId, task, payload, history, historyBuffer, drawCount, winningCount, totalCols } = e.data;
@@ -44,6 +53,43 @@ self.onmessage = (e: MessageEvent) => {
                 break;
             case 'TRANSFER_ENTROPY':
                 result = mathCore.computeTransferEntropy(hist, p?.targetNumbers);
+                break;
+            case 'TOPOLOGICAL_LYAPUNOV_HPC':
+                result = computeTopologicalLyapunovHpc(
+                    p.historyDraws,
+                    p.numDraws,
+                    p.winCols || 5,
+                    p.horizonLimit || 30
+                );
+                break;
+            case 'COMBINATORIAL_ANNEALING_HPC':
+                result = solveCombinatorialAnnealingHpc(p);
+                break;
+            case 'CROSS_HAWKES_HPC':
+                result = computeCrossHawkesKernelHpc(p);
+                break;
+            case 'MARKOV_TRANSITIONS_HPC':
+                result = computeMarkovTransitionHpc(
+                    p.historyDraws,
+                    p.numDraws,
+                    p.winCols || 5,
+                    p.numStates || 90
+                );
+                break;
+            case 'COOCCURRENCE_TENSOR_HPC':
+                result = computeCooccurrenceTensorHpc(
+                    p.predDrawsFlat,
+                    p.targetDrawsFlat,
+                    p.numDraws,
+                    p.winCols || 5,
+                    p.activePredNumbers || []
+                );
+                break;
+            case 'HURST_HPC':
+                result = computeRobustHurstHpc(p.signal);
+                break;
+            case 'SPECTRAL_FFT_HPC':
+                result = computeFftPowerSpectrumHpc(p.signal);
                 break;
             default:
                 result = { status: 'OK' };

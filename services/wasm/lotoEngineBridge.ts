@@ -76,6 +76,9 @@ export async function initializeLotoEngineWasm(): Promise<boolean> {
         wasmModuleInstance = wasm;
         isWasmLoaded = true;
         console.info('[LOTO-ENGINE] Module Rust/WASM initialisé avec succès (Accélération HPC active).');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('loto-engine-wasm-ready', { detail: { mode: 'RUST_WASM' } }));
+        }
         return true;
       }
     } catch (err) {

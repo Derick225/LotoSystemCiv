@@ -107,9 +107,10 @@ export const networkCorrelationPlugin: AlgorithmPlugin = {
       return;
     }
 
-    // 1. Compute marginal counts P(X) and joint co-occurrence counts
+    // 1. Compute marginal counts P(X) and joint co-occurrence counts (contiguous 1D buffer)
     const counts = new Float64Array(DOMAIN_SIZE + 1);
-    const coCounts = Array(DOMAIN_SIZE + 1).fill(0).map(() => new Float64Array(DOMAIN_SIZE + 1));
+    const stride = DOMAIN_SIZE + 1;
+    const coCounts = new Float64Array(stride * stride);
 
     for (const draw of history) {
       const winners = draw.gagnants || [];
@@ -119,8 +120,8 @@ export const networkCorrelationPlugin: AlgorithmPlugin = {
         for (let j = i + 1; j < winners.length; j++) {
           const v = winners[j];
           if (v >= 1 && v <= DOMAIN_SIZE) {
-            coCounts[u][v]++;
-            coCounts[v][u]++;
+            coCounts[u * stride + v]++;
+            coCounts[v * stride + u]++;
           }
         }
       }
@@ -144,7 +145,7 @@ export const networkCorrelationPlugin: AlgorithmPlugin = {
         if (pB === 0) continue;
 
         // P(A|B) = P(A and B) / P(B)
-        const pAandB = coCounts[A][B] / totalDraws;
+        const pAandB = coCounts[A * stride + B] / totalDraws;
         const pAgivenB = pAandB / pB;
 
         // Lift defined as P(A|B) - P(A)

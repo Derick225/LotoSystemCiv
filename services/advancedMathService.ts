@@ -1,5 +1,6 @@
 import { DrawResult } from "../types";
 import { calculateShannonEntropy, calculateVolatility } from "./mathService";
+import { isLotoEngineWasmReady, computeTopologicalLyapunovHpc } from "./wasm/lotoEngineBridge";
 
 // ============================================================================
 // UTILITAIRES MATHÉMATIQUES ADAPTATIFS (Zéro Nombre Magique)
@@ -955,38 +956,62 @@ export const calculateTopologicalLyapunov = (
   };
 
   // 1. Calcul de l'Exposant de Lyapunov empirique maximal (λ) sur l'historique
-  // Nous mesurons le taux exponentiel de divergence topologique entre trajectoires temporelles.
-  let lyapunovSum = 0;
-  let validSteps = 0;
+  // Accélération native Rust WASM si disponible
+  let lambda = 0.0;
+  let isChaotic = false;
+  let hpcComputed = false;
 
-  for (let i = 0; i < horizon - 2; i++) {
-    const t0 = recentHistory[i + 1].gagnants;
-    const t1 = recentHistory[i].gagnants;
-
-    // Distance topologique entre le tirage à t et t+1
-    let topologicalDist = 0;
-    for (const c1 of t1) {
-      let minDist = 999;
-      const pos1 = getGridPos(c1);
-      for (const c0 of t0) {
-        const pos0 = getGridPos(c0);
-        // Distance euclidienne sur la grille
-        const d = Math.sqrt(
-          Math.pow(pos1.row - pos0.row, 2) + Math.pow(pos1.col - pos0.col, 2),
-        );
-        if (d < minDist) minDist = d;
+  if (isLotoEngineWasmReady()) {
+    try {
+      const flatDraws = new Int32Array(horizon * 5);
+      for (let d = 0; d < horizon; d++) {
+        const w = recentHistory[d]?.gagnants || [];
+        for (let c = 0; c < 5; c++) {
+          flatDraws[d * 5 + c] = w[c] || 1;
+        }
       }
-      topologicalDist += minDist;
+      const lyapRes = computeTopologicalLyapunovHpc(flatDraws, horizon, 5, horizon);
+      lambda = lyapRes.lyapunov_exponent;
+      isChaotic = lyapRes.is_chaotic;
+      hpcComputed = true;
+    } catch {
+      hpcComputed = false;
     }
-
-    // Pour éviter le log(0), on ajoute un epsilon
-    const divergenceRate = Math.log(topologicalDist + 1e-4);
-    lyapunovSum += divergenceRate;
-    validSteps++;
   }
 
-  const lambda = validSteps > 0 ? lyapunovSum / validSteps : 0.0;
-  const isChaotic = lambda > 0; // Divergence fractale
+  if (!hpcComputed) {
+    let lyapunovSum = 0;
+    let validSteps = 0;
+
+    for (let i = 0; i < horizon - 2; i++) {
+      const t0 = recentHistory[i + 1].gagnants;
+      const t1 = recentHistory[i].gagnants;
+
+      // Distance topologique entre le tirage à t et t+1
+      let topologicalDist = 0;
+      for (const c1 of t1) {
+        let minDist = 999;
+        const pos1 = getGridPos(c1);
+        for (const c0 of t0) {
+          const pos0 = getGridPos(c0);
+          // Distance euclidienne sur la grille
+          const d = Math.sqrt(
+            Math.pow(pos1.row - pos0.row, 2) + Math.pow(pos1.col - pos0.col, 2),
+          );
+          if (d < minDist) minDist = d;
+        }
+        topologicalDist += minDist;
+      }
+
+      // Pour éviter le log(0), on ajoute un epsilon
+      const divergenceRate = Math.log(topologicalDist + 1e-4);
+      lyapunovSum += divergenceRate;
+      validSteps++;
+    }
+
+    lambda = validSteps > 0 ? lyapunovSum / validSteps : 0.0;
+    isChaotic = lambda > 0; // Divergence fractale
+  }
 
   // 2. Projection sur les candidats avec la Fonction de Perte Topologique
   // Si Chaotique (λ > 0) -> On favorise l'exploration (fuite topologique).

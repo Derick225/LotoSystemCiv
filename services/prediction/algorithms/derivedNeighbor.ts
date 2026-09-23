@@ -11,7 +11,7 @@ const getCircularDistance = (a: number, b: number, maxVal = 90): number => {
 };
 
 export const derivedNeighborPlugin: AlgorithmPlugin = {
-  key: AlgoKey.DERIVED_NEIGHBOR as any, // Type cast for new key
+  key: AlgoKey.DERIVED_NEIGHBOR,
   category: 'meta', // Meta-algorithme car il observe les autres
   stability: 'stable',
   mathematicalBasis: 'Diffusion Gaussienne sur Variété Circulaire (Spreading Activation)',

@@ -4,6 +4,7 @@ import { workerService } from '../services/workerService';
 import { lotteryService } from '../services/lotteryService';
 import { getAlgoWeights } from '../services/prediction/weightsManager';
 import { initializeLcgForDraw } from '../utils/mathUtils';
+import { initializeLotoEngineWasm } from '../services/wasm/lotoEngineBridge';
 
 export interface WarmupState {
   isWarmedUp: boolean;
@@ -56,6 +57,9 @@ export function useNeuralWarmup(isBooted: boolean): WarmupState {
       }
 
       try {
+        // 0. Initialisation et pré-chauffage du module HPC Rust WebAssembly
+        await initializeLotoEngineWasm().catch(() => null);
+
         // 1. Initialisation LCG déterministe
         initializeLcgForDraw(currentDrawName);
 

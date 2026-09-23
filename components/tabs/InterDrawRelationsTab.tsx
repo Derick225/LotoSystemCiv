@@ -22,6 +22,7 @@ import { audioEngine } from "../../utils/audioEngine";
 import { formatDateSafely, isDrawToday } from "../../utils/dateUtils";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
+import { useHpcEngineStatus } from "../../hooks/useHpcEngineStatus";
 import { InterDrawCooccurrenceView } from "../interdraw/InterDrawCooccurrenceView";
 import { InterDrawPatternView } from "../interdraw/InterDrawPatternView";
 import {
@@ -65,6 +66,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   const storeDrawName = useNexusStore((state) => state.drawName);
   const refreshData = useNexusStore((state) => state.refreshData);
   const { showToast } = useToast();
+  const hpcStatus = useHpcEngineStatus();
 
   // État de la famille sélectionnée (par défaut la famille du tirage, ou 10H/16H/Dim19H55)
   const [selectedFamilyId, setSelectedFamilyId] = useState<InterDrawFamilyId>(() => {
@@ -629,8 +631,12 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   <h4 className="text-sm font-black uppercase tracking-wider text-slate-900 dark:text-white">
                     Noyau de Hawkes Croisé Vectorisé Multi-Lags
                   </h4>
-                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
-                    SIMD WASM
+                  <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded border transition-colors ${
+                    hpcStatus.isReady
+                      ? "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/30 font-mono shadow-[0_0_8px_rgba(6,182,212,0.2)]"
+                      : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20"
+                  }`}>
+                    {hpcStatus.isReady ? "RUST WASM" : "SIMD WASM"}
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 dark:text-slate-400 font-mono">
