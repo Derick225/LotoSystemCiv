@@ -174,6 +174,11 @@ export const healForensicReport = (report: ForensicReport): ForensicReport => {
     healed.divergenceMetric = Math.max(0, Math.min(100, Math.round((1.0 - (exactHits + 0.5 * nearMissesCount) / predCount) * 100)));
   }
 
+  // Seule la RMSE admet une reconstitution exacte : elle se recalcule sur les paires
+  // (prédit, sorti) réellement archivées. Toutes les autres statistiques (Brier, KL,
+  // entropie, Benford théorique, indices d'intégrité, pertes topologiques) dépendent du
+  // breakdown spectral du moteur : sans lui, elles restent absentes et l'UI affiche
+  // « n/d » plutôt qu'une valeur reconstituée par une formule arbitraire.
   if (healed.rmse === undefined) {
     let sumSq = 0;
     let count = 0;
@@ -183,89 +188,27 @@ export const healForensicReport = (report: ForensicReport): ForensicReport => {
         count++;
       }
     });
-    // Écart-type d'une distribution uniforme continue sur [1..90] = 90 / sqrt(12) ≈ 25.98
-    const uniformStd90 = 90.0 / Math.sqrt(12.0);
-    healed.rmse = count > 0 ? Math.sqrt(sumSq / count) : parseFloat(((healed.divergenceMetric / 100.0) * uniformStd90).toFixed(3));
-  }
-
-  if (healed.brier_score === undefined) {
-    const predCount = Math.max(1, predictedSet.size || 5);
-    const errorRatio = Math.max(0, (predCount - exactHits) / predCount);
-    healed.brier_score = parseFloat((Math.pow(errorRatio, 2) * (1.0 / predCount)).toFixed(4));
-  }
-
-  if (healed.kl_divergence === undefined) {
-    const predCount = Math.max(1, predictedSet.size || 5);
-    const pSuccess = Math.max(0.01, (exactHits + 0.5 * nearMissesCount) / predCount);
-    healed.kl_divergence = parseFloat((-Math.log(pSuccess)).toFixed(4));
-  }
-
-  if (healed.shannon_entropy === undefined) {
-    const numbersToEval = healed.combo && healed.combo.length > 0 ? healed.combo : matches.map(m => m.predicted).filter((n): n is number => typeof n === "number");
-    if (numbersToEval.length > 0) {
-      const sum = numbersToEval.reduce((a, b) => a + b, 0) || 1;
-      let ent = 0;
-      numbersToEval.forEach(n => {
-        const p = n / sum;
-        if (p > 0) ent -= p * Math.log2(p);
-      });
-      healed.shannon_entropy = parseFloat(ent.toFixed(3));
-    } else {
-      healed.shannon_entropy = parseFloat(Math.log2(90).toFixed(3));
-    }
+    if (count > 0) healed.rmse = Math.sqrt(sumSq / count);
   }
 
   if (healed.benfordCompliance === undefined) {
     const numbers = healed.combo || [];
-    if (numbers.length > 0) {
-      const firstDigits = numbers.map(n => parseInt(String(n)[0], 10)).filter(d => d >= 1 && d <= 9);
+    const firstDigits = numbers
+      .map(n => parseInt(String(n)[0], 10))
+      .filter(d => d >= 1 && d <= 9);
+    if (firstDigits.length > 0) {
       const digitCounts = new Float32Array(10);
       firstDigits.forEach(d => digitCounts[d]++);
       let dev = 0;
       for (let d = 1; d <= 9; d++) {
-        const pEmp = digitCounts[d] / (firstDigits.length || 1);
+        const pEmp = digitCounts[d] / firstDigits.length;
         const pTheo = Math.log10(1 + 1 / d);
         dev += Math.abs(pEmp - pTheo);
       }
-      healed.benfordCompliance = parseFloat(Math.max(0.5, Math.min(1.0, 1.0 - dev / 2)).toFixed(3));
-    } else {
-      // Déviation théorique exacte pour l'espace uniforme [1..90]
-      let devTheo = 0;
-      for (let d = 1; d <= 9; d++) {
-        const countIn90 = (d === 1 || d === 9) ? 11 : 10;
-        const pEmp = countIn90 / 90.0;
-        const pTheo = Math.log10(1 + 1 / d);
-        devTheo += Math.abs(pEmp - pTheo);
-      }
-      healed.benfordCompliance = parseFloat(Math.max(0.5, Math.min(1.0, 1.0 - devTheo / 2.0)).toFixed(3));
+      // Σ|p_emp − p_théo| ∈ [0, 2] entre deux distributions : conformité ramenée sur
+      // [0, 1] sans plancher arbitraire, qui afficherait une conformité minimale inventée.
+      healed.benfordCompliance = parseFloat(Math.max(0, Math.min(1, 1 - dev / 2)).toFixed(3));
     }
-  }
-
-  if (healed.suspicionScore === undefined) {
-    const predCount = Math.max(1, predictedSet.size || 5);
-    const logisticAttenuation = 1.0 / (1.0 + Math.exp(exactHits - predCount / 2.0));
-    healed.suspicionScore = Math.max(0, Math.min(100, Math.round((healed.divergenceMetric || 0) * logisticAttenuation * 0.5)));
-  }
-
-  if (healed.unifiedIntegrityIndex === undefined) {
-    healed.unifiedIntegrityIndex = Math.max(0, 100 - healed.suspicionScore);
-  }
-
-  if (healed.riggedProbability === undefined) {
-    healed.riggedProbability = parseFloat((healed.suspicionScore / 100.0).toFixed(4));
-  }
-
-  if (healed.continuousTopologicalLoss === undefined) {
-    healed.continuousTopologicalLoss = parseFloat(((healed.divergenceMetric || 50) / 100.0).toFixed(4));
-  }
-
-  if (healed.wassersteinLoss === undefined) {
-    const uniformStd90 = 90.0 / Math.sqrt(12.0);
-    healed.wassersteinLoss = parseFloat(((healed.rmse / uniformStd90) * (90.0 / 4.0)).toFixed(4));
-  }
-
-  if (healed.idealAlgorithmicDriftTolerance === undefined) {
-    healed.idealAlgorithmicDriftTolerance = parseFloat(Math.max(0.01, Math.min(0.2, 0.05 + 0.1 * ((healed.divergenceMetric || 0) / 100.0))).toFixed(4));
   }
   
   // Reconstruct missing list fields if empty
@@ -652,41 +595,14 @@ export const performForensicAnalysis = async (
   let squaredErrorSum = 0;
   let validPoints = 0;
   let brierSum = 0;
-  let shannonEntropy = 0;
+  let shannonEntropy: number | undefined;
   const allScores: { number: number; score: number }[] = [];
 
-  let activeBreakdown = predictionBreakdown;
-  if (!activeBreakdown || Object.keys(activeBreakdown).length === 0) {
-    // Génération déterministe d'un pseudo-breakdown basé sur les prédictions
-    // pour garantir qu'aucune métrique ne se retrouve à "N/A"
-    const fallbackBreakdown: Record<number, ScoreBreakdown> = {};
-    const suggestedSet = new Set(predictedNumbers);
-    
-    let seed = 0;
-    const seedStr = `${drawName}-${date}`;
-    for (let i = 0; i < seedStr.length; i++) {
-      seed = (seed << 5) - seed + seedStr.charCodeAt(i);
-      seed |= 0;
-    }
-    const lcg = () => {
-      seed = (seed * 1664525 + 1013904223) | 0;
-      return (Math.abs(seed) % 1000) / 1000;
-    };
-
-    const algos = ["FREQUENCY", "MARKOV", "SPATIAL", "SPECTRAL", "FRACTAL", "BAYES", "TEMPORAL"];
-    
-    for (let i = 1; i <= 90; i++) {
-      const isSuggested = suggestedSet.has(i);
-      const scoreBase = isSuggested ? 85 : (lcg() * 40 + 20);
-      
-      const bd: Record<string, number> = {};
-      algos.forEach((algo) => {
-        bd[algo] = Math.max(0, Math.min(100, scoreBase + (lcg() * 15 - 7.5)));
-      });
-      fallbackBreakdown[i] = bd as ScoreBreakdown;
-    }
-    activeBreakdown = fallbackBreakdown;
-  }
+  // Aucune décomposition n'est synthétisée : si le breakdown réel de la prédiction est
+  // absent, les métriques spectrales (RMSE, Brier, KL, entropie) restent non mesurées et
+  // sont omises du rapport. Fabriquer des scores d'algorithmes pour remplir l'affichage
+  // reviendrait à présenter une mesure inventée.
+  const activeBreakdown = predictionBreakdown;
 
   if (activeBreakdown) {
     for (let i = 1; i <= 90; i++) {
@@ -724,11 +640,16 @@ export const performForensicAnalysis = async (
     }
   }
 
-  const brier_score = validPoints > 0 ? brierSum / validPoints : 0;
-  const rmse = validPoints > 0 ? Math.sqrt(squaredErrorSum / validPoints) : 0;
+  // Métriques conditionnées à l'existence d'une décomposition réelle : sans elle, elles
+  // restent indéfinies (l'UI affiche « n/d ») au lieu d'être ramenées à zéro, ce qui
+  // laisserait croire à une erreur nulle donc à une prédiction parfaite.
+  const brier_score =
+    validPoints > 0 ? brierSum / validPoints : undefined;
+  const rmse =
+    validPoints > 0 ? Math.sqrt(squaredErrorSum / validPoints) : undefined;
 
   let z_scores: { number: number; z: number }[] = [];
-  let kl_divergence = 0;
+  let kl_divergence: number | undefined;
 
   if (allScores.length > 0) {
     const sumScores = allScores.reduce((acc, s) => acc + s.score, 0) || 1;
@@ -743,7 +664,7 @@ export const performForensicAnalysis = async (
 
     allScores.forEach((s) => {
       const p = s.score / sumScores;
-      if (p > 0) shannonEntropy -= p * Math.log2(p);
+      if (p > 0) shannonEntropy = (shannonEntropy ?? 0) - p * Math.log2(p);
 
       if (actualSet.has(s.number)) {
         z_scores.push({
@@ -756,7 +677,8 @@ export const performForensicAnalysis = async (
         ? 1 / actualWinningNumbers.length
         : 0;
       if (pActual > 0) {
-        kl_divergence += pActual * Math.log2(pActual / (p + epsilon));
+        kl_divergence =
+          (kl_divergence ?? 0) + pActual * Math.log2(pActual / (p + epsilon));
       }
     });
   }
@@ -1161,9 +1083,11 @@ export const performForensicAnalysis = async (
 
   // ENTROPIE MAXIMALE DE SHANNON pour 90 résultats équiprobables
   const maxPossibleEntropy = Math.log2(90); // ~6.4918
+  // Entropie non mesurée (aucun breakdown spectral) : aucune pénalité de chaos n'est
+  // appliquée plutôt qu'une pénalité médiane arbitraire.
   const entropyRatio = shannonEntropy
     ? shannonEntropy / maxPossibleEntropy
-    : 0.5;
+    : 0;
 
   // Orbiting : pénalise le consensus dans les environnements à haute entropie (chaos)
   // Remplace le "1.7" magique par une relation linéaire bornée : réduction max de 50% basée sur le chaos
@@ -1195,7 +1119,11 @@ export const performForensicAnalysis = async (
   // ============================================================================
   const drawAnomalyScore = Math.max(0, Math.min(100, Math.round(100.0 - (UFI_Data.unifiedIntegrityIndex ?? 100.0))));
   const hitEffectiveness = (exactHitsCount * 1.0 + nearMisses.length * 0.4) / 5.0;
-  const brierPenaltyFactor = (1.0 + Math.min(1.0, (brier_score ?? 0.05) * 15.0)) / 2.0;
+  // Sans score de Brier mesuré, aucune pénalité n'est appliquée (facteur neutre = 1).
+  const brierPenaltyFactor =
+    brier_score === undefined
+      ? 1.0
+      : (1.0 + Math.min(1.0, brier_score * 15.0)) / 2.0;
   const modelMissScore = Math.min(100, Math.max(0, Math.round((1.0 - Math.min(1.0, hitEffectiveness)) * 100.0 * brierPenaltyFactor)));
   
   const structuralQualityScore = Math.max(0, Math.min(100, Math.round(
@@ -1210,16 +1138,29 @@ export const performForensicAnalysis = async (
   const dominantCauses: string[] = [];
   const warnings: string[] = [];
 
+  // Deux seules causes de rupture sont retenues, toutes deux mesurées en amont :
+  // le régime de bifurcation émis par le moteur de catastrophe (René Thom) et le signal
+  // d'effondrement entropique produit par l'audit médico-légal. Aucun seuil local n'est inventé ici.
+  const cuspBifurcationActive = UFI_Data.catastropheControlParams?.regime === "BIFURCATION_ACTIVE";
+  const entropyCollapseMeasured = UFI_Data.entropyCollapse === true;
+  const topologicalBreak = cuspBifurcationActive || entropyCollapseMeasured;
+
   if (drawAnomalyScore >= 65 || (UFI_Data.riggedProbability && UFI_Data.riggedProbability > 0.6)) {
     dominantCauses.push("Anomalie structurelle du tirage : rupture des distributions standard (UFI bas, biais stochastique)");
   }
-  if (UFI_Data.catastropheControlParams?.regime === "RUPTURE" || (shannonEntropy && shannonEntropy < 2.0)) {
-    dominantCauses.push("Effondrement entropique ou saut de catastrophe topologique (changement de régime dynamique)");
+  if (topologicalBreak) {
+    dominantCauses.push(
+      `Effondrement entropique ou saut de catastrophe topologique (changement de régime dynamique) : ${
+        cuspBifurcationActive
+          ? `bifurcation active (Δ = ${UFI_Data.catastropheControlParams?.discriminant.toFixed(2)})`
+          : "effondrement entropique signalé par l'audit"
+      }`,
+    );
   }
   if (nearMisses.length >= 3 && exactHitsCount <= 1) {
     dominantCauses.push(`Dispersion par frôlements (${nearMisses.length} near-misses) : résonance spatiale/miroir présente mais décalée`);
   }
-  if ((brier_score ?? 0) > 0.08) {
+  if (brier_score !== undefined && brier_score > 0.08) {
     dominantCauses.push("Surconfiance de l'ensemble d'inférence : probabilités disproportionnées par rapport aux réalisations");
   }
   if (continuousTopologicalLoss > 0.6) {
@@ -1242,13 +1183,13 @@ export const performForensicAnalysis = async (
   let failureMode: ForensicFailureMode = "normalnoise";
   if (drawAnomalyScore >= 70) {
     failureMode = "anomalousdraw";
-  } else if (UFI_Data.catastropheControlParams?.regime === "RUPTURE" || (shannonEntropy && shannonEntropy < 2.0)) {
+  } else if (topologicalBreak) {
     failureMode = "regimebreak";
   } else if (severeDrifts.some(d => d.algo.toLowerCase().includes("momentum") || d.algo.toLowerCase().includes("freq"))) {
     failureMode = "recentoverfit";
   } else if (continuousTopologicalLoss > 0.65 || (nearMisses.length >= 3 && exactHitsCount === 0)) {
     failureMode = "structuralmisalignment";
-  } else if ((brier_score ?? 0) > 0.08) {
+  } else if (brier_score !== undefined && brier_score > 0.08) {
     failureMode = "overconfidence";
   } else {
     failureMode = "normalnoise";
@@ -1349,8 +1290,12 @@ export const performForensicAnalysis = async (
     proposedAdjustments,
     aiAnalysis: aiAutopsy?.analysis,
     recommendations: aiAutopsy?.recommendations,
-    isBlackSwan: aiAutopsy?.isBlackSwan || (1.0 / (1.0 + Math.exp((UFI_Data.unifiedIntegrityIndex - 25.0) / 5.0)) > 0.8),
-    modelUsed: aiAutopsy ? "Gemini-2.5-Flash (XAI)" : "Nexus Forensic Engine",
+    isBlackSwan:
+      aiAutopsy?.isBlackSwan ??
+      (cuspBifurcationActive || UFI_Data.isChaoticRegime === true),
+    modelUsed: aiAutopsy
+      ? "Nexus Forensic Engine (autopsie hypergéométrique locale)"
+      : "Nexus Forensic Engine (mesures de base, autopsie désactivée)",
     dnaOrbitingIndex,
     consensusStrength,
     antiConsensusActive,

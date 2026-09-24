@@ -221,7 +221,11 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
           return {
             timestamp: rep.timestamp ? new Date(rep.timestamp).getTime() : Date.now(),
             suggestedNumbers: suggested,
-            confidence: rep.forensicScore || (100 - (rep.suspicionScore || 15)),
+            confidence:
+              rep.forensicScore ??
+              (rep.suspicionScore !== undefined
+                ? 100 - rep.suspicionScore
+                : undefined),
             result: actualGagnants.length > 0 ? {
               id: rep.drawResultId || `rep-${rep.id}`,
               drawName,

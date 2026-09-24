@@ -50,16 +50,20 @@ export const condenseForensicReport = (report: ForensicReport): CondensedForensi
     exactHitsCount: exactHits.length,
     nearMissesCount: nearMisses.length,
     totalPredicted: matches.length,
-    unifiedIntegrityIndex: report.unifiedIntegrityIndex ?? 85,
-    rmse: report.rmse ?? 28.45,
-    brier_score: report.brier_score ?? 0.2145,
-    kl_divergence: report.kl_divergence ?? 1.3412,
-    shannon_entropy: report.shannon_entropy ?? 5.21,
-    forensicScore: report.forensicScore ?? 80,
-    suspicionScore: report.suspicionScore ?? 15,
-    failureMode: report.failureMode || report.verdict || "normalnoise",
-    verdict: report.verdict || report.failureMode,
-    severity: report.severity || "low",
+    // Métriques transmises telles que mesurées : aucun repli numérique inventé ici.
+    // L'en-tête condensé est persisté puis affiché ; y injecter une valeur par défaut
+    // (85, 28.45, "low"…) ferait passer une donnée fabriquée pour une mesure réelle.
+    // Les champs restent optionnels : l'UI doit afficher « n/d » lorsqu'ils sont absents.
+    unifiedIntegrityIndex: report.unifiedIntegrityIndex,
+    rmse: report.rmse,
+    brier_score: report.brier_score,
+    kl_divergence: report.kl_divergence,
+    shannon_entropy: report.shannon_entropy,
+    forensicScore: report.forensicScore,
+    suspicionScore: report.suspicionScore,
+    failureMode: report.failureMode ?? report.verdict,
+    verdict: report.verdict ?? report.failureMode,
+    severity: report.severity,
     aiAnalysisSummary,
     isCondensed: true,
     hasFullPayload: true

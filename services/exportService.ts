@@ -326,7 +326,7 @@ export const ExportService = {
         doc.setFont("helvetica", "bold");
         doc.text("CONFIANCE NEURALE", pageWidth - margin - 21, currentY + 7, { align: "center" });
         doc.setFontSize(16);
-        doc.text(`${(params.confidence || 85).toFixed(1)}%`, pageWidth - margin - 21, currentY + 18, { align: "center" });
+        doc.text(`${params.confidence.toFixed(1)}%`, pageWidth - margin - 21, currentY + 18, { align: "center" });
 
         // Titre Section Vecteurs
         doc.setTextColor(15, 23, 42);
@@ -371,13 +371,15 @@ export const ExportService = {
         }
 
         // 3. TABLEAU DES STATISTIQUES DE CONFIANCE & ROBUSTESSE
-        const stability = params.stabilityScore !== undefined ? `${params.stabilityScore.toFixed(1)}%` : "88.0%";
-        const diversity = params.diversityScore !== undefined ? `${(params.diversityScore * 100).toFixed(1)}%` : "92.0%";
-        const alignment = params.realityAlignment !== undefined ? `${params.realityAlignment.toFixed(1)}%` : "85.4%";
-        const adversarial = params.adversarialSurvivalScore !== undefined ? `${params.adversarialSurvivalScore.toFixed(1)}%` : "94.2%";
+        // Aucune valeur de repli chiffrée : une métrique absente est déclarée non mesurée
+        // dans le document plutôt que remplacée par une constante d'apparence plausible.
+        const stability = params.stabilityScore !== undefined ? `${params.stabilityScore.toFixed(1)}%` : "n/d";
+        const diversity = params.diversityScore !== undefined ? `${(params.diversityScore * 100).toFixed(1)}%` : "n/d";
+        const alignment = params.realityAlignment !== undefined ? `${params.realityAlignment.toFixed(1)}%` : "n/d";
+        const adversarial = params.adversarialSurvivalScore !== undefined ? `${params.adversarialSurvivalScore.toFixed(1)}%` : "n/d";
 
         const statsData = [
-            ['Confiance Globale du Modèle', `${(params.confidence || 85).toFixed(1)}%`, 'Indice calibré de probabilité d\'apparition'],
+            ['Confiance Globale du Modèle', `${params.confidence.toFixed(1)}%`, 'Indice calibré de probabilité d\'apparition'],
             ['Stabilité Topologique', stability, 'Résistance du paysage d\'inférence aux perturbations'],
             ['Alignement Réalité', alignment, 'Concordance avec les harmoniques historiques réelles'],
             ['Diversité Génétique du Ticket', diversity, 'Éloignement des clusters d\'entropie et anti-monoculture'],
@@ -598,43 +600,71 @@ export const ExportService = {
         doc.text("1. SYNTHÈSE ANALYTIQUE & RÉGIME STOCHASTIQUE", margin, currentY);
         currentY += 4;
 
-        const hurst = params.gameRegimeInfo?.hurst ?? 0.50;
-        const entropy = params.currentEntropy ?? params.gameRegimeInfo?.entropy ?? 0.85;
-        const weyl = params.gameRegimeInfo?.weylDiscrepancy ?? 0.18;
-        const chaos = params.gameRegimeInfo?.chaosDimension ?? 1.25;
-        const noise = params.resolvedNoiseLevel ?? 0.35;
-        const lr = params.resolvedLearningRate ?? 0.05;
+        // Toute grandeur non mesurée est publiée "n/d" : aucune valeur de repli n'est inventée.
+        const measure = (value: number | undefined | null): number | null =>
+            typeof value === "number" && Number.isFinite(value) ? value : null;
+        const signed = (value: number, digits = 4): string =>
+            `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+
+        const hurst = measure(params.gameRegimeInfo?.hurst);
+        const entropy = measure(params.currentEntropy) ?? measure(params.gameRegimeInfo?.entropy);
+        const weyl = measure(params.gameRegimeInfo?.weylDiscrepancy);
+        const chaos = measure(params.gameRegimeInfo?.chaosDimension);
+        const noise = measure(params.resolvedNoiseLevel);
+        const lr = measure(params.resolvedLearningRate);
+        const stability = measure(params.stabilityScore);
+        const alignment = measure(params.realityAlignment);
+        const regimeLabel = params.gameRegimeInfo?.regime ?? "non classé";
 
         const kpiRows = [
             [
                 "Exposant de Hurst (H)",
-                hurst.toFixed(4),
-                hurst > 0.52 ? "Persistance Longue Mémoire" : hurst < 0.48 ? "Réversion à la Moyenne" : "Régime Brownien Neutre"
+                hurst === null ? "n/d" : hurst.toFixed(4),
+                hurst === null
+                    ? "Non mesuré sur l'historique isolé de ce tirage"
+                    : `Régime « ${regimeLabel} » · déviation ${signed(hurst - 0.5)} par rapport à la marche aléatoire (H = 0.5000)`
             ],
             [
-                "Entropie de Shannon (S)",
-                entropy.toFixed(4),
-                entropy > 0.8 ? "Haute Dispersion (Recuit Actif)" : "Structure Fréquentielle Concentrée"
+                "Entropie de Shannon (S/Smax)",
+                entropy === null ? "n/d" : entropy.toFixed(4),
+                entropy === null
+                    ? "Non mesurée sur l'historique isolé de ce tirage"
+                    : `Dispersion normalisée : ${(entropy * 100).toFixed(1)}% de l'entropie maximale (mesure brute, aucun seuil)`
             ],
             [
                 "Discrépance de Weyl",
-                weyl.toFixed(4),
-                weyl < 0.20 ? "Équirépartition Topologique Optimale" : "Anisotropie Spatiale Modérée"
+                weyl === null ? "n/d" : weyl.toFixed(4),
+                weyl === null
+                    ? "Non mesurée sur l'historique isolé de ce tirage"
+                    : "Écart moyen observé à l'équirépartition uniforme sur le domaine mesuré"
             ],
             [
                 "Dimension de Chaos GP",
-                chaos.toFixed(3),
-                "Dimension fractale dans l'espace des phases des écarts"
+                chaos === null ? "n/d" : chaos.toFixed(3),
+                chaos === null
+                    ? "Non mesurée sur l'historique isolé de ce tirage"
+                    : "Dimension fractale estimée dans l'espace des phases des écarts"
             ],
             [
                 "Bruit Thermique (sigma)",
-                `${noise.toFixed(3)} V`,
-                "Température de recuit stochastique déterministe (sans aléa)"
+                noise === null ? "n/d" : noise.toFixed(3),
+                noise === null
+                    ? "Non calibré : aucun recuit exécuté"
+                    : "Température de recuit déterministe (LCG à graine canonique, zéro aléa système)"
+            ],
+            [
+                "Taux d'apprentissage",
+                lr === null ? "n/d" : lr.toFixed(4),
+                lr === null
+                    ? "Non calibré : aucune passe d'entraînement exécutée"
+                    : "Pas de descente de gradient appliqué sur cet historique isolé"
             ],
             [
                 "Stabilité / Alignement",
-                `${(params.stabilityScore ?? 85).toFixed(1)}% / ${(params.realityAlignment ?? 82).toFixed(1)}%`,
-                "Résistance aux perturbations paramétriques & concordance historique"
+                stability === null && alignment === null
+                    ? "n/d"
+                    : `${stability === null ? "n/d" : `${stability.toFixed(1)}%`} / ${alignment === null ? "n/d" : `${alignment.toFixed(1)}%`}`,
+                "Résistance aux perturbations paramétriques & concordance historique (mesures internes du moteur)"
             ]
         ];
 
@@ -698,27 +728,26 @@ export const ExportService = {
         const algoEntries = Object.entries(rawWeights).map(([key, val]) => {
             const pct = ((Number(val) || 0) / sumWeights) * 100;
             const proof = params.empiricalProofs?.[key];
-            const baseline = proof?.baselineRate ?? (5.0 / 90.0);
-            const rate = proof?.empiricalHitRate ?? baseline;
-            const zScore = proof?.proofScore ?? 0;
-            
-            // Écart type stochastique observé sigma = sqrt(p * (1 - p) / N)
-            const trials = 200;
-            const stdDev = proof?.stdDev ?? Math.sqrt((rate * (1.0 - rate)) / trials);
 
-            let status = "Régularisé";
+            // Aucune preuve empirique disponible : la ligne est publiée "n/d".
+            // Ni taux de base ni écart type théorique ne sont substitués à la mesure.
+            const hitRate = typeof proof?.empiricalHitRate === "number" ? proof.empiricalHitRate : null;
+            const zScore = typeof proof?.proofScore === "number" ? proof.proofScore : null;
+            const stdDev = typeof proof?.stdDev === "number" ? proof.stdDev : null;
+
+            let status: string;
             if (key === "machine_transfer" || key === "machine") {
                 if (params.hasMachineData === false || pct === 0) {
                     status = "Inactif (Zéro Données Machine)";
                 } else if (proof?.hasProof) {
-                    status = "Prouvé (Z > 0)";
+                    status = "Transfert prouvé sur l'historique isolé";
                 } else {
-                    status = "Non Prouvé (Bloqué)";
+                    status = "Transfert non prouvé sur l'historique isolé";
                 }
-            } else if (proof?.hasProof || zScore > 0.5) {
-                status = "Prouvé (Z > 0)";
-            } else if (pct > 7) {
-                status = "Prioritaire";
+            } else if (zScore === null) {
+                status = "Non mesuré (aucune preuve empirique)";
+            } else {
+                status = `${zScore >= 0 ? "Au-dessus" : "Sous"} l'attendu · |Z| = ${Math.abs(zScore).toFixed(2)}`;
             }
 
             return {
@@ -727,7 +756,7 @@ export const ExportService = {
                 pct,
                 stdDev,
                 zScore,
-                hitRate: (rate * 100).toFixed(1),
+                hitRate,
                 status
             };
         }).sort((a, b) => b.pct - a.pct);
@@ -735,9 +764,9 @@ export const ExportService = {
         const layerRows = algoEntries.map(item => [
             item.name,
             `${item.pct.toFixed(2)}%`,
-            `sigma = ${item.stdDev.toFixed(4)}`,
-            `Z = ${item.zScore >= 0 ? "+" : ""}${item.zScore.toFixed(2)}`,
-            `${item.hitRate}%`,
+            item.stdDev === null ? "n/d" : `sigma = ${item.stdDev.toFixed(4)}`,
+            item.zScore === null ? "n/d" : `Z = ${signed(item.zScore, 2)}`,
+            item.hitRate === null ? "n/d" : `${(item.hitRate * 100).toFixed(1)}%`,
             item.status
         ]);
 
@@ -846,7 +875,8 @@ export const ExportService = {
         items: Array<{
             timestamp: number;
             suggestedNumbers: number[];
-            confidence: number;
+            /** Absente lorsque le rapport ne porte aucune mesure de confiance. */
+            confidence?: number;
             result?: DrawResult | null;
             hits: number[];
             nearMisses: number[];
@@ -893,9 +923,13 @@ export const ExportService = {
         const avgPrecision = verifiedItems.length > 0
             ? (verifiedItems.reduce((acc, it) => acc + it.precisionPct, 0) / verifiedItems.length).toFixed(1)
             : "0.0";
-        const avgConfidence = params.items.length > 0
-            ? (params.items.reduce((acc, it) => acc + it.confidence, 0) / params.items.length).toFixed(1)
-            : "0.0";
+        // Moyenne établie uniquement sur les rapports portant réellement une confiance.
+        const measuredConfidences = params.items
+            .map(it => it.confidence)
+            .filter((c): c is number => typeof c === "number" && Number.isFinite(c));
+        const avgConfidence = measuredConfidences.length > 0
+            ? `${(measuredConfidences.reduce((acc, c) => acc + c, 0) / measuredConfidences.length).toFixed(1)}%`
+            : "n/d";
 
         // KPI Summary Bar
         let currentY = 42;
@@ -933,7 +967,7 @@ export const ExportService = {
         doc.setTextColor(71, 85, 105);
         doc.text("Confiance Moyenne", margin + colWidth * 4.5, kpiY, { align: "center" });
         doc.setTextColor(79, 70, 229); // Indigo
-        doc.text(`${avgConfidence}%`, margin + colWidth * 4.5, valY, { align: "center" });
+        doc.text(avgConfidence, margin + colWidth * 4.5, valY, { align: "center" });
 
         currentY += 22;
 
@@ -952,7 +986,7 @@ export const ExportService = {
                 actualStr,
                 hitsStr,
                 `${item.nearMisses.length}`,
-                `${item.confidence}%`,
+                item.confidence !== undefined ? `${item.confidence}%` : "n/d",
                 statusStr
             ];
         });

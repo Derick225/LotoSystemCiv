@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { generateMasterPrediction } from "../../services/prediction/predictionFacade";
 import { Prediction, AlgoWeights } from "../../types";
-import { AlgoKey } from "../../shared/prediction.types";
+import { AlgoKey, ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
 import { NumberBall } from "../NumberBall";
 import {
   Sliders,
@@ -793,7 +793,7 @@ export const WhatIfSimulatorTab: React.FC<{ drawName: string }> = ({
               <h3 className="text-base font-black text-white">Modulation Cybernétique de Bézier</h3>
             </div>
             <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-              Ce système applique un étalement continu non-linéaire sur les 20 algorithmes en séquence (du fréquentiel classique au deep learning).
+              Ce système applique un étalement continu non-linéaire sur les {ACTIVE_ALGO_COUNT} algorithmes actifs en séquence (du fréquentiel classique au deep learning).
             </p>
           </div>
 

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } f
 import { useNexusStore } from '../store/useNexusStore';
 import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights, generateEmpiricalCalibration } from '../services/predictionEngine';
 import { savePredictionToHistory, getLatestPredictionForDraw } from '../services/predictionHistoryService';
-import { calculateShannonEntropy, detectGameRegime } from '../services/mathService';
+import { calculateShannonEntropy, detectGameRegime, calculateVolatility } from '../services/mathService';
 import { getLocalForensicReports } from '../services/postPredictionAnalysisService';
 import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../shared/prediction.types';
 import { DNAOptimizer } from '../services/training/DNAOptimizer';
@@ -38,7 +38,7 @@ export const usePredictionGenerator = (drawName: string) => {
     const [activeDNA, setActiveDNA] = useState<string>("Standard");
     const [quantumMode, setQuantumMode] = useState(false);
     const { flags } = useFeatureFlags();
-    const [isChaotic, setIsChaotic] = useState(false);
+    const [chaosIndex, setChaosIndex] = useState(0);
     const lastInferenceStateRef = useRef<string | null>(null);
 
     const [isOptimizing, setIsOptimizing] = useState(false);
@@ -74,9 +74,13 @@ export const usePredictionGenerator = (drawName: string) => {
         return regularity;
     }, [regularity]);
 
+    // Volatilité : métrique analytics si chargée, sinon MESURÉE localement sur l'historique isolé
+    // du tirage (écart-type des sommes ramené à son espérance théorique exacte
+    // Var = k(N²−1)/12 · (N−k)/(N−1)). Aucune valeur de repli inventée : historique vide ⇒ score 0.
     const activeVolatility = useMemo(() => {
-        return volatility;
-    }, [volatility]);
+        if (volatility) return volatility;
+        return calculateVolatility(activeHistory);
+    }, [volatility, activeHistory]);
 
     const activeSymbioticContext = useMemo(() => {
         return symbioticContext;
@@ -99,7 +103,7 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [currentEntropy]);
 
     const resolvedNoiseLevel = useMemo(() => {
-        const volScore = activeVolatility?.score || 50;
+        const volScore = activeVolatility.score;
         return Math.max(0.1, Math.min(3.0, (volScore / 50.0) * (currentEntropy || 0.5) * 1.5 + 0.2));
     }, [currentEntropy, activeVolatility]);
 
@@ -107,8 +111,15 @@ export const usePredictionGenerator = (drawName: string) => {
         return Math.max(10, Math.min(100, Math.round(20 + 80 * (currentEntropy || 0.5))));
     }, [currentEntropy]);
 
-    const gameRegimeInfo = activeRegime;
+    // Régime de jeu : mesure analytics si disponible, sinon mesure locale déterministe (Hurst,
+    // entropie, volatilité, discrépance de Weyl, dimension de chaos) sur l'historique isolé du
+    // tirage. Aucun seuil inventé, aucune constante de repli.
+    const localRegime = useMemo(() => {
+        if (activeHistory.length < 10) return null;
+        return detectGameRegime(activeHistory);
+    }, [activeHistory]);
 
+    const gameRegimeInfo = activeRegime ?? localRegime;
     const [chaoticRatio, setChaoticRatio] = useState(0);
     useEffect(() => {
         let active = true;
@@ -133,11 +144,16 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [drawName]);
 
     useEffect(() => {
-        // Activation logistique continue pour la détection du chaos (Zéro Seuil Arbitraire)
-        const volScore = activeVolatility?.score ?? 50.0;
-        const chaosIndex = 0.5 * (1.0 / (1.0 + Math.exp(-8.0 * (chaoticRatio - 0.20)))) +
-                           0.5 * (1.0 / (1.0 + Math.exp(-0.1 * (volScore - 75.0))));
-        setIsChaotic(chaosIndex > 0.5);
+        // Indice de chaos continu (0-1) : sigmoïdes sans palier, aucune valeur inventée.
+        // Si la volatilité n'est pas mesurable (historique vide), son terme s'abstient au lieu
+        // d'être remplacé par une constante neutre qui forcerait artificiellement le diagnostic.
+        const hasVolatility = activeVolatility.score > 0;
+        const sChaosRatio = 1.0 / (1.0 + Math.exp(-8.0 * (chaoticRatio - 0.20)));
+        const sVolatility = 1.0 / (1.0 + Math.exp(-0.1 * (activeVolatility.score - 75.0)));
+        const chaosIndex = hasVolatility
+            ? 0.5 * sChaosRatio + 0.5 * sVolatility
+            : sChaosRatio;
+        setChaosIndex(chaosIndex);
     }, [chaoticRatio, activeVolatility]);
 
     useEffect(() => {
@@ -239,7 +255,6 @@ export const usePredictionGenerator = (drawName: string) => {
         }
 
         try {
-            await new Promise(r => setTimeout(r, 150)); 
             const metrics = { spectral: activeSpectral, correlationMatrix: activeCorrelationMatrix, regularity: activeRegularity, volatility: activeVolatility, fractal: activeFractal };
             const res = await generateMasterPrediction(
                 drawName,
@@ -394,7 +409,7 @@ export const usePredictionGenerator = (drawName: string) => {
         activeDNA,
         quantumMode,
         setQuantumMode,
-        isChaotic,
+        chaosIndex,
         isOptimizing,
         optimizedWeights,
         previousWeights,
@@ -403,7 +418,9 @@ export const usePredictionGenerator = (drawName: string) => {
         resolvedNoiseLevel,
         resolvedMcIterations,
         gameRegimeInfo,
-        volatilityScore: activeVolatility?.score ?? 35.0,
+        // Volatilité mesurée (analytics si chargée, sinon calcul local déterministe sur
+        // l'historique isolé du tirage) : toujours un nombre réel, jamais une constante de repli.
+        volatilityScore: activeVolatility.score,
         activeHistory,
         runInference,
         runMonteCarlo,

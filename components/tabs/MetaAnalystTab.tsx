@@ -5,9 +5,12 @@ import {
   getPlatinumHistory,
 } from "../../services/metaAnalystService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
+import { HYPERGEOMETRIC_5_90 } from "../../services/backtestingFramework";
+import { binomialUpperTail, benjaminiHochberg } from "../../utils/mathUtils";
 import { saveTicket } from "../../services/userPreferencesService";
 import { useNexusStore } from "../../store/useNexusStore";
 import type { PlatinumResult, PlatinumScenario, Prediction } from "../../types";
+import { AlgoKey, ScoreBreakdown } from "../../shared/prediction.types";
 import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
 import { TicketXRay } from "../TicketXRay";
@@ -54,6 +57,37 @@ interface MetaAnalystTabProps {
   drawName: string;
 }
 
+// Encodage visuel continu d'une métrique 0-100 : teinte ambre (45°) → émeraude (160°).
+// Interpolation purement graphique, aucun seuil de décision.
+const metricHue = (value: number): string =>
+  `hsl(${45 + Math.max(0, Math.min(100, value)) * 1.15} 85% 55%)`;
+
+// Teinte barycentrique du régime : mélange RGB pondéré par les probabilités mesurées
+// (émeraude = stable, ambre = transition, rose = chaotique). La couleur affichée est donc
+// toujours cohérente avec la barre de répartition, sans bifurcation binaire.
+const regimeTint = (
+  p?: { stable: number; transition: number; chaotic: number },
+): string => {
+  if (!p) return "#94a3b8";
+  const total = p.stable + p.transition + p.chaotic || 1;
+  const mix = (a: number, b: number, c: number) =>
+    Math.round((p.stable * a + p.transition * b + p.chaotic * c) / total);
+  return `rgb(${mix(16, 245, 244)}, ${mix(185, 158, 63)}, ${mix(129, 11, 94)})`;
+};
+
+// Référence exacte d'un tirage équitable 5/90, dérivée de la loi hypergéométrique :
+// espérance du nombre de bons numéros et probabilité d'obtenir au moins 2 bons numéros.
+const NULL_EXPECTED_HITS = Object.entries(HYPERGEOMETRIC_5_90).reduce(
+  (acc, [k, p]) => acc + Number(k) * p,
+  0,
+);
+const NULL_PROB_AT_LEAST_2 = 1 - HYPERGEOMETRIC_5_90[0] - HYPERGEOMETRIC_5_90[1];
+
+// Tolérance FDR dérivée de la structure du jeu (aucun seuil arbitraire type 0.05) : la proportion
+// neutre de numéros gagnants (5/90) sert d'échelle de risque intrinsèque, même convention que
+// `services/prediction/weightsManager.ts`.
+const NEUTRAL_FDR_TOLERANCE = 5 / 90;
+
 const ScenarioCard = React.memo<{
   scenario: PlatinumScenario;
   isSelected: boolean;
@@ -92,10 +126,13 @@ const ScenarioCard = React.memo<{
               backgroundColor: `${scenario.color}15`,
             }}
           >
-            {scenario.risk} RISK
+            Rang {scenario.risk}
           </span>
-          <span className="text-xs font-bold text-white">
-            {scenario.probability}%
+          <span className="text-xs font-bold text-white flex items-baseline gap-1">
+            {scenario.relativeIndex.toFixed(0)}
+            <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">
+              densité
+            </span>
           </span>
         </div>
 
@@ -193,7 +230,20 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     trials: number;
     scenariosStats: Record<
       string,
-      { name: string; meanHits: number; successRate: number; totalHits: number }
+      {
+        name: string;
+        meanHits: number;
+        expectedHits: number;
+        ge2Count: number;
+        ge2Rate: number;
+        nullGe2Rate: number;
+        totalHits: number;
+        // p-value unilatérale EXACTE (queue supérieure binomiale) du nombre de tirages à ≥2 bons
+        // numéros observés, sous H0 « tirage équitable ». null si la fenêtre ne permet aucun test.
+        pValue: number | null;
+        // p-value ajustée Benjamini-Hochberg (FDR) sur la famille des scénarios testés ensemble.
+        qValue: number | null;
+      }
     >;
     details: {
       drawDate: string;
@@ -243,9 +293,6 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     audioEngine.play("loading");
 
     try {
-      // Simulation de temps de calcul (UX)
-      await new Promise((r) => setTimeout(r, 150));
-
       const data = await generatePlatinumPrediction(
         drawName,
         history,
@@ -291,20 +338,19 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     audioEngine.play("loading");
 
     try {
-      await new Promise((r) => setTimeout(r, 150));
       // Backtest sur les 8 derniers tirages disponibles
       const trialsCount = Math.min(8, history.length - 10);
       const detailsList: any[] = [];
       const scenarioAccumulator: Record<
         string,
-        { name: string; totalHits: number; wins: number }
+        { name: string; totalHits: number; ge2: number }
       > = {
-        alpha: { name: "Alpha Core", totalHits: 0, wins: 0 },
-        beta: { name: "Beta Flow", totalHits: 0, wins: 0 },
-        gamma: { name: "Gamma Burst", totalHits: 0, wins: 0 },
-        delta: { name: "Delta Convergence", totalHits: 0, wins: 0 },
-        epsilon: { name: "Epsilon Forensic", totalHits: 0, wins: 0 },
-        zeta: { name: "Zeta Adversarial", totalHits: 0, wins: 0 },
+        alpha: { name: "Alpha Core", totalHits: 0, ge2: 0 },
+        beta: { name: "Beta Flow", totalHits: 0, ge2: 0 },
+        gamma: { name: "Gamma Burst", totalHits: 0, ge2: 0 },
+        delta: { name: "Delta Convergence", totalHits: 0, ge2: 0 },
+        epsilon: { name: "Epsilon Forensic", totalHits: 0, ge2: 0 },
+        zeta: { name: "Zeta Adversarial", totalHits: 0, ge2: 0 },
       };
 
       for (let j = trialsCount; j >= 1; j--) {
@@ -343,8 +389,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           if (scenarioAccumulator[s.id]) {
             scenarioAccumulator[s.id].name = s.name;
             scenarioAccumulator[s.id].totalHits += hits;
+            // Comptage du taux observé de tirages à ≥ 2 bons numéros, dont la valeur
+            // attendue sous tirage équitable est NULL_PROB_AT_LEAST_2 (loi hypergéométrique).
             if (hits >= 2) {
-              scenarioAccumulator[s.id].wins += 1; // Au moins 2 matches considérés comme un hit significatif
+              scenarioAccumulator[s.id].ge2 += 1;
             }
           }
         });
@@ -360,21 +408,39 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
       let maxTotalHits = -1;
       let bestScen = "Alpha Core";
 
+      // p-values exactes par scénario : X ~ B(trialsCount, NULL_PROB_AT_LEAST_2) sous tirage
+      // équitable. Calculées AVANT la correction FDR, qui exige la famille complète.
+      const rawPValues: Record<string, number> = {};
+
       Object.keys(scenarioAccumulator).forEach((id) => {
         const item = scenarioAccumulator[id];
         const meanHits = item.totalHits / trialsCount;
-        const successRate = (item.wins / trialsCount) * 100;
+        rawPValues[id] = binomialUpperTail(item.ge2, trialsCount, NULL_PROB_AT_LEAST_2);
 
         if (item.totalHits > maxTotalHits) {
           maxTotalHits = item.totalHits;
           bestScen = item.name;
         }
+      });
+
+      const qValues = benjaminiHochberg(rawPValues);
+
+      Object.keys(scenarioAccumulator).forEach((id) => {
+        const item = scenarioAccumulator[id];
+        const meanHits = item.totalHits / trialsCount;
+        const p = rawPValues[id];
+        const q = qValues[id];
 
         stats[id] = {
           name: item.name,
           meanHits: Number(meanHits.toFixed(2)),
-          successRate: Number(successRate.toFixed(1)),
+          expectedHits: Number(NULL_EXPECTED_HITS.toFixed(2)),
+          ge2Count: item.ge2,
+          ge2Rate: Number(((item.ge2 / trialsCount) * 100).toFixed(1)),
+          nullGe2Rate: Number((NULL_PROB_AT_LEAST_2 * 100).toFixed(2)),
           totalHits: item.totalHits,
+          pValue: Number.isFinite(p) ? Number(p.toFixed(4)) : null,
+          qValue: Number.isFinite(q) ? Number(q.toFixed(4)) : null,
         };
       });
 
@@ -407,24 +473,32 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     });
 
     if (result) {
-      const breakdown: Record<number, Record<string, number>> = {};
+      // Breakdown construit exclusivement à partir des scores de canal réellement mesurés
+      // par le moteur Platinum (aucun canal à zéro inventé, aucune clé hors AlgoKey).
+      const breakdown: Record<number, ScoreBreakdown> = {};
       const safeScenarioNums = Array.isArray(scenario?.numbers) ? scenario.numbers : [];
-      safeScenarioNums.forEach((num) => {
-        breakdown[num] = {
-          orchestration: scenario.probability,
-          fractal: 0,
-          spectral: 0,
-          momentum: 0,
-          consensus: result.consensusVector[num] || 0,
-        };
-      });
+      const channels = Object.entries(result.channelScores ?? {}) as [
+        AlgoKey,
+        number[],
+      ][];
+      if (channels.length > 0) {
+        safeScenarioNums.forEach((num) => {
+          const entry: ScoreBreakdown = {};
+          channels.forEach(([key, values]) => {
+            const v = values?.[num];
+            if (typeof v === "number") entry[key] = Number(v.toFixed(2));
+          });
+          breakdown[num] = entry;
+        });
+      }
 
       const predictionObj: Prediction = {
         suggestedNumbers: scenario.numbers,
         candidates: scenario.numbers,
-        confidence: scenario.probability,
+        confidence: result.confidence,
         analysis: scenario.description,
         breakdown: breakdown,
+        scenarioName: `Platinum ${scenario.name}`,
         timestamp: Date.now(),
       };
       await savePredictionToHistory(drawName, predictionObj, undefined, {
@@ -479,25 +553,69 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
     }));
   }, [result]);
 
+  // Échelle et moyenne mesurées sur place (le vecteur de consensus est normalisé par son max).
+  const spectrumMax = useMemo(
+    () => Math.max(1, ...spectrumData.map((e) => e.v)),
+    [spectrumData],
+  );
+  const spectrumMean = useMemo(
+    () =>
+      spectrumData.length > 0
+        ? spectrumData.reduce((acc, e) => acc + e.v, 0) / spectrumData.length
+        : 0,
+    [spectrumData],
+  );
+
+  // Verdict du rétro-audit DÉRIVÉ des p-values ajustées (FDR) réellement calculées : aucune
+  // conclusion de significativité n'est affirmée sans le test correspondant.
+  const backtestVerdict = useMemo(() => {
+    if (!backtestResults) return null;
+    const entries = Object.values(backtestResults.scenariosStats) as {
+      name: string;
+      qValue: number | null;
+      ge2Count?: number;
+      pValue: number | null;
+    }[];
+    const tested = entries.filter(
+      (s) => typeof s.qValue === "number" && typeof s.pValue === "number",
+    );
+    if (tested.length === 0) {
+      return { testedCount: 0, rejected: [] as string[], minQ: null as number | null };
+    }
+    const rejected = tested
+      .filter((s) => (s.qValue as number) <= NEUTRAL_FDR_TOLERANCE)
+      .map((s) => s.name);
+    const minQ = Math.min(...tested.map((s) => s.qValue as number));
+    return { testedCount: tested.length, rejected, minQ };
+  }, [backtestResults]);
+
   const selectedScenario = result?.scenarios.find(
     (s) => s.id === selectedScenarioId,
   );
 
+  // `nexusLoading` est un chargement de DONNÉES, pas une inférence : une revalidation en
+  // arrière-plan ne doit ni se présenter comme une inférence en cours ni masquer un résultat
+  // déjà calculé. Seul le tout premier chargement (aucun historique) justifie l'overlay.
+  const initialDataLoad = nexusLoading && history.length === 0;
+  const isInferring = loading || isBacktesting || initialDataLoad;
+
   return (
     <div className="space-y-6 animate-fade-in pb-20 w-full overflow-hidden">
       <PredictionComputationOverlay
-        isComputing={nexusLoading || loading || isBacktesting}
+        isComputing={isInferring}
         computingStep={
           loadingStep ||
           (isBacktesting
             ? "Rétro-audit temporel..."
-            : "Fusion des tenseurs probabilistes...")
+            : initialDataLoad
+              ? "Chargement de l'historique du tirage..."
+              : "Fusion des tenseurs probabilistes...")
         }
         historyLength={history.length}
         progress={loadingProgress}
       />
 
-      {!result && !(nexusLoading || loading || isBacktesting) && (
+      {!result && !isInferring && (
         <div className="flex flex-col items-center justify-center min-h-[500px] p-8 text-center bg-slate-900/50 rounded-3xl border border-white/5">
           <div className="p-6 bg-slate-900 rounded-full shadow-2xl mb-8 border border-white/5">
             <Layers size={64} className="text-slate-500" />
@@ -532,16 +650,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             <ShieldCheck size={14} className="text-emerald-400" />
           </span>
           <div className="mt-2 text-2xl font-black text-white flex items-center gap-2">
-            {result.coherence}%
-            <Activity
-              size={16}
-              className={
-                result.coherence > 80 ? "text-emerald-500" : "text-amber-500"
-              }
-            />
+            {result.coherence}
+            <Activity size={16} style={{ color: metricHue(result.coherence) }} />
           </div>
           <span className="text-[9px] font-mono text-slate-500 mt-1">
-            H = {result.entropy.toFixed(3)} bit/sym
+            {typeof result.entropy === "number"
+              ? `H = ${result.entropy.toFixed(3)} bit/sym`
+              : "H = n/d"}
           </span>
         </div>
 
@@ -550,11 +665,21 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             <span>Tamis ADN Actif</span>
             <Dna size={14} className="text-violet-400" />
           </span>
-          <div className="mt-2 text-2xl font-black text-violet-400 flex items-center gap-2">
-            {result.dnaSieveInfo?.dnaConcordanceMean ?? 50}%
+          <div className="mt-2 text-2xl font-black text-violet-400 flex items-baseline gap-1">
+            {typeof result.dnaSieveInfo?.dnaConcordanceMean === "number"
+              ? result.dnaSieveInfo.dnaConcordanceMean
+              : "n/d"}
+            {typeof result.dnaSieveInfo?.dnaConcordanceMean === "number" && (
+              <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">
+                indice
+              </span>
+            )}
           </div>
           <span className="text-[9px] font-mono text-slate-400 mt-1 truncate">
-            Intensité : {result.dnaSieveInfo?.sieveIntensityPercent ?? 50}%
+            Intensité :{" "}
+            {typeof result.dnaSieveInfo?.sieveIntensityPercent === "number"
+              ? `${result.dnaSieveInfo.sieveIntensityPercent}%`
+              : "n/d"}
           </span>
         </div>
 
@@ -562,11 +687,14 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
             <span>Régime</span>
             <span className="text-[9px] font-mono text-slate-400">
-              {result.regimeProbabilities?.stable ?? 0}% S
+              {typeof result.regimeProbabilities?.stable === "number"
+                ? `${result.regimeProbabilities.stable}% S`
+                : "n/d"}
             </span>
           </span>
           <div
-            className={`mt-2 text-xl font-black uppercase ${result.regime === "STABLE" ? "text-emerald-400" : result.regime === "CHAOTIC" ? "text-rose-400" : "text-amber-400"}`}
+            className="mt-2 text-xl font-black uppercase"
+            style={{ color: regimeTint(result.regimeProbabilities) }}
           >
             {result.regime}
           </div>
@@ -610,8 +738,8 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         <div className="flex justify-between items-center mb-8 px-2">
           <div>
             <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-              <BarChart3 className="text-indigo-400" size={12} /> Spectre de
-              Probabilité
+              <BarChart3 className="text-indigo-400" size={12} /> Densité
+              Relative (100 = numéro le mieux classé)
             </h3>
             <span className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
               Hyper-Spectre Harmonique
@@ -620,10 +748,13 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           {hoveredIndex !== null && (
             <div className="flex items-center gap-2.5 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/20 shadow-inner animate-fade-in">
               <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">
-                Vecteur {hoveredIndex}
+                Numéro {hoveredIndex}
               </span>
-              <span className="text-sm font-black text-emerald-400">
-                {spectrumData[hoveredIndex - 1]?.v}%
+              <span
+                className="text-sm font-black"
+                style={{ color: metricHue(spectrumData[hoveredIndex - 1]?.v ?? 0) }}
+              >
+                {spectrumData[hoveredIndex - 1]?.v ?? "n/d"}
               </span>
             </div>
           )}
@@ -653,15 +784,26 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                     fill={
                       selectedScenario?.numbers.includes(entry.n)
                         ? selectedScenario.color
-                        : entry.v > 50
-                          ? "#818cf8"
-                          : "#334155"
+                        : "#818cf8"
+                    }
+                    fillOpacity={
+                      0.25 + 0.75 * (entry.v / spectrumMax)
                     }
                     className="transition-all duration-300"
                   />
                 ))}
               </Bar>
-              <ReferenceLine y={50} stroke="#334155" strokeDasharray="3 3" />
+              <ReferenceLine
+                y={spectrumMean}
+                stroke="#475569"
+                strokeDasharray="3 3"
+                label={{
+                  value: `moyenne ${spectrumMean.toFixed(1)}`,
+                  position: "insideTopRight",
+                  fill: "#64748b",
+                  fontSize: 10,
+                }}
+              />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -916,24 +1058,34 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                           {stats.name}
                         </span>
                         <span className="text-[10px] font-mono text-slate-500">
-                          Succès:{" "}
+                          ≥2 bons :{" "}
                           <strong className="text-emerald-400">
-                            {stats.successRate}%
+                            {stats.ge2Rate}%
                           </strong>
                         </span>
                       </div>
                       <div className="space-y-1">
                         <div className="flex justify-between text-[9px] font-mono text-slate-400">
-                          <span>Ratio Hits moyen</span>
+                          <span>Hits moyens</span>
                           <span className="text-slate-300">
-                            {stats.meanHits} / 5
+                            {stats.meanHits} / 5{" "}
+                            <span className="text-slate-500">
+                              (aléatoire {stats.expectedHits})
+                            </span>
                           </span>
                         </div>
-                        {/* Progress Hits Bar */}
-                        <div className="w-full bg-slate-850 h-1 rounded-full overflow-hidden">
+                        {/* Progress Hits Bar + repère du hasard pur */}
+                        <div className="relative w-full bg-slate-850 h-1 rounded-full overflow-hidden">
                           <div
                             className="h-full bg-gradient-to-r from-violet-500 to-indigo-500"
                             style={{ width: `${(stats.meanHits / 5) * 100}%` }}
+                          />
+                          <div
+                            className="absolute top-0 h-full w-px bg-slate-400/70"
+                            style={{
+                              left: `${(stats.expectedHits / 5) * 100}%`,
+                            }}
+                            title={`Espérance sous tirage équitable : ${stats.expectedHits}`}
                           />
                         </div>
                       </div>
@@ -943,18 +1095,75 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                           {stats.totalHits}
                         </strong>
                       </span>
+                      <span className="text-[9px] font-mono text-slate-500 block">
+                        Test équité (≥2 bons) :{" "}
+                        {stats.pValue === null || stats.qValue === null ? (
+                          <span className="text-slate-400">
+                            n/d — échantillon insuffisant
+                          </span>
+                        ) : (
+                          <>
+                            p ={" "}
+                            <strong className="text-slate-300">
+                              {stats.pValue.toFixed(3)}
+                            </strong>
+                            {" · "}q (FDR) ={" "}
+                            <strong
+                              className={
+                                stats.qValue <= NEUTRAL_FDR_TOLERANCE
+                                  ? "text-emerald-400"
+                                  : "text-slate-300"
+                              }
+                            >
+                              {stats.qValue.toFixed(3)}
+                            </strong>
+                          </>
+                        )}
+                      </span>
                     </div>
                   ),
                 )}
               </div>
 
-              <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/15 flex items-center justify-between text-[10px]">
-                <span className="text-slate-400">
-                  Scénario de résonance optimal identifié :
-                </span>
-                <span className="font-black text-emerald-400 uppercase tracking-wider">
-                  {backtestResults.bestScenario}
-                </span>
+              <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/15 space-y-1.5 text-[10px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">
+                    Plus grand nombre de hits observés sur la fenêtre :
+                  </span>
+                  <span className="font-black text-emerald-400 uppercase tracking-wider">
+                    {backtestResults.bestScenario}
+                  </span>
+                </div>
+                <p className="text-[9px] font-mono text-slate-500 leading-relaxed">
+                  Référence tirage équitable (loi hypergéométrique exacte 5/90) :{" "}
+                  {NULL_EXPECTED_HITS.toFixed(2)} hit(s) attendu(s) par tirage et{" "}
+                  {(NULL_PROB_AT_LEAST_2 * 100).toFixed(2)}% de tirages à ≥2 bons
+                  numéros.{" "}
+                  {backtestVerdict === null || backtestVerdict.testedCount === 0 ? (
+                    <>
+                      Aucun test de significativité n'a pu être calculé sur cette
+                      fenêtre : la conclusion reste indéterminée.
+                    </>
+                  ) : backtestVerdict.rejected.length === 0 ? (
+                    <>
+                      Test binomial exact unilatéral (n = {backtestResults.trials}) sur{" "}
+                      {backtestVerdict.testedCount} scénario(s) puis correction FDR : la
+                      plus petite q-value observée est {backtestVerdict.minQ?.toFixed(3)},
+                      au-dessus de la tolérance dérivée du jeu (
+                      {(NEUTRAL_FDR_TOLERANCE * 100).toFixed(2)}% = proportion neutre
+                      5/90). Aucun scénario ne se distingue significativement du hasard
+                      sur cette fenêtre.
+                    </>
+                  ) : (
+                    <>
+                      Test binomial exact unilatéral (n = {backtestResults.trials}) puis
+                      correction FDR : {backtestVerdict.rejected.join(", ")} passe(nt)
+                      sous la tolérance dérivée du jeu (
+                      {(NEUTRAL_FDR_TOLERANCE * 100).toFixed(2)}% = 5/90). À confirmer sur
+                      une fenêtre plus longue avant toute conclusion opérationnelle.
+                    </>
+                  )}
+                </p>
               </div>
             </motion.div>
           )}
@@ -1030,7 +1239,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
 
               <TicketXRay
                 numbers={selectedScenario.numbers}
-                score={selectedScenario.probability} // Use prob as a proxy for score visual
+                score={selectedScenario.relativeIndex}
                 showTitle={false}
               />
 
@@ -1041,8 +1250,10 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                 />
                 <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
                   Ce scénario est optimisé pour un régime{" "}
-                  <strong>{result.regime}</strong>. La cohérence globale est de{" "}
-                  {result.coherence}%.
+                  <strong>{result.regime}</strong>. Indice de cohérence globale :{" "}
+                  <strong>{result.coherence}</strong> / 100 (entropie inverse du
+                  vecteur de consensus). Un tirage équitable reste équiprobable
+                  quel que soit le scénario.
                 </p>
               </div>
             </div>

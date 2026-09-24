@@ -295,6 +295,7 @@ export interface RefactoredPipelineResult {
   top5: number[];
   top18: number[];
   stabilityScore: number;
+  spreadFactor: number;
   regimeDiagnostic: {
     regime: "stable" | "volatile" | "chaotic" | "cryo";
     confidenceInRegime: number;
@@ -956,6 +957,7 @@ export const runOrchestrationPipeline = (
     top5: selected,
     top18,
     stabilityScore,
+    spreadFactor,
     regimeDiagnostic
   };
 };
@@ -1165,6 +1167,7 @@ export const getFullOrchestrationAnalysis = async (
     narrativeLesson: trend.lessons[0]?.description || `Cohérence harmonique empirique du Top 5 : ${calculateCoherence(top5Numbers, calibration)}%.`,
     candidatesDetails,
     stabilityScore: pipeline.stabilityScore,
+    spreadFactor: pipeline.spreadFactor,
     regimeDiagnostic: pipeline.regimeDiagnostic
   };
 

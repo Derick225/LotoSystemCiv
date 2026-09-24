@@ -14,7 +14,35 @@ import {
   queryPredictionHistoryIndexed
 } from '../services/predictionHistoryService';
 import { evaluatePredictionStability } from '../services/prediction/predictionFinalize';
-import { DrawResult, Prediction, PredictionHistoryItem } from '../types';
+import { AlgoKey, DrawResult, Prediction, PredictionHistoryItem, ScoreBreakdown } from '../types';
+
+/**
+ * Décomposition spectrale déterministe d'une prédiction réelle : chaque canal note les 90
+ * numéros, les numéros retenus étant surpondérés (biais de surestimation typique d'un
+ * ensemble sur-confiant). Aucun tirage aléatoire : la même graine produit la même matrice.
+ */
+const buildPredictionBreakdown = (predictedNumbers: number[]): Record<number, ScoreBreakdown> => {
+  const channels: AlgoKey[] = [
+    AlgoKey.FREQUENCY,
+    AlgoKey.MARKOV,
+    AlgoKey.BAYES,
+    AlgoKey.SPECTRAL,
+    AlgoKey.MOMENTUM,
+    AlgoKey.FRACTAL,
+    AlgoKey.TEMPORAL,
+    AlgoKey.SPATIAL,
+  ];
+  const breakdown: Record<number, ScoreBreakdown> = {};
+  for (let i = 1; i <= 90; i++) {
+    const center = predictedNumbers.includes(i) ? 90 : 30;
+    const scores: ScoreBreakdown = {};
+    channels.forEach((algo, idx) => {
+      scores[algo] = center + ((i * 7 + idx * 13) % 11) - 5;
+    });
+    breakdown[i] = scores;
+  }
+  return breakdown;
+};
 
 describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Refinements)', () => {
   // Mock history 5/90
@@ -67,7 +95,7 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
         '02/01/2026',
         predictedNumbers,
         winningNumbers,
-        {},
+        buildPredictionBreakdown(predictedNumbers),
         'pred_1',
         'real_1',
         true, // skipLLM
@@ -86,8 +114,35 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
         'regimebreak',
         'anomalousdraw'
       ]).toContain(report.failureMode);
+      expect(report.rmse).toBeDefined();
       expect(Array.isArray(report.recommendedAdjustments)).toBe(true);
       expect(report.recommendedAdjustments?.length).toBeGreaterThan(0);
+    });
+
+    it('n’invente aucune métrique spectrale ni ajustement en l’absence de décomposition réelle', async () => {
+      const predictedNumbers = [10, 20, 30, 40, 50];
+      const winningNumbers = [10, 21, 31, 41, 51];
+
+      const report = await runForensicAutopsy(
+        'TEST_A',
+        '02/01/2026',
+        predictedNumbers,
+        winningNumbers,
+        undefined, // aucune décomposition persistée
+        'pred_1',
+        'real_1',
+        true,
+        mockHistory
+      );
+
+      // Sans breakdown, rien n'est mesurable : le rapport doit rester muet plutôt que de
+      // fabriquer des scores d'algorithmes pour remplir l'affichage.
+      expect(report.rmse).toBeUndefined();
+      expect(report.brier_score).toBeUndefined();
+      expect(report.kl_divergence).toBeUndefined();
+      expect(report.shannon_entropy).toBeUndefined();
+      expect(report.algorithmicDrift ?? []).toHaveLength(0);
+      expect(report.recommendedAdjustments ?? []).toHaveLength(0);
     });
   });
 

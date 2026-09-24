@@ -12,6 +12,8 @@
  * - Isolation Absolue du Tirage : calculs et statistiques strictement délimités à l'historique actif.
  */
 
+import { combinations, binomialUpperTail } from "../../utils/mathUtils";
+
 export interface SystemInertiaMetrics {
   drawName: string;
   safeMaxNum: number;
@@ -82,8 +84,30 @@ export interface InertiaBacktestResult {
     matched: number[];
   }[];
   bestDamping: number;
+  // Hits TOTAUX obtenus sur la fenêtre par la calibration ζ retenue, et par la calibration
+  // actuellement en vigueur : permet à l'interface d'affirmer ou non une amélioration réelle.
+  bestDampingHits: number;
+  currentDampingHits: number;
+  // Nombre de valeurs de ζ réellement évaluées (domaine complet offert par le curseur).
+  dampingCandidatesEvaluated: number;
+  // Taux de succès (≥1 bon numéro) attendu d'un tirage strictement équitable, en %, dérivé de
+  // l'hypergéométrique exacte (aucune constante de jeu codée en dur).
+  nullSuccessRate: number;
+  // p-value unilatérale exacte du taux de succès (≥1 bon numéro) sous tirage équitable.
+  successPValue: number | null;
   empiricalGain: number;
 }
+
+/**
+ * Domaine de recherche de l'amortissement ζ : exactement les valeurs que le curseur de l'interface
+ * expose à l'opérateur. Aucune constante de décision n'est introduite — la grille d'évaluation
+ * rétro-active est l'espace d'action réel de l'utilisateur.
+ */
+export const INERTIA_DAMPING_DOMAIN = {
+  min: 0.1,
+  max: 2.0,
+  step: 0.05,
+} as const;
 
 /**
  * 1. DÉCOUVERTE DYNAMIQUE DE LA PLAGE NUMÉRIQUE DU TIRAGE
@@ -542,8 +566,13 @@ export const resolveOptimizedInertiaVector = (
 };
 
 /**
- * 6. RÉTRO-AUDIT TEMPATIONNEL DÉTERMINISTE (TIME-MACHINE BACKTEST)
- * Évalue la précision rétroactive sans aléatoire et dérive le zeta optimal.
+ * 6. RÉTRO-AUDIT TEMPOREAL DÉTERMINISTE (TIME-MACHINE BACKTEST)
+ *
+ * Fenêtre causale stricte : pour chaque tirage cible `history[j-1]`, l'entraînement n'utilise que
+ * `history.slice(j)` (le passé exclusif du tirage). Les métriques sont ζ-indépendantes et donc
+ * calculées une seule fois par cible ; le domaine d'amortissement réellement offert à l'opérateur
+ * est ensuite balayé exhaustivement, et l'optimum rapporté est celui qui MAXIMISE les hits
+ * rétro-actifs mesurés — jamais une reformulation de la valeur courante du curseur.
  */
 export const runDeterministicInertiaBacktest = async (
   history: any[],
@@ -557,9 +586,16 @@ export const runDeterministicInertiaBacktest = async (
   }
 
   const trialsCount = Math.min(10, history.length - 8);
+  const topSize = 5;
   const detailsList: any[] = [];
   let totalPrimaryHits = 0;
   let successTrialsCount = 0;
+
+  const trialRecords: {
+    winners: number[];
+    sliceMetrics: SystemInertiaMetrics;
+  }[] = [];
+  let winnersCountSum = 0;
 
   for (let j = trialsCount; j >= 1; j--) {
     const targetDraw = history[j - 1];
@@ -569,11 +605,12 @@ export const runDeterministicInertiaBacktest = async (
     const scores = computeInertiaVectorScores(sliceMetrics, modifiers);
     scores.sort((a, b) => b.score - a.score);
 
-    const primaryPredicted = scores.slice(0, 5).map((x) => x.num);
+    const primaryPredicted = scores.slice(0, topSize).map((x) => x.num);
     const realWinners = Array.isArray(targetDraw?.gagnants) ? targetDraw.gagnants : [];
     const matched = primaryPredicted.filter((num) => realWinners.includes(num));
     const hitsCount = matched.length;
 
+    winnersCountSum += realWinners.length;
     totalPrimaryHits += hitsCount;
     if (hitsCount >= 1) {
       successTrialsCount++;
@@ -585,24 +622,94 @@ export const runDeterministicInertiaBacktest = async (
       hits: hitsCount,
       matched,
     });
+
+    trialRecords.push({
+      winners: realWinners,
+      sliceMetrics,
+    });
   }
 
   const primaryHitsAvg = totalPrimaryHits / Math.max(1, trialsCount);
   const successRate = (successTrialsCount / Math.max(1, trialsCount)) * 100;
 
-  // Dérivation continue de l'amortissement optimal par résonance d'énergie
-  const fullMetrics = computeSystemInertiaMetrics(history, drawName, hurstExponent);
-  const entropyTarget = 0.5 + 0.5 * fullMetrics.shannonEntropyNormalized;
-  const bestDamping = 0.2 + 1.4 / (1.0 + Math.exp(-3.5 * (modifiers.dampingRatio - entropyTarget)));
+  // --- Balayage déterministe exhaustif du domaine d'amortissement (grille exacte du curseur) ---
+  // La calibration en vigueur est TOUJOURS incluse dans l'espace de recherche (elle peut être hors
+  // grille si elle a été persistée autrement) : l'optimum rapporté est donc comparé à armes égales
+  // avec le statu quo, et non à un voisin de grille.
+  const gridCount =
+    Math.round((INERTIA_DAMPING_DOMAIN.max - INERTIA_DAMPING_DOMAIN.min) / INERTIA_DAMPING_DOMAIN.step) + 1;
+  const candidateList: number[] = [];
+  for (let i = 0; i < gridCount; i++) {
+    candidateList.push(
+      parseFloat((INERTIA_DAMPING_DOMAIN.min + i * INERTIA_DAMPING_DOMAIN.step).toFixed(2))
+    );
+  }
+  const currentZeta = parseFloat(modifiers.dampingRatio.toFixed(2));
+  if (!candidateList.some((z) => Math.abs(z - currentZeta) < 1e-9)) {
+    candidateList.push(currentZeta);
+  }
 
-  const empiricalGain = primaryHitsAvg / (5 * (5 / fullMetrics.safeMaxNum));
+  let bestDamping = candidateList[0];
+  let bestTotalHits = -1;
+  let bestStability = -Infinity;
+
+  for (let i = 0; i < candidateList.length; i++) {
+    const zeta = candidateList[i];
+    const candidateModifiers: InertiaCalibrationModifiers = { ...modifiers, dampingRatio: zeta };
+
+    let candidateHits = 0;
+    let stabilitySum = 0;
+    for (let t = 0; t < trialRecords.length; t++) {
+      const rec = trialRecords[t];
+      const scores = computeInertiaVectorScores(rec.sliceMetrics, candidateModifiers);
+      scores.sort((a, b) => b.score - a.score);
+      const top = scores.slice(0, topSize);
+      candidateHits += top.filter((x) => rec.winners.includes(x.num)).length;
+      stabilitySum += top.reduce((acc, x) => acc + x.score, 0) / topSize;
+    }
+
+    // Objectif primaire : hits rétro-actifs. Départage continu : stabilité moyenne du top 5
+    // (précision énergétique), puis écart minimal à la calibration en vigueur (moindre changement).
+    const isBetter =
+      candidateHits > bestTotalHits ||
+      (candidateHits === bestTotalHits && stabilitySum > bestStability + 1e-9) ||
+      (candidateHits === bestTotalHits &&
+        Math.abs(stabilitySum - bestStability) <= 1e-9 &&
+        Math.abs(zeta - modifiers.dampingRatio) < Math.abs(bestDamping - modifiers.dampingRatio));
+
+    if (isBetter) {
+      bestDamping = zeta;
+      bestTotalHits = candidateHits;
+      bestStability = stabilitySum;
+    }
+  }
+
+  // Gain empirique mesuré de la calibration EN VIGUEUR, rapporté à l'espérance du hasard pur.
+  const fullMetrics = computeSystemInertiaMetrics(history, drawName, hurstExponent);
+  const expectedHitsByChance =
+    topSize * ((winnersCountSum / Math.max(1, trialsCount)) / Math.max(1, fullMetrics.safeMaxNum));
+  const empiricalGain = primaryHitsAvg / Math.max(Number.EPSILON, expectedHitsByChance);
+
+  // p-value unilatérale exacte du taux de succès (≥1 bon numéro), sous hypothèse de tirage équitable :
+  // probabilité qu'un ensemble fixe de `topSize` numéros croise le tirage gagnant, sans remise.
+  const winnersCount = Math.max(1, Math.round(winnersCountSum / Math.max(1, trialsCount)));
+  const totalCombos = combinations(fullMetrics.safeMaxNum, topSize);
+  const zeroHitCombos = combinations(fullMetrics.safeMaxNum - winnersCount, topSize);
+  const pZeroHit = totalCombos > 0 ? zeroHitCombos / totalCombos : 0;
+  const pAtLeastOneHit = Math.min(1, Math.max(0, 1 - pZeroHit));
+  const rawPValue = binomialUpperTail(successTrialsCount, trialsCount, pAtLeastOneHit);
 
   return {
     trials: trialsCount,
     primaryHitsAvg: parseFloat(primaryHitsAvg.toFixed(2)),
     successRate: parseFloat(successRate.toFixed(1)),
     details: detailsList,
-    bestDamping: parseFloat(bestDamping.toFixed(2)),
+    bestDamping,
+    bestDampingHits: bestTotalHits,
+    currentDampingHits: totalPrimaryHits,
+    dampingCandidatesEvaluated: candidateList.length,
+    nullSuccessRate: parseFloat((pAtLeastOneHit * 100).toFixed(2)),
+    successPValue: Number.isFinite(rawPValue) && trialsCount > 0 ? parseFloat(rawPValue.toFixed(4)) : null,
     empiricalGain: parseFloat(empiricalGain.toFixed(2)),
   };
 };

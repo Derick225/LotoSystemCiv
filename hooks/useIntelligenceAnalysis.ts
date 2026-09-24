@@ -74,8 +74,7 @@ export const useIntelligenceAnalysis = (drawName: string) => {
             // 2. Lancement parallèle : Analyse Logique + Rapport Narratif
             const [reasoning, story] = await Promise.all([
                 analyzeDrawLogic(drawName, history, metrics),
-                generateNarrativeReport(drawName, history, ent, chi, safeHurst),
-                new Promise(r => setTimeout(r, 1500)) // delay for visual feedback
+                generateNarrativeReport(drawName, history, ent, chi, safeHurst)
             ]);
 
             if (isMounted.current) {

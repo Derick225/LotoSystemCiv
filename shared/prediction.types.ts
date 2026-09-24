@@ -109,6 +109,15 @@ export const DEFAULT_ALGO_WEIGHTS: AlgoWeights = Object.values(AlgoKey).reduce((
 
 export type ScoreBreakdown = Partial<Record<AlgoKey, number>>;
 
+/**
+ * Décompte canonique des canaux algorithmiques, dérivé de l'enum et de l'ensemble des canaux
+ * retirés. Source unique de vérité : toute mention chiffrée dans l'UI doit s'y référer afin
+ * qu'aucun libellé ne puisse annoncer un nombre d'algorithmes différent de la réalité du moteur.
+ */
+export const TOTAL_ALGO_COUNT = Object.values(AlgoKey).length;
+export const RETIRED_ALGO_COUNT = RETIRED_ALGO_WEIGHT_KEYS.size;
+export const ACTIVE_ALGO_COUNT = TOTAL_ALGO_COUNT - RETIRED_ALGO_COUNT;
+
 // CORRECTION : Remplacement des bornes empiriques par des constantes statistiques standard.
 // CONFIDENCE_THRESHOLD correspond à alpha = 0.05 (niveau de confiance de 95% en statistique inférentielle).
 export const PREDICTION_CONSTANTS = {

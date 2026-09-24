@@ -1,4 +1,4 @@
-import React, { useState, Suspense, lazy, useEffect } from "react";
+import React, { useState, useMemo, Suspense, lazy, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
   Sparkles,
@@ -6,11 +6,14 @@ import {
   BrainCircuit,
   Network,
   AlertTriangle,
-  ShieldCheck,
   Hexagon,
   Gauge,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
+import {
+  computeContinuousTemperature,
+  measureDrawFrequencies,
+} from "../../services/geminiService";
 
 const PredictionTab = lazy(() =>
   import("./PredictionTab").then((m) => ({ default: m.PredictionTab })),
@@ -47,6 +50,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
   const globalRegime = useNexusStore((state) => state.regime);
   const nexusLoading = useNexusStore((state) => state.loading);
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
+  const history = useNexusStore((state) => state.history);
 
   const [pillar, setPillar] = useState<MainPillar>("strategic");
   const [inferenceMode, setInferenceMode] = useState<InferenceMode>("platinum");
@@ -104,6 +108,62 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     }
   }, [activeSubTab]);
 
+  // Écarts de fréquence réellement mesurés sur l'historique complet (aucune valeur de repli inventée).
+  const frequency = useMemo(() => measureDrawFrequencies(history), [history]);
+
+  // Diagnostic de régime continu : z = (H - 0.5) / (1/√N), sévérité = CDF de Rayleigh du |z|.
+  const regimeDiagnostic = useMemo(() => {
+    const samples = history.length;
+    const hurst = globalRegime?.hurst;
+    const hasHurst = typeof hurst === "number" && Number.isFinite(hurst);
+    const regimeLabel = globalRegime?.regime ?? "non mesuré";
+
+    if (!hasHurst || samples < 2) {
+      return {
+        available: false as const,
+        hue: 152,
+        severity: 0,
+        regimeLabel,
+        hurstLabel: "n/d",
+        deviationLabel: "n/d",
+        uncertaintyLabel: "n/d",
+        temperatureLabel: "n/d",
+        entropyLabel:
+          typeof globalRegime?.entropy === "number" &&
+          Number.isFinite(globalRegime.entropy)
+            ? globalRegime.entropy.toFixed(3)
+            : "n/d",
+      };
+    }
+
+    // Marge d'incertitude de l'estimateur de Hurst, identique à celle du moteur (1/√N).
+    const sigma = 1 / Math.sqrt(samples);
+    const z = (hurst - 0.5) / sigma;
+    // Sévérité continue : aucun seuil binaire, la mesure elle-même pilote l'intensité visuelle.
+    const severity = 1 - Math.exp(-(z * z) / 2);
+    const temperature = computeContinuousTemperature(hurst, samples);
+    const entropy = globalRegime?.entropy;
+
+    return {
+      available: true as const,
+      hue: Math.round(152 * (1 - severity)),
+      severity,
+      regimeLabel,
+      hurstLabel: hurst.toFixed(4),
+      deviationLabel: `${z >= 0 ? "+" : ""}${z.toFixed(2)} σ`,
+      uncertaintyLabel: `σ = ${sigma.toFixed(4)} (1/√${samples})`,
+      temperatureLabel: temperature === null ? "n/d" : temperature.toFixed(4),
+      entropyLabel:
+        typeof entropy === "number" && Number.isFinite(entropy)
+          ? entropy.toFixed(3)
+          : "n/d",
+    };
+  }, [globalRegime?.hurst, globalRegime?.entropy, globalRegime?.regime, history.length]);
+
+  const regimeColor = `hsl(${regimeDiagnostic.hue}, 84%, 62%)`;
+  const regimeSurface = `hsla(${regimeDiagnostic.hue}, 84%, 55%, 0.12)`;
+  const regimeBorder = `hsla(${regimeDiagnostic.hue}, 84%, 55%, 0.35)`;
+
   const pillars = [
     {
       id: "strategic" as MainPillar,
@@ -128,7 +188,10 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
     },
   ];
 
-  if (nexusLoading) {
+  // Le squelette n'est affiché qu'au premier chargement : une revalidation en arrière-plan
+  // (changement de tirage, refresh périodique) ne doit pas démonter les sous-onglets actifs,
+  // ce qui détruirait leur état local et relancerait leurs calculs pour rien.
+  if (nexusLoading && history.length === 0) {
     return (
       <div className="p-20 text-center animate-pulse text-indigo-500">
         Connexion Oracle...
@@ -172,86 +235,138 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
 
         {/* Indicateurs Métriques HPC Régime */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-mono text-xs">
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-slate-500/10 border-slate-500/30 font-mono text-xs"
+            title={
+              frequency
+                ? `Écart normalisé maximal sur ${frequency.domainMax} numéros candidats, mesuré sur ${frequency.draws} tirages · p famille = ${frequency.familyWiseP.toFixed(4)}`
+                : "Historique insuffisant pour mesurer un écart"
+            }
+          >
             <span className="text-[10px] font-bold text-slate-400">
-              B_score:
+              Écart max :
             </span>
-            <span className="font-extrabold text-emerald-400">
-              {Math.round(
-                100 *
-                  (0.4 * (1 - 0.18) +
-                    0.35 *
-                      (1 -
-                        (useNexusStore.getState().volatility?.score || 0.2)) +
-                    0.25 * (1 - 0.82)),
-              )}
-              %
+            <span className="font-extrabold text-slate-200">
+              {frequency ? `${frequency.maxAbsZ.toFixed(2)} σ` : "n/d"}
             </span>
           </div>
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-400 font-mono text-xs">
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-400 font-mono text-xs"
+            title="Exposant de Hurst du régime actif (H = 0.5 pour une marche aléatoire)"
+          >
             <span className="text-[10px] font-bold text-slate-400">
               Hurst H:
             </span>
             <span className="font-extrabold text-amber-400">
-              {(globalRegime?.hurst || 0.5).toFixed(3)}
+              {regimeDiagnostic.hurstLabel}
             </span>
           </div>
           <div
-            className={`flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl border ${
-              globalRegime?.regime === "CHAOS"
-                ? "bg-rose-500/10 border-rose-500/30 text-rose-400 animate-pulse"
-                : "bg-indigo-500/10 border-indigo-500/30 text-indigo-300"
-            }`}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-sky-500/10 border-sky-500/30 text-sky-300 font-mono text-xs"
+            title="Entropie spectrale normalisée du régime actif"
           >
-            {globalRegime?.regime === "CHAOS" ? (
-              <AlertTriangle size={15} />
-            ) : (
-              <ShieldCheck size={15} />
-            )}
+            <span className="text-[10px] font-bold text-slate-400">
+              Entropie:
+            </span>
+            <span className="font-extrabold text-sky-300">
+              {regimeDiagnostic.entropyLabel}
+            </span>
+          </div>
+          <div
+            className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl border transition-colors duration-500"
+            style={{
+              backgroundColor: regimeSurface,
+              borderColor: regimeBorder,
+              color: regimeColor,
+            }}
+            title={
+              regimeDiagnostic.available
+                ? `Déviation de régime : ${regimeDiagnostic.deviationLabel} (${regimeDiagnostic.uncertaintyLabel})`
+                : "Exposant de Hurst indisponible : aucun régime classé"
+            }
+          >
+            <Gauge size={15} />
             <span className="text-[10px] font-black uppercase tracking-wider">
-              Régime {globalRegime?.regime || "Analyse..."}
+              Régime {regimeDiagnostic.regimeLabel}
+            </span>
+            <span className="text-[10px] font-mono font-bold opacity-80">
+              {regimeDiagnostic.deviationLabel}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Proactive Drift Alert Banner en cas de rupture de régime */}
-      {(globalRegime?.regime === "CHAOS" ||
-        (globalRegime?.hurst && globalRegime.hurst < 0.42)) && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-950/80 via-red-900/40 to-slate-900 border border-rose-500/40 text-rose-200 shadow-xl flex items-start gap-4 animate-pulse">
-          <div className="p-2.5 rounded-xl bg-rose-500/20 text-rose-400 shrink-0 mt-0.5">
+      {/* Diagnostic de Régime Continu (Concept Drift) — intensité = mesure, aucun seuil binaire */}
+      <div
+        className="p-4 rounded-2xl border shadow-lg flex items-start gap-4 transition-colors duration-500"
+        style={{
+          backgroundColor: regimeSurface,
+          borderColor: regimeBorder,
+          backgroundImage: `linear-gradient(to right, hsla(${regimeDiagnostic.hue}, 84%, 30%, 0.55), transparent)`,
+        }}
+      >
+        <div
+          className="p-2.5 rounded-xl shrink-0 mt-0.5"
+          style={{ backgroundColor: regimeSurface, color: regimeColor }}
+        >
+          {regimeDiagnostic.available ? (
+            <Gauge size={22} />
+          ) : (
             <AlertTriangle size={22} />
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black uppercase tracking-wider text-rose-400">
-                Alerte Rupture de Régime (Concept Drift)
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-bold">
-                CRITIQUE
-              </span>
-            </div>
-            <p className="text-xs text-rose-100/90 leading-relaxed font-sans">
-              Bascule détectée vers un régime <strong>CHAOTIQUE</strong> (Exposant de Hurst{" "}
-              <code className="text-rose-300 font-mono">
-                H = {(globalRegime?.hurst || 0.38).toFixed(3)}
-              </code>
-              ). Effondrement de l'autocorrélation harmonique. L'Oracle a calibré
-              automatiquement la température de génération à{" "}
-              <code className="text-rose-300 font-mono">
-                T ={" "}
-                {(
-                  0.1 +
-                  0.85 /
-                    (1.0 +
-                      Math.exp(12.0 * ((globalRegime?.hurst || 0.38) - 0.5)))
-                ).toFixed(2)}
-              </code>{" "}
-              pour modéliser les stochastiques chaotiques sans biais.
-            </p>
-          </div>
+          )}
         </div>
-      )}
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className="text-xs font-black uppercase tracking-wider"
+              style={{ color: regimeColor }}
+            >
+              Diagnostic de Régime (Concept Drift)
+            </span>
+            <span
+              className="px-2 py-0.5 rounded-full text-white text-[9px] font-bold font-mono"
+              style={{ backgroundColor: regimeColor }}
+            >
+              {regimeDiagnostic.available
+                ? `SÉVÉRITÉ ${Math.round(regimeDiagnostic.severity * 100)}%`
+                : "INDISPONIBLE"}
+            </span>
+          </div>
+          {regimeDiagnostic.available ? (
+            <p className="text-xs text-slate-200/90 leading-relaxed font-sans">
+              Régime classé{" "}
+              <strong style={{ color: regimeColor }}>
+                {regimeDiagnostic.regimeLabel}
+              </strong>{" "}
+              · exposant de Hurst{" "}
+              <code className="font-mono">H = {regimeDiagnostic.hurstLabel}</code>{" "}
+              pour une marge d'incertitude{" "}
+              <code className="font-mono">
+                {regimeDiagnostic.uncertaintyLabel}
+              </code>
+              , soit une déviation de{" "}
+              <code className="font-mono">
+                {regimeDiagnostic.deviationLabel}
+              </code>{" "}
+              par rapport à la marche aléatoire (H = 0.5000). Température de
+              génération recalibrée à{" "}
+              <code className="font-mono">
+                T = {regimeDiagnostic.temperatureLabel}
+              </code>{" "}
+              par la même fonction logistique que le moteur d'inférence. Aucun
+              seuil binaire n'est appliqué : l'intensité affichée est la mesure
+              elle-même.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-200/90 leading-relaxed font-sans">
+              Exposant de Hurst indisponible pour ce tirage : le moteur n'a pas
+              encore produit de régime sur un historique suffisant. Aucune
+              valeur de repli n'est affichée et aucune alerte n'est simulée —
+              lancez une analyse pour alimenter la mesure.
+            </p>
+          )}
+        </div>
+      </div>
 
       {/* Zone de Contenu du Pilier Actif */}
       <div

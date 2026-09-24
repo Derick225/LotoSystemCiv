@@ -9,7 +9,6 @@ import type {
   DrawResult,
   MimicryMetric,
   ScoreComposition,
-  Prediction,
 } from "../../types";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
 import { NumberBall } from "../NumberBall";
@@ -414,40 +413,16 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
 
   const handleSaveTicket = async () => {
     audioEngine.play("click");
-    if (!generatedTicket) return;
+    // Ticket et prédiction sont produits ensemble par le pipeline : sans prédiction courante,
+    // rien de mesuré ne peut être archivé (aucune valeur de repli n'est inventée).
+    if (!generatedTicket || !currentPrediction) return;
+
     await saveTicket({
       numbers: generatedTicket,
       drawName,
       strategy: "Orchestration Elite",
     });
-
-    const breakdown: Record<number, Record<string, number>> = {};
-    (generatedTicket || []).forEach((num) => {
-      const candidate = metrics?.topCandidates?.find((c) => c.number === num);
-      breakdown[num] = {
-        orchestration: candidate ? candidate.score : 50,
-        fractal: 0,
-        spectral: 0,
-        momentum: 0,
-      };
-    });
-
-    const dynamicConfidence = Math.round(
-      Math.max(15, Math.min(98,
-        currentPrediction?.confidence ??
-        ((metrics?.backtestAccuracy ?? 50) * 0.55 + ((metrics?.stabilityScore ?? 0.8) * 100) * 0.45)
-      ))
-    );
-
-    const predictionObj: Prediction = {
-      suggestedNumbers: generatedTicket,
-      candidates: generatedTicket,
-      confidence: dynamicConfidence,
-      analysis: currentPrediction?.analysis || `Orchestration Elite Flux (Stabilité: ${Math.round((metrics?.stabilityScore ?? 0.8) * 100)}%, Backtest: ${metrics?.backtestAccuracy ?? 50}%)`,
-      breakdown: currentPrediction?.breakdown || breakdown,
-      timestamp: Date.now(),
-    };
-    await savePredictionToHistory(drawName, predictionObj);
+    await savePredictionToHistory(drawName, currentPrediction);
 
     audioEngine.play("success");
     showToast("Ticket sauvegardé et autopsié.", "success");
@@ -481,7 +456,10 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
     }
   };
 
-  if (nexusLoading || loading)
+  // Le squelette ne couvre que le premier chargement (aucune analyse disponible) : une
+  // revalidation en arrière-plan ne doit ni masquer les vecteurs déjà calculés ni effacer
+  // le ticket affiché.
+  if (!metrics && (nexusLoading || loading))
     return (
       <div className="flex flex-col items-center justify-center p-24 gap-6 animate-pulse">
         <Layers className="text-indigo-500 animate-bounce" size={48} />
@@ -497,6 +475,22 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
         Historique insuffisant pour l'orchestration.
       </div>
     );
+
+  // Métriques brutes du moteur : une mesure absente est affichée "n/d" plutôt que remplacée
+  // par une valeur de repli inventée, et c'est la mesure elle-même qui pilote l'intensité visuelle.
+  const stabilityScore =
+    typeof metrics.stabilityScore === "number" && Number.isFinite(metrics.stabilityScore)
+      ? metrics.stabilityScore
+      : null;
+  const spreadFactor =
+    typeof metrics.spreadFactor === "number" && Number.isFinite(metrics.spreadFactor)
+      ? metrics.spreadFactor
+      : null;
+  const regimeConfidence =
+    typeof metrics.regimeDiagnostic?.confidenceInRegime === "number" &&
+    Number.isFinite(metrics.regimeDiagnostic.confidenceInRegime)
+      ? metrics.regimeDiagnostic.confidenceInRegime
+      : null;
 
   return (
     <div className="space-y-10 animate-fade-in pb-20 w-full overflow-hidden">
@@ -533,7 +527,7 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
                 {metrics.backtestAccuracy}%
               </div>
               <span className="text-[10px] text-slate-500 font-bold uppercase">
-                Couverture 5T
+                Couverture Top 10 · 5 derniers tirages
               </span>
             </div>
 
@@ -542,16 +536,24 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
                 Stabilité Gate
               </span>
               <div className="text-4xl font-black text-white my-2">
-                {Math.round((metrics.stabilityScore ?? 1.0) * 100)}%
+                {stabilityScore === null
+                  ? "n/d"
+                  : `${Math.round(stabilityScore * 100)}%`}
               </div>
               <div className="flex items-center gap-1.5">
                 <span
-                  className={`h-2 w-2 rounded-full ${(metrics.stabilityScore ?? 1.0) >= 0.75 ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`}
+                  className="h-2 w-2 rounded-full transition-colors duration-500"
+                  style={{
+                    backgroundColor:
+                      stabilityScore === null
+                        ? "#64748b"
+                        : `hsl(${Math.round(152 * stabilityScore)}, 84%, 55%)`,
+                  }}
                 ></span>
                 <span className="text-[10px] text-slate-500 font-bold uppercase">
-                  {(metrics.stabilityScore ?? 1.0) >= 0.75
-                    ? "Sécurisé"
-                    : "Lissé"}
+                  {spreadFactor === null
+                    ? "Lissage vers la moyenne n/d"
+                    : `Lissage vers la moyenne ${(spreadFactor * 100).toFixed(1)}%`}
                 </span>
               </div>
             </div>
@@ -561,14 +563,12 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
                 Diagnostic Régime
               </span>
               <div className="text-2xl font-black text-white capitalize my-2">
-                {metrics.regimeDiagnostic?.regime ?? "Stable"}
+                {metrics.regimeDiagnostic?.regime ?? "n/d"}
               </div>
               <span className="text-[10px] text-slate-500 font-bold uppercase">
-                Conf.{" "}
-                {Math.round(
-                  (metrics.regimeDiagnostic?.confidenceInRegime ?? 0.5) * 100,
-                )}
-                %
+                {regimeConfidence === null
+                  ? "Confiance n/d"
+                  : `Confiance ${Math.round(regimeConfidence * 100)}% (champ thermo-statistique)`}
               </span>
             </div>
           </div>
@@ -627,24 +627,37 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-6">
           {metrics.topCandidates.slice(0, 10).map((cand, idx) => {
-            const details = metrics.candidatesDetails?.[cand.number] || {
+            // Aucune décomposition inventée : si le moteur n'en fournit pas pour ce numéro,
+            // ses contributions valent toutes 0 et la barre reste vide — l'absence se voit.
+            const details = metrics.candidatesDetails?.[cand.number] ?? {
               markov: 0,
               structural: 0,
               machine: 0,
               trend: 0,
             };
-            // Calcul d'un total local pour les pourcentages relatifs
-            const localTotal =
-              details.markov +
-                details.structural +
-                details.machine +
-                details.trend || 1;
+            // Part de chaque canal dans la décomposition locale. Un total nul donne 0 % partout
+            // (aucune constante de repli, aucune division par zéro).
+            const channels = [
+              details.markov,
+              details.structural,
+              details.machine,
+              details.trend,
+            ];
+            const localTotal = channels.reduce((acc, v) => acc + v, 0);
+            const share = (value: number) =>
+              localTotal > 0 ? (value / localTotal) * 100 : 0;
 
-            // Normalisation pour la barre visuelle
-            const pMarkov = (details.markov / localTotal) * 100;
-            const pStruct = (details.structural / localTotal) * 100;
-            const pMachine = (details.machine / localTotal) * 100;
-            const pTrend = (details.trend / localTotal) * 100;
+            const pMarkov = share(details.markov);
+            const pStruct = share(details.structural);
+            const pMachine = share(details.machine);
+            const pTrend = share(details.trend);
+
+            // Intensité continue des étiquettes de dominance : nulle à la moitié de la part
+            // d'égale contribution (100 / nb de canaux), maximale à 1,5× cette part. La part
+            // d'égale contribution est dérivée du nombre de canaux, pas fixée arbitrairement.
+            const uniformShare = 100 / channels.length;
+            const shareTint = (p: number) =>
+              Math.min(1, Math.max(0, (p - uniformShare / 2) / uniformShare));
 
             return (
               <div
@@ -692,21 +705,30 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  {pMarkov > 30 && (
-                    <div className="text-[10px] font-bold text-indigo-500 flex items-center gap-1">
-                      <Workflow size={8} /> Markovien
-                    </div>
-                  )}
-                  {pStruct > 30 && (
-                    <div className="text-[10px] font-bold text-emerald-500 flex items-center gap-1">
-                      <Layers size={8} /> Symétrie
-                    </div>
-                  )}
-                  {pMachine > 20 && (
-                    <div className="text-[10px] font-bold text-amber-500 flex items-center gap-1">
-                      <Binary size={8} /> Machine
-                    </div>
-                  )}
+                  <div
+                    className="text-[10px] font-bold text-indigo-500 flex items-center gap-1"
+                    style={{ opacity: shareTint(pMarkov) }}
+                  >
+                    <Workflow size={8} /> Markovien
+                  </div>
+                  <div
+                    className="text-[10px] font-bold text-emerald-500 flex items-center gap-1"
+                    style={{ opacity: shareTint(pStruct) }}
+                  >
+                    <Layers size={8} /> Symétrie
+                  </div>
+                  <div
+                    className="text-[10px] font-bold text-amber-500 flex items-center gap-1"
+                    style={{ opacity: shareTint(pMachine) }}
+                  >
+                    <Binary size={8} /> Machine
+                  </div>
+                  <div
+                    className="text-[10px] font-bold text-rose-500 flex items-center gap-1"
+                    style={{ opacity: shareTint(pTrend) }}
+                  >
+                    <Activity size={8} /> Tendance
+                  </div>
                 </div>
               </div>
             );

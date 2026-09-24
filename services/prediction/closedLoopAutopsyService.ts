@@ -393,11 +393,25 @@ export const executeClosedLoopAutopsy = async (
     };
   });
 
+  // La carte d'explicabilité attendue par le synthétiseur est { [num]: { topologicalTension } } :
+  // on la dérive réellement de la matrice de Lyapunov disponible au lieu de lui passer une carte
+  // de nombres bruts (dont les tensions auraient toutes été lues à 0).
+  const autopsyExplainability: Record<number, { topologicalTension: number }> = {};
+  Object.entries((advancedMetrics?.topologicalLyapunov as Record<string, number>) || {}).forEach(([key, value]) => {
+    const num = Number(key);
+    if (Number.isFinite(num) && typeof value === "number" && Number.isFinite(value)) {
+      autopsyExplainability[num] = { topologicalTension: value };
+    }
+  });
+
   const scenarioDeck = generateProbabilisticScenarioMatrix({
     selection: top5Predicted,
     denoisedScores: simulatedScoredNumbers,
-    explainabilityRecord: (advancedMetrics?.topologicalLyapunov as any) || {},
-    finalConfidence: calibrationAccuracy,
+    explainabilityRecord: autopsyExplainability,
+    // `calibrationAccuracy` est une exactitude de calibration PÉRIODIQUE (dérivée du Brier), pas un
+    // indicateur de cohérence par ticket : la transmettre comme cohérence primaire serait un
+    // étiquetage abusif. L'autopsie ne consomme pas cet indicateur (elle mesure les hits réels).
+    primaryCoherence: null,
     drawName,
   });
 

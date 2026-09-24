@@ -9,8 +9,8 @@ import { calculateGeneticDiversityIndex } from "./diversityService";
 import { evaluateAdversarialSurvival } from "./adversarialProxy";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { TUNING } from "./microSgd";
-import { HONEST_NOTE, generateProbabilisticScenarioMatrix } from "./predictionScenarios";
-import { STABILITY_POLYHARMONIC_WEIGHTS, REALITY_ALIGNMENT_WEIGHTS } from "./calibrationConstants";
+import { HONEST_NOTE, generateProbabilisticScenarioMatrix, type ScenarioCoherenceCalibration } from "./predictionScenarios";
+import { STABILITY_POLYHARMONIC_WEIGHTS, REALITY_ALIGNMENT_WEIGHTS, PLATT_SCORE_STANDARDIZATION } from "./calibrationConstants";
 import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { generateXAPNarratives } from "./xapExplainabilityService";
@@ -207,7 +207,7 @@ export const finalizePredictionPayload = async (
   const plattA = calibratedParams.sigmoid_slope;
   const plattB = calibratedParams.sigmoid_intercept;
   
-  const rawX = (averageScore - 50.0) / 15.0;
+  const rawX = (averageScore - PLATT_SCORE_STANDARDIZATION.CENTER) / PLATT_SCORE_STANDARDIZATION.SCALE;
   const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
   
   let calibratedConfidence = plattCalibratedProbability * 100.0 * calibratedParams.boosting_multiplier;
@@ -359,12 +359,24 @@ export const finalizePredictionPayload = async (
   // ============================================================================
   // SCÉNARIOS DE SIMULATION PROBABILISTES DÉTERMINISTES (SCÉNARIO D SYNTHESIZER)
   // ============================================================================
+  // Les scénarios dérivés partagent le MÊME calibrage que le vecteur primaire : leur indicateur de
+  // cohérence est recalculé sur la moyenne des scores de leurs propres membres, jamais dérivé par
+  // un multiplicateur arbitraire de `finalConfidence`.
+  const scenarioCalibration: ScenarioCoherenceCalibration = {
+    plattSlope: plattA,
+    plattIntercept: plattB,
+    boostingMultiplier: calibratedParams.boosting_multiplier,
+    cyclicModulator: cyclicPhaseProfile.confidenceModulator,
+    shrinkageMultiplier: shrinkageApplied ? shrinkageFactor : 1.0,
+  };
+
   const simulationScenarios = generateProbabilisticScenarioMatrix({
     selection,
     denoisedScores,
     explainabilityRecord,
-    finalConfidence,
+    primaryCoherence: finalConfidence,
     drawName: context.drawName,
+    calibration: scenarioCalibration,
     dnaSieveMetrics,
   });
 

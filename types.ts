@@ -1,5 +1,5 @@
 export * from "./shared/prediction.types";
-import { AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
+import { AlgoKey, AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
 
 export interface GapEfficiency {
   number: number;
@@ -175,12 +175,18 @@ export interface SimulationScenarioItem {
   scenarioId: string;
   scenarioName: string;
   ticket: number[];
-  probabilityScore: number;
+  /**
+   * Indicateur interne de cohérence du moteur pour le ticket de CE scénario : moyenne des scores
+   * de ses membres, passée dans la même sigmoïde de Platt que le vecteur primaire (cf.
+   * predictionScenarios.plattCoherenceFromAverageScore). Ce n'est PAS une probabilité de gain :
+   * un tirage équitable reste équiprobable quel que soit l'algorithme.
+   * `null` = non mesurable (aucun score exploitable ou calibrage indisponible) — à afficher « n/d ».
+   */
+  coherenceScore: number | null;
   riskProfile: 'DEFENSIVE' | 'BALANCED' | 'AGGRESSIVE' | 'RECURRENT' | 'ADVERSARIAL';
   description: string;
   color?: string;
   genomicFocus?: string;
-  energyPct?: number;
 }
 
 export interface PredictionFeedback {
@@ -772,6 +778,13 @@ export interface PlatinumResult {
     transition: number;
     chaotic: number;
   };
+  /**
+   * Scores mesurés par canal (sigmoïde du z-score, échelle 0-100) pour chaque numéro 1..90 ;
+   * l'index 0 n'est pas utilisé. Ces valeurs sont les grandeurs réelles qui alimentent la
+   * fusion : elles permettent de construire un breakdown d'audit authentique, sans aucune
+   * valeur inventée, pour l'analyse post-prédiction.
+   */
+  channelScores?: Partial<Record<AlgoKey, number[]>>;
 }
 
 export interface PlatinumScenario {
@@ -779,7 +792,17 @@ export interface PlatinumScenario {
   name: string;
   description: string;
   numbers: number[];
-  probability: number;
+  /**
+   * Indice de densité relative du scénario (0-100) : ratio entre l'énergie moyenne des
+   * numéros sélectionnés et l'énergie moyenne des 90 numéros DANS LE PROFIL DE SCORES PROPRE
+   * au scénario, projeté continûment par
+   *   index = 100 · r² / (1 + r²)  ≡  50 · (1 + tanh(ln r)),  r = setMean / profileMean
+   * Monotone, log-symétrique, borné dans ]0,100[ et neutre (50) quand la sélection est
+   * exactement à la moyenne du profil. Mesure la concentration de la sélection, PAS la
+   * probabilité de gain : un tirage équitable reste équiprobable quel que soit l'algorithme.
+   */
+  relativeIndex: number;
+  /** Rang de risque RELATIF parmi les scénarios mesurés (terciles de relativeIndex), pas une probabilité. */
   risk: "LOW" | "MEDIUM" | "HIGH";
   color: string;
   genomicProfile?: {
@@ -850,6 +873,11 @@ export interface OrchestrationMetrics {
   backtestAccuracy: number;
   narrativeLesson: string;
   stabilityScore?: number;
+  /**
+   * Fraction de mélange vers la moyenne globale réellement appliquée par le moteur
+   * (mesure interne : 0 = classement brut, valeur élevée = scores fortement lissés).
+   */
+  spreadFactor?: number;
   regimeDiagnostic?: {
     regime: "stable" | "volatile" | "chaotic" | "cryo";
     confidenceInRegime: number;

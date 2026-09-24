@@ -44,6 +44,7 @@ import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { audioEngine } from "../../utils/audioEngine";
 import { useToast } from "../ui/Toast";
 import { AlgoWeights, PlatinumScenario } from "../../types";
+import { ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
 import { normalizeWeights } from "../../services/predictionEngine";
 import {
   ResponsiveContainer,
@@ -919,7 +920,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
                     Inoculation & Calibrage ADN
                   </h3>
                   <p className="text-[10px] text-slate-400">
-                    Calibrer instantanément les 22 algorithmes et réaligner le
+                    Calibrer instantanément les {ACTIVE_ALGO_COUNT} algorithmes actifs et réaligner le
                     tamis
                   </p>
                 </div>
@@ -930,7 +931,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
                   {
                     id: "FULL_RECOMMENDED",
                     label: "Idéal Complet (Softmax Global)",
-                    desc: "Ajuste les 22 algorithmes selon leur rendement réel",
+                    desc: `Ajuste les ${ACTIVE_ALGO_COUNT} algorithmes actifs selon leur rendement réel`,
                   },
                   {
                     id: "TOP_5_ELITE",

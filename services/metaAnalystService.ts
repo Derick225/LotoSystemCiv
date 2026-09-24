@@ -375,7 +375,7 @@ export async function generatePlatinumPredictionCore(
 
     // 6. GÉNÉRATION DES 6 SCÉNARIOS STRATÉGIQUES HYPER-CONVERGENTS
     onProgress?.(85, "Génération des scénarios stratégiques déterministes...");
-    const scenarios: PlatinumScenario[] = [];
+    const scenarioDrafts: Omit<PlatinumScenario, 'risk'>[] = [];
     const freqPhase = opts.phaseFrequency;
 
     // Ratios d'harmoniques de variance
@@ -386,16 +386,25 @@ export async function generatePlatinumPredictionCore(
     const gammaRatio = statsMomentum.stdDev / (statsVector.stdDev + statsMomentum.stdDev + Number.EPSILON);
     const deltaRatio = statsGap.stdDev / (statsVector.stdDev + statsGap.stdDev + Number.EPSILON);
 
-    // Fonction de calcul continu de probabilité de scénario basée sur la densité d'énergie
-    const computeScenarioProbability = (selectedNums: number[], targetVector: Float64Array, baseWeight: number): number => {
+    // Indice relatif de densité spectrale : ratio de l'énergie moyenne de la sélection sur
+    // l'énergie moyenne des 90 numéros, projeté continûment dans [0,100] par
+    //   100·r²/(1+r²) ≡ 50·(1+tanh(ln r))
+    // Monotone, log-symétrique, borné, neutre (50) quand la sélection est exactement à la
+    // moyenne mesurée. Aucun seuil, aucune pondération arbitraire, aucune borne artificielle.
+    const computeScenarioIndex = (selectedNums: number[], targetVector: Float64Array): number => {
         let setSum = 0;
         for (const num of selectedNums) {
             setSum += targetVector[num] || 0;
         }
-        const meanScore = setSum / (selectedNums.length || 1);
-        const coherenceBonus = (1.0 - entropyScore) * 20.0;
-        const prob = Math.round(baseWeight + (meanScore / 100.0) * 15.0 + coherenceBonus);
-        return Math.max(45, Math.min(96, prob));
+        let globalSum = 0;
+        for (let i = 1; i <= MAX_NUM; i++) {
+            globalSum += targetVector[i] || 0;
+        }
+        const setMean = setSum / (selectedNums.length || 1);
+        const globalMean = globalSum / MAX_NUM;
+        const ratio = setMean / (globalMean + Number.EPSILON);
+        const squared = ratio * ratio;
+        return 100.0 * squared / (1.0 + squared);
     };
 
     // Helper de calcul continu de l'empreinte spectrale d'un scénario sur les 6 Macro-Familles
@@ -435,14 +444,13 @@ export async function generatePlatinumPredictionCore(
     }
     const normAlpha = normalizeVector(alphaVector);
     const alphaNumbers = greedyDeterministicSelection(normAlpha, DRAW_SIZE, 0.0, entropyScore);
-    const alphaProb = computeScenarioProbability(alphaNumbers, normAlpha, 72);
-    scenarios.push({
+    const alphaIndex = computeScenarioIndex(alphaNumbers, normAlpha);
+    scenarioDrafts.push({
         id: 'alpha',
         name: 'Alpha Core',
         description: 'Convergence maximale. Pondération stricte sur les gènes à fort MRR et pic de résonance invariant.',
         numbers: alphaNumbers,
-        probability: alphaProb,
-        risk: alphaProb >= 82 ? 'LOW' : 'MEDIUM',
+        relativeIndex: alphaIndex,
         color: '#10b981',
         genomicProfile: {
             focus: 'Pondération stricte sur les gènes à fort MRR',
@@ -460,14 +468,13 @@ export async function generatePlatinumPredictionCore(
     const normBeta = normalizeVector(betaVector);
     const betaPhase = (Math.PI / 4.0) * freqPhase;
     const betaNumbers = greedyDeterministicSelection(normBeta, DRAW_SIZE, betaPhase, entropyScore);
-    const betaProb = computeScenarioProbability(betaNumbers, normBeta, 65);
-    scenarios.push({
+    const betaIndex = computeScenarioIndex(betaNumbers, normBeta);
+    scenarioDrafts.push({
         id: 'beta',
         name: 'Beta Flow',
         description: 'Intègre les harmoniques secondaires via un décalage de phase trigonométrique orbital.',
         numbers: betaNumbers,
-        probability: betaProb,
-        risk: betaProb >= 75 ? 'LOW' : 'MEDIUM',
+        relativeIndex: betaIndex,
         color: '#6366f1',
         genomicProfile: {
             focus: 'Harmonique orbitale et alignement de phase spectral',
@@ -486,14 +493,13 @@ export async function generatePlatinumPredictionCore(
     const normGamma = normalizeVector(gammaVector);
     const gammaPhase = (Math.PI / 2.0) * freqPhase;
     const gammaNumbers = greedyDeterministicSelection(normGamma, DRAW_SIZE, gammaPhase, entropyScore);
-    const gammaProb = computeScenarioProbability(gammaNumbers, normGamma, 58);
-    scenarios.push({
+    const gammaIndex = computeScenarioIndex(gammaNumbers, normGamma);
+    scenarioDrafts.push({
         id: 'gamma',
         name: 'Gamma Burst',
         description: 'Amplification sur les numéros à forte accélération de tamisage (ΔM_n > 0) et momentum pur.',
         numbers: gammaNumbers,
-        probability: gammaProb,
-        risk: gammaProb >= 75 ? 'MEDIUM' : 'HIGH',
+        relativeIndex: gammaIndex,
         color: '#f43f5e',
         genomicProfile: {
             focus: 'Amplification cinétique sur accélération de tamisage ΔM_n > 0',
@@ -511,14 +517,13 @@ export async function generatePlatinumPredictionCore(
     const normDelta = normalizeVector(deltaVector);
     const deltaPhase = (3.0 * Math.PI / 4.0) * freqPhase;
     const deltaNumbers = greedyDeterministicSelection(normDelta, DRAW_SIZE, deltaPhase, entropyScore);
-    const deltaProb = computeScenarioProbability(deltaNumbers, normDelta, 60);
-    scenarios.push({
+    const deltaIndex = computeScenarioIndex(deltaNumbers, normDelta);
+    scenarioDrafts.push({
         id: 'delta',
         name: 'Delta Convergence',
         description: 'Théorie des écarts asymétriques pour cibler les corrections de rupture imminentes.',
         numbers: deltaNumbers,
-        probability: deltaProb,
-        risk: deltaProb >= 75 ? 'MEDIUM' : 'HIGH',
+        relativeIndex: deltaIndex,
         color: '#f59e0b',
         genomicProfile: {
             focus: 'Restitution d\'écart asymétrique et bascule de cycle',
@@ -576,14 +581,13 @@ export async function generatePlatinumPredictionCore(
     const normEpsilon = normalizeVector(epsilonVector);
     const epsilonPhase = Math.PI * freqPhase;
     const epsilonNumbers = greedyDeterministicSelection(normEpsilon, DRAW_SIZE, epsilonPhase, entropyScore);
-    const epsilonProb = computeScenarioProbability(epsilonNumbers, normEpsilon, 64);
-    scenarios.push({
+    const epsilonIndex = computeScenarioIndex(epsilonNumbers, normEpsilon);
+    scenarioDrafts.push({
         id: 'epsilon',
         name: 'Epsilon Forensic',
         description: 'Adaptation Agentique & Forensic. Corrige la dérive de l\'ADN algorithmique sur les cycles récents.',
         numbers: epsilonNumbers,
-        probability: epsilonProb,
-        risk: epsilonProb >= 75 ? 'LOW' : 'MEDIUM',
+        relativeIndex: epsilonIndex,
         color: '#8b5cf6',
         genomicProfile: {
             focus: 'Correction agentique médico-légale et compensation des dérives',
@@ -630,15 +634,13 @@ export async function generatePlatinumPredictionCore(
     const normZeta = normalizeVector(zetaVector);
     const zetaPhase = (7.0 * Math.PI / 4.0) * freqPhase; // Phase anti-symétrique orthogonale
     const zetaNumbers = greedyDeterministicSelection(normZeta, DRAW_SIZE, zetaPhase, entropyScore);
-    const dynamicBaseProb = Math.round(50 + entropyScore * 22);
-    const zetaProb = computeScenarioProbability(zetaNumbers, normZeta, dynamicBaseProb);
-    scenarios.push({
+    const zetaIndex = computeScenarioIndex(zetaNumbers, normZeta);
+    scenarioDrafts.push({
         id: 'zeta',
         name: 'Zeta Adversarial',
         description: 'Exploitation des gènes contre-cycliques, amortissement harmonique ζ de 2nd ordre et anti-consensus en régime de haute entropie.',
         numbers: zetaNumbers,
-        probability: zetaProb,
-        risk: zetaProb >= 72 ? 'HIGH' : 'MEDIUM',
+        relativeIndex: zetaIndex,
         color: '#f97316',
         genomicProfile: {
             focus: 'Contre-mesure anti-consensus, amortissement harmonique ζ et résonance orthogonale',
@@ -653,7 +655,7 @@ export async function generatePlatinumPredictionCore(
 
     // Remplissage sécurisé déterministe si un scénario est incomplet
     const defaultNumbers = masterPred?.suggestedNumbers || [];
-    scenarios.forEach(s => {
+    scenarioDrafts.forEach(s => {
         if (s.numbers.length < DRAW_SIZE) {
             const fillers = [...defaultNumbers];
             while (s.numbers.length < DRAW_SIZE && fillers.length > 0) {
@@ -667,6 +669,15 @@ export async function generatePlatinumPredictionCore(
             }
         }
     });
+
+    // Bandes de risque RELATIVES : terciles des indices mesurés (aucun seuil absolu).
+    const sortedIndices = scenarioDrafts.map(s => s.relativeIndex).sort((a, b) => a - b);
+    const lowerBand = sortedIndices[Math.floor(sortedIndices.length / 3)];
+    const upperBand = sortedIndices[Math.floor((2 * sortedIndices.length) / 3)];
+    const scenarios: PlatinumScenario[] = scenarioDrafts.map(s => ({
+        ...s,
+        risk: s.relativeIndex >= upperBand ? 'LOW' : s.relativeIndex >= lowerBand ? 'MEDIUM' : 'HIGH'
+    }));
 
     // Calcul de la concordance moyenne de l'ADN
     let sumDnaAff = 0;
@@ -705,6 +716,16 @@ export async function generatePlatinumPredictionCore(
             stable: Number((pStable * 100).toFixed(1)),
             transition: Number((pTransition * 100).toFixed(1)),
             chaotic: Number((pChaotic * 100).toFixed(1))
+        },
+        channelScores: {
+            [AlgoKey.FREQUENCY]: Array.from(stdFreq),
+            [AlgoKey.GAPS]: Array.from(stdGap),
+            [AlgoKey.MOMENTUM]: Array.from(stdMomentum),
+            [AlgoKey.SPECTRAL]: Array.from(stdSpectral),
+            [AlgoKey.MARKOV]: Array.from(stdMarkov),
+            [AlgoKey.BAYES]: Array.from(stdBayes),
+            [AlgoKey.FRACTAL]: Array.from(stdFractal),
+            [AlgoKey.SPATIAL]: Array.from(stdSpatial)
         }
     };
 }

@@ -44,6 +44,24 @@ export const SHRINKAGE_CALIBRATION = {
 } as const;
 
 /**
+ * Standardisation du score moyen avant application de la sigmoïde de Platt.
+ * Sites : predictionFinalize (vecteur primaire) ET predictionScenarios (scénarios dérivés).
+ *
+ * Le score moyen du moteur (~[0,100]) est ramené sur une échelle centrée-réduite avant d'être
+ * passé dans la sigmoïde : rawX = (averageScore - CENTER) / SCALE. CENTER/SCALE sont des
+ * paramètres d'échelle, non des seuils de décision : ils n'introduisent aucune discontinuité.
+ * Ils sont mutualisés ici pour que le vecteur primaire et les scénarios dérivés traversent
+ * EXACTEMENT la même transformation (une valeur différente produirait deux échelles de
+ * cohérence non comparables dans la même interface).
+ */
+export const PLATT_SCORE_STANDARDIZATION = {
+  /** Centre de l'échelle des scores du moteur (score moyen neutre). */
+  CENTER: 50.0,
+  /** Écart-type de référence de l'échelle des scores (acuité de la sigmoïde). */
+  SCALE: 15.0,
+} as const;
+
+/**
  * Exposants de l'agrégation poly-harmonique du score de stabilité.
  * Site : predictionFinalize (calcul de combinedStability).
  *

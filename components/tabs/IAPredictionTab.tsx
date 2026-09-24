@@ -63,7 +63,7 @@ import {
   STORAGE_RETENTION_CONSTANTS,
 } from "../../services/predictionHistoryService";
 import type { Prediction, PredictionHistoryItem, AlgoWeights } from "../../types";
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS, ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
 import { getAlgoWeights, adjustWeightsForRegime, normalizeWeights } from "../../services/prediction/weightsManager";
 import { NumberBall } from "../NumberBall";
 import { ExportService } from "../../services/exportService";
@@ -82,6 +82,10 @@ interface BacktestResult {
   nearMisses: { num: number; type: "voisin" | "miroir"; match: number }[];
   confidence: number;
 }
+
+// Une métrique non produite par le moteur est affichée "n/d" : aucune valeur de repli inventée.
+const formatPercent = (value?: number | null): string =>
+  typeof value === "number" && Number.isFinite(value) ? `${value}%` : "n/d";
 
 export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   drawName,
@@ -476,7 +480,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     hyperAccuracyGain?: number;
     aiWeights?: Record<string, number>;
     aiRationale?: string;
-    aiConfidence?: number;
     aiStrategicAdvice?: string;
     isLocalFallback?: boolean;
     engineType?: "local" | "cloud";
@@ -522,7 +525,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
 
     const hDiff = hurst - 0.5;
     const eDiff = entropy - 3.0;
-    const volMod = Math.max(-0.5, Math.min(0.5, volatility / 100.0));
 
     const persistenceProb = 1.0 / (1.0 + Math.exp(-35.0 * hDiff));
     const antipersistenceProb = 1.0 - persistenceProb;
@@ -550,21 +552,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     const volProb = 1.0 / (1.0 + Math.exp(-0.2 * (volatility - 20.0)));
     rationale += `La volatilité mesurée contribue continûment à hauteur de ${(volProb * 100).toFixed(1)}% à l'amplification spectrale globale. `;
 
-    const confidence = Math.round(
-      100.0 / (1.0 + Math.exp(-0.1 * (hDiff * 200 - eDiff * 50 - volMod * 50))),
-    ); // Sigmoid instead of min/max clamping
-    const boundedConfidence = Math.max(
-      65,
-      Math.min(95, 65 + (30 * confidence) / 100),
-    );
-
     // Strategic advice interpolé de façon continue
     const strategicAdvice = `Favoriser continûment un ratio d'exposition de ${(persistenceProb * 100).toFixed(0)}% de numéros chauds d'inertie (historique récent) et ${(antipersistenceProb * 100).toFixed(0)}% d'écarts longs parvenus à maturité (rupture de phase).`;
 
+    // Aucune confiance n'est revendiquée ici : la composition du régime décrit l'état du
+    // paysage d'inférence, pas la probabilité qu'un ticket gagne. La confiance affichée est
+    // celle, calibrée, du moteur d'inférence lui-même.
     return {
       weights: adjustedWeights as Record<string, number>,
       rationale,
-      confidence: boundedConfidence,
       strategicAdvice,
     };
   };
@@ -585,9 +581,19 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     try {
       let aiWeights: Record<string, number> | undefined = undefined;
       let aiRationale = "";
-      let aiConfidence = 80;
+      // Confiance revendiquée par le modèle cloud, quand il en fournit une. En secours local,
+      // elle reste indéfinie : la confiance affichée vient alors du moteur d'inférence.
+      let aiConfidence: number | undefined = undefined;
       let aiStrategicAdvice = "";
       let isLocalFallback = false;
+
+      // Socle complet des 24 canaux sur lequel toute allocation partielle se fusionne : le
+      // cloud ne se prononce que sur les canaux actifs qu'il connaît, les autres doivent
+      // conserver leur calibration entraînée pour ce tirage plutôt que retomber à un défaut.
+      const resolveBaseWeights = async (): Promise<AlgoWeights> =>
+        globalWeights && Object.keys(globalWeights).length > 0
+          ? globalWeights
+          : await getAlgoWeights(drawName);
 
       const hurstVal =
         globalRegime?.hurst !== undefined ? globalRegime.hurst : 0.5;
@@ -625,7 +631,12 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         }
 
         if (data) {
-          aiWeights = data.weights;
+          // Fusion sur le socle complet : les canaux absents de la réponse cloud gardent leur
+          // poids entraîné au lieu d'être silencieusement écartés de l'ensemble pondéré.
+          aiWeights = {
+            ...(await resolveBaseWeights()),
+            ...(data.weights as Record<string, number>),
+          };
           aiRationale = data.rationale;
           aiConfidence = data.confidence;
           aiStrategicAdvice = data.strategicAdvice;
@@ -640,9 +651,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           e.message?.includes("GEMINI_NOT_CONFIGURED")
         ) {
           // Gemini not configured - fallback to high-fidelity math optimizer
-          const activeBaseWeights = globalWeights && Object.keys(globalWeights).length > 0
-            ? globalWeights
-            : await getAlgoWeights(drawName);
+          const activeBaseWeights = await resolveBaseWeights();
 
           const localFb = generateSmartLocalWeightsFallback(
             drawName,
@@ -654,7 +663,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           );
           aiWeights = localFb.weights;
           aiRationale = localFb.rationale;
-          aiConfidence = localFb.confidence;
           aiStrategicAdvice = localFb.strategicAdvice;
           isLocalFallback = true;
           showToast(
@@ -666,9 +674,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
             "Could not fetch Gemini hybrid weights, falling back to local stochastics:",
             e,
           );
-          const activeBaseWeights = globalWeights && Object.keys(globalWeights).length > 0
-            ? globalWeights
-            : await getAlgoWeights(drawName);
+          const activeBaseWeights = await resolveBaseWeights();
 
           const localFb = generateSmartLocalWeightsFallback(
             drawName,
@@ -680,7 +686,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           );
           aiWeights = localFb.weights;
           aiRationale = localFb.rationale;
-          aiConfidence = localFb.confidence;
           aiStrategicAdvice = localFb.strategicAdvice;
           isLocalFallback = true;
         }
@@ -709,7 +714,12 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       setPrediction({
         suggestedNumbers: predictionData.suggestedNumbers,
         candidates: predictionData.candidates,
-        confidence: aiConfidence || predictionData.confidence,
+        // La confiance affichée est soit celle revendiquée par le cloud, soit celle du moteur
+        // d'inférence. Le secours local n'en produit pas : il ne fabrique donc aucune valeur.
+        confidence:
+          isLocalFallback || aiConfidence === undefined
+            ? predictionData.confidence
+            : aiConfidence,
         analysis:
           predictionData.analysis ||
           "Inférence hybride complétée à partir de la matrice d'alignement.",
@@ -729,7 +739,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         hyperAccuracyGain: predictionData.hyperAccuracyGain,
         aiWeights,
         aiRationale,
-        aiConfidence,
         aiStrategicAdvice,
         isLocalFallback,
         engineType: isLocalFallback ? "local" : "cloud",
@@ -1324,11 +1333,17 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                               (x) => x.number === num,
                             );
                             breakdown[num] = {
-                              xap: xapItem
-                                ? xapItem.contributionPercentage
-                                : 20,
-                              confidence: prediction?.confidence || 50,
-                              stability: prediction?.stabilityScore || 80,
+                              // Seules les valeurs réellement produites sont enregistrées :
+                              // aucun taux de repli n'est injecté dans le rapport exporté.
+                              ...(xapItem
+                                ? { xap: xapItem.contributionPercentage }
+                                : {}),
+                              ...(typeof prediction?.confidence === "number"
+                                ? { confidence: prediction.confidence }
+                                : {}),
+                              ...(typeof prediction?.stabilityScore === "number"
+                                ? { stability: prediction.stabilityScore }
+                                : {}),
                             };
                           });
 
@@ -1400,9 +1415,9 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           </span>
                           <span className="text-[10px] uppercase font-bold text-fuchsia-400 leading-normal block flex items-center gap-1.5">
                             <span
-                              className={`w-1.5 h-1.5 rounded-full ${globalRegime?.regime === "CHAOS" ? "bg-red-500 animate-pulse" : "bg-emerald-500"}`}
+                              className={`w-1.5 h-1.5 rounded-full ${globalRegime ? "bg-emerald-500" : "bg-slate-500"}`}
                             />
-                            {globalRegime?.regime || "STABLE (Harmonisé)"}
+                            {globalRegime?.regime ?? "Régime non mesuré"}
                           </span>
                         </div>
                       </div>
@@ -1416,7 +1431,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           </span>
                           <div className="flex items-baseline gap-1">
                             <span className="text-sm font-black text-emerald-400 font-mono">
-                              {prediction.realityAlignment || 82}%
+                              {formatPercent(prediction.realityAlignment)}
                             </span>
                           </div>
                           <span className="text-[8px] text-slate-500 block leading-tight mt-1">
@@ -1431,7 +1446,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           </span>
                           <div className="flex items-baseline gap-1">
                             <span className="text-sm font-black text-indigo-400 font-mono">
-                              {prediction.stabilityScore || 100}%
+                              {formatPercent(prediction.stabilityScore)}
                             </span>
                           </div>
                           <span className="text-[8px] text-slate-500 block leading-tight mt-1">
@@ -1685,7 +1700,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             Pondération Hybride de l'Oracle
                           </h3>
                           <p className="text-[11px] text-slate-500">
-                            Configuration des 19 algorithmes calibrée par{" "}
+                            Configuration des {ACTIVE_ALGO_COUNT} canaux algorithmiques actifs calibrée par{" "}
                             {prediction.isLocalFallback
                               ? "le moteur cybernétique local"
                               : "l'IA Gemini"}
@@ -3243,7 +3258,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                               Indices de Fiabilité Stochastique
                             </span>
                             <div className="text-[10px] font-mono font-bold text-fuchsia-400 space-y-0.5">
-                              <div>Index de Stabilité : {item.prediction.stabilityScore || 100}%</div>
+                              <div>Index de Stabilité : {formatPercent(item.prediction.stabilityScore)}</div>
                               {item.prediction.realityAlignment !== undefined && (
                                 <div className="text-cyan-400">
                                   Alignement Réel : {item.prediction.realityAlignment}%
@@ -3308,10 +3323,12 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                                       <span>
                                         XAP:{" "}
                                         <strong className={isHit ? "text-emerald-400" : "text-fuchsia-400"}>
-                                          {(metrics.xap || 20).toFixed(0)}%
+                                          {typeof metrics.xap === "number"
+                                            ? `${metrics.xap.toFixed(0)}%`
+                                            : "n/d"}
                                         </strong>
                                       </span>
-                                      {metrics.stability && (
+                                      {typeof metrics.stability === "number" && (
                                         <span className="text-slate-500">
                                           Stab: {metrics.stability}%
                                         </span>

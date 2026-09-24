@@ -87,6 +87,57 @@ export const combinations = (n: number, k: number): number => {
 };
 
 /**
+ * Queue supérieure EXACTE de la loi binomiale : P(X ≥ k) pour X ~ B(n, p0).
+ * Somme directe des termes binomiaux (aucune approximation normale de Laplace) : reste valide
+ * sur les très petits effectifs où le théorème central limite ne s'applique pas encore.
+ * 100 % déterministe, sans générateur pseudo-aléatoire.
+ *
+ * @param k Nombre de succès observés (borne inférieure inclusive).
+ * @param n Nombre d'essais indépendants.
+ * @param p0 Probabilité de succès sous l'hypothèse nulle.
+ * @returns La p-value unilatérale dans [0,1], ou NaN si les paramètres sont inexploitables.
+ */
+export const binomialUpperTail = (k: number, n: number, p0: number): number => {
+    if (!Number.isFinite(k) || !Number.isFinite(n) || !Number.isFinite(p0)) return NaN;
+    if (n <= 0 || k > n) return 0;
+    if (k <= 0) return 1;
+    if (p0 <= 0) return 0;
+    if (p0 >= 1) return 1;
+    let tail = 0;
+    for (let i = k; i <= n; i++) {
+        tail += combinations(n, i) * Math.pow(p0, i) * Math.pow(1 - p0, n - i);
+    }
+    return Math.min(1, Math.max(0, tail));
+};
+
+/**
+ * Correction Benjamini-Hochberg (FDR) par procédure step-up, appliquée à une famille de
+ * p-values. Aucune constante arbitraire n'intervient : seuls le rang et la taille m de la
+ * famille. Les valeurs non finies ou absentes sont traitées comme non testées (q = 1).
+ *
+ * @param pValues p-values brutes indexées par identifiant de test.
+ * @returns q-values ajustées indexées de la même façon.
+ */
+export const benjaminiHochberg = (
+    pValues: Record<string, number>,
+): Record<string, number> => {
+    const entries = Object.entries(pValues).filter(([, p]) => Number.isFinite(p));
+    const m = entries.length;
+    const qValues: Record<string, number> = {};
+    Object.keys(pValues).forEach((key) => { qValues[key] = 1.0; });
+    if (m === 0) return qValues;
+    const ascending = [...entries].sort((a, b) => a[1] - b[1]);
+    let runningMin = 1.0;
+    for (let i = m - 1; i >= 0; i--) {
+        const rank = i + 1;
+        const adjusted = Math.min(1.0, (m / rank) * ascending[i][1]);
+        runningMin = Math.min(runningMin, adjusted);
+        qValues[ascending[i][0]] = runningMin;
+    }
+    return qValues;
+};
+
+/**
  * Plus Grand Commun Diviseur (GCD)
  */
 export const gcd = (a: number, b: number): number => {

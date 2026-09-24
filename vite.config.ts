@@ -213,6 +213,14 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: true
+    },
+    // Les tests E2E d'orchestration (pipeline complet + WASM HPC) dépassent les 5 s par défaut
+    // dès que la suite tourne en parallèle : leur durée réelle (~2-3 s en isolation) n'est pas
+    // un échec fonctionnel. On aligne le budget sur la charge, ce qui évite des faux négatifs
+    // qui masqueraient de vraies régressions.
+    test: {
+      testTimeout: 30000,
+      hookTimeout: 30000
     }
   };
 });

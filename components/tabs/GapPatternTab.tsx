@@ -34,9 +34,64 @@ import {
   Table,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
-import { AlgoKey } from "../../shared/prediction.types";
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from "../../shared/prediction.types";
 import { lotteryService } from "../../services/lotteryService";
 import { generateMasterPrediction, getAlgoWeights } from "../../services/predictionEngine";
+
+/**
+ * Famille "Écart" telle que réellement mesurée par la matrice de corrélation ci-dessous.
+ * Source unique : le tableau alimente le calcul et la prose, afin qu'aucun libellé ne puisse
+ * annoncer un nombre de canaux différent de celui effectivement corrélé.
+ */
+const GAP_FAMILY_KEYS: readonly AlgoKey[] = [
+  AlgoKey.GAPS,
+  AlgoKey.GAP_SEQUENCE,
+  AlgoKey.GAP_PATTERN,
+  AlgoKey.GAP_CADENCE,
+  AlgoKey.GAP_TREND,
+  AlgoKey.GAP_BAND_SEQUENCE,
+];
+
+const GAP_FAMILY_ACTIVE_KEYS = GAP_FAMILY_KEYS.filter(
+  (key) => !RETIRED_ALGO_WEIGHT_KEYS.has(key),
+);
+
+const GAP_FAMILY_LABELS: Record<string, { short: string; long: string; basis: string }> = {
+  [AlgoKey.GAPS]: {
+    short: "Gaps Theo.",
+    long: "CDF Géométrique (Gaps)",
+    basis:
+      "Modélisation théorique globale (loi géométrique continue sans mémoire), servant de socle neutre.",
+  },
+  [AlgoKey.GAP_SEQUENCE]: {
+    short: "Gap Seq.",
+    long: "Autocorrélation Populationnelle (Gap Sequence)",
+    basis: "Analyse de dépendance séquentielle basée sur le comportement des tirages collectifs passés.",
+  },
+  [AlgoKey.GAP_PATTERN]: {
+    short: "Gap Pat.",
+    long: "Modèle Idiographique AR(1) (Gap Pattern)",
+    basis:
+      "Équations de régression autorégressives spécifiques à chaque numéro individuel pour isoler ses cycles propres.",
+  },
+  [AlgoKey.GAP_CADENCE]: {
+    short: "Gap Cad.",
+    long: "Régime de Retour Collectif (Gap Cadence)",
+    basis: "Modulation par ondes de tension et dynamique harmonique globale du tirage complet.",
+  },
+  [AlgoKey.GAP_TREND]: {
+    short: "Gap Trend",
+    long: "Tendance de Dérive (Gap Trend)",
+    basis:
+      "Lissage de Holt (niveau + tendance, paramètres optimisés par moindres carrés), représentant orthogonal conservé de la dynamique d'autocorrélation.",
+  },
+  [AlgoKey.GAP_BAND_SEQUENCE]: {
+    short: "Gap Band",
+    long: "Markov des Tranches d'Écarts (Gap Band Sequence)",
+    basis:
+      "Chaînes de Markov sur les tranches d'écarts décennales entre tirages successifs (signal collectif de tranche).",
+  },
+};
 
 export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const history = useNexusStore((state) => state.history);
@@ -96,22 +151,11 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       // Respect TIRAGE ISOLATION RULE: analyze strictly the isolated active draw history
       const drawNamesToAnalyze = [drawName];
 
-      const keys = [
-        AlgoKey.GAPS,
-        AlgoKey.GAP_SEQUENCE,
-        AlgoKey.GAP_PATTERN,
-        AlgoKey.GAP_CADENCE,
-        AlgoKey.GAP_TREND,
-        AlgoKey.GAP_BAND_SEQUENCE,
-      ];
-      const algoScores: Record<string, number[]> = {
-        [AlgoKey.GAPS]: [],
-        [AlgoKey.GAP_SEQUENCE]: [],
-        [AlgoKey.GAP_PATTERN]: [],
-        [AlgoKey.GAP_CADENCE]: [],
-        [AlgoKey.GAP_TREND]: [],
-        [AlgoKey.GAP_BAND_SEQUENCE]: [],
-      };
+      const keys = GAP_FAMILY_KEYS;
+      const algoScores: Record<string, number[]> = {};
+      keys.forEach((k) => {
+        algoScores[k] = [];
+      });
 
       for (const dName of drawNamesToAnalyze) {
         let gameHistory = history;
@@ -161,8 +205,16 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           } else {
             const r = calculateCorrelation(algoScores[k1], algoScores[k2]);
             matrix[k1][k2] = parseFloat(r.toFixed(4));
-            sumCorr += Math.abs(r);
-            countCorr++;
+            // La moyenne affichée ne porte que sur les canaux qui contribuent réellement à
+            // l'ensemble : les canaux retirés (colinéaires par construction) restent mesurés
+            // dans la matrice pour l'audit, mais ne faussent plus l'indicateur de tête.
+            const bothActive =
+              !RETIRED_ALGO_WEIGHT_KEYS.has(k1 as AlgoKey) &&
+              !RETIRED_ALGO_WEIGHT_KEYS.has(k2 as AlgoKey);
+            if (bothActive) {
+              sumCorr += Math.abs(r);
+              countCorr++;
+            }
           }
         });
       });
@@ -1206,85 +1258,81 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       <th className="p-3 text-[9px] font-black uppercase text-slate-400">
                         Algorithme
                       </th>
-                      <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">
-                        Gaps Theo.
-                      </th>
-                      <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">
-                        Gap Seq.
-                      </th>
-                      <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">
-                        Gap Pat.
-                      </th>
-                      <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">
-                        Gap Cad.
-                      </th>
-                      <th className="p-3 text-[9px] font-black uppercase text-slate-400 text-center">
-                        Gap Trend
-                      </th>
+                      {GAP_FAMILY_KEYS.map((colKey) => (
+                        <th
+                          key={colKey}
+                          className={`p-3 text-[9px] font-black uppercase text-center ${
+                            RETIRED_ALGO_WEIGHT_KEYS.has(colKey)
+                              ? "text-slate-300 dark:text-slate-600"
+                              : "text-slate-400"
+                          }`}
+                        >
+                          {GAP_FAMILY_LABELS[colKey].short}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {[
-                      { key: AlgoKey.GAPS, label: "Gaps Theo. CDF" },
-                      { key: AlgoKey.GAP_SEQUENCE, label: "Gap Seq. Pop." },
-                      { key: AlgoKey.GAP_PATTERN, label: "Gap Pat. AR(1)" },
-                      { key: AlgoKey.GAP_CADENCE, label: "Gap Cad. Regime" },
-                      { key: AlgoKey.GAP_TREND, label: "Gap Trend" },
-                    ].map((row) => (
+                    {GAP_FAMILY_KEYS.map((rowKey) => {
+                      const retiredRow = RETIRED_ALGO_WEIGHT_KEYS.has(rowKey);
+                      return (
                       <tr
-                        key={row.key}
+                        key={rowKey}
                         className="border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50/50 dark:hover:bg-slate-800/30"
                       >
-                        <td className="p-3 text-[10px] font-bold text-slate-700 dark:text-slate-300">
-                          {row.label}
+                        <td
+                          className={`p-3 text-[10px] font-bold ${
+                            retiredRow
+                              ? "text-slate-400 dark:text-slate-500"
+                              : "text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          {GAP_FAMILY_LABELS[rowKey].long}
+                          {retiredRow ? (
+                            <span className="ml-2 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                              Retiré
+                            </span>
+                          ) : null}
                         </td>
-                        {[
-                          AlgoKey.GAPS,
-                          AlgoKey.GAP_SEQUENCE,
-                          AlgoKey.GAP_PATTERN,
-                          AlgoKey.GAP_CADENCE,
-                          AlgoKey.GAP_TREND,
-                          AlgoKey.GAP_BAND_SEQUENCE,
-                        ].map((colKey) => {
+                        {GAP_FAMILY_KEYS.map((colKey) => {
                           const val =
-                            correlationData.matrix[row.key]?.[colKey] ?? 0;
-                          const absVal = Math.abs(val);
-
-                          let bgClass =
-                            "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20";
-                          let label = "Complémentaire";
-
-                          if (row.key === colKey) {
-                            bgClass =
-                              "bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold border border-slate-200 dark:border-slate-700";
-                            label = "Identité";
-                          } else if (absVal >= 0.7) {
-                            bgClass =
-                              "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-black";
-                            label = "Redondant";
-                          } else if (absVal >= 0.3) {
-                            bgClass =
-                              "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold";
-                            label = "Modéré";
-                          }
+                            correlationData.matrix[rowKey]?.[colKey] ?? 0;
+                          const isIdentity = rowKey === colKey;
+                          // Intensité et teinte portées continûment par |ρ| mesuré : plus la
+                          // corrélation est forte, plus la teinte glisse vers le rouge. Aucun
+                          // seuil de « redondance » binaire n'est appliqué.
+                          const weight = isIdentity ? 0 : Math.min(1, Math.abs(val));
+                          const hue = 152 * (1 - weight);
 
                           return (
                             <td key={colKey} className="p-2 text-center">
                               <div
-                                className={`py-1.5 px-2 rounded-lg text-[10px] font-mono ${bgClass}`}
+                                className={`py-1.5 px-2 rounded-lg text-[10px] font-mono border ${
+                                  isIdentity
+                                    ? "bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold border-slate-200 dark:border-slate-700"
+                                    : "text-slate-700 dark:text-slate-100 border-slate-200/60 dark:border-slate-700/60"
+                                }`}
+                                style={
+                                  isIdentity
+                                    ? undefined
+                                    : {
+                                        backgroundColor: `hsla(${hue}, 85%, 45%, ${0.08 + 0.4 * weight})`,
+                                      }
+                                }
                                 title={
-                                  row.key === colKey
+                                  isIdentity
                                     ? "Identité"
-                                    : `Corrélation de Pearson: ${val} (${label})`
+                                    : `Corrélation de Pearson mesurée : ${val} (redondance ${(weight * 100).toFixed(1)}%)`
                                 }
                               >
-                                {val === 1.0 ? "1.000" : val.toFixed(3)}
+                                {val.toFixed(3)}
                               </div>
                             </td>
                           );
                         })}
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1293,7 +1341,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   Échantillons analysés : {correlationData.sampleSize} vecteurs
                 </span>
                 <span>
-                  Moyenne absolue hors-diagonale :{" "}
+                  Moyenne |ρ| des {GAP_FAMILY_ACTIVE_KEYS.length} canaux actifs :{" "}
                   <span className="font-mono text-indigo-500 font-black">
                     {correlationData.average.toFixed(3)}
                   </span>
@@ -1307,50 +1355,51 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   <Brain size={14} /> Diagnostic de l'Indépendance Linéaire
                 </h5>
                 <p className="mb-3">
-                  Les 4 algorithmes de la famille "Écart" utilisent des bases
-                  mathématiques fondamentalement distinctes et orthogonales, ce
-                  qui garantit qu'ils n'induisent pas de bruit redondant :
+                  Les {GAP_FAMILY_KEYS.length} canaux de la famille "Écart"
+                  ci-contre sont corrélés deux à deux sur les scores réellement
+                  produits par le moteur ; {GAP_FAMILY_ACTIVE_KEYS.length} d'entre
+                  eux contribuent à l'ensemble pondéré, les{" "}
+                  {GAP_FAMILY_KEYS.length - GAP_FAMILY_ACTIVE_KEYS.length} autres
+                  étant mesurés pour l'audit mais retirés de la pondération :
                 </p>
                 <ul className="space-y-2.5">
-                  <li className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
-                    <span>
-                      <strong>CDF Géométrique (CDF Gaps)</strong> : Modélisation
-                      théorique globale (Loi Géométrique continue sans mémoire)
-                      servant de socle neutre.
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
-                    <span>
-                      <strong>
-                        Autocorrélation Populationnelle (Gap Sequence)
-                      </strong>{" "}
-                      : Analyse de dépendance séquentielle basée sur le
-                      comportement des tirages collectifs passés.
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500 mt-1.5 shrink-0" />
-                    <span>
-                      <strong>Modèle Idiographique AR(1) (Gap Pattern)</strong>{" "}
-                      : Équations de régression autorégressives spécifiques à
-                      chaque numéro individuel pour isoler ses cycles propres.
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-500 mt-1.5 shrink-0" />
-                    <span>
-                      <strong>Régime de Retour Collectif (Gap Cadence)</strong>{" "}
-                      : Modulation par ondes de tension et dynamique harmonique
-                      globale du tirage complet.
-                    </span>
-                  </li>
+                  {GAP_FAMILY_KEYS.map((key) => {
+                    const retired = RETIRED_ALGO_WEIGHT_KEYS.has(key);
+                    return (
+                      <li key={key} className="flex items-start gap-2">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${
+                            retired ? "bg-slate-400" : "bg-indigo-500"
+                          }`}
+                        />
+                        <span>
+                          <strong>{GAP_FAMILY_LABELS[key].long}</strong> :{" "}
+                          {GAP_FAMILY_LABELS[key].basis}
+                          {retired ? (
+                            <span className="text-slate-400 dark:text-slate-500">
+                              {" "}
+                              Canal retiré de la pondération : il modélise le même
+                              signal d'autocorrélation que Gap Trend, qui en est
+                              conservé comme représentant orthogonal.
+                            </span>
+                          ) : null}
+                        </span>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <div className="mt-4 pt-3 border-t border-indigo-100/50 dark:border-indigo-900/40 text-[10px] text-indigo-500 font-bold flex justify-between items-center uppercase tracking-wider">
                   <span>Dernier calcul : {correlationData.timestamp}</span>
-                  <span className="px-2.5 py-1 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                    Signaux Hautement Orthogonaux
+                  <span
+                    className="px-2.5 py-1 rounded border"
+                    style={{
+                      backgroundColor: `hsla(${152 * (1 - Math.min(1, correlationData.average))}, 85%, 45%, 0.1)`,
+                      borderColor: `hsla(${152 * (1 - Math.min(1, correlationData.average))}, 85%, 45%, 0.3)`,
+                    }}
+                    title="Orthogonalité déduite de la moyenne |ρ| mesurée sur les canaux actifs (1 − |ρ|)."
+                  >
+                    Orthogonalité mesurée :{" "}
+                    {((1 - Math.min(1, correlationData.average)) * 100).toFixed(1)}%
                   </span>
                 </div>
               </div>

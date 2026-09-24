@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Prediction } from "../../types";
 import { NumberBall } from "../NumberBall";
 import { audioEngine } from "../../utils/audioEngine";
@@ -6,6 +6,7 @@ import { useToast } from "../ui/Toast";
 import {
   interpolatePredictionScenarios,
   SimulationScenarioItem,
+  HONEST_NOTE,
 } from "../../services/prediction/predictionScenarios";
 import {
   Sparkles,
@@ -15,9 +16,7 @@ import {
   Layers,
   CheckCircle2,
   Sliders,
-  ChevronRight,
-  TrendingUp,
-  Cpu,
+  Info,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -27,38 +26,48 @@ interface OracleScenarioMatrixDeckProps {
   onAdoptTicket?: (numbers: number[], scenarioName: string) => void;
 }
 
+/** Rend un indicateur de cohérence, ou « n/d » s'il n'a pas été mesuré (jamais de valeur inventée). */
+const formatCoherence = (value: number | null | undefined): string =>
+  typeof value === "number" ? `${value}%` : "n/d";
+
 export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> = React.memo(
   ({ prediction, drawName, onAdoptTicket }) => {
     const { showToast } = useToast();
 
-    const rawScenarios: SimulationScenarioItem[] = useMemo(() => {
-      if (prediction.simulationScenarios && prediction.simulationScenarios.length > 0) {
-        return prediction.simulationScenarios as SimulationScenarioItem[];
-      }
-      return [
-        {
-          scenarioId: "sim_default_1",
-          scenarioName: "Consensus Symbiotique (Tamis ADN)",
-          ticket: prediction.suggestedNumbers,
-          probabilityScore: prediction.confidence,
-          riskProfile: "BALANCED",
-          description: "Profil d'équilibre optimisé par le Tamis ADN et l'alignement de réalité.",
-          color: "#6366f1",
-          genomicFocus: "Tamis ADN & Consensus",
-          energyPct: 90,
-        },
-      ];
-    }, [prediction]);
+    // Les scénarios proviennent EXCLUSIVEMENT du moteur. Aucun profil de repli n'est synthétisé
+    // ici : la matrice est soit celle calculée, soit annoncée comme absente.
+    const rawScenarios: SimulationScenarioItem[] = useMemo(
+      () => (prediction.simulationScenarios as SimulationScenarioItem[] | undefined) ?? [],
+      [prediction]
+    );
+
+    const scenarioKey = useMemo(
+      () => rawScenarios.map((s) => s.scenarioId).join("|"),
+      [rawScenarios]
+    );
 
     const [activeScenarioId, setActiveScenarioId] = useState<string>(
-      rawScenarios[0]?.scenarioId || "default"
+      rawScenarios[0]?.scenarioId || ""
     );
 
     const [isMorphingOpen, setIsMorphingOpen] = useState(false);
     const [morphTargetId, setMorphTargetId] = useState<string>(
-      rawScenarios[1]?.scenarioId || rawScenarios[0]?.scenarioId || "default"
+      rawScenarios[1]?.scenarioId || rawScenarios[0]?.scenarioId || ""
     );
     const [morphAlpha, setMorphAlpha] = useState<number>(0.5);
+
+    // Les identifiants de scénarios sont déterministes : le pôle de morphing doit suivre la
+    // matrice courante, sous peine de rester pointé sur un profil qui n'existe plus.
+    useEffect(() => {
+      setActiveScenarioId((prev) =>
+        rawScenarios.some((s) => s.scenarioId === prev) ? prev : rawScenarios[0]?.scenarioId || ""
+      );
+      setMorphTargetId((prev) =>
+        rawScenarios.some((s) => s.scenarioId === prev)
+          ? prev
+          : rawScenarios[1]?.scenarioId || rawScenarios[0]?.scenarioId || ""
+      );
+    }, [scenarioKey]);
 
     const activeScenario = useMemo(() => {
       return rawScenarios.find((s) => s.scenarioId === activeScenarioId) || rawScenarios[0];
@@ -120,6 +129,31 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
       showToast(`Vecteur "${name}" appliqué comme combinaison principale.`, "success");
     };
 
+    if (rawScenarios.length === 0) {
+      return (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-slate-500/10 text-slate-500 dark:text-slate-400 flex items-center justify-center shrink-0 border border-slate-500/20">
+              <Layers size={20} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white uppercase tracking-tight">
+                Matrice des Scénarios
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Aucune matrice de scénarios n'a été produite pour cette prédiction.
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+            Les profils de scénarios sont synthétisés par le moteur à partir du vecteur de scores
+            débruité. Leur absence signifie que cette prédiction n'a pas emprunté ce chemin de calcul
+            (payload cloud antérieur, restauration d'un historique, ou dataset insuffisant).
+          </p>
+        </div>
+      );
+    }
+
     return (
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
         {/* Header */}
@@ -138,7 +172,9 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Exploration multi-régimes générée par le moteur stochastique Oracle Base.
+                Exploration multi-régimes générée par le moteur stochastique Oracle Base. Les
+                pourcentages affichés sont des indicateurs internes de cohérence — ce ne sont pas des
+                probabilités de gain.
               </p>
             </div>
           </div>
@@ -186,8 +222,11 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
                       {badge.icon}
                       {badge.label}
                     </span>
-                    <span className="font-mono text-xs font-black text-indigo-600 dark:text-indigo-400">
-                      {sc.probabilityScore}%
+                    <span
+                      className="font-mono text-xs font-black text-indigo-600 dark:text-indigo-400 cursor-help"
+                      title={HONEST_NOTE}
+                    >
+                      {formatCoherence(sc.coherenceScore)}
                     </span>
                   </div>
 
@@ -289,7 +328,7 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
                   >
                     {rawScenarios.map((s) => (
                       <option key={s.scenarioId} value={s.scenarioId}>
-                        {s.scenarioName} ({s.probabilityScore}%)
+                        {s.scenarioName} — cohérence {formatCoherence(s.coherenceScore)}
                       </option>
                     ))}
                   </select>
@@ -306,7 +345,7 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
                   >
                     {rawScenarios.map((s) => (
                       <option key={s.scenarioId} value={s.scenarioId}>
-                        {s.scenarioName} ({s.probabilityScore}%)
+                        {s.scenarioName} — cohérence {formatCoherence(s.coherenceScore)}
                       </option>
                     ))}
                   </select>
@@ -342,7 +381,7 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
                         Vecteur Interpolé
                       </span>
                       <span className="text-xs font-bold text-white font-mono">
-                        (Confiance: {morphedResult.interpolatedProbability}%)
+                        (Cohérence: {formatCoherence(morphedResult.interpolatedProbability)})
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -350,6 +389,12 @@ export const OracleScenarioMatrixDeck: React.FC<OracleScenarioMatrixDeckProps> =
                         <NumberBall key={num} number={num} size="sm" isAttractor={true} />
                       ))}
                     </div>
+                    <p className="text-[10px] text-slate-400 flex items-center gap-1.5 leading-snug max-w-md">
+                      <Info size={11} className="shrink-0" />
+                      {morphedResult.interpolatedProbability === null
+                        ? "Cohérence non mesurable : au moins un des deux pôles n'a pas d'indicateur calculé."
+                        : "Indicateur interne interpolé entre les deux pôles. " + HONEST_NOTE}
+                    </p>
                   </div>
 
                   <button

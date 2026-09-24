@@ -4,6 +4,9 @@ import { Prediction, DrawResult } from "../../types";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNexusStore } from "../../store/useNexusStore";
+import { AlgoKey, AlgoWeights, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
+import { combinations } from "../../utils/mathUtils";
 import {
   Sparkles,
   Shield,
@@ -28,6 +31,46 @@ interface PredictionVectorPortfolioProps {
   drawName: string;
 }
 
+// Composition des vecteurs alternatifs : la STRATÉGIE est définie par le choix des canaux
+// (écarts/isolation pour l'anti-fragile, résonance spectrale et markovienne pour l'harmonique) ;
+// la pondération de ces canaux est celle du moteur (poids réels du tirage), jamais un coefficient
+// inventé. Aucun multiplicateur arbitraire n'intervient dans le classement.
+const ANTIFRAGILE_CHANNELS: readonly AlgoKey[] = [
+  AlgoKey.GAPS,
+  AlgoKey.ISOLATION_ANOMALY,
+  AlgoKey.MOMENTUM,
+];
+const HARMONIC_CHANNELS: readonly AlgoKey[] = [
+  AlgoKey.SPECTRAL,
+  AlgoKey.MARKOV,
+  AlgoKey.INTER_MONTHLY_RESONANCE,
+  AlgoKey.ECHO_STATE,
+];
+
+// Certains canaux sont historiquement journalisés sous un alias dans `breakdown`.
+const BREAKDOWN_ALIASES: Partial<Record<AlgoKey, string>> = {
+  [AlgoKey.GAPS]: "gaps",
+};
+
+/**
+ * Loi hypergéométrique EXACTE d'un découpage binaire du domaine (pair/impair, bas/haut) :
+ * probabilité que `draws` boules tirées sans remise produisent exactement `k` boules de la
+ * première classe, et comparaison au profil modal de la loi. Aucun seuil arbitraire.
+ */
+const exactSplitProfile = (k: number, classSize: number, otherSize: number, draws: number) => {
+  const total = combinations(classSize + otherSize, draws);
+  if (total <= 0) return null;
+  const probability = (combinations(classSize, k) * combinations(otherSize, draws - k)) / total;
+  let maxProbability = 0;
+  const lower = Math.max(0, draws - otherSize);
+  const upper = Math.min(draws, classSize);
+  for (let i = lower; i <= upper; i++) {
+    const p = (combinations(classSize, i) * combinations(otherSize, draws - i)) / total;
+    if (p > maxProbability) maxProbability = p;
+  }
+  return { probability, isModal: Math.abs(probability - maxProbability) < 1e-12 };
+};
+
 export const PredictionVectorPortfolio: React.FC<
   PredictionVectorPortfolioProps
 > = ({ prediction, history, drawName }) => {
@@ -38,21 +81,80 @@ export const PredictionVectorPortfolio: React.FC<
   >("primary");
   const [inspectedNum, setInspectedNum] = useState<number | null>(null);
 
+  // Poids canoniques en vigueur pour ce tirage : la pondération des canaux provient du moteur
+  // (poids persistés du tirage, repli sur la bibliothèque par défaut). Aucun coefficient inventé.
+  const rawWeights = useNexusStore((state) => state.globalWeights);
+  const weights = useMemo<AlgoWeights>(
+    () => ({ ...DEFAULT_ALGO_WEIGHTS, ...(rawWeights || {}) }),
+    [rawWeights]
+  );
+
+  // Moyenne pondérée des canaux demandés, avec les poids réels du moteur. Renvoie null si aucun
+  // canal exploitable : l'interface affiche alors "n/d" plutôt qu'une valeur de repli inventée.
+  const weightedChannelMean = (
+    bd: Record<string, number> | undefined,
+    channels: readonly AlgoKey[]
+  ): number | null => {
+    if (!bd) return null;
+    let acc = 0;
+    let weightSum = 0;
+    for (const key of channels) {
+      const w = weights[key];
+      if (!Number.isFinite(w) || w <= 0) continue;
+      const alias = BREAKDOWN_ALIASES[key];
+      const raw = Number(bd[key] ?? (alias ? bd[alias] : undefined) ?? NaN);
+      if (!Number.isFinite(raw)) continue;
+      acc += w * raw;
+      weightSum += w;
+    }
+    return weightSum > 0 ? acc / weightSum : null;
+  };
+
+  const ALL_CHANNELS = useMemo(() => Object.values(AlgoKey), []);
+
+  const breakdownMap = useMemo(
+    () => (prediction.breakdown || {}) as Record<string, Record<string, number>>,
+    [prediction.breakdown]
+  );
+
+  // Score agrégé d'un vecteur : moyenne des scores pondérés de ses numéros sur l'ensemble des
+  // canaux actifs. Grandeur réellement calculée à partir du `breakdown` du moteur — ce n'est PAS
+  // une confiance : la confiance calibrée n'existe que pour le vecteur principal (Platt scaling
+  // sur le score moyen de la fusion), elle n'est pas transposable à un vecteur dérivé.
+  const aggregateScore = (nums: number[], channels: readonly AlgoKey[]): number | null => {
+    if (!nums || nums.length === 0) return null;
+    let total = 0;
+    let counted = 0;
+    for (const num of nums) {
+      const value = weightedChannelMean(
+        breakdownMap[num] as Record<string, number> | undefined,
+        channels
+      );
+      if (value === null) continue;
+      total += value;
+      counted++;
+    }
+    return counted > 0 ? total / counted : null;
+  };
+
   // 1. Calcul déterministe des vecteurs alternatifs dérivés
   const vectors = useMemo(() => {
     const primary = prediction.suggestedNumbers || [];
     const candidates = prediction.candidates || [];
-    const breakdown = prediction.breakdown || {};
 
-    // Vecteur Anti-Fragile : Outsiders mathématiques à forte tension d'écart ou anomalie
+    // Vecteur Anti-Fragile : outsiders à tension d'écart ou anomalie d'isolation maximale,
+    // pondérés par les poids réels des canaux concernés. Départage déterministe par numéro.
     const scoredOutsiders = candidates
       .filter((n) => !primary.includes(n))
-      .map((num) => {
-        const bd = (breakdown[num] as Record<string, number>) || {};
-        const gapScore = ((bd.gap ?? bd.gaps ?? 0) * 1.4) + ((bd.isolation_anomaly ?? 0) * 1.2) + ((bd.momentum ?? 0) * 0.8);
-        return { num, score: gapScore };
-      })
-      .sort((a, b) => b.score - a.score);
+      .map((num) => ({
+        num,
+        score:
+          weightedChannelMean(
+            breakdownMap[num] as Record<string, number> | undefined,
+            ANTIFRAGILE_CHANNELS
+          ) ?? -Infinity,
+      }))
+      .sort((a, b) => b.score - a.score || a.num - b.num);
 
     // Composition équilibrée pour l'anti-fragile (2 du primaire + 3 outsiders de rupture)
     const antifragile = [
@@ -60,24 +162,27 @@ export const PredictionVectorPortfolio: React.FC<
       ...scoredOutsiders.slice(0, 3).map((s) => s.num),
     ].sort((a, b) => a - b);
 
-    // Vecteur Harmonique & Markov : Résonance fréquentielle, spectrale et chaînes markoviennes
+    // Vecteur Harmonique & Markov : résonance fréquentielle, spectrale et chaînes markoviennes
     const scoredHarmonic = candidates
       .filter((n) => !primary.slice(0, 3).includes(n))
-      .map((num) => {
-        const bd = breakdown[num] || {};
-        const harmScore =
-          (bd.spectral || 0) * 1.3 +
-          (bd.markov || 0) * 1.2 +
-          (bd.inter_monthly_resonance || 0) * 1.1 +
-          (bd.echo_state || 0) * 0.9;
-        return { num, score: harmScore };
-      })
-      .sort((a, b) => b.score - a.score);
+      .map((num) => ({
+        num,
+        score:
+          weightedChannelMean(
+            breakdownMap[num] as Record<string, number> | undefined,
+            HARMONIC_CHANNELS
+          ) ?? -Infinity,
+      }))
+      .sort((a, b) => b.score - a.score || a.num - b.num);
 
     const harmonic = [
       ...primary.slice(2, 4),
       ...scoredHarmonic.slice(0, 3).map((s) => s.num),
     ].sort((a, b) => a - b);
+
+    const primaryNumbers = primary;
+    const antifragileNumbers = antifragile.length === 5 ? antifragile : primary;
+    const harmonicNumbers = harmonic.length === 5 ? harmonic : primary;
 
     return {
       primary: {
@@ -86,8 +191,9 @@ export const PredictionVectorPortfolio: React.FC<
         subtitle: "Attracteur principal issu du consensus algorithmique global",
         badge: "Consensus Optimal",
         badgeColor: "indigo",
-        numbers: primary,
-        confidence: prediction.confidence,
+        numbers: primaryNumbers,
+        aggregateScore: aggregateScore(primaryNumbers, ALL_CHANNELS),
+        engineConfidence: prediction.confidence,
         strategy: "Consensus Bayésien & Débruitage PCA",
       },
       antifragile: {
@@ -96,8 +202,10 @@ export const PredictionVectorPortfolio: React.FC<
         subtitle: "Exploration des saturations d'écarts et asymétries de phase",
         badge: "Asymétrie Écart",
         badgeColor: "emerald",
-        numbers: antifragile.length === 5 ? antifragile : primary,
-        confidence: Math.max(40, Math.round(prediction.confidence * 0.91)),
+        numbers: antifragileNumbers,
+        aggregateScore: aggregateScore(antifragileNumbers, ALL_CHANNELS),
+        channelScore: aggregateScore(antifragileNumbers, ANTIFRAGILE_CHANNELS),
+        engineConfidence: null,
         strategy: "Convergence d'Outsiders & Résidus d'Isolation",
       },
       harmonic: {
@@ -106,12 +214,14 @@ export const PredictionVectorPortfolio: React.FC<
         subtitle: "Harmoniques de Fourier et matrices de transition d'état",
         badge: "Cyclicité Spectrale",
         badgeColor: "purple",
-        numbers: harmonic.length === 5 ? harmonic : primary,
-        confidence: Math.max(40, Math.round(prediction.confidence * 0.88)),
+        numbers: harmonicNumbers,
+        aggregateScore: aggregateScore(harmonicNumbers, ALL_CHANNELS),
+        channelScore: aggregateScore(harmonicNumbers, HARMONIC_CHANNELS),
+        engineConfidence: null,
         strategy: "Décomposition FFT & Résonance Inter-Mensuelle",
       },
     };
-  }, [prediction]);
+  }, [prediction, weights, ALL_CHANNELS]);
 
   const activeVector = vectors[selectedVectorTab];
 
@@ -120,35 +230,58 @@ export const PredictionVectorPortfolio: React.FC<
     const nums = activeVector.numbers || [];
     if (nums.length === 0) return null;
 
+    // Géométrie du jeu DÉRIVÉE des données réelles (aucune constante de domaine codée en dur) :
+    // plus grande boule observée sur l'historique, la prédiction et le breakdown du moteur.
+    let poolSize = 0;
+    for (const draw of history) {
+      for (const n of draw.gagnants || []) if (n > poolSize) poolSize = n;
+    }
+    for (const n of nums) if (n > poolSize) poolSize = n;
+    for (const key of Object.keys(prediction.breakdown || {})) {
+      const n = Number(key);
+      if (Number.isFinite(n) && n > poolSize) poolSize = n;
+    }
+    if (poolSize <= 0) return null;
+
+    const ticketSize = nums.length;
     const sum = nums.reduce((acc, n) => acc + n, 0);
-    // Espérance théorique pour 5 boules parmi 90 = 5 * (91 / 2) = 227.5
-    const theoreticalExpectedSum = 227.5;
+    // Espérance théorique exacte d'un ticket de `ticketSize` boules sur [1..poolSize]
+    const theoreticalExpectedSum = (ticketSize * (poolSize + 1)) / 2;
     const sumDeviationPercent = (
       ((sum - theoreticalExpectedSum) / theoreticalExpectedSum) *
       100
     ).toFixed(1);
 
     const evenCount = nums.filter((n) => n % 2 === 0).length;
-    const oddCount = nums.length - evenCount;
+    const oddCount = ticketSize - evenCount;
 
-    const lowCount = nums.filter((n) => n <= 45).length;
-    const highCount = nums.length - lowCount;
+    const midpoint = Math.ceil(poolSize / 2);
+    const lowCount = nums.filter((n) => n <= midpoint).length;
+    const highCount = ticketSize - lowCount;
+
+    // Découpages binaires du domaine : parité et moitié basse/haute
+    const evenPool = Math.floor(poolSize / 2);
+    const parityProfile = exactSplitProfile(evenCount, evenPool, poolSize - evenPool, ticketSize);
+    const rangeProfile = exactSplitProfile(lowCount, midpoint, poolSize - midpoint, ticketSize);
 
     // Calcul de la dispersion spatiale minimale (Inter-Gap)
     const sorted = [...nums].sort((a, b) => a - b);
-    let minGap = 90;
+    let minGap = Number.POSITIVE_INFINITY;
     let totalInterGaps = 0;
     for (let i = 0; i < sorted.length - 1; i++) {
       const g = sorted[i + 1] - sorted[i];
       if (g < minGap) minGap = g;
       totalInterGaps += g;
     }
-    const meanInterGap = (totalInterGaps / (sorted.length - 1 || 1)).toFixed(1);
+    const meanInterGap =
+      sorted.length > 1 ? (totalInterGaps / (sorted.length - 1)).toFixed(1) : null;
 
-    // Entropie continue de la répartition des dizaines (1-9, 10-19, ..., 80-90)
-    const decadeBuckets = new Array(9).fill(0);
+    // Entropie continue de la répartition par dizaines (1-9, 10-19, ...), normalisée par
+    // l'entropie maximale réellement atteignable par un ticket de cette taille.
+    const decadeCount = Math.ceil(poolSize / 10);
+    const decadeBuckets = new Array(decadeCount).fill(0);
     nums.forEach((n) => {
-      const idx = Math.min(8, Math.floor((n - 1) / 10));
+      const idx = Math.min(decadeCount - 1, Math.floor((n - 1) / 10));
       decadeBuckets[idx]++;
     });
     let decEntropy = 0;
@@ -158,22 +291,28 @@ export const PredictionVectorPortfolio: React.FC<
         decEntropy -= p * Math.log2(p);
       }
     });
-    const maxDecEntropy = Math.log2(Math.min(nums.length, 9));
+    const maxDecEntropy = Math.log2(Math.min(nums.length, decadeCount));
     const normalizedEntropy =
-      maxDecEntropy > 0 ? (decEntropy / maxDecEntropy) * 100 : 80;
+      maxDecEntropy > 0 ? Math.round((decEntropy / maxDecEntropy) * 100) : null;
 
     return {
+      poolSize,
+      ticketSize,
       sum,
+      theoreticalExpectedSum,
       sumDeviationPercent,
       evenCount,
       oddCount,
       lowCount,
       highCount,
-      minGap,
+      midpoint,
+      parityProfile,
+      rangeProfile,
+      minGap: Number.isFinite(minGap) ? minGap : null,
       meanInterGap,
-      normalizedEntropy: Math.round(normalizedEntropy),
+      normalizedEntropy,
     };
-  }, [activeVector]);
+  }, [activeVector, history, prediction.breakdown]);
 
   // Copie presse-papier
   const handleCopyVector = (nums: number[], index: number) => {
@@ -193,13 +332,19 @@ export const PredictionVectorPortfolio: React.FC<
       timestamp: new Date().toISOString(),
       predictionSummary: {
         confidence: prediction.confidence,
-        realityAlignment: prediction.realityAlignment ?? 82,
+        // Métrique absente ⇒ null explicite : l'export ne doit jamais fabriquer un alignement.
+        realityAlignment: prediction.realityAlignment ?? null,
         strategy: prediction.analysis,
       },
       vectors: {
         primary: vectors.primary.numbers,
         antifragile: vectors.antifragile.numbers,
         harmonic: vectors.harmonic.numbers,
+      },
+      vectorAggregateScores: {
+        primary: vectors.primary.aggregateScore,
+        antifragile: vectors.antifragile.aggregateScore,
+        harmonic: vectors.harmonic.aggregateScore,
       },
       vectorTopologicalMetrics: vectorMetrics,
       breakdown: prediction.breakdown,
@@ -330,10 +475,10 @@ export const PredictionVectorPortfolio: React.FC<
               </div>
               <div className="flex items-center gap-2 mt-auto">
                 <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                  Confiance :
+                  Score agrégé :
                 </span>
                 <span className="text-xs font-mono font-black text-slate-900 dark:text-white">
-                  {vec.confidence}%
+                  {vec.aggregateScore === null ? "n/d" : `${vec.aggregateScore.toFixed(1)}/100`}
                 </span>
               </div>
             </button>
@@ -360,6 +505,34 @@ export const PredictionVectorPortfolio: React.FC<
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 {activeVector.subtitle}
               </p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                <span>
+                  Score agrégé (tous canaux) :{" "}
+                  <strong className="text-slate-800 dark:text-slate-200 font-black">
+                    {activeVector.aggregateScore === null
+                      ? "n/d"
+                      : activeVector.aggregateScore.toFixed(1)}
+                  </strong>
+                </span>
+                {"channelScore" in activeVector && (
+                  <span>
+                    Score de la stratégie :{" "}
+                    <strong className="text-slate-800 dark:text-slate-200 font-black">
+                      {activeVector.channelScore === null
+                        ? "n/d"
+                        : activeVector.channelScore.toFixed(1)}
+                    </strong>
+                  </span>
+                )}
+                {activeVector.engineConfidence !== null && (
+                  <span title="Confiance calibrée du moteur (Platt scaling sur le score moyen de la fusion). Elle n'existe que pour le vecteur principal : un vecteur dérivé n'a pas de confiance mesurée.">
+                    Confiance moteur (vecteur primaire) :{" "}
+                    <strong className="text-slate-800 dark:text-slate-200 font-black">
+                      {activeVector.engineConfidence}%
+                    </strong>
+                  </span>
+                )}
+              </div>
             </div>
             <div className="px-3 py-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-[11px] font-mono font-semibold text-slate-700 dark:text-slate-300">
               Stratégie : <span className="text-indigo-500 font-bold">{activeVector.strategy}</span>
@@ -429,7 +602,8 @@ export const PredictionVectorPortfolio: React.FC<
                         {algo.replace(/_/g, " ")}
                       </div>
                       <div className="text-xs font-mono font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
-                        {(Number(score) * 100).toFixed(1)}%
+                        {/* Les canaux du registre sont garantis dans [0,100] : aucune conversion. */}
+                        {Number(score).toFixed(1)}%
                       </div>
                     </div>
                   ))}
@@ -439,7 +613,7 @@ export const PredictionVectorPortfolio: React.FC<
 
           {/* Topological Vector Metrics Grid */}
           {vectorMetrics && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3 pt-2">
               <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-1">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
                   <Scale className="size-3 text-indigo-400" /> Somme du Ticket
@@ -453,7 +627,7 @@ export const PredictionVectorPortfolio: React.FC<
                   </span>
                 </div>
                 <div className="text-[9px] text-slate-400">
-                  Espérance théorique : 227.5
+                  Espérance théorique : {vectorMetrics.theoreticalExpectedSum}
                 </div>
               </div>
 
@@ -465,9 +639,11 @@ export const PredictionVectorPortfolio: React.FC<
                   {vectorMetrics.evenCount}P / {vectorMetrics.oddCount}I
                 </div>
                 <div className="text-[9px] text-slate-400">
-                  {vectorMetrics.evenCount === 2 || vectorMetrics.evenCount === 3
-                    ? "✓ Profil Hypergéométrique Optimal"
-                    : "⚠️ Profil d'Asymétrie"}
+                  {vectorMetrics.parityProfile === null
+                    ? "n/d"
+                    : `P = ${(vectorMetrics.parityProfile.probability * 100).toFixed(1)}%${
+                        vectorMetrics.parityProfile.isModal ? " (profil modal)" : ""
+                      }`}
                 </div>
               </div>
 
@@ -479,7 +655,10 @@ export const PredictionVectorPortfolio: React.FC<
                   {vectorMetrics.lowCount}B / {vectorMetrics.highCount}H
                 </div>
                 <div className="text-[9px] text-slate-400">
-                  Répartition [1-45] vs [46-90]
+                  [1-{vectorMetrics.midpoint}] vs [{vectorMetrics.midpoint + 1}-{vectorMetrics.poolSize}]
+                  {vectorMetrics.rangeProfile === null
+                    ? ""
+                    : ` • P = ${(vectorMetrics.rangeProfile.probability * 100).toFixed(1)}%`}
                 </div>
               </div>
 
@@ -488,10 +667,22 @@ export const PredictionVectorPortfolio: React.FC<
                   <Zap className="size-3 text-amber-400" /> Dispersion Spatiale
                 </div>
                 <div className="text-lg font-black font-mono text-slate-900 dark:text-white">
-                  Δ {vectorMetrics.meanInterGap}
+                  Δ {vectorMetrics.meanInterGap ?? "n/d"}
                 </div>
                 <div className="text-[9px] text-slate-400">
-                  Écart minimal : {vectorMetrics.minGap} boule(s)
+                  Écart minimal : {vectorMetrics.minGap === null ? "n/d" : `${vectorMetrics.minGap} boule(s)`}
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200/80 dark:border-slate-800 space-y-1">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                  <PieChartIcon className="size-3 text-cyan-400" /> Entropie Dizaines
+                </div>
+                <div className="text-lg font-black font-mono text-slate-900 dark:text-white">
+                  {vectorMetrics.normalizedEntropy === null ? "n/d" : `${vectorMetrics.normalizedEntropy}%`}
+                </div>
+                <div className="text-[9px] text-slate-400">
+                  Dispersion du ticket sur les tranches de 10
                 </div>
               </div>
             </div>

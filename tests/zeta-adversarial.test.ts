@@ -47,7 +47,44 @@ describe('Zeta Adversarial & Adversarial Survival Logic', () => {
         expect(zetaA?.name).toBe('Zeta Adversarial');
         expect(zetaA?.numbers.length).toBe(5);
         expect(zetaA?.numbers).toEqual(zetaB?.numbers);
-        expect(zetaA?.probability).toBeGreaterThanOrEqual(45);
-        expect(zetaA?.probability).toBeLessThanOrEqual(96);
+        expect(resultA.scenarios.map(s => s.relativeIndex)).toEqual(resultB.scenarios.map(s => s.relativeIndex));
+    });
+
+    it('relativeIndex is a bounded, un-clamped density ratio of the selection within its own profile', async () => {
+        const result = await generatePlatinumPredictionCore('TEST_ZETA', mockHistory, DEFAULT_ALGO_WEIGHTS);
+
+        // 100·r²/(1+r²) est strictement dans ]0,100[ pour tout ratio fini r > 0 :
+        // aucune borne artificielle (l'ancien moteur saturait à 96) et aucune valeur nulle.
+        for (const s of result.scenarios) {
+            expect(Number.isFinite(s.relativeIndex)).toBe(true);
+            expect(s.relativeIndex).toBeGreaterThan(0);
+            expect(s.relativeIndex).toBeLessThan(100);
+        }
+
+        // Une sélection gloutonne des 5 meilleurs numéros d'un profil se situe par
+        // construction au-dessus de la moyenne de ce profil : l'indice dépasse donc 50.
+        for (const s of result.scenarios) {
+            expect(s.relativeIndex).toBeGreaterThan(50);
+        }
+    });
+
+    it('risk bands are relative terciles consistent with the measured indices', async () => {
+        const result = await generatePlatinumPredictionCore('TEST_ZETA', mockHistory, DEFAULT_ALGO_WEIGHTS);
+        const ordered = [...result.scenarios].sort((a, b) => a.relativeIndex - b.relativeIndex);
+
+        // Un indice strictement supérieur ne peut jamais porter une bande de risque plus mauvaise.
+        const rank: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+        for (let i = 1; i < ordered.length; i++) {
+            expect(rank[ordered[i].risk]).toBeGreaterThanOrEqual(rank[ordered[i - 1].risk]);
+        }
+
+        // Les deux tiers extrêmes doivent être peuplés (6 scénarios => 2 par bande).
+        const counts = ordered.reduce<Record<string, number>>((acc, s) => {
+            acc[s.risk] = (acc[s.risk] ?? 0) + 1;
+            return acc;
+        }, {});
+        expect(counts.LOW).toBe(2);
+        expect(counts.MEDIUM).toBe(2);
+        expect(counts.HIGH).toBe(2);
     });
 });

@@ -44,12 +44,14 @@ import {
   savePersistedInertiaCalibration,
   resetPersistedInertiaCalibration,
   DEFAULT_INERTIA_CALIBRATION,
+  INERTIA_DAMPING_DOMAIN,
   SystemInertiaMetrics,
   InertiaOscillatorScore,
   InertiaResolvedVector,
   InertiaBacktestResult,
   InertiaCalibrationModifiers,
 } from "../../services/prediction/systemInertiaEngine";
+import { computeRobustHurst } from "../../services/mathCore";
 
 // Custom Type-Safe Tooltip for the Phase Portrait
 const CustomTooltip = ({ active, payload }: any) => {
@@ -122,7 +124,23 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     setBacktestStats(null);
   }, [drawName]);
 
-  const hurst = globalRegime?.hurst ?? 0.5;
+  // Hurst mesuré sur l'historique PROPRE au tirage (estimateur R/S robuste) : source primaire.
+  // computeRobustHurst exige au moins 10 échantillons pour mesurer quoi que ce soit ; en deçà on
+  // ne prétend pas connaître l'exposant.
+  const measuredHurst = useMemo(() => {
+    if (history.length < 10) return null;
+    const signal = history
+      .slice(0, 20)
+      .flatMap((draw) => (Array.isArray(draw?.gagnants) ? draw.gagnants : []));
+    return signal.length >= 10 ? computeRobustHurst(signal) : null;
+  }, [history]);
+
+  const storeHurst =
+    typeof globalRegime?.hurst === "number" ? globalRegime.hurst : null;
+  // Aucune valeur inventée : soit une mesure locale, soit le régime global mesuré, soit le régime
+  // neutre documenté (H = 0.5 ≡ marche aléatoire) — signalé comme tel dans l'interface.
+  const hurst = measuredHurst ?? storeHurst ?? 0.5;
+  const hurstIsMeasured = measuredHurst !== null || storeHurst !== null;
 
   // 100% Deterministic Statistical Computation based on the active history (Tirage Isolation)
   const computedMetrics: SystemInertiaMetrics = useMemo(() => {
@@ -136,6 +154,43 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     jaccardGain,
     dampingRatio,
   }), [viscosityGain, massGain, couplingGain, jaccardGain, dampingRatio]);
+
+  // Régime d'amortissement dérivé continûment de ζ : la frontière critique est ζ = 1 exactement,
+  // la bande de tolérance est le demi-pas du curseur (résolution de l'action réellement offerte).
+  const dampingRegime = useMemo(() => {
+    if (Math.abs(dampingRatio - 1.0) < INERTIA_DAMPING_DOMAIN.step / 2) {
+      return {
+        label: "(Critique)",
+        color: "text-cyan-400",
+        note: "ζ = 1.0 : Amortissement critique. Convergence optimale sans sur-oscillation.",
+      };
+    }
+    return dampingRatio < 1.0
+      ? {
+          label: "(Sous-Amorti)",
+          color: "text-emerald-400",
+          note: "ζ < 1.0 : Régime oscillatoire pseudo-périodique. Cible la résonance cyclique des retours.",
+        }
+      : {
+          label: "(Sur-Amorti)",
+          color: "text-amber-400",
+          note: "ζ > 1.0 : Dissipation thermique continue. Pénalise exponentiellement les grands écarts.",
+        };
+  }, [dampingRatio]);
+
+  // Verdict du balayage ζ, strictement dérivé des hits rétro-actifs mesurés (aucune reformulation
+  // du curseur). `atGridPoint` compare sur la grille réelle du curseur (demi-pas de tolérance).
+  const dampingSweepVerdict = useMemo(() => {
+    if (!backtestStats) return null;
+    const deltaHits = backtestStats.bestDampingHits - backtestStats.currentDampingHits;
+    return {
+      deltaHits,
+      improved: deltaHits > 0,
+      atGridPoint:
+        Math.abs(dampingRatio - backtestStats.bestDamping) <
+        INERTIA_DAMPING_DOMAIN.step / 2,
+    };
+  }, [backtestStats, dampingRatio]);
 
   // Helper to update state and persist for the active draw
   const updateAndPersistModifiers = useCallback((patch: Partial<InertiaCalibrationModifiers>) => {
@@ -201,11 +256,21 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   // Handler to apply the optimal damping factor (ζ_optimal) from Time Machine directly to the engine
   const handleApplyOptimalDamping = () => {
     if (!backtestStats) return;
+    // Aucune amélioration mesurée => rien à appliquer : on refuse de persister une valeur que le
+    // balayage n'a pas départagée favorablement sur la fenêtre causale de rétro-audit.
+    if (backtestStats.bestDampingHits <= backtestStats.currentDampingHits) {
+      audioEngine.play("error");
+      showToast(
+        `Aucune amélioration mesurée : sur les ${backtestStats.dampingCandidatesEvaluated} valeurs de ζ balayées, aucune ne dépasse les ${backtestStats.currentDampingHits} hits de la calibration en vigueur. Calibration inchangée.`,
+        "info"
+      );
+      return;
+    }
     const optimalZeta = backtestStats.bestDamping;
     audioEngine.play("success");
     updateAndPersistModifiers({ dampingRatio: optimalZeta });
     showToast(
-      `Calibration critique appliquée : ζ = ${optimalZeta.toFixed(2)} mémorisé pour ${drawName}.`,
+      `ζ = ${optimalZeta.toFixed(2)} appliqué et mémorisé pour ${drawName} (+${backtestStats.bestDampingHits - backtestStats.currentDampingHits} hits rétro-actifs mesurés).`,
       "success"
     );
   };
@@ -224,18 +289,15 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     audioEngine.play("scan");
     setIsOptimizing(true);
 
-    const calcTimeout = Math.max(
-      600,
-      Math.round(computedMetrics.shannonEntropyNormalized * 1200),
+    // Calcul synchrone déterministe : aucun délai artificiel ne conditionne le résultat.
+    const resolved = resolveOptimizedInertiaVector(
+      oscillatorScores,
+      computedMetrics,
     );
-
-    setTimeout(() => {
-      const resolved = resolveOptimizedInertiaVector(oscillatorScores, computedMetrics);
-      setOptimizedVector(resolved);
-      setIsOptimizing(false);
-      audioEngine.play("success");
-      showToast("Optimisation de l'inertie de système achevée.", "success");
-    }, calcTimeout);
+    setOptimizedVector(resolved);
+    setIsOptimizing(false);
+    audioEngine.play("success");
+    showToast("Optimisation de l'inertie de système achevée.", "success");
   };
 
   // Advanced retroactive backtesting simulation (Time-Machine simulation)
@@ -253,7 +315,6 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     audioEngine.play("loading");
 
     try {
-      await new Promise((r) => setTimeout(r, 900));
       const result = await runDeterministicInertiaBacktest(
         history,
         drawName,
@@ -263,7 +324,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
       setBacktestStats(result);
       audioEngine.play("success");
       showToast(
-        `Rétro-audit de l'inertie complété sur ${result.trials} tirages virtuels.`,
+        `Rétro-audit de l'inertie complété sur ${result.trials} tirages réels antérieurs.`,
         "success",
       );
     } catch (err: any) {
@@ -552,28 +613,15 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   <span className="font-bold text-pink-400 uppercase tracking-wider flex items-center gap-1">
                     <Waves size={10} className="animate-pulse" /> Amortissement Oscillatoire (ζ)
                   </span>
-                  <span
-                    className={`font-mono font-black ${
-                      Math.abs(dampingRatio - 1.0) < 0.05
-                        ? "text-cyan-400"
-                        : dampingRatio < 1.0
-                        ? "text-emerald-400"
-                        : "text-amber-400"
-                    }`}
-                  >
-                    {dampingRatio.toFixed(2)}{" "}
-                    {Math.abs(dampingRatio - 1.0) < 0.05
-                      ? "(Critique)"
-                      : dampingRatio < 1.0
-                      ? "(Sous-Amorti)"
-                      : "(Sur-Amorti)"}
+                  <span className={`font-mono font-black ${dampingRegime.color}`}>
+                    {dampingRatio.toFixed(2)} {dampingRegime.label}
                   </span>
                 </div>
                 <input
                   type="range"
-                  min="0.10"
-                  max="2.00"
-                  step="0.05"
+                  min={INERTIA_DAMPING_DOMAIN.min}
+                  max={INERTIA_DAMPING_DOMAIN.max}
+                  step={INERTIA_DAMPING_DOMAIN.step}
                   value={dampingRatio}
                   onChange={(e) => {
                     audioEngine.play("click");
@@ -582,11 +630,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   className="w-full h-1.5 bg-slate-800 accent-pink-500 rounded-lg cursor-pointer"
                 />
                 <p className="text-[8px] text-slate-500 leading-normal font-mono">
-                  {dampingRatio < 1.0
-                    ? "ζ < 1.0 : Régime oscillatoire pseudo-périodique. Cible la résonance cyclique des retours."
-                    : Math.abs(dampingRatio - 1.0) < 0.05
-                    ? "ζ = 1.0 : Amortissement critique. Convergence optimale sans sur-oscillation."
-                    : "ζ > 1.0 : Dissipation thermique continue. Pénalise exponentiellement les grands écarts."}
+                  {dampingRegime.note}
                 </p>
               </div>
             </div>
@@ -610,7 +654,12 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                 Écart Moyen μ_g : <strong className="text-slate-200">{computedMetrics.meanGap.toFixed(1)}</strong>
               </div>
               <div>
-                Hurst H : <strong className="text-slate-200">{computedMetrics.baseHurst.toFixed(3)}</strong>
+                Hurst H : <strong className="text-slate-200">{hurstIsMeasured ? computedMetrics.baseHurst.toFixed(3) : "n/d"}</strong>
+                {!hurstIsMeasured && (
+                  <span className="ml-1 text-slate-500" title="Historique insuffisant (< 10 tirages) pour mesurer l'exposant : le moteur applique le régime neutre H = 0.5 (marche aléatoire).">
+                    (neutre)
+                  </span>
+                )}
               </div>
               <div>
                 Jaccard J̄ : <strong className="text-emerald-400 font-bold">{(computedMetrics.meanJaccardInertia * 100).toFixed(2)}%</strong>
@@ -883,6 +932,12 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                     </strong>
                   </div>
                   <div className="flex justify-between text-[10px] font-mono">
+                    <span className="text-slate-400">Hasard pur (≥1) :</span>
+                    <strong className="text-slate-300 font-black">
+                      {backtestStats.nullSuccessRate}%
+                    </strong>
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono">
                     <span className="text-slate-400">Hits Moyens :</span>
                     <strong className="text-cyan-400 font-black">
                       {backtestStats.primaryHitsAvg} / 5
@@ -894,9 +949,20 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                       {backtestStats.empiricalGain}x
                     </strong>
                   </div>
+                  <div className="flex justify-between text-[10px] font-mono">
+                    <span className="text-slate-400">p-value (≥1 bon) :</span>
+                    <strong className="text-slate-200 font-black">
+                      {backtestStats.successPValue === null
+                        ? "n/d"
+                        : backtestStats.successPValue.toFixed(3)}
+                    </strong>
+                  </div>
                 </div>
                 <span className="text-[8px] font-mono text-slate-500 leading-normal block">
                   Rétropolation déterministe isolée respectant la causalité temporelle stricte.
+                  {backtestStats.successPValue === null
+                    ? " p-value non calculable sur cet échantillon."
+                    : " p-value unilatérale exacte sous tirage équitable, référence hypergéométrique exacte ci-dessus."}
                 </span>
               </div>
 
@@ -963,35 +1029,55 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   </span>
                 </div>
                 <p className="text-slate-300 text-[10px] leading-relaxed">
-                  L'optimisation énergétique de Fourier et l'asymétrie de phase sur l'historique de <strong className="text-cyan-300">{drawName}</strong> identifient un amortissement critique idéal à <strong className="text-pink-400 font-mono">ζ = {backtestStats.bestDamping.toFixed(2)}</strong> (actuel : <span className="font-mono text-slate-300">{dampingRatio.toFixed(2)}</span>).
+                  Balayage exhaustif des{" "}
+                  <strong className="text-cyan-300">{backtestStats.dampingCandidatesEvaluated}</strong>{" "}
+                  valeurs de ζ de la grille ({INERTIA_DAMPING_DOMAIN.min.toFixed(2)} →{" "}
+                  {INERTIA_DAMPING_DOMAIN.max.toFixed(2)}) sur la fenêtre rétro-active de{" "}
+                  <strong className="text-cyan-300">{drawName}</strong> : optimum mesuré à{" "}
+                  <strong className="text-pink-400 font-mono">
+                    ζ = {backtestStats.bestDamping.toFixed(2)}
+                  </strong>{" "}
+                  ({backtestStats.bestDampingHits} hits) contre{" "}
+                  <strong className="font-mono text-slate-300">{backtestStats.currentDampingHits}</strong>{" "}
+                  hits à la calibration en vigueur (ζ = {dampingRatio.toFixed(2)}).
+                  {dampingSweepVerdict && dampingSweepVerdict.improved
+                    ? ` Gain mesuré : +${dampingSweepVerdict.deltaHits} hit(s) rétro-actif(s).`
+                    : " Aucun gain mesuré sur cette fenêtre : l'écart au hasard pur n'est pas distinguable ici."}
                 </p>
               </div>
 
               <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
                 <div className="flex flex-col items-end">
                   <span className="text-[8px] font-mono uppercase text-slate-400 tracking-wider">
-                    Amortissement suggéré
+                    Amortissement mesuré
                   </span>
                   <span className="font-mono font-black text-pink-400 text-sm tracking-wider">
-                    ζ_optimal = {backtestStats.bestDamping.toFixed(2)}
+                    ζ_balayage = {backtestStats.bestDamping.toFixed(2)}
                   </span>
                 </div>
 
-                {Math.abs(dampingRatio - backtestStats.bestDamping) < 0.01 ? (
+                {dampingSweepVerdict?.atGridPoint ? (
                   <div className="px-4 py-2.5 bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-emerald-950/30">
                     <CheckCircle2 size={14} className="text-emerald-400" />
-                    <span>ζ_optimal Actif &amp; Mémorisé</span>
+                    <span>ζ_balayage Actif &amp; Mémorisé</span>
                   </div>
-                ) : (
+                ) : dampingSweepVerdict?.improved ? (
                   <button
                     id="btn-apply-optimal-damping"
                     onClick={handleApplyOptimalDamping}
-                    className="px-5 py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-cyan-600 hover:from-pink-500 hover:to-cyan-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all duration-300 hover:scale-105 shadow-xl shadow-pink-600/30 border border-pink-400/40 cursor-pointer active:scale-95 animate-pulse"
-                    title={`Appliquer dynamiquement ζ = ${backtestStats.bestDamping.toFixed(2)} au moteur et le mémoriser pour ${drawName}`}
+                    className="px-5 py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-cyan-600 hover:from-pink-500 hover:to-cyan-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all duration-300 hover:scale-105 shadow-xl shadow-pink-600/30 border border-pink-400/40 cursor-pointer active:scale-95"
+                    title={`Appliquer ζ = ${backtestStats.bestDamping.toFixed(2)} (mesuré à ${backtestStats.bestDampingHits} hits contre ${backtestStats.currentDampingHits} actuellement) et le mémoriser pour ${drawName}`}
                   >
                     <Zap size={14} className="text-white" />
-                    <span>Appliquer ζ_optimal ({backtestStats.bestDamping.toFixed(2)}) au Moteur</span>
+                    <span>
+                      Appliquer ζ_balayage ({backtestStats.bestDamping.toFixed(2)}) au Moteur
+                    </span>
                   </button>
+                ) : (
+                  <div className="px-4 py-2.5 bg-slate-950/70 border border-white/10 text-slate-400 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
+                    <AlertCircle size={14} className="text-slate-500" />
+                    <span>Aucun gain mesuré — calibration conservée</span>
+                  </div>
                 )}
               </div>
             </div>

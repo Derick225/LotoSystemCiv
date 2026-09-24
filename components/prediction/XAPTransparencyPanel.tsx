@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { Prediction } from "../../types";
 import { NumberBall } from "../NumberBall";
@@ -45,6 +45,7 @@ import { NeuralWeightsAuditDashboard } from "./NeuralWeightsAuditDashboard";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import { audioEngine } from "../../utils/audioEngine";
+import { ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
 
 
 interface XAPTransparencyPanelProps {
@@ -83,8 +84,8 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   prediction,
   drawName,
   gameRegimeInfo,
-  resolvedNoiseLevel = 0.35,
-  resolvedLearningRate = 0.05,
+  resolvedNoiseLevel,
+  resolvedLearningRate,
 }) => {
   const { showToast } = useToast();
   const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
@@ -95,6 +96,35 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   const [activeTab, setActiveTab] = useState<XAPTab>("number_breakdown");
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
+
+  // Le moteur forensic affiche « n/d » pour toute grandeur non mesurée : on ne lui transmet
+  // donc que les valeurs réellement calculées en amont, jamais de constante de remplissage.
+  const measuredEntropy = useMemo(() => {
+    const fromContext = prediction.regimeContext?.entropy;
+    if (typeof fromContext === "number") return fromContext;
+    return typeof gameRegimeInfo?.entropy === "number" ? gameRegimeInfo.entropy : undefined;
+  }, [prediction.regimeContext, gameRegimeInfo]);
+
+  const measuredRegime = useMemo(() => {
+    if (!gameRegimeInfo) return undefined;
+    const info: {
+      regime?: string;
+      hurst?: number;
+      chaosDimension?: number;
+      weylDiscrepancy?: number;
+      entropy?: number;
+      volatility?: number;
+    } = {};
+    if (typeof gameRegimeInfo.regime === "string" && gameRegimeInfo.regime.length > 0) {
+      info.regime = gameRegimeInfo.regime;
+    }
+    if (typeof gameRegimeInfo.hurst === "number") info.hurst = gameRegimeInfo.hurst;
+    if (typeof gameRegimeInfo.chaosDimension === "number") info.chaosDimension = gameRegimeInfo.chaosDimension;
+    if (typeof gameRegimeInfo.weylDiscrepancy === "number") info.weylDiscrepancy = gameRegimeInfo.weylDiscrepancy;
+    if (typeof gameRegimeInfo.entropy === "number") info.entropy = gameRegimeInfo.entropy;
+    if (typeof gameRegimeInfo.volatility === "number") info.volatility = gameRegimeInfo.volatility;
+    return Object.keys(info).length > 0 ? info : undefined;
+  }, [gameRegimeInfo]);
 
   const handleExportForensicReport = async () => {
     audioEngine.play("click");
@@ -115,18 +145,10 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         confidence: prediction.confidence,
         stabilityScore: prediction.stabilityScore,
         realityAlignment: prediction.realityAlignment,
-        currentEntropy: 0.85,
-        gameRegimeInfo: {
-          regime: gameRegimeInfo?.regime || "Régime Mixte Stationnaire",
-          hurst: gameRegimeInfo?.hurst ?? 0.52,
-          chaosDimension: gameRegimeInfo?.chaosDimension ?? 1.25,
-          weylDiscrepancy: gameRegimeInfo?.weylDiscrepancy ?? 0.18,
-          entropy: 0.85,
-          volatility: 35.0,
-        },
+        currentEntropy: measuredEntropy,
+        gameRegimeInfo: measuredRegime,
         resolvedNoiseLevel,
         resolvedLearningRate,
-        resolvedMcIterations: 500,
         appliedWeights: ((prediction as any).aiWeights || (prediction as any).weights || globalWeights) as Record<string, number>,
         empiricalProofs: proofs as any,
 
@@ -164,15 +186,15 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     return combined;
   }, [prediction.suggestedNumbers, prediction.candidates]);
 
-  // Current Number XAP Data
-  const currentNumberXAP = useMemo(() => {
+  // XAP d'un numéro : donnée réelle si le moteur en a produit une, sinon synthèse déterministe
+  // construite à partir du breakdown / des valeurs de Shapley du même tirage (aucune constante inventée).
+  const buildXAPFor = useCallback((num: number) => {
     const xapList = prediction.xapExp || [];
-    const found = xapList.find((x) => x.number === selectedNum);
+    const found = xapList.find((x) => x.number === num);
     if (found) return found;
 
-    // Fallback synthesis from breakdown and explainabilityData if xapExp not directly matched
-    const breakdown = prediction.breakdown?.[selectedNum] || {};
-    const explainExtra = prediction.explainabilityData?.[selectedNum] || {};
+    const breakdown = prediction.breakdown?.[num] || {};
+    const explainExtra = prediction.explainabilityData?.[num] || {};
     const shapValues = explainExtra.shapValues || breakdown;
 
     const entries = Object.entries(shapValues);
@@ -194,17 +216,45 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       shapleyPct[k] = total > 0 ? (numVal / total) * 100 : 0;
     });
 
+    // Entropie et Gini de composition : mesurés sur la distribution de Shapley réellement
+    // calculée ci-dessus (mêmes formules que DNAOptimizer), jamais des constantes de repli.
+    let compositionEntropy = 0;
+    let compositionGini = 0;
+    const uniformShare = entries.length > 0 ? 1.0 / entries.length : 0;
+    if (total > 0) {
+      let entropySum = 0;
+      let diffSum = 0;
+      entries.forEach(([, vi]) => {
+        const valI = Math.max(0, Number(vi) || 0);
+        const p = valI / total;
+        if (p > Number.EPSILON) entropySum -= p * Math.log2(p);
+        entries.forEach(([, vj]) => {
+          diffSum += Math.abs(valI - Math.max(0, Number(vj) || 0));
+        });
+      });
+      const maxEnt = Math.log2(entries.length || 1) || 1.0;
+      compositionEntropy = entropySum / maxEnt;
+      compositionGini = diffSum / (2.0 * entries.length * total);
+    }
+
     return {
-      number: selectedNum,
-      dominantAlgo: dominantKey as any,
+      number: num,
+      // Aucun canal mesuré : on n'attribue pas de dominant par défaut.
+      dominantAlgo: entries.length > 0 ? (dominantKey as any) : null,
       contributionPercentage: total > 0 ? (maxVal / total) * 100 : 0,
       dnaVector: shapValues as any,
-      compositionEntropy: 0.85,
-      compositionGini: 0.35,
-      synergyAlgos: entries.filter(([, v]) => Number(v) > 0.05).map(([k]) => k as any),
+      compositionEntropy,
+      compositionGini,
+      // Contributeurs en synergie : contribution strictement supérieure à la part uniforme 1/n
+      synergyAlgos: entries
+        .filter(([, v]) => Math.max(0, Number(v) || 0) / Math.max(Number.EPSILON, total) > uniformShare)
+        .map(([k]) => k as any),
       shapleyValues: shapleyPct as any,
     };
-  }, [prediction, selectedNum]);
+  }, [prediction]);
+
+  // Current Number XAP Data
+  const currentNumberXAP = useMemo(() => buildXAPFor(selectedNum), [buildXAPFor, selectedNum]);
 
   // Extra explainability metadata
   const currentExplainData = useMemo(() => {
@@ -213,20 +263,22 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
 
   // Shapley Bar Chart Data for selected number
   const shapleyChartData = useMemo(() => {
-    if (!currentNumberXAP?.shapleyValues) {
-      const breakdown = prediction.breakdown?.[selectedNum] || {};
-      const total = Object.values(breakdown).reduce((a, b) => a + (Number(b) || 0), 0) || 1;
-      return Object.entries(breakdown)
-        .map(([algo, val]) => ({
-          algo: LABELS_FRIENDLY[algo] || algo,
-          key: algo,
-          val: Math.max(0, ((Number(val) || 0) / total) * 100),
-        }))
-        .sort((a, b) => b.val - a.val)
-        .slice(0, 7);
-    }
+    const rawShapley = currentNumberXAP?.shapleyValues;
+    const shapleyValues: Record<string, number> =
+      rawShapley && Object.keys(rawShapley).length > 0
+        ? rawShapley
+        : (() => {
+            const breakdown = prediction.breakdown?.[selectedNum] || {};
+            const total = Object.values(breakdown).reduce((a, b) => a + (Number(b) || 0), 0) || 1;
+            return Object.fromEntries(
+              Object.entries(breakdown).map(([algo, val]) => [
+                algo,
+                Math.max(0, ((Number(val) || 0) / total) * 100),
+              ]),
+            );
+          })();
 
-    return Object.entries(currentNumberXAP.shapleyValues)
+    return Object.entries(shapleyValues)
       .map(([algo, val]) => ({
         algo: LABELS_FRIENDLY[algo] || algo,
         key: algo,
@@ -239,21 +291,28 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
   // Neural Weights Ranking & Distribution
   const neuralWeightsData = useMemo(() => {
     const sourceWeights = prediction.aiWeights || globalWeights || {};
-    const entries = Object.entries(sourceWeights).map(([k, v]) => ({
-      key: k,
-      label: LABELS_FRIENDLY[k] || k,
-      weight: Number(v) || 0,
-      percentage: (Number(v) || 0) * 100,
-    }));
+    // Masse totale réelle : la part affichée est weight / Σweight, exacte quelle que soit l'échelle
+    // des poids reçus (L1 normalisée ou non), sans supposer une somme unitaire.
+    const totalMass =
+      Object.values(sourceWeights).reduce((s, v) => s + Math.max(0, Number(v) || 0), 0) || 1.0;
+
+    const entries = Object.entries(sourceWeights).map(([k, v]) => {
+      const w = Math.max(0, Number(v) || 0);
+      return {
+        key: k,
+        label: LABELS_FRIENDLY[k] || k,
+        weight: w,
+        percentage: (w / totalMass) * 100,
+      };
+    });
 
     entries.sort((a, b) => b.weight - a.weight);
 
     // Calculate weight entropy
     let entropySum = 0;
-    const totalMass = entries.reduce((s, e) => s + e.weight, 0) || 1.0;
     entries.forEach((e) => {
       const p = e.weight / totalMass;
-      if (p > 1e-12) {
+      if (p > Number.EPSILON) {
         entropySum -= p * Math.log2(p);
       }
     });
@@ -263,41 +322,54 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     return {
       entries,
       normalizedEntropy,
-      activeModelsCount: entries.filter((e) => e.weight > 0.005).length,
+      // Canal réellement alimenté : masse de poids strictement positive après normalisation L1
+      // (les canaux retirés sont forcés à 0 par normalizeWeights, aucun seuil arbitraire n'est requis).
+      activeModelsCount: entries.filter((e) => e.weight > 0).length,
     };
   }, [prediction.aiWeights, globalWeights]);
 
   // Stochastic Factors Decomposition
+  // Aucune constante de remplissage : une grandeur non mesurée est exposée à null et rendue « n/d ».
   const stochasticFactors = useMemo(() => {
-    const H = gameRegimeInfo?.hurst ?? 0.52;
-    const chaosDim = gameRegimeInfo?.chaosDimension ?? 1.25;
-    const weylDiscrepancy = gameRegimeInfo?.weylDiscrepancy ?? 0.18;
-    const histEntropy = gameRegimeInfo?.entropy ?? 0.88;
+    const H = typeof gameRegimeInfo?.hurst === "number" ? gameRegimeInfo.hurst : null;
+    const weylDiscrepancy =
+      typeof gameRegimeInfo?.weylDiscrepancy === "number" ? gameRegimeInfo.weylDiscrepancy : null;
+    const histEntropy = typeof gameRegimeInfo?.entropy === "number" ? gameRegimeInfo.entropy : null;
+    const sigma = typeof resolvedNoiseLevel === "number" ? resolvedNoiseLevel : null;
 
-    // Continuous impacts based on mathematical derivations (AGENTS.md)
-    // 1. Hurst Persistence Force: |H - 0.5| * 200%
-    const hurstForce = Math.min(100, Math.abs(H - 0.5) * 200);
-    // 2. Thermal Annealing Noise: sigmoid mapping
-    const thermalForce = Math.min(100, (resolvedNoiseLevel / 2.0) * 100);
+    // Marge d'échantillonnage de la marche aléatoire : 1/sqrt(N), convention identique à detectGameRegime.
+    const sampleN = Math.max(1, Math.min(history.length, 200));
+    const uncertaintyMargin = 1.0 / Math.sqrt(sampleN);
+
+    // Plafond de recuit σ_max = 3.0, imposé par le clamps de usePredictionGenerator.
+    const SIGMA_MAX = 3.0;
+
     const gWeights = (globalWeights || {}) as Record<string, number>;
-    // 3. Hawkes Self-Excitation Impact:
-    const hawkesWeight = ((gWeights["hawkes"] || gWeights["temporal"] || 0.05) / Math.max(0.01, Object.values(gWeights).reduce((a, b) => a + b, 0))) * 100;
-    // 4. Machine Transfer Symbiosis (Exact normalized weight percentage):
-    const rawMachineVal = gWeights["machine_transfer"] ?? gWeights["machineTransfer"] ?? gWeights["machine"] ?? 0;
-    const totalWeightsSum = Math.max(0.01, Object.values(gWeights).reduce((a, b) => a + b, 0));
-    const machineWeight = (rawMachineVal / totalWeightsSum) * 100;
-    // 5. Weyl Topological Regularity:
-    const weylUniformity = Math.max(10, Math.min(99, (1.0 - weylDiscrepancy) * 100));
-    // 6. Shannon Entropy Dispersion:
-    const entropyDispersion = Math.min(100, histEntropy * 100);
+    const totalWeightsSum = Object.values(gWeights).reduce((a, b) => a + b, 0);
+
+    const shareOfMass = (raw: number) =>
+      totalWeightsSum > 0 ? (raw / totalWeightsSum) * 100 : null;
+    const rawHawkes = gWeights["hawkes"] ?? gWeights["temporal"] ?? 0;
+    const rawMachine = gWeights["machine_transfer"] ?? gWeights["machineTransfer"] ?? gWeights["machine"] ?? 0;
+    const hawkesShare = shareOfMass(rawHawkes);
+    const machineShare = shareOfMass(rawMachine);
+
+    const hurstDeviation = H === null ? null : Math.abs(H - 0.5);
 
     return [
       {
         id: "hurst",
         name: "Mémoire Temporelle de Hurst (H)",
-        value: H.toFixed(4),
-        forcePct: Math.round(hurstForce),
-        status: H > 0.53 ? "Persistance Longue Mémoire" : H < 0.47 ? "Réversion à la Moyenne" : "Marche Aléatoire Brownienne",
+        value: H === null ? null : H.toFixed(4),
+        forcePct: hurstDeviation === null ? null : Math.min(100, Math.round(hurstDeviation * 200)),
+        status:
+          hurstDeviation === null
+            ? "Exposant de Hurst non mesuré sur cet historique"
+            : hurstDeviation <= uncertaintyMargin
+              ? `Compatible avec la marche aléatoire : |H − 0.5| = ${hurstDeviation.toFixed(4)} ≤ marge 1/√N = ${uncertaintyMargin.toFixed(4)}`
+              : H !== null && H > 0.5
+                ? `Persistance longue mémoire : |H − 0.5| = ${hurstDeviation.toFixed(4)} > marge 1/√N = ${uncertaintyMargin.toFixed(4)}`
+                : `Réversion à la moyenne : |H − 0.5| = ${hurstDeviation.toFixed(4)} > marge 1/√N = ${uncertaintyMargin.toFixed(4)}`,
         description: "Quantifie l'autocorrélation asymptotique des séries d'écarts temporels.",
         color: "text-indigo-400",
         barColor: "bg-indigo-500",
@@ -305,9 +377,12 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       {
         id: "thermal",
         name: "Bruit Thermique de Recuit (σ)",
-        value: `${resolvedNoiseLevel.toFixed(3)} V`,
-        forcePct: Math.round(thermalForce),
-        status: resolvedNoiseLevel > 0.6 ? "Haute Exploration Stochastique" : "Convergence Stable Froid",
+        value: sigma === null ? null : `${sigma.toFixed(3)} V`,
+        forcePct: sigma === null ? null : Math.min(100, Math.round((sigma / SIGMA_MAX) * 100)),
+        status:
+          sigma === null
+            ? "Niveau de bruit non résolu par le générateur"
+            : `Température de recuit : ${((sigma / SIGMA_MAX) * 100).toFixed(1)}% du plafond σ_max = ${SIGMA_MAX.toFixed(1)}`,
         description: "Contrôle la relaxation d'entropie pour éviter les minima locaux dans l'espace des solutions.",
         color: "text-amber-400",
         barColor: "bg-amber-500",
@@ -315,9 +390,14 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       {
         id: "hawkes",
         name: "Intensité Auto-Excitatrice (Hawkes)",
-        value: `${hawkesWeight.toFixed(1)}%`,
-        forcePct: Math.min(100, Math.round(hawkesWeight)),
-        status: hawkesWeight > 15 ? "Forte Contagion Temporelle" : "Activité Résiduelle Normale",
+        value: hawkesShare === null ? null : `${hawkesShare.toFixed(1)}%`,
+        forcePct: hawkesShare === null ? null : Math.min(100, Math.round(hawkesShare)),
+        status:
+          hawkesShare === null
+            ? "Masse de poids totale nulle : part indéterminée"
+            : rawHawkes <= 0
+              ? "Canal Hawkes non alimenté (masse de poids nulle)"
+              : `Masse de poids auto-excitatrice : ${hawkesShare.toFixed(1)}% du total normalisé des ${ACTIVE_ALGO_COUNT} algorithmes actifs`,
         description: "Modélise les grappes (clusters) d'apparition via un noyau de Poisson à mémoire exponentielle.",
         color: "text-rose-400",
         barColor: "bg-rose-500",
@@ -325,9 +405,14 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       {
         id: "machine",
         name: "Transfert Machine ➔ Gagnants",
-        value: `${machineWeight.toFixed(1)}%`,
-        forcePct: Math.min(100, Math.round(machineWeight)),
-        status: machineWeight > 5 ? "Flux Cinématique Actif" : machineWeight > 0.1 ? "Flux Découplé Stationnaire" : "Inactif (Désactivé / Non Prouvé sur ce Tirage)",
+        value: machineShare === null ? null : `${machineShare.toFixed(1)}%`,
+        forcePct: machineShare === null ? null : Math.min(100, Math.round(machineShare)),
+        status:
+          machineShare === null
+            ? "Masse de poids totale nulle : part indéterminée"
+            : rawMachine <= 0
+              ? "Canal machine non alimenté sur ce tirage"
+              : `Flux cinématique actif : ${machineShare.toFixed(1)}% du total normalisé des poids`,
         description: "Amplification cinématique continue par transformation tanh du vecteur machine.",
         color: "text-emerald-400",
         barColor: "bg-emerald-500",
@@ -335,9 +420,12 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       {
         id: "weyl",
         name: "Régularité de Weyl (Uniformité)",
-        value: `D = ${weylDiscrepancy.toFixed(4)}`,
-        forcePct: Math.round(weylUniformity),
-        status: weylDiscrepancy < 0.2 ? "Haute Équirépartition Topologique" : "Anisotropie Locale",
+        value: weylDiscrepancy === null ? null : `D = ${weylDiscrepancy.toFixed(4)}`,
+        forcePct: weylDiscrepancy === null ? null : Math.min(100, Math.round(Math.max(0, 1 - weylDiscrepancy) * 100)),
+        status:
+          weylDiscrepancy === null
+            ? "Discrépance non mesurée sur cet historique"
+            : `Équirépartition ${(Math.max(0, 1 - weylDiscrepancy) * 100).toFixed(1)}% (discrépance D = ${weylDiscrepancy.toFixed(4)})`,
         description: "Mesure la discrépance géométrique pour assurer la complétude spatiale de la sélection.",
         color: "text-cyan-400",
         barColor: "bg-cyan-500",
@@ -345,19 +433,31 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
       {
         id: "entropy",
         name: "Dispersion Entropique (Shannon)",
-        value: `H = ${histEntropy.toFixed(4)}`,
-        forcePct: Math.round(entropyDispersion),
-        status: histEntropy > 0.8 ? "Haute Complexité Informationnelle" : "Signal Fortement Structuré",
+        value: histEntropy === null ? null : `H = ${histEntropy.toFixed(4)}`,
+        forcePct: histEntropy === null ? null : Math.min(100, Math.round(histEntropy * 100)),
+        status:
+          histEntropy === null
+            ? "Entropie normalisée non mesurée sur cet historique"
+            : `Dispersion informationnelle : ${(histEntropy * 100).toFixed(1)}% de l'entropie normalisée maximale`,
         description: "Mesure continue du désordre probabiliste et de l'étalement du paysage d'inférence.",
         color: "text-purple-400",
         barColor: "bg-purple-500",
       },
     ];
-  }, [gameRegimeInfo, resolvedNoiseLevel, globalWeights]);
+  }, [gameRegimeInfo, resolvedNoiseLevel, globalWeights, history]);
 
   // Physics Archetype Tag Details
   const archetypeInfo = useMemo(() => {
-    const arch = currentExplainData?.physicsArchetype || "Convergence Probabiliste";
+    const arch = currentExplainData?.physicsArchetype as string | undefined;
+    if (!arch) {
+      return {
+        title: "Archétype Non Classé",
+        badge: "Aucun archétype émis par le moteur",
+        color: "bg-slate-500/10 text-slate-400 border-slate-500/30",
+        icon: <Atom size={14} className="text-slate-400" />,
+        desc: "Le moteur n'a attribué aucun archétype physique à ce numéro pour ce tirage ; aucune catégorie n'est inventée ici.",
+      };
+    }
     switch (arch) {
       case "Cycle Harmonique":
         return {
@@ -373,7 +473,7 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
           badge: "Auto-Similarité & Hurst",
           color: "bg-purple-500/10 text-purple-400 border-purple-500/30",
           icon: <Layers size={14} className="text-purple-400" />,
-          desc: "Caractérisé par un exposant de Hurst H > 0.50 indiquant une mémoire longue des écarts.",
+          desc: "Caractérisé par un exposant de Hurst supérieur à la référence de marche aléatoire (H = 0.50), signant une mémoire longue des écarts.",
         };
       case "Transfert Machine":
         return {
@@ -393,11 +493,11 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
         };
       default:
         return {
-          title: "Convergence Probabiliste",
-          badge: "Synergie Multi-Modèles",
+          title: arch,
+          badge: "Archétype Enregistré",
           color: "bg-indigo-500/10 text-indigo-400 border-indigo-500/30",
           icon: <Atom size={14} className="text-indigo-400" />,
-          desc: "Émergence consensuelle issue de l'agrégation conjointe de plusieurs estimateurs orthogonaux.",
+          desc: "Archétype physique renvoyé tel quel par le moteur d'inférence pour ce numéro.",
         };
     }
   }, [currentExplainData]);
@@ -409,9 +509,9 @@ Numéro Analysé: ${selectedNum}
 Archétype Physique: ${archetypeInfo.title} (${archetypeInfo.badge})
 Top Drivers (Valeurs Shapley):
 ${shapleyChartData.map((d) => `  • ${d.algo}: ${d.val.toFixed(1)}%`).join("\n")}
-Tension Topologique: ${currentExplainData?.topologicalTension?.toFixed(2) || "1.00"}
-Indice d'Orbitale ADN: ${currentExplainData?.dnaOrbitingIndex?.toFixed(4) || "0.0000"}
-Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Convergence conjointe standard."}
+Tension Topologique: ${typeof currentExplainData?.topologicalTension === "number" ? currentExplainData.topologicalTension.toFixed(2) : "n/d"}
+Indice d'Orbitale ADN: ${typeof currentExplainData?.dnaOrbitingIndex === "number" ? currentExplainData.dnaOrbitingIndex.toFixed(4) : "n/d"}
+Explication Narrative: ${currentExplainData?.narrativeInterpretation || "n/d"}
 ---------------------------------------------`;
 
     navigator.clipboard.writeText(summary);
@@ -448,7 +548,7 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 text-[11px] font-mono">
             <span className="text-slate-500">Robustesse:</span>
             <span className="text-emerald-400 font-bold">
-              {prediction.stabilityScore ?? 85}%
+              {typeof prediction.stabilityScore === "number" ? `${prediction.stabilityScore}%` : "n/d"}
             </span>
           </div>
 
@@ -710,7 +810,9 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                       Tension Topologique
                     </div>
                     <div className="text-2xl font-black font-mono text-indigo-400">
-                      {currentExplainData?.topologicalTension?.toFixed(2) || "1.00"}
+                      {typeof currentExplainData?.topologicalTension === "number"
+                        ? currentExplainData.topologicalTension.toFixed(2)
+                        : "n/d"}
                     </div>
                     <div className="text-[9px] text-slate-500">
                       Résistance aux micro-perturbations
@@ -723,7 +825,9 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                       Résonance ADN
                     </div>
                     <div className="text-2xl font-black font-mono text-emerald-400">
-                      {currentExplainData?.dnaOrbitingIndex?.toFixed(4) || "0.0000"}
+                      {typeof currentExplainData?.dnaOrbitingIndex === "number"
+                        ? currentExplainData.dnaOrbitingIndex.toFixed(4)
+                        : "n/d"}
                     </div>
                     <div className="text-[9px] text-slate-500">
                       Alignement spectral continu
@@ -739,9 +843,9 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed font-medium">
                     {currentExplainData?.narrativeInterpretation ||
-                      `Le numéro ${selectedNum} est soutenu par une convergence continue entre le modèle ${
-                        shapleyChartData[0]?.algo || "Spectral"
-                      } et l'espace des phases du tirage ${drawName}.`}
+                      `Aucune interprétation narrative émise par le moteur pour le numéro ${selectedNum}. Canal dominant mesuré sur ce tirage : ${
+                        shapleyChartData[0]?.algo || "aucun"
+                      }${shapleyChartData[0] ? ` (${shapleyChartData[0].val.toFixed(1)}% des valeurs de Shapley)` : ""}.`}
                   </p>
                 </div>
               </div>
@@ -756,10 +860,10 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800/80 space-y-1">
                 <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
-                  Modèles Actifs / 19
+                  Modèles Actifs / {ACTIVE_ALGO_COUNT}
                 </span>
                 <div className="text-2xl font-black font-mono text-indigo-400">
-                  {neuralWeightsData.activeModelsCount} / 19
+                  {neuralWeightsData.activeModelsCount} / {ACTIVE_ALGO_COUNT}
                 </div>
                 <p className="text-[10px] text-slate-400">
                   Sous-systèmes participant activement
@@ -774,9 +878,9 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                   {neuralWeightsData.normalizedEntropy.toFixed(4)}
                 </div>
                 <p className="text-[10px] text-slate-400">
-                  {neuralWeightsData.normalizedEntropy > 0.85
-                    ? "Régime Égalitaire (Haute Synergie)"
-                    : "Régime Polarisé (Modèles Dominants)"}
+                  Dispersion {((neuralWeightsData.normalizedEntropy) * 100).toFixed(1)}% ·
+                  concentration {((1 - neuralWeightsData.normalizedEntropy) * 100).toFixed(1)}%
+                  (0% = masse concentrée sur un seul canal)
                 </p>
               </div>
 
@@ -785,7 +889,7 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                   Taux d'Apprentissage (η)
                 </span>
                 <div className="text-2xl font-black font-mono text-amber-400">
-                  {resolvedLearningRate.toFixed(4)}
+                  {typeof resolvedLearningRate === "number" ? resolvedLearningRate.toFixed(4) : "n/d"}
                 </div>
                 <p className="text-[10px] text-slate-400">
                   Gradient Micro-SGD régularisé
@@ -797,7 +901,7 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
             <div className="bg-slate-950/80 rounded-2xl p-5 border border-slate-800/80 space-y-4">
               <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-2">
                 <Network size={14} className="text-indigo-400" />
-                Distribution Complète des 19 Poids Algorithmiques
+                Distribution Complète des {neuralWeightsData.entries.length} Poids Algorithmiques
               </h4>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3 pt-2">
@@ -862,8 +966,12 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                       <span className="text-xs font-bold text-slate-300">
                         {factor.name}
                       </span>
-                      <span className={`text-xs font-black font-mono ${factor.color}`}>
-                        {factor.value}
+                      <span
+                        className={`text-xs font-black font-mono ${
+                          factor.value === null ? "text-slate-500" : factor.color
+                        }`}
+                      >
+                        {factor.value ?? "n/d"}
                       </span>
                     </div>
                     <div className="inline-block px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-[10px] font-mono text-slate-400">
@@ -877,12 +985,16 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                   <div className="space-y-1.5 pt-2 border-t border-slate-900">
                     <div className="flex justify-between text-[10px] text-slate-500 font-mono">
                       <span>Force d'Impact:</span>
-                      <span className="text-slate-300 font-bold">{factor.forcePct}%</span>
+                      <span className="text-slate-300 font-bold">
+                        {factor.forcePct === null ? "n/d" : `${factor.forcePct}%`}
+                      </span>
                     </div>
                     <div className="w-full h-1.5 bg-slate-850 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-700 ${factor.barColor}`}
-                        style={{ width: `${factor.forcePct}%` }}
+                        className={`h-full rounded-full transition-all duration-700 ${
+                          factor.forcePct === null ? "bg-slate-700" : factor.barColor
+                        }`}
+                        style={{ width: `${factor.forcePct ?? 0}%` }}
                       />
                     </div>
                   </div>
@@ -916,8 +1028,8 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2">
                 {prediction.suggestedNumbers.map((num) => {
-                  const xap = prediction.xapExp?.find((x) => x.number === num);
-                  const synAlgos = xap?.synergyAlgos || ["spectral", "markov", "hawkes"];
+                  const xap = buildXAPFor(num);
+                  const synAlgos = xap?.synergyAlgos ?? [];
 
                   return (
                     <div
@@ -933,7 +1045,9 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                           <div className="text-[10px] text-slate-400">
                             Dominant:{" "}
                             <span className="text-indigo-400 font-bold capitalize">
-                              {xap?.dominantAlgo || "Spectral"}
+                              {xap?.dominantAlgo
+                                ? LABELS_FRIENDLY[xap.dominantAlgo] || xap.dominantAlgo
+                                : "n/d"}
                             </span>
                           </div>
                         </div>
@@ -944,14 +1058,20 @@ Explication Narrative: ${currentExplainData?.narrativeInterpretation || "Converg
                           Modèles en Co-Synergie :
                         </span>
                         <div className="flex flex-wrap gap-1.5">
-                          {synAlgos.map((algo) => (
-                            <span
-                              key={algo}
-                              className="px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/20 text-[9px] font-mono text-indigo-300"
-                            >
-                              {LABELS_FRIENDLY[algo] || algo}
+                          {synAlgos.length === 0 ? (
+                            <span className="text-[9px] font-mono text-slate-500 italic">
+                              Aucun canal au-dessus de la part uniforme 1/n
                             </span>
-                          ))}
+                          ) : (
+                            synAlgos.map((algo) => (
+                              <span
+                                key={algo}
+                                className="px-2 py-0.5 rounded-md bg-indigo-950/60 border border-indigo-500/20 text-[9px] font-mono text-indigo-300"
+                              >
+                                {LABELS_FRIENDLY[algo] || algo}
+                              </span>
+                            ))
+                          )}
                         </div>
                       </div>
                     </div>

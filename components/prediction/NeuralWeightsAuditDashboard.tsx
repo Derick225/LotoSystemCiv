@@ -352,18 +352,23 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
     };
   }, [normalizedPercentages]);
 
-  // Standard Deviation per algorithm sigma = sqrt(p * (1-p) / N)
+  // Écart type du taux de succès : σ = (hit-rate − baseline) / Z, inversion exacte du z-score
+  // déjà calculé par le moteur d'épreuve empirique (aucun effectif d'essais n'est inventé ici).
+  // Indéterminé (n/d) lorsque Z = 0, c'est-à-dire lorsque le taux mesuré égale exactement le hasard.
   const stdDevMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    const nTrials = Math.max(20, history.length * 5);
+    const map: Record<string, number | undefined> = {};
     ALGO_REGISTRY.forEach((meta) => {
       const proof = empiricalProofs[meta.key];
-      const p = proof?.empiricalHitRate || (5.0 / 90.0);
-      const sigma = Math.sqrt((p * (1.0 - p)) / nTrials);
-      map[meta.key] = sigma;
+      const z = proof?.proofScore;
+      if (!proof || typeof z !== "number" || !Number.isFinite(z) || Math.abs(z) < Number.EPSILON) {
+        map[meta.key] = undefined;
+        return;
+      }
+      const sigma = (proof.empiricalHitRate - proof.baselineRate) / z;
+      map[meta.key] = sigma > 0 ? sigma : undefined;
     });
     return map;
-  }, [empiricalProofs, history]);
+  }, [empiricalProofs]);
 
   // Handle single weight change with auto-constraint
   const handleWeightChange = (key: AlgoKey, newRawVal: number) => {
@@ -400,7 +405,8 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
         if (lockedKeys[meta.key]) {
           newWeights[meta.key] = localWeights[meta.key];
         } else {
-          newWeights[meta.key] = (optimized as any)[meta.key] ?? 1.0;
+          // Canal absent du génome optimisé : on conserve le poids courant plutôt que d'inventer 1.0.
+          newWeights[meta.key] = (optimized as any)[meta.key] ?? localWeights[meta.key] ?? 0;
         }
       });
       setLocalWeights(newWeights);
@@ -452,29 +458,43 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
   // Generate and download Stochastic Forensic Report PDF
   const handleExportForensicPDF = async () => {
     audioEngine.play("click");
+    // Un rapport forensic est indexé sur un ticket réel : sans prédiction courante, rien n'est inventé.
+    if (!lastPrediction || !lastPrediction.suggestedNumbers?.length) {
+      showToast("Aucune prédiction courante : lancez une inférence avant d'exporter le rapport forensic.", "error");
+      return;
+    }
     setIsExportingPDF(true);
     try {
-      const suggested = lastPrediction?.suggestedNumbers?.length ? lastPrediction.suggestedNumbers : [7, 14, 28, 42, 77];
-      const candidates = lastPrediction?.candidates || [3, 9, 21, 33, 54, 66, 88];
+      // Seules les grandeurs réellement mesurées sont transmises ; le moteur PDF imprime « n/d »
+      // pour tout champ absent. Aucun ticket, score ou paramètre de remplissage n'est fabriqué ici.
+      const measuredRegime = (() => {
+        if (!regime) return undefined;
+        const info: {
+          regime?: string;
+          hurst?: number;
+          chaosDimension?: number;
+          weylDiscrepancy?: number;
+          entropy?: number;
+          volatility?: number;
+        } = {};
+        if (typeof regime.regime === "string" && regime.regime.length > 0) info.regime = regime.regime;
+        if (typeof regime.hurst === "number") info.hurst = regime.hurst;
+        if (typeof regime.chaosDimension === "number") info.chaosDimension = regime.chaosDimension;
+        if (typeof regime.weylDiscrepancy === "number") info.weylDiscrepancy = regime.weylDiscrepancy;
+        if (typeof regime.entropy === "number") info.entropy = regime.entropy;
+        if (typeof regime.volatility === "number") info.volatility = regime.volatility;
+        return Object.keys(info).length > 0 ? info : undefined;
+      })();
 
       await exportService.generateForensicStochasticReportPDF({
         drawName,
-        suggestedNumbers: suggested,
-        candidates,
-        confidence: lastPrediction?.confidence || 86.4,
-        stabilityScore: lastPrediction?.stabilityScore || 88.0,
-        realityAlignment: lastPrediction?.realityAlignment || 84.5,
-        currentEntropy: weightEntropy.normalized,
-        gameRegimeInfo: {
-          regime: regime?.regime || "Régime Mixte Stationnaire",
-          hurst: regime?.hurst ?? 0.52,
-          chaosDimension: 1.25,
-          weylDiscrepancy: 0.18,
-          entropy: weightEntropy.normalized,
-          volatility: regime?.volatility ?? 35.0,
-        },
-        resolvedNoiseLevel: 0.35,
-        resolvedLearningRate: 0.05,
+        suggestedNumbers: lastPrediction.suggestedNumbers,
+        candidates: lastPrediction.candidates,
+        confidence: lastPrediction.confidence,
+        stabilityScore: lastPrediction.stabilityScore,
+        realityAlignment: lastPrediction.realityAlignment,
+        currentEntropy: typeof regime?.entropy === "number" ? regime.entropy : undefined,
+        gameRegimeInfo: measuredRegime,
         appliedWeights: localWeights,
         empiricalProofs: empiricalProofs as any,
         hasMachineData: hasMachineDataInHistory,
@@ -643,11 +663,11 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
       {/* Layers List Scrollable Area */}
       <div className="overflow-y-auto space-y-3 py-4 pr-1 relative z-10 flex-1 min-h-[300px]">
         {filteredLayers.map((meta) => {
-          const rawVal = localWeights[meta.key] ?? 1.0;
+          const rawVal = Number(localWeights[meta.key] ?? 0);
           const pct = normalizedPercentages[meta.key] || 0;
           const isLocked = lockedKeys[meta.key] || false;
           const proof = empiricalProofs[meta.key];
-          const sigma = stdDevMap[meta.key] || 0.05;
+          const sigma = stdDevMap[meta.key];
           const isMachineTransfer = meta.key === AlgoKey.MACHINE_TRANSFER;
           const isMachineDisabled = isMachineTransfer && !hasMachineDataInHistory;
 
@@ -694,10 +714,10 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 justify-end">
-                      <span>σ = {sigma.toFixed(4)}</span>
+                      <span>σ = {typeof sigma === "number" ? sigma.toFixed(4) : "n/d"}</span>
                       <span>•</span>
                       <span className={proof?.hasProof ? "text-emerald-400 font-bold" : "text-slate-400"}>
-                        Z = {proof ? (proof.proofScore >= 0 ? `+${proof.proofScore.toFixed(2)}` : proof.proofScore.toFixed(2)) : "0.00"}
+                        Z = {proof ? (proof.proofScore >= 0 ? `+${proof.proofScore.toFixed(2)}` : proof.proofScore.toFixed(2)) : "n/d"}
                       </span>
                     </div>
                     <div className="text-[9px] text-slate-500">

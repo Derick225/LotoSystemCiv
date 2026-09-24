@@ -18,6 +18,7 @@ import { OracleScenarioMatrixDeck } from "../prediction/OracleScenarioMatrixDeck
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import { getPrimaryInterDrawFamily } from "../../constants";
+import { ACTIVE_ALGO_COUNT, RETIRED_ALGO_COUNT, TOTAL_ALGO_COUNT } from "../../shared/prediction.types";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { Prediction } from "../../types";
 import {
@@ -105,7 +106,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
     activeDNA,
     quantumMode,
     setQuantumMode,
-    isChaotic,
+    chaosIndex,
     isOptimizing,
     optimizedWeights,
     previousWeights,
@@ -143,6 +144,14 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
       window.removeEventListener("offline", handleOffline);
     };
   }, []);
+
+  // Les métriques non produites par le moteur sont affichées "n/d" : aucune valeur de repli inventée.
+  const formatPct = (value?: number | null) =>
+    typeof value === "number" && Number.isFinite(value) ? `${value}%` : "n/d";
+  const clampPct = (value?: number | null) =>
+    typeof value === "number" && Number.isFinite(value)
+      ? Math.max(0, Math.min(100, value))
+      : 0;
 
   // Adoption directe d'un scénario alternatif comme vecteur principal
   const handleAdoptScenarioTicket = useCallback(
@@ -183,14 +192,16 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
         stabilityScore: activePrediction.stabilityScore,
         realityAlignment: activePrediction.realityAlignment,
         currentEntropy: currentEntropy,
-        gameRegimeInfo: {
-          regime: gameRegimeInfo?.regime || "Régime Mixte Stationnaire",
-          hurst: gameRegimeInfo?.hurst ?? 0.52,
-          chaosDimension: gameRegimeInfo?.chaosDimension ?? 1.25,
-          weylDiscrepancy: gameRegimeInfo?.weylDiscrepancy ?? 0.18,
-          entropy: currentEntropy,
-          volatility: volatilityScore,
-        },
+        gameRegimeInfo: gameRegimeInfo
+          ? {
+              regime: gameRegimeInfo.regime,
+              hurst: gameRegimeInfo.hurst,
+              chaosDimension: gameRegimeInfo.chaosDimension,
+              weylDiscrepancy: gameRegimeInfo.weylDiscrepancy,
+              entropy: currentEntropy,
+              volatility: volatilityScore,
+            }
+          : undefined,
         resolvedNoiseLevel,
         resolvedLearningRate,
         resolvedMcIterations,
@@ -227,7 +238,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const checkNetworkAndAuth = useCallback(async () => {
     setNetworkState((prev) => ({ ...prev, checkingConnection: true }));
     const online = navigator.onLine;
-    await new Promise((resolve) => setTimeout(resolve, 600));
     setNetworkState((prev) => ({
       ...prev,
       isOffline: !online,
@@ -238,7 +248,9 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
     }));
   }, []);
 
-  if (nexusLoading) {
+  // Ce squelette ne couvre que le premier chargement : une revalidation en arrière-plan
+  // (auto-sync post-tirage, refresh manuel) ne doit pas masquer une prédiction déjà calculée.
+  if (nexusLoading && history.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 animate-pulse">
         <Cpu className="text-slate-400 animate-spin" size={32} />
@@ -294,7 +306,8 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
           </h2>
 
           <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-6 text-center px-4">
-            Moteur stochastique prédictif à 24 algorithmes déterministes. Génération de vecteurs absolus & synthèse multi-scénarios.
+            Moteur stochastique prédictif à {ACTIVE_ALGO_COUNT} canaux algorithmiques actifs
+            ({TOTAL_ALGO_COUNT} enregistrés, {RETIRED_ALGO_COUNT} retirés). Génération de vecteurs absolus & synthèse multi-scénarios.
           </p>
 
           {/* Network & Local Diagnostic */}
@@ -315,7 +328,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                 </span>
               </div>
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
-                24 Algorithmes • Web Workers
+                {TOTAL_ALGO_COUNT} Algorithmes • Web Workers
               </span>
               <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
                 Markov, Poisson, Hawkes, FFT, Lyapunov, Entropie, SGD
@@ -407,7 +420,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              Oracle Base • Confiance: {activePrediction?.confidence ?? 0}% • Famille : {interDrawFamily.name}
+              Oracle Base • Confiance: {activePrediction ? `${activePrediction.confidence}%` : "n/d (calcul en cours)"} • Famille : {interDrawFamily.name}
             </p>
           </div>
         </div>
@@ -417,7 +430,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
           <div className="flex items-center gap-2 px-3.5 py-1.5 bg-emerald-500/10 dark:bg-emerald-950/40 rounded-xl border border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
             <Cpu size={14} className="shrink-0" />
             <span className="text-[10px] font-black uppercase tracking-wider">
-              19 Algos Déterministes
+              {ACTIVE_ALGO_COUNT} Algos Déterministes
             </span>
           </div>
 
@@ -513,10 +526,11 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                       <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter">
                         Sélection Optimale
                       </span>
-                      {isChaotic && (
+                      {chaosIndex > 0 && (
                         <div
                           className="bg-orange-500/10 text-orange-600 dark:text-orange-400 p-2 rounded-xl"
-                          title="Mode Chaotique Détecté"
+                          style={{ opacity: 0.25 + 0.75 * chaosIndex }}
+                          title={`Indice de chaos continu : ${(chaosIndex * 100).toFixed(1)} % (0 % = trajectoire stable, 100 % = divergence maximale des sensibilités aux conditions initiales)`}
                         >
                           <AlertTriangle size={20} />
                         </div>
@@ -594,7 +608,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                     </div>
                     <div className="border-l border-slate-100 dark:border-slate-800/80 pl-4">
                       <div className="text-3xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
-                        {activePrediction.realityAlignment ?? 82}%
+                        {formatPct(activePrediction.realityAlignment)}
                       </div>
                       <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">
                         Alignement ADN Réel
@@ -621,13 +635,13 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                         Robustesse Inférence
                       </span>
                       <span className="text-xs font-black font-mono text-indigo-600 dark:text-indigo-400">
-                        {activePrediction.stabilityScore ?? 80}%
+                        {formatPct(activePrediction.stabilityScore)}
                       </span>
                     </div>
                     <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-indigo-500 rounded-full transition-all duration-500"
-                        style={{ width: `${activePrediction.stabilityScore ?? 80}%` }}
+                        style={{ width: `${clampPct(activePrediction.stabilityScore)}%` }}
                       ></div>
                     </div>
                   </div>

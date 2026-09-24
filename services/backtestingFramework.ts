@@ -19,7 +19,7 @@ const binomialCoeff = (n: number, k: number): number => {
 // Aucune approximation, aucun "drift" ajouté : un tirage équitable est équiprobable et aucun
 // prédicteur ne peut augmenter la probabilité réelle d'un évènement. Ces valeurs servent de référence
 // honnête au Monte-Carlo et au dimensionnement Kelly (qui conclut alors à une espérance négative).
-const HYPERGEOMETRIC_5_90: Record<number, number> = (() => {
+export const HYPERGEOMETRIC_5_90: Record<number, number> = (() => {
   const denom = binomialCoeff(90, 5);
   const table: Record<number, number> = {};
   for (let k = 0; k <= 5; k++) {

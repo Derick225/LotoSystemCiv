@@ -87,7 +87,7 @@ export const DnaReferenceAuditor: React.FC<{
       addAgentLog({
         id: `dna_sync_${Date.now()}`,
         timestamp: new Date(),
-        action: `Synchronisation complète de l'ADN de référence (${drawName}) sur 23 algorithmes.`,
+        action: `Synchronisation complète de l'ADN de référence (${drawName}) sur ${syncResult.realignedCount} algorithmes.`,
         type: "AUTOTUNE",
         impact: `Cohérence portée à ${syncResult.report.coherenceScore}%.`,
       });

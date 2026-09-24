@@ -1,4 +1,4 @@
-import { DrawResult, Prediction, AlgoWeights, SymbioticContext } from "../../types";
+import { DrawResult, Prediction, AlgoWeights, SymbioticContext, SimulationScenarioItem } from "../../types";
 import { logger } from "../../utils/logger";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
@@ -9,22 +9,83 @@ import { calculateShannonEntropy } from "../mathService";
 import { LCG } from "../../utils/mathUtils";
 import { ScoredNumber } from "./scoringEngine";
 import { AlgoKey } from "../../shared/prediction.types";
+import { PLATT_SCORE_STANDARDIZATION } from "./calibrationConstants";
 
 export const HONEST_NOTE = "Indicateur interne de cohérence du moteur — ne reflète PAS une probabilité de gain.";
 const TICKET_SIZE = 5;
 const DOMAIN_SIZE = 90;
 
-export interface SimulationScenarioItem {
-  scenarioId: string;
-  scenarioName: string;
-  ticket: number[];
-  probabilityScore: number;
-  riskProfile: "BALANCED" | "DEFENSIVE" | "AGGRESSIVE" | "RECURRENT" | "ADVERSARIAL";
-  description: string;
-  color?: string;
-  genomicFocus?: string;
-  energyPct?: number;
+/** Source unique du type : la définition vit dans types.ts (aucune duplication locale). */
+export type { SimulationScenarioItem };
+
+/**
+ * Paramètres de calibrage nécessaires pour reproduire EXACTEMENT la transformation
+ * score moyen -> indicateur de cohérence du moteur (cf. predictionFinalize).
+ *
+ * Sans cet objet, aucun score de cohérence ne peut être calculé honnêtement : on renvoie
+ * alors `null` (affiché « n/d ») plutôt qu'un pourcentage inventé.
+ */
+export interface ScenarioCoherenceCalibration {
+  /** Pente de la sigmoïde de Platt calibrée (calibratedParams.sigmoid_slope). */
+  plattSlope: number;
+  /** Ordonnée à l'origine de la sigmoïde de Platt calibrée. */
+  plattIntercept: number;
+  /** Multiplicateur de boosting de la calibration courante. */
+  boostingMultiplier: number;
+  /** Modulateur de confiance du profil cyclique (matrice de phase). */
+  cyclicModulator: number;
+  /** Facteur de shrinkage effectivement appliqué (1.0 si non appliqué). */
+  shrinkageMultiplier: number;
 }
+
+/**
+ * Transformation canonique du moteur : moyenne des scores d'un ticket -> indicateur de cohérence [1,99].
+ * Strictement identique à la chaîne appliquée au vecteur primaire dans predictionFinalize.
+ *
+ * ATTENTION : ce n'est PAS une probabilité de gain. Un tirage équitable reste équiprobable.
+ */
+export const plattCoherenceFromAverageScore = (
+  averageScore: number,
+  calibration: ScenarioCoherenceCalibration
+): number | null => {
+  if (!Number.isFinite(averageScore) || !Number.isFinite(calibration.plattSlope) || !Number.isFinite(calibration.plattIntercept)) {
+    return null;
+  }
+  const rawX = (averageScore - PLATT_SCORE_STANDARDIZATION.CENTER) / PLATT_SCORE_STANDARDIZATION.SCALE;
+  const p = 1.0 / (1.0 + Math.exp(-(calibration.plattSlope * rawX + calibration.plattIntercept)));
+  const value =
+    p *
+    100.0 *
+    calibration.boostingMultiplier *
+    calibration.cyclicModulator *
+    calibration.shrinkageMultiplier;
+  if (!Number.isFinite(value)) return null;
+  return Math.round(Math.max(1, Math.min(99, value)));
+};
+
+/**
+ * Construit un évaluateur de cohérence pour un ticket quelconque : moyenne des scores bruts
+ * (issus du débruitage) de ses membres, puis transformation de Platt partagée.
+ * Retourne `null` si le calibrage est absent ou si aucun membre du ticket n'a de score mesuré.
+ */
+export const buildTicketCoherenceScorer = (
+  denoisedScores: ScoredNumber[],
+  calibration?: ScenarioCoherenceCalibration
+): ((ticket: number[]) => number | null) => {
+  const scoreByNum = new Map<number, number>();
+  denoisedScores.forEach((s) => {
+    if (typeof s?.score === "number" && Number.isFinite(s.score)) scoreByNum.set(s.num, s.score);
+  });
+
+  return (ticket: number[]): number | null => {
+    if (!calibration || ticket.length === 0) return null;
+    const measured = ticket.map((n) => scoreByNum.get(n)).filter((v): v is number => typeof v === "number");
+    if (measured.length === 0) return null;
+    const avg = measured.reduce((a, b) => a + b, 0) / measured.length;
+    return plattCoherenceFromAverageScore(avg, calibration);
+  };
+};
+
 
 /**
  * Récupération sécurisée de l'état du store Zustand sans crash dans les Web Workers ou SSR
@@ -106,10 +167,14 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
     Math.min(99, Math.round(100.0 * samplePower * Math.max(0.1, 1.0 - Math.abs(currentEntropy - 0.5))))
   );
 
-  // Reality alignment continu basé sur la somme
+  // Reality alignment continu basé sur la somme (écart-type théorique exact de la somme de 5 numéros sur 90)
   const sumVal = selected.reduce((a, b) => a + b, 0);
-  const expectedSum = (TICKET_SIZE * (DOMAIN_SIZE + 1)) / 2.0; // 227.5
-  const sumLikelihood = Math.exp(-0.5 * Math.pow((sumVal - expectedSum) / 45.0, 2));
+  const expectedSum = (TICKET_SIZE * (DOMAIN_SIZE + 1)) / 2.0;
+  const theoreticalSumStd =
+    Math.sqrt(
+      ((TICKET_SIZE * (Math.pow(DOMAIN_SIZE, 2) - 1.0)) / 12.0) * (1.0 - TICKET_SIZE / DOMAIN_SIZE)
+    ) || 1.0;
+  const sumLikelihood = Math.exp(-0.5 * Math.pow((sumVal - expectedSum) / theoreticalSumStd, 2));
   const realityAlignment = Math.max(5, Math.min(99, Math.round(sumLikelihood * 100.0)));
 
   const breakdownRecord: Record<number, Record<string, number>> = {};
@@ -120,31 +185,35 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
     };
   });
 
-  const epistemicUncertainty = parseFloat((Math.max(10, 100 - calibratedConfidence) * 0.95).toFixed(2));
+  // Incertitude épistémique : déficit de pouvoir statistique rapporté à l'échelle de cohérence.
+  // Aucun plancher arbitraire : elle tend vers 0 quand l'échantillon suffit, et vers 100 - C sinon.
+  const epistemicUncertainty = parseFloat(((100 - calibratedConfidence) * (1.0 - samplePower)).toFixed(2));
   const aleatoricUncertainty = parseFloat((currentEntropy * 100.0).toFixed(2));
+
+  const ciLower = Math.max(1, Math.round(calibratedConfidence - epistemicUncertainty));
+  const ciUpper = Math.min(99, Math.round(calibratedConfidence + epistemicUncertainty));
 
   const simulationScenarios: SimulationScenarioItem[] = [
     {
-      scenarioId: `sim_degraded_laplace_${Date.now()}`,
+      scenarioId: "sim_degraded_laplace",
       scenarioName: "Attracteur Empirique de Laplace",
       ticket: selected,
-      probabilityScore: calibratedConfidence,
+      coherenceScore: calibratedConfidence,
       riskProfile: "DEFENSIVE",
       description: `Régression fréquentielle lissée (${historyLength} tirages historiques).`,
       color: "#6366f1",
       genomicFocus: "Fréquence Laplace",
-      energyPct: 85,
     },
     {
-      scenarioId: `sim_degraded_dispersion_${Date.now()}`,
+      scenarioId: "sim_degraded_dispersion",
       scenarioName: "Dispersion Équirépartie",
       ticket: candidates.slice(0, TICKET_SIZE),
-      probabilityScore: Math.max(1, Math.round(calibratedConfidence * 0.85)),
+      // Aucun calibrage de Platt disponible en mode dégradé → indicateur non mesurable, affiché « n/d ».
+      coherenceScore: null,
       riskProfile: "BALANCED",
-      description: "Orbitales secondaires de lissage empirique.",
+      description: "Orbitales secondaires de lissage empirique — cohérence non mesurable en mode dégradé.",
       color: "#06b6d4",
       genomicFocus: "Dispersion Spatiale",
-      energyPct: 60,
     },
   ];
 
@@ -154,7 +223,7 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
     candidates,
     confidence: calibratedConfidence,
     confidenceNote: "MOTEUR EN MODE FAIBLE PROFONDEUR - " + HONEST_NOTE,
-    analysis: `Dataset court (${historyLength} tirage${historyLength > 1 ? "s" : ""}). Inférence basée sur la loi de succession de Laplace et décomposition stochastique continue.`,
+    analysis: `Dataset court (${historyLength} tirage${historyLength > 1 ? "s" : ""}). Inférence basée sur la loi de succession de Laplace et décomposition stochastique continue. Audit antagoniste et indice de diversité génétique non calculés : les pseudo-canaux de ce mode dégradé ne sont pas des algorithmes du registre, les mesurer produirait un diagnostic trompeur.`,
     breakdown: breakdownRecord,
     timestamp: Date.now(),
     symbiosisFactor: 1.0,
@@ -163,16 +232,6 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
     adversarialApplied: false,
     challengedNumbers: [],
     stabilityScore: Math.round(samplePower * 100),
-    diversityMetrics: {
-      meanSimilarity: 0.5,
-      diversityScore: 0.8,
-      penalty: 0,
-      isMonoculture: false,
-      pairwiseSimilarities: [],
-      dominantAlgo: "LaplaceEstimator",
-    },
-    adversarialSurvivalScore: 50,
-    adversarialRisks: ["Dataset restreint : audit antagoniste limité"],
     explainabilityData: {},
     shrinkageApplied: true,
     shrinkageFactor: 1.0,
@@ -180,11 +239,11 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
       epistemicUncertainty,
       aleatoricUncertainty,
       confidenceInterval: {
-        lower: Math.max(1, calibratedConfidence - 12),
-        upper: Math.min(99, calibratedConfidence + 12),
+        lower: ciLower,
+        upper: ciUpper,
       },
       entropyBits: parseFloat(currentEntropy.toFixed(3)),
-      credibleIntervalRange: 24,
+      credibleIntervalRange: ciUpper - ciLower,
     },
     simulationScenarios,
     hyperparameters: {
@@ -274,35 +333,46 @@ export const tryCloudPrediction = async (context: PredictionRuntimeContext): Pro
 };
 
 /**
- * SCÉNARIO D : Générateur de Matrice Multi-Scénarios Probabilistes Déterministe
- * Synthétise les 5 profils de scénarios clés à partir du vecteur de scores débruité et des métriques XAP
+ * SCÉNARIO D : Générateur de Matrice Multi-Scénarios Déterministe
+ *
+ * Chaque ticket dérivé est une exploration structurelle du même vecteur de scores débruité.
+ * Le champ `coherenceScore` de chaque scénario est calculé par la MÊME transformation de Platt
+ * que le vecteur primaire, appliquée à la moyenne des scores de ses propres membres — jamais par
+ * un multiplicateur arbitraire de la confiance primaire. Quand le calibrage est indisponible, il
+ * vaut `null` (« n/d »), car un indicateur non mesuré ne doit pas être inventé.
  */
 export const generateProbabilisticScenarioMatrix = (params: {
   selection: number[];
   denoisedScores: ScoredNumber[];
   explainabilityRecord: Record<number, any>;
-  finalConfidence: number;
+  /** Indicateur de cohérence du vecteur primaire (ou null si non mesurable). */
+  primaryCoherence: number | null;
   drawName: string;
+  calibration?: ScenarioCoherenceCalibration;
   dnaSieveMetrics?: {
     dominantAlgos: string[];
     dnaConcordanceMean: number;
   };
 }): SimulationScenarioItem[] => {
-  const { selection, denoisedScores, explainabilityRecord, finalConfidence, dnaSieveMetrics } = params;
+  const { selection, denoisedScores, explainabilityRecord, primaryCoherence, dnaSieveMetrics, calibration } = params;
 
-  // 1. Scénario 1: Consensus Symbiotique (Tamis ADN)
+  // Le vecteur débruité n'est PAS trié (le débruitage PCA et le tamis ADN préservent l'ordre du
+  // registre). On établit un classement local explicite avant toute sélection par rang.
+  const rankedScores = [...denoisedScores].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const coherenceOf = buildTicketCoherenceScorer(denoisedScores, calibration);
+
+  // 1. Scénario 1: Consensus Symbiotique (Tamis ADN) — le ticket primaire du moteur
   const balancedTicket = [...selection].sort((a, b) => a - b);
 
   // 2. Scénario 2: Attracteur Fréquentiel (Défensif / Densité maximale)
-  const defensiveTicket = [...denoisedScores]
-    .sort((a, b) => b.score - a.score)
+  const defensiveTicket = rankedScores
     .slice(0, TICKET_SIZE)
     .map((s) => s.num)
     .sort((a, b) => a - b);
 
   // 3. Scénario 3: Rupture de Phase (Exploration Lyapunov / Agressif)
-  const top3 = denoisedScores.slice(0, 3).map((s) => s.num);
-  const outsiderPool = [...denoisedScores]
+  const top3 = rankedScores.slice(0, 3).map((s) => s.num);
+  const outsiderPool = rankedScores
     .slice(5, 25)
     .sort((a, b) => {
       const tensionA = explainabilityRecord[a.num]?.topologicalTension || 0;
@@ -326,84 +396,127 @@ export const generateProbabilisticScenarioMatrix = (params: {
     .map((s) => s.num)
     .sort((a, b) => a - b);
 
-  // 5. Scénario 5: Anti-Consensus Adversarial (Filtre Pièges Machine)
+  // 5. Scénario 5: Anti-Consensus Adversarial (atténuation continue des leurres machine)
+  const decoyOf = (num: number): number => {
+    const shap = explainabilityRecord[num]?.shapValues || {};
+    const raw = Number(shap["machineDecoy"] ?? shap["transfertMachine"] ?? 0);
+    return Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  };
+  const decoyValues = denoisedScores.map((s) => decoyOf(s.num));
+  const decoyMean = decoyValues.length > 0 ? decoyValues.reduce((a, b) => a + b, 0) / decoyValues.length : 0;
+  const decoyVariance =
+    decoyValues.length > 0
+      ? decoyValues.reduce((acc, v) => acc + Math.pow(v - decoyMean, 2), 0) / decoyValues.length
+      : 0;
+  const decoyStd = Math.sqrt(decoyVariance);
+  // Poids de mesurabilité ∈ [0,1] : nul lorsque les leurres sont constants (donc non discriminants),
+  // ce qui neutralise l'atténuation au lieu de filtrer sur un seuil de rejet binaire arbitraire.
+  const decoySpreadWeight = decoyStd > 0 ? decoyStd / (Math.abs(decoyMean) + decoyStd) : 0;
+  const scoreMean = rankedScores.length > 0 ? rankedScores.reduce((a, s) => a + (s.score || 0), 0) / rankedScores.length : 0;
+  const scoreStd =
+    rankedScores.length > 0
+      ? Math.sqrt(rankedScores.reduce((acc, s) => acc + Math.pow((s.score || 0) - scoreMean, 2), 0) / rankedScores.length)
+      : 0;
+  const zScore = (score: number): number => (scoreStd > 0 ? (score - scoreMean) / scoreStd : 0);
+
+  // Pénalité exprimée dans le MÊME espace standardisé que le score, afin d'être comparable à lui
+  // quelle que soit l'échelle des canaux. Aucun seuil : le leurrage s'oppose continûment au score,
+  // et l'opposition s'annule quand l'information de leurrage est absente.
   const adversarialPool = [...denoisedScores]
-    .filter((s) => {
-      const shap = explainabilityRecord[s.num]?.shapValues || {};
-      const machineDecoy = shap["machineDecoy"] || shap["transfertMachine"] || 0;
-      return machineDecoy < 0.2;
-    })
-    .sort((a, b) => b.score - a.score)
+    .map((s) => ({
+      num: s.num,
+      adjusted:
+        zScore(s.score || 0) - decoySpreadWeight * (decoyStd > 0 ? (decoyOf(s.num) - decoyMean) / decoyStd : 0),
+    }))
+    .sort((a, b) => b.adjusted - a.adjusted)
     .slice(0, TICKET_SIZE)
     .map((s) => s.num)
     .sort((a, b) => a - b);
 
-  const now = Date.now();
+  const buildScenario = (
+    scenarioId: string,
+    scenarioName: string,
+    ticketRaw: number[],
+    riskProfile: SimulationScenarioItem["riskProfile"],
+    description: string,
+    color: string,
+    genomicFocus: string,
+    coherenceScore: number | null
+  ): SimulationScenarioItem => ({
+    scenarioId,
+    scenarioName,
+    ticket: ticketRaw.length === TICKET_SIZE ? ticketRaw : balancedTicket,
+    coherenceScore,
+    riskProfile,
+    description,
+    color,
+    genomicFocus,
+  });
 
   return [
-    {
-      scenarioId: `sim_balanced_${now}`,
-      scenarioName: "Consensus Symbiotique (Tamis ADN)",
-      ticket: balancedTicket,
-      probabilityScore: finalConfidence,
-      riskProfile: "BALANCED",
-      description: dnaSieveMetrics?.dominantAlgos?.length
+    buildScenario(
+      "sim_balanced",
+      "Consensus Symbiotique (Tamis ADN)",
+      balancedTicket,
+      "BALANCED",
+      dnaSieveMetrics?.dominantAlgos?.length
         ? `Équilibre optimisé par le Tamis ADN (${dnaSieveMetrics.dominantAlgos.slice(0, 2).join(" • ")}, Concordance : ${dnaSieveMetrics.dnaConcordanceMean}%).`
         : "Profil d'équilibre optimisé par le Tamis ADN et l'alignement de réalité.",
-      color: "#6366f1",
-      genomicFocus: "Tamis ADN & Alignement",
-      energyPct: 92,
-    },
-    {
-      scenarioId: `sim_defensive_${now}`,
-      scenarioName: "Attracteur Fréquentiel (Défensif)",
-      ticket: defensiveTicket.length === TICKET_SIZE ? defensiveTicket : balancedTicket,
-      probabilityScore: Math.min(99, Math.round(finalConfidence * 1.05)),
-      riskProfile: "DEFENSIVE",
-      description: "Concentration sur les centres de masse à densité maximale et variance stochastique minimale.",
-      color: "#10b981",
-      genomicFocus: "Densité Fréquentielle",
-      energyPct: 88,
-    },
-    {
-      scenarioId: `sim_aggressive_${now}`,
-      scenarioName: "Rupture de Phase (Exploration Lyapunov)",
-      ticket: aggressiveTicket.length === TICKET_SIZE ? aggressiveTicket : balancedTicket,
-      probabilityScore: Math.max(1, Math.round(finalConfidence * 0.85)),
-      riskProfile: "AGGRESSIVE",
-      description: "Injection d'outsiders à tension topologique élevée pour anticiper les ruptures et bifurcations de régime.",
-      color: "#f43f5e",
-      genomicFocus: "Tension Topologique",
-      energyPct: 74,
-    },
-    {
-      scenarioId: `sim_recurrent_${now}`,
-      scenarioName: "Résilience Hawkes (Auto-Excitant)",
-      ticket: hawkesPool.length === TICKET_SIZE ? hawkesPool : balancedTicket,
-      probabilityScore: Math.round(finalConfidence * 0.95),
-      riskProfile: "RECURRENT",
-      description: "Modélisation des trains de clusters temporels et excitations mutuelles de Poisson/Hawkes.",
-      color: "#8b5cf6",
-      genomicFocus: "Auto-excitation Temporelle",
-      energyPct: 81,
-    },
-    {
-      scenarioId: `sim_adversarial_${now}`,
-      scenarioName: "Anti-Consensus Adversarial (Filtre Pièges)",
-      ticket: adversarialPool.length === TICKET_SIZE ? adversarialPool : balancedTicket,
-      probabilityScore: Math.round(finalConfidence * 0.92),
-      riskProfile: "ADVERSARIAL",
-      description: "Filtrage systématique des leurres machines et des sur-consensus artificiels.",
-      color: "#f59e0b",
-      genomicFocus: "Anti-Leurres Machine",
-      energyPct: 79,
-    },
+      "#6366f1",
+      "Tamis ADN & Alignement",
+      primaryCoherence
+    ),
+    buildScenario(
+      "sim_defensive",
+      "Attracteur Fréquentiel (Défensif)",
+      defensiveTicket,
+      "DEFENSIVE",
+      "Concentration sur les centres de masse à densité maximale et variance stochastique minimale.",
+      "#10b981",
+      "Densité Fréquentielle",
+      coherenceOf(defensiveTicket)
+    ),
+    buildScenario(
+      "sim_aggressive",
+      "Rupture de Phase (Exploration Lyapunov)",
+      aggressiveTicket,
+      "AGGRESSIVE",
+      "Injection d'outsiders à tension topologique élevée pour anticiper les ruptures et bifurcations de régime.",
+      "#f43f5e",
+      "Tension Topologique",
+      coherenceOf(aggressiveTicket)
+    ),
+    buildScenario(
+      "sim_recurrent",
+      "Résilience Hawkes (Auto-Excitant)",
+      hawkesPool,
+      "RECURRENT",
+      "Modélisation des trains de clusters temporels et excitations mutuelles de Poisson/Hawkes.",
+      "#8b5cf6",
+      "Auto-excitation Temporelle",
+      coherenceOf(hawkesPool)
+    ),
+    buildScenario(
+      "sim_adversarial",
+      "Anti-Consensus Adversarial (Filtre Pièges)",
+      adversarialPool,
+      "ADVERSARIAL",
+      decoySpreadWeight <= 0
+        ? "Atténuation neutre : les leurres machine sont constants sur ce tirage, donc non discriminants — classement par score brut."
+        : "Atténuation continue des leurres machine par z-score standardisé (aucun seuil de rejet binaire).",
+      "#f59e0b",
+      "Anti-Leurres Machine",
+      coherenceOf(adversarialPool)
+    ),
   ];
 };
 
 /**
  * Morphing Continu entre deux Scénarios (Interpolation Paramétrique α ∈ [0, 1])
- * Permet d'explorer de manière continue le gradient entre deux profils stratégiques
+ * Permet d'explorer de manière continue le gradient entre deux profils stratégiques.
+ *
+ * L'indicateur interpolé n'est renvoyé que si les DEUX scénarios en possèdent un : interpoler
+ * vers une valeur non mesurable produirait un nombre qui ne correspond à rien de calculé.
  */
 export const interpolatePredictionScenarios = (
   scenarioA: SimulationScenarioItem,
@@ -411,7 +524,7 @@ export const interpolatePredictionScenarios = (
   alpha: number
 ): {
   ticket: number[];
-  interpolatedProbability: number;
+  interpolatedProbability: number | null;
   interpolatedAlpha: number;
   dominantScenario: string;
 } => {
@@ -433,22 +546,25 @@ export const interpolatePredictionScenarios = (
     .sort((a, b) => b[1] - a[1])
     .map(([num]) => num);
 
-  let mergedTicket = sortedCandidates.slice(0, TICKET_SIZE).sort((a, b) => a - b);
-  if (mergedTicket.length < TICKET_SIZE) {
-    const fallback = boundedAlpha < 0.5 ? scenarioA.ticket : scenarioB.ticket;
-    mergedTicket = fallback;
-  }
+  // |A ∪ B| ≥ max(|A|, |B|) : ce chemin n'est emprunté que si un ticket source est incomplet.
+  const mergedTicket =
+    sortedCandidates.length >= TICKET_SIZE
+      ? sortedCandidates.slice(0, TICKET_SIZE).sort((a, b) => a - b)
+      : Array.from(new Set([...scenarioA.ticket, ...scenarioB.ticket])).sort((a, b) => a - b);
 
-  const interpolatedProbability = Math.round(
-    (1.0 - boundedAlpha) * scenarioA.probabilityScore + boundedAlpha * scenarioB.probabilityScore
-  );
+  const interpolatedProbability =
+    scenarioA.coherenceScore === null || scenarioB.coherenceScore === null
+      ? null
+      : Math.round(
+          (1.0 - boundedAlpha) * scenarioA.coherenceScore + boundedAlpha * scenarioB.coherenceScore
+        );
 
   const dominantScenario =
-    boundedAlpha <= 0.4
+    boundedAlpha <= 0
       ? scenarioA.scenarioName
-      : boundedAlpha >= 0.6
+      : boundedAlpha >= 1
       ? scenarioB.scenarioName
-      : `Hybride (${( (1 - boundedAlpha) * 100 ).toFixed(0)}% A • ${( boundedAlpha * 100 ).toFixed(0)}% B)`;
+      : `Hybride (${((1 - boundedAlpha) * 100).toFixed(0)}% A • ${(boundedAlpha * 100).toFixed(0)}% B)`;
 
   return {
     ticket: mergedTicket,

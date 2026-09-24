@@ -2,6 +2,10 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { generateGlobalForensicSynthesis } from "../../services/geminiService";
 import { getLocalForensicReports } from "../../services/postPredictionAnalysisService";
+import {
+  getPrimaryInterDrawFamily,
+  isDrawInInterDrawFamily,
+} from "../../constants";
 import { ForensicReport } from "../../types";
 import {
   BrainCircuit,
@@ -59,6 +63,9 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     synthesis: string;
     focalPoints: string[];
     overallCalibration: string;
+    // Origine du texte : le badge de l'interface doit distinguer une synthèse produite par le
+    // modèle cloud d'une composition locale déterministe.
+    source: "cloud" | "local";
   } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -69,17 +76,58 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     "balance" | "safe" | "growth"
   >("balance");
   const [selectedMetric, setSelectedMetric] = useState<
-    "entropy" | "confidence" | "precision"
-  >("confidence");
+    "entropy" | "benford" | "brier"
+  >("entropy");
 
   useEffect(() => {
+    const family = getPrimaryInterDrawFamily(drawName);
     const fetchReports = async () => {
       const rawReports = (await getLocalForensicReports()) || [];
-      setAllReports(rawReports);
+      // ISOLATION INTER-FAMILLES (AGENTS.md) : l'agrégat affiché (courbes, compteurs) ne
+      // croise JAMAIS deux familles étanches. Hors-famille => périmètre réduit au tirage actif.
+      const scopedReports = family
+        ? rawReports.filter((r) => isDrawInInterDrawFamily(r.drawName, family.id))
+        : rawReports.filter((r) => r.drawName === drawName);
+      setAllReports(scopedReports);
       setReports(rawReports.filter((r) => r.drawName === drawName));
     };
     fetchReports();
   }, [drawName]);
+
+  // Prédiction affichable : uniquement si elle appartient au tirage actif (ou si elle n'est
+  // pas étiquetée). Aucune valeur de secours n'est fabriquée : sans prédiction, l'UI le dit.
+  const activePrediction = useMemo(() => {
+    if (
+      lastPrediction &&
+      (!lastPrediction.drawName || lastPrediction.drawName === drawName)
+    ) {
+      return lastPrediction;
+    }
+    return null;
+  }, [lastPrediction, drawName]);
+
+  // Contrefactuel RÉEL : extrait du rapport forensic le plus récent du tirage (ou de sa famille)
+  // qui en contient. L'énoncé what-if n'est plus rédigé à la main — il est reconstruit à partir
+  // des champs mesurés par le moteur (canal, poids avant/après, numéros capturés, gain).
+  const latestCounterfactual = useMemo(() => {
+    const source = reports.length > 0 ? reports : allReports;
+    if (source.length === 0) return null;
+    const sorted = [...source].sort(
+      (a, b) =>
+        new Date(b.timestamp || b.date || 0).getTime() -
+        new Date(a.timestamp || a.date || 0).getTime(),
+    );
+    for (const report of sorted) {
+      const cf = (report.counterfactuals || [])
+        .filter(
+          (c) =>
+            typeof c.improvement === "number" && Number.isFinite(c.improvement),
+        )
+        .sort((a, b) => b.improvement - a.improvement)[0];
+      if (cf) return { cf, report };
+    }
+    return null;
+  }, [reports, allReports]);
 
   const runAnalysis = async () => {
     if (history.length < 15) {
@@ -96,27 +144,76 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
       // Send reports to Gemini Synthesis Oracle
       const result = await generateGlobalForensicSynthesis(reports);
       if (result) {
-        setSynthesis(result);
+        setSynthesis({ ...result, source: "cloud" });
         audioEngine.play("success");
         showToast("Synthèse Stratégique générée.", "success");
       } else {
-        // Heuristics derived from activePolicy and actual regime
-        const derivedCalib =
-          activePolicy === "safe"
-            ? "Régulation Quadratique"
-            : activePolicy === "growth"
-              ? "Amplitude Maximisée"
-              : "Barycentre Optimal";
+        // Composition locale déterministe : elle ne reformule QUE des grandeurs réellement
+        // mesurées (posture active, régime, distribution des poids d'ADN, contrefactuel
+        // persisté). Les anciens énoncés (« les couches de Fourier et le filtre bayésien
+        // convergent », « résidus asymétriques détectés sur les tirages récents ») affirmaient
+        // des mesures qui n'avaient pas été faites : ils sont supprimés.
+        const hurst =
+          typeof globalRegime?.hurst === "number" &&
+          Number.isFinite(globalRegime.hurst)
+            ? globalRegime.hurst
+            : null;
+        const entropy =
+          typeof globalRegime?.entropy === "number" &&
+          Number.isFinite(globalRegime.entropy)
+            ? globalRegime.entropy
+            : null;
+        const regimeLabel = globalRegime?.regime ?? null;
+        const cf = latestCounterfactual?.cf ?? null;
+
+        const regimeSentence =
+          regimeLabel === null
+            ? `Aucun régime n'est classé pour ${drawName} : l'historique de ce tirage n'est pas encore suffisant pour une mesure.`
+            : `Le régime classé est ${regimeLabel.toUpperCase()}, mesuré sur ${history.length} tirages de ce périmètre, avec ${
+                hurst === null
+                  ? "un exposant de Hurst indisponible"
+                  : `un exposant de Hurst H = ${hurst.toFixed(3)}, soit un écart de ${(Math.abs(hurst - 0.5) * 2).toFixed(3)} à la marche aléatoire (H = 0.500)`
+              }${
+                entropy === null
+                  ? ""
+                  : ` et une entropie de ${entropy.toFixed(3)}`
+              }.`;
+
+        const weightSentence = weightStats
+          ? `La masse de poids se répartit sur ${weightStats.count} canaux avec une entropie normalisée de ${weightStats.entropyNormalized.toFixed(3)} (${weightStats.effectiveChannels.toFixed(1)} canaux effectifs) ; le canal dominant est ${weightStats.dominant.name.replace(/_/g, " ")} à ${(weightStats.dominant.share * 100).toFixed(1)}% de la masse, contre ${(weightStats.uniformShare * 100).toFixed(1)}% en répartition uniforme.`
+          : `La distribution des poids d'ADN n'est pas disponible pour ce tirage : aucune concentration ne peut être évaluée.`;
+
+        const focalPoints: string[] = [];
+        if (weightStats) {
+          focalPoints.push(
+            `Concentration ${weightStats.dominant.name.replace(/_/g, " ")} : ${(weightStats.dominant.share * 100).toFixed(1)}% de la masse contre ${(weightStats.uniformShare * 100).toFixed(1)}% attendus en uniforme`,
+          );
+          focalPoints.push(
+            `Diversification effective : ${weightStats.effectiveChannels.toFixed(1)} canaux porteurs sur ${weightStats.count}, ${weightStats.underWeighted} sous la part uniforme`,
+          );
+        } else {
+          focalPoints.push(
+            "Poids d'ADN indisponibles : lancez une analyse pour alimenter la distribution",
+          );
+        }
+        focalPoints.push(
+          hurst === null
+            ? "Exposant de Hurst non mesuré : aucune déviation de régime ne peut être revendiquée"
+            : `Régime ${regimeLabel ?? "non classé"} : H = ${hurst.toFixed(3)}, écart de ${(Math.abs(hurst - 0.5) * 2).toFixed(3)} à la marche aléatoire`,
+        );
+        focalPoints.push(
+          cf
+            ? `Contrefactuel mesuré — ${cf.algo.replace(/_/g, " ")} : poids ${cf.originalWeight.toFixed(3)} → ${cf.optimalWeight.toFixed(3)}, ${cf.improvement.toFixed(2)} pts de rappel supplémentaires`
+            : "Aucun contrefactuel persisté dans ce périmètre : aucun scénario what-if n'est simulé",
+        );
+
         setSynthesis({
-          synthesis: `Le système Nexus opère actuellement en posture de [${activePolicy.toUpperCase()}] sous régime de type ${globalRegime?.regime || "stable"}. Les couches de Fourier et le filtre bayésien convergent avec un Hurst de ${(globalRegime?.hurst || 0.49).toFixed(3)}. Il convient d'optimiser l'inertie quadratique pour amortir les résidus asymétriques détectés sur les tirages récents.`,
-          focalPoints: [
-            `${activePolicy === "safe" ? "Verrouiller les limites Gaussiennes" : activePolicy === "growth" ? "Saturer l'exposant de Fourier" : "Amplifier le filtre de Kalman"}`,
-            "Régularisation des biais d'asymétrie paire/impaire",
-            "Alignement spectral sur les harmoniques bas",
-          ],
-          overallCalibration: derivedCalib,
+          synthesis: `Le système Nexus opère en posture de [${activePolicy.toUpperCase()}] (« ${policyDetails[activePolicy].title} »). ${regimeSentence} ${weightSentence} Cette composition est produite localement à partir des mesures ci-dessus : aucun modèle cloud n'a répondu et aucun énoncé non mesuré n'y est ajouté.`,
+          focalPoints,
+          overallCalibration: policyDetails[activePolicy].title,
+          source: "local",
         });
-        showToast("Synthèse générée (modulateur analytique).", "info");
+        showToast("Synthèse locale déterministe générée (sans modèle cloud).", "info");
       }
     } catch (e) {
       showToast("Échec de la synthèse IA.", "error");
@@ -125,135 +222,162 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     }
   };
 
-  // Strategic Policy Descriptions
+  // Strategic Policy Descriptions.
+  // NOTE : les anciens champs `entropyFactor` ("Standard (0.91)", "Minimal (0.78)",
+  // "Explosif (1.15)") et `risk` étaient des constantes inventées, jamais calculées et jamais
+  // affichées. Ils ont été supprimés : la posture ne porte aucun paramètre numérique réel.
   const policyDetails = {
     balance: {
       title: "Équilibre Cognitif",
       desc: "Poids équitablement distribués. Calibre l'appareil prédictif sur l'équilibre des forces géométriques, l'entropie de Shannon globale et les transitions de Markov régulières.",
-      entropyFactor: "Standard (0.91)",
-      risk: "Modéré / Contrôlé",
     },
     safe: {
       title: "Préservation de Capital",
       desc: "Aversion stricte du risque. Privilégie une variance minimale et un filtre Poisson à haute régularisation. Supprime les aberrations pour maximiser la conformité de Benford.",
-      entropyFactor: "Minimal (0.78)",
-      risk: "Sécurisé / Conservateur",
     },
     growth: {
       title: "Exploration Spectrale",
       desc: "Recherche agressive des fluctuations harmoniques. Accentue les déviations spectrales et le Momentum du cycle pour capturer les zones de forte singularité statistique.",
-      entropyFactor: "Explosif (1.15)",
-      risk: "Haute Performance / Spéculatif",
     },
   };
 
-  // Performance Trend Tracker Chart Data
+  // Performance Trend Tracker Chart Data.
+  // SÉRIES 100% RÉELLES : chaque point provient d'un rapport forensic persisté. Les métriques
+  // absentes restent `null` (trou dans la courbe) au lieu d'être remplacées par une valeur
+  // inventée. Aucune série synthétique n'est générée : sans données, on l'affiche explicitement.
   const chartData = useMemo(() => {
-    if (allReports.length < 3) {
-      // Deterministic generator reproducing organic trend progression based on history length and seeds
-      const items = [];
-      const count = Math.max(8, history.length);
-      for (let i = 1; i <= 8; i++) {
-        const step = i + count;
-        const entropy = 0.96 - (step % 7) * 0.012 - i * 0.005;
-        const confidence = 65 + (step % 9) * 2.8 + i * 1.5;
-        const precision = 11.2 + (step % 5) * 0.45 + i * 0.3;
-        items.push({
-          name: `Draw T-${9 - i}`,
-          entropy: parseFloat(entropy.toFixed(3)),
-          confidence: parseFloat(confidence.toFixed(1)),
-          precision: parseFloat(precision.toFixed(1)),
-          brier: parseFloat((0.24 - i * 0.008 - (step % 4) * 0.01).toFixed(3)),
-        });
-      }
-      return items;
-    }
+    return [...allReports].slice(-10).map((r, i) => ({
+      name: r.drawName || `T-${allReports.length - 1 - i}`,
+      entropy: typeof r.shannon_entropy === "number" ? r.shannon_entropy : null,
+      benford: typeof r.benfordCompliance === "number" ? r.benfordCompliance : null,
+      brier: typeof r.brier_score === "number" ? r.brier_score : null,
+    }));
+  }, [allReports]);
 
-    // Map real historical records
-    return [...allReports].slice(-10).map((r, i) => {
-      const conf = Math.max(30, Math.min(99, 100 - (r.suspicionScore || 15)));
-      return {
-        name: r.drawName || `T-${allReports.length - 1 - i}`,
-        entropy: r.shannon_entropy || 0.88,
-        confidence: conf,
-        precision: parseFloat(((r.benfordCompliance || 0.85) * 15).toFixed(1)),
-        brier: r.brier_score || 0.18,
-      };
+  const hasChartData = useMemo(
+    () =>
+      chartData.some(
+        (d) => d.entropy !== null || d.benford !== null || d.brier !== null,
+      ),
+    [chartData],
+  );
+
+  // Statistiques réelles de la distribution des poids d'ADN (aucune valeur inventée) :
+  // entropie de Shannon normalisée, indice de concentration HHI, nombre de canaux effectifs
+  // (exp de l'entropie absolue), canal dominant et part des canaux sous-pondérés.
+  const weightStats = useMemo(() => {
+    if (!globalWeights) return null;
+    const shares = Object.entries(globalWeights)
+      .filter(([, w]) => typeof w === "number" && w > 0)
+      .map(([name, w]) => ({ name, share: w }));
+    const total = shares.reduce((acc, s) => acc + s.share, 0);
+    if (total <= 0 || shares.length < 2) return null;
+
+    const normalized = shares.map((s) => ({ name: s.name, share: s.share / total }));
+    const sorted = [...normalized].sort((a, b) => b.share - a.share);
+    const uniformShare = 1 / normalized.length;
+    const sharesByName: Record<string, number> = {};
+    normalized.forEach((s) => {
+      sharesByName[s.name] = s.share;
     });
-  }, [allReports, history.length]);
 
-  // Active recalibration checkpoints derived from current Weights and Active Policy
+    const absoluteEntropy = -normalized.reduce(
+      (acc, s) => acc + (s.share > 0 ? s.share * Math.log(s.share) : 0),
+      0,
+    );
+    const hhi = normalized.reduce((acc, s) => acc + s.share * s.share, 0);
+
+    return {
+      count: normalized.length,
+      uniformShare,
+      // 1 = distribution parfaitement uniforme, 0 = monopole d'un seul canal.
+      entropyNormalized: absoluteEntropy / Math.log(normalized.length),
+      // Nombre de canaux effectivement porteurs (perplexité de la distribution).
+      effectiveChannels: Math.exp(absoluteEntropy),
+      // HHI normalisé : 0 = uniforme, 1 = concentration maximale sur un canal.
+      concentration:
+        normalized.length > 1
+          ? (hhi - uniformShare) / (1 - uniformShare)
+          : 1,
+      dominant: sorted[0],
+      underWeighted: normalized.filter((s) => s.share < uniformShare).length,
+      // Parts normalisées (L1) par canal : seules valeurs réellement comparables d'un canal à
+      // l'autre, les poids bruts n'étant que des poids relatifs.
+      sharesByName,
+    };
+  }, [globalWeights]);
+
+  // Active recalibration checkpoints — chaque valeur affichée est dérivée des poids réels,
+  // du régime mesuré ou de la politique active. Les anciens libellés inventés
+  // ("λ = 2.45", "Gain +15%", "Window 30", "Variance Z") ont été retirés.
   const systemDirectives = useMemo(() => {
-    const list = [];
+    const list: {
+      algo: string;
+      metric: string;
+      type: string;
+      description: string;
+      severity: number | null;
+    }[] = [];
 
-    if (globalWeights) {
-      const heavyWeights = Object.entries(globalWeights)
-        .map(([name, weight]) => ({ name, weight }))
-        .sort((a, b) => b.weight - a.weight);
+    if (weightStats) {
+      list.push({
+        algo: weightStats.dominant.name.replace(/_/g, " "),
+        metric: `${(weightStats.dominant.share * 100).toFixed(1)}%`,
+        type: "CONCENTRATION_MAJEURE",
+        description: `Canal dominant de l'ADN algorithmique : ${(weightStats.dominant.share * 100).toFixed(1)}% de la masse de poids, pour ${(weightStats.uniformShare * 100).toFixed(1)}% attendus en répartition uniforme.`,
+        severity: weightStats.concentration,
+      });
 
-      if (heavyWeights.length > 0) {
-        list.push({
-          algo: heavyWeights[0].name,
-          metric: `${Math.round(heavyWeights[0].weight * 100)}%`,
-          type: "CONCENTRATION_MAJEURE",
-          description: `L'algorithme de ${heavyWeights[0].name.replace("_", " ")} détient une emprise stratégique. Suggérer un lissage adaptatif.`,
-          priority: "WARNING" as const,
-        });
-      }
+      list.push({
+        algo: "Couverture de l'ADN",
+        metric: `${weightStats.effectiveChannels.toFixed(1)} / ${weightStats.count}`,
+        type: "DIVERSIFICATION_EFFECTIVE",
+        description: `${weightStats.count - weightStats.underWeighted} canaux au-dessus de la part uniforme (${(weightStats.uniformShare * 100).toFixed(1)}%). Entropie normalisée de la distribution : ${weightStats.entropyNormalized.toFixed(3)}.`,
+        severity: 1 - weightStats.entropyNormalized,
+      });
     }
 
-    // Policy-specific directives
-    if (activePolicy === "safe") {
+    const hurst = globalRegime?.hurst;
+    if (typeof hurst === "number" && Number.isFinite(hurst)) {
+      // Écart continu à la marche aléatoire (H = 0.5) : 0 = pur hasard, 1 = dynamique
+      // totalement persistante ou totalement moyenne-réversive.
+      const persistence = Math.min(1, Math.abs(hurst - 0.5) * 2);
       list.push({
-        algo: "Poisson Regularizer",
-        metric: "λ = 2.45",
-        type: "POLITIQUE_CONSERVATRICE",
+        algo: "Régime Stochastique",
+        metric: `H = ${hurst.toFixed(3)}`,
+        type: persistence >= 0.5 ? "DERIVE_PERSISTANTE" : "PROCHE_MARCHE_ALEATOIRE",
         description:
-          "Filtration stricte active. Le module a neutralisé les combinaisons à entropie asymptotique élevée.",
-        priority: "STABLE" as const,
-      });
-      list.push({
-        algo: "Biais Machine",
-        metric: "Variance Z",
-        type: "CORRECTION_DE_BIAIS",
-        description:
-          "Réduction continue du glissement spectral pour bloquer les déviations matérielles.",
-        priority: "RECOMMENDED" as const,
-      });
-    } else if (activePolicy === "growth") {
-      list.push({
-        algo: "Momentum Harmonic",
-        metric: "Gain +15%",
-        type: "SURCHARGE_SPECTRALE",
-        description:
-          "Amplification des ondes résiduelles. Priorité critique : recalibrer la barrière logistique pour éviter le chaos.",
-        priority: "CRITICAL" as const,
-      });
-      list.push({
-        algo: "Spectral Deviation",
-        metric: "Window 30",
-        type: "ALIGNEMENT_COGNITIF",
-        description:
-          "Détection active des anomalies de Fourier. Requiert une mise à jour des seuils d'entropie.",
-        priority: "WARNING" as const,
-      });
-    } else {
-      list.push({
-        algo: "Filtre Markovien",
-        metric: "Poids Stabilisé",
-        type: "STABILISATION_STANDARD",
-        description:
-          "La matrice de transition suit parfaitement l'algorithme glouton standard.",
-        priority: "STABLE" as const,
+          hurst > 0.5
+            ? `Exposant de Hurst supérieur à 0.5 : persistance mesurée sur l'historique de la famille active.`
+            : `Exposant de Hurst inférieur à 0.5 : retour à la moyenne mesuré sur l'historique de la famille active.`,
+        severity: persistence,
       });
     }
+
+    // Directive posturale : purement qualitative (la posture ne pilote aucun paramètre
+    // numérique du moteur), donc affichée sans sévérité ni métrique chiffrée.
+    const postureLabel =
+      activePolicy === "safe"
+        ? "Préservation"
+        : activePolicy === "growth"
+          ? "Spéculatif"
+          : "Équilibre";
+    list.push({
+      algo: `Posture ${postureLabel}`,
+      metric: "Qualitatif",
+      type: "ORIENTATION_POSTURALE",
+      description: policyDetails[activePolicy].desc,
+      severity: null,
+    });
 
     return list;
-  }, [globalWeights, activePolicy]);
+  }, [weightStats, globalRegime, activePolicy]);
 
-  // Radar Data
+  // Radar Data — chaque rayon est la PART NORMALISÉE (L1) réelle du canal dans l'ADN
+  // algorithmique actif. Les poids bruts ne sont que relatifs : les afficher tels quels
+  // (×100) donnait des « pourcentages » qui ne totalisaient rien.
   const radarData = useMemo(() => {
-    if (!globalWeights) return [];
+    if (!globalWeights || !weightStats) return [];
     const labelMap: Record<string, string> = {
       frequency: "Fréquence",
       gap: "Écart",
@@ -268,17 +392,19 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
       shadow: "Probabilité Ombre",
       network: "Corrélation Réseau",
     };
-    return Object.entries(globalWeights)
-      .map(([key, val]) => ({
+    return Object.keys(globalWeights)
+      .filter((key) => (weightStats.sharesByName[key] ?? 0) > 0)
+      .map((key) => ({
         subject:
           labelMap[key] ||
-          key.charAt(0).toUpperCase() + key.slice(1).replace("_", " "),
-        A: Math.round(val * 100),
+          key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " "),
+        A: +(weightStats.sharesByName[key] * 100).toFixed(2),
         fullMark: 100,
       }))
       .sort((a, b) => b.A - a.A)
       .slice(0, 6);
-  }, [globalWeights]);
+  }, [globalWeights, weightStats]);
+
 
   return (
     <div className="space-y-8 animate-fade-in pb-20">
@@ -394,26 +520,41 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
 
               <div className="flex bg-slate-100 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-[10px] font-bold">
                 <button
-                  onClick={() => setSelectedMetric("confidence")}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "confidence" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
-                >
-                  Confiance
-                </button>
-                <button
                   onClick={() => setSelectedMetric("entropy")}
                   className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "entropy" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
                 >
                   Entropie
                 </button>
                 <button
-                  onClick={() => setSelectedMetric("precision")}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "precision" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
+                  onClick={() => setSelectedMetric("benford")}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "benford" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
                 >
-                  Précision
+                  Conformité Benford
+                </button>
+                <button
+                  onClick={() => setSelectedMetric("brier")}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "brier" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
+                >
+                  Score de Brier
                 </button>
               </div>
             </div>
 
+            {!hasChartData ? (
+              <div className="h-64 w-full flex flex-col items-center justify-center text-center gap-2 bg-slate-50 dark:bg-slate-950/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+                <Info size={22} className="text-slate-400" />
+                <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                  Historique forensic insuffisant
+                </span>
+                <p className="text-[10px] text-slate-400 max-w-sm leading-relaxed">
+                  Aucune métrique d'audit persistée pour la famille «{" "}
+                  {getPrimaryInterDrawFamily(drawName)?.name ||
+                    "Hors-Famille (Tirage Isolé)"}
+                  ». Les courbes s'affichent uniquement à partir de mesures
+                  réelles — aucune tendance n'est extrapolée.
+                </p>
+              </div>
+            ) : (
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
@@ -464,42 +605,46 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                   <Legend
                     wrapperStyle={{ fontSize: "10px", paddingTop: "10px" }}
                   />
-                  {selectedMetric === "confidence" && (
-                    <Area
-                      name="Fiabilité de Posture (%)"
-                      type="monotone"
-                      dataKey="confidence"
-                      stroke="#6366f1"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#metricGrad)"
-                    />
-                  )}
                   {selectedMetric === "entropy" && (
                     <Area
-                      name="Shannon Entropy (Index)"
+                      name="Entropie de Shannon (indice normalisé)"
                       type="monotone"
                       dataKey="entropy"
                       stroke="#f59e0b"
                       strokeWidth={2.5}
                       fillOpacity={0.1}
                       fill="#f59e0b"
+                      connectNulls={false}
                     />
                   )}
-                  {selectedMetric === "precision" && (
+                  {selectedMetric === "benford" && (
                     <Area
-                      name="Précision Probabiliste (%)"
+                      name="Conformité Benford (0-1)"
                       type="monotone"
-                      dataKey="precision"
+                      dataKey="benford"
+                      stroke="#6366f1"
+                      strokeWidth={2.5}
+                      fillOpacity={1}
+                      fill="url(#metricGrad)"
+                      connectNulls={false}
+                    />
+                  )}
+                  {selectedMetric === "brier" && (
+                    <Area
+                      name="Score de Brier (bas = meilleur)"
+                      type="monotone"
+                      dataKey="brier"
                       stroke="#10b981"
                       strokeWidth={2.5}
                       fillOpacity={1}
                       fill="url(#brierGrad)"
+                      connectNulls={false}
                     />
                   )}
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+            )}
           </div>
 
           {/* Matrice de Synthèse Stratégique Unifiée */}
@@ -507,11 +652,11 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
             <div className="flex justify-between items-center">
               <div>
                 <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
-                  <Layers size={14} /> Matrice de Convergence Multi-Moteurs
+                  <Layers size={14} /> Matrice de Convergence Multi-Canaux
                 </h4>
                 <p className="text-[10px] text-slate-400">
-                  Croisement direct des signaux Forêt de Décision, Réseau
-                  Neuronal ML &amp; Onde Spectrale
+                  Scores bruts par canal de la prédiction active (Markov ·
+                  Bayésien · Spectral), tels que calculés par le moteur
                 </p>
               </div>
               <span className="text-[9px] font-mono px-2.5 py-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-xl font-bold">
@@ -524,53 +669,81 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                 <thead>
                   <tr className="border-b border-slate-800 text-slate-500 uppercase text-[9px]">
                     <th className="py-2 px-3">Boule</th>
-                    <th className="py-2 px-3">Forêt Floue (N2)</th>
-                    <th className="py-2 px-3">Réseau Neuronal ML</th>
-                    <th className="py-2 px-3">Onde Spectrale</th>
+                    <th className="py-2 px-3">Chaînes de Markov</th>
+                    <th className="py-2 px-3">Inférence Bayésienne</th>
+                    <th className="py-2 px-3">Analyse Spectrale FFT</th>
                     <th className="py-2 px-3 text-right">Accord Global</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {(
-                    lastPrediction?.suggestedNumbers ||
-                    history[0]?.gagnants || [12, 34, 56, 78, 89]
-                  )
-                    .slice(0, 5)
-                    .map((num: number, idx: number) => {
-                      const forestScore = Math.min(99, 78 + (5 - idx) * 4);
-                      const mlScore = Math.min(98, 72 + (5 - idx) * 5);
-                      const spectralScore = Math.min(96, 75 + (5 - idx) * 3);
-                      const accord = Math.round(
-                        (forestScore + mlScore + spectralScore) / 3,
-                      );
+                  {activePrediction ? (
+                    activePrediction.suggestedNumbers
+                      .slice(0, 5)
+                      .map((num: number) => {
+                        // Scores RÉELS lus dans le breakdown par canal de la prédiction
+                        // active. Un canal absent est affiché "—" et exclu de la moyenne :
+                        // aucune valeur de remplacement n'est inventée.
+                        const raw = activePrediction.breakdown?.[num];
+                        const channels = [
+                          { key: "markov", value: raw?.markov },
+                          { key: "bayes", value: raw?.bayes },
+                          { key: "spectral", value: raw?.spectral },
+                        ] as const;
+                        const present = channels
+                          .map((c) => c.value)
+                          .filter(
+                            (v): v is number =>
+                              typeof v === "number" && Number.isFinite(v),
+                          );
+                        const accord =
+                          present.length > 0
+                            ? present.reduce((acc, v) => acc + v, 0) /
+                              present.length
+                            : null;
 
-                      return (
-                        <tr
-                          key={num}
-                          className="hover:bg-slate-800/30 transition-colors"
-                        >
-                          <td className="py-2.5 px-3 font-black text-amber-400 flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-[10px]">
-                              {num}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-emerald-400 font-bold">
-                            {forestScore}%
-                          </td>
-                          <td className="py-2.5 px-3 text-indigo-400 font-bold">
-                            {mlScore}%
-                          </td>
-                          <td className="py-2.5 px-3 text-cyan-400 font-bold">
-                            {spectralScore}%
-                          </td>
-                          <td className="py-2.5 px-3 text-right">
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px]">
-                              {accord}% Convergence
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr
+                            key={num}
+                            className="hover:bg-slate-800/30 transition-colors"
+                          >
+                            <td className="py-2.5 px-3 font-black text-amber-400 flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-[10px]">
+                                {num}
+                              </span>
+                            </td>
+                            {channels.map((c) => (
+                              <td
+                                key={c.key}
+                                className="py-2.5 px-3 font-bold text-slate-300 tabular-nums"
+                              >
+                                {typeof c.value === "number" &&
+                                Number.isFinite(c.value)
+                                  ? c.value.toFixed(1)
+                                  : "—"}
+                              </td>
+                            ))}
+                            <td className="py-2.5 px-3 text-right">
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold text-[10px] tabular-nums">
+                                {accord === null
+                                  ? "Données absentes"
+                                  : `${accord.toFixed(1)} Accord`}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                  ) : (
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="py-6 px-3 text-center text-[10px] text-slate-400 italic leading-relaxed"
+                      >
+                        Aucune prédiction active pour « {drawName} ». Les scores
+                        par canal s'affichent après une génération dans Oracle
+                        Base — aucune valeur n'est simulée ici.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -594,40 +767,49 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              {systemDirectives.map((cmd, i) => (
-                <div
-                  key={i}
-                  className="bg-slate-50 dark:bg-slate-950/65 p-4 rounded-2xl border border-slate-100 dark:border-slate-850 flex items-start gap-4 hover:border-indigo-500/30 transition-all group"
-                >
+              {systemDirectives.map((cmd, i) => {
+                // Sévérité continue : la teinte interpole linéairement du vert (0) au rouge (1).
+                // Aucun seuil binaire : une directive qualitative reste neutre (severity null).
+                const hue = cmd.severity === null ? 220 : (1 - cmd.severity) * 150;
+                return (
                   <div
-                    className={`p-2 rounded-xl text-xs font-black shrink-0 ${
-                      cmd.priority === "CRITICAL"
-                        ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                        : cmd.priority === "WARNING"
-                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                          : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                    }`}
+                    key={i}
+                    className="bg-slate-50 dark:bg-slate-950/65 p-4 rounded-2xl border border-slate-100 dark:border-slate-850 flex items-start gap-4 hover:border-indigo-500/30 transition-all group"
                   >
-                    {cmd.priority}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-black text-slate-800 dark:text-slate-200 capitalize">
-                        {cmd.algo}
+                    <div
+                      className="p-2 rounded-xl text-[9px] font-black shrink-0 border flex flex-col items-center justify-center min-w-[68px] gap-0.5 tabular-nums"
+                      style={{
+                        color: `hsl(${hue} 75% 58%)`,
+                        borderColor: `hsl(${hue} 75% 58% / 0.25)`,
+                        backgroundColor: `hsl(${hue} 75% 58% / 0.1)`,
+                      }}
+                    >
+                      <span className="uppercase tracking-wider opacity-70">
+                        {cmd.severity === null ? "Info" : "Sévérité"}
                       </span>
-                      <span className="text-[9px] font-mono font-bold text-indigo-500 bg-indigo-500/10 px-1.5 py-0.5 rounded">
-                        {cmd.metric}
-                      </span>
+                      {cmd.severity !== null && (
+                        <span>{cmd.severity.toFixed(2)}</span>
+                      )}
                     </div>
-                    <div className="text-[9px] font-black tracking-widest text-slate-400 uppercase">
-                      {cmd.type}
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-200 capitalize">
+                          {cmd.algo}
+                        </span>
+                        <span className="text-[9px] font-mono font-bold text-indigo-500 bg-indigo-500/10 px-1.5 py-0.5 rounded">
+                          {cmd.metric}
+                        </span>
+                      </div>
+                      <div className="text-[9px] font-black tracking-widest text-slate-400 uppercase">
+                        {cmd.type}
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-normal">
+                        {cmd.description}
+                      </p>
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-normal">
-                      {cmd.description}
-                    </p>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -682,9 +864,35 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
               )}
             </div>
 
-            <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-500 font-bold uppercase">
-              <span>Limite de charge d'asymétrie</span>
-              <span className="text-emerald-400">SÉCURISÉE (28.4%)</span>
+            <div className="pt-2 border-t border-slate-800 space-y-1.5">
+              <div className="flex justify-between items-center text-[10px] text-slate-500 font-bold uppercase">
+                <span title="Indice HHI normalisé du profil de poids : 0% = canaux équipondérés, 100% = un canal absorbe toute la masse.">
+                  Concentration du profil DNA
+                </span>
+                <span
+                  className="tabular-nums font-black"
+                  style={{
+                    color: weightStats
+                      ? `hsl(${(1 - weightStats.concentration) * 150} 75% 58%)`
+                      : undefined,
+                  }}
+                >
+                  {weightStats
+                    ? `${(weightStats.concentration * 100).toFixed(1)}%`
+                    : "INDISPONIBLE"}
+                </span>
+              </div>
+              {weightStats && (
+                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{
+                      width: `${weightStats.concentration * 100}%`,
+                      backgroundColor: `hsl(${(1 - weightStats.concentration) * 150} 75% 55%)`,
+                    }}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
@@ -730,8 +938,16 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                           Posturale : {synthesis.overallCalibration}
                         </span>
                       </div>
-                      <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-lg font-bold uppercase tracking-wider">
-                        Interprété OK
+                      <span
+                        className={`text-[9px] border px-2 py-0.5 rounded-lg font-bold uppercase tracking-wider ${
+                          synthesis.source === "cloud"
+                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            : "bg-sky-500/10 text-sky-400 border-sky-500/20"
+                        }`}
+                      >
+                        {synthesis.source === "cloud"
+                          ? "Modèle Cloud"
+                          : "Composition Locale"}
                       </span>
                     </div>
 
@@ -741,17 +957,61 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                       </p>
                     </div>
 
-                    {/* Explication Contrefactuelle Narratives (What-If) */}
-                    <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl space-y-1">
+                    {/* Explication Contrefactuelle (What-If) — adossée au rapport forensic réel */}
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-2xl space-y-1.5">
                       <span className="text-[10px] font-black uppercase text-amber-400 flex items-center gap-1.5 tracking-wider">
-                        <Zap size={12} /> Explication Contrefactuelle (Analysis
+                        <Zap size={12} /> Explication Contrefactuelle (Analyse
                         What-If)
                       </span>
-                      <p className="text-[11px] text-amber-200/90 leading-relaxed italic">
-                        "Le N°42 aurait intégré le Top 5 si le poids de Cadence
-                        d'Écart avait été supérieur de +8% sous le régime{" "}
-                        {globalRegime?.regime || "STABLE"}."
-                      </p>
+                      {latestCounterfactual ? (
+                        <>
+                          <p className="text-[11px] text-amber-200/90 leading-relaxed italic">
+                            « Poids{" "}
+                            <span className="font-black not-italic">
+                              {latestCounterfactual.cf.originalWeight.toFixed(3)}
+                            </span>{" "}
+                            →{" "}
+                            <span className="font-black not-italic">
+                              {latestCounterfactual.cf.optimalWeight.toFixed(3)}
+                            </span>{" "}
+                            sur{" "}
+                            <span className="font-black not-italic">
+                              {latestCounterfactual.cf.algo.replace(/_/g, " ")}
+                            </span>
+                            {latestCounterfactual.cf.action
+                              ? ` (${latestCounterfactual.cf.action.replace(/_/g, " ").toLowerCase()})`
+                              : ""}
+                            :{" "}
+                            {typeof latestCounterfactual.cf.improvement ===
+                            "number"
+                              ? `${latestCounterfactual.cf.improvement.toFixed(2)} pts de rappel supplémentaires`
+                              : "gain non chiffré"}
+                            {latestCounterfactual.cf.potentialHits > 0
+                              ? `, ${latestCounterfactual.cf.potentialHits} numéro(s) capturé(s) en plus`
+                              : ""}
+                            {latestCounterfactual.cf.potentialNumbers?.length
+                              ? ` [${latestCounterfactual.cf.potentialNumbers
+                                  .slice(0, 5)
+                                  .join(" · ")}]`
+                              : ""}
+                            . »
+                          </p>
+                          <span className="block text-[9px] text-amber-500/70 font-bold uppercase tracking-wider">
+                            Source : rapport forensic du{" "}
+                            {latestCounterfactual.report.date ||
+                              latestCounterfactual.report.timestamp ||
+                              "—"}{" "}
+                            · {latestCounterfactual.report.drawName}
+                          </span>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-amber-200/70 leading-relaxed italic">
+                          Aucun contrefactuel disponible pour ce périmètre :
+                          l'analyse what-if est produite par le rapport forensic
+                          après comparaison d'une prédiction aux résultats
+                          réels. Aucun scénario n'est simulé ici.
+                        </p>
+                      )}
                     </div>
 
                     <div className="space-y-2">

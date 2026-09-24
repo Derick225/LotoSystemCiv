@@ -46,7 +46,7 @@ Données du tirage actuel (CALCULÉES EMPIRIQUEMENT PAR LE CŒUR STATISTIQUE LOC
 Historique récent (les 15 derniers tirages réels) :
 ${JSON.stringify(history.slice(0, 15).map((h: any) => ({ date: h.date, gagnants: h.gagnants })), null, 2)}
 
-Liste des 19 algorithmes disponibles pour lesquels vous devez attribuer des poids relatifs continus (de 0.1 à 10.0) :
+Liste EXHAUSTIVE des 20 canaux ACTIFS de l'ensemble pour lesquels vous devez attribuer des poids relatifs continus (de 0.1 à 10.0). Cette liste est la source de vérité du moteur : vous devez fournir un poids pour CHACUN, sans en omettre ni en inventer :
 1. frequency (analyse classique de fréquence de sortie)
 2. gap (analyse d'écarts de sortie)
 3. spectral (transformation de Fourier spectrale)
@@ -57,15 +57,18 @@ Liste des 19 algorithmes disponibles pour lesquels vous devez attribuer des poid
 8. spatial (topologie et géométrie des numéros sur la grille)
 9. temporal (processus de Hawkes spatio-temporel)
 10. fractal (analyse multi-fractale des séries de tirages)
-11. shadow (densité spectrale de probabilités fantômes/ombres)
-12. network (réseau neuronal de corrélation temporelle)
+11. shadow (lissage topologique gaussien du spillover des derniers gagnants)
+12. network (lift moyen continu de co-occurrence sur le graphe d'affinités réelles)
 13. echo_state (réseau à état d'écho de réservoir)
-14. gap_sequence (séquence continue d'écarts)
-15. derived_neighbor (corrélation par voisinage dérivé)
-16. gap_pattern (motifs géométriques des écarts)
-17. sequence_pattern (motifs de séquences récurrentes)
-18. gap_cadence (rythme et cadence harmonique des écarts)
-19. gap_trend (tendance de dérive locale)
+14. derived_neighbor (corrélation par voisinage dérivé)
+15. gap_cadence (rythme et cadence harmonique des écarts)
+16. gap_trend (tendance de dérive locale, lissage de Holt niveau + tendance)
+17. isolation_anomaly (fusion à variance inverse des scores d'anomalie et d'écart)
+18. gap_band_sequence (chaînes de Markov sur les tranches d'écarts)
+19. machine_transfer (carry-over cinématique du plateau Machine vers les Gagnants ; le moteur annule ce canal de lui-même sur les tirages sans numéros machine)
+20. inter_draw_resonance (flux inter-tirages à familles étanches : transitions markoviennes d'ordre 1 et 2, persistance carry-over modulée par Hurst, résonance harmonique miroir / complément 91)
+
+Quatre canaux retirés de l'ensemble actif (gap_sequence, gap_pattern, sequence_pattern, inter_monthly_resonance) subsistent dans le code pour l'audit et l'affichage, mais leurs poids sont forcés à zéro par le moteur : ne les mentionnez pas et ne leur attribuez aucun poids.
 
 DIRECTIVES DE QUANTIFICATION ET DE NARRATION (NON NÉGOCIABLES) :
 1. RIGUEUR DES MÉTRIQUES : Le champ 'rationale' et 'strategicAdvice' doivent s'appuyer UNIQUEMENT et EXCLUSIVEMENT sur les indicateurs chiffrés locaux fournis ci-dessus (Exposant de Hurst, Entropie de Shannon). Il vous est STRICTEMENT INTERDIT d'inventer, d'estimer ou d'halluciner d'autres métriques spéculatives non calculées par notre moteur.
@@ -98,18 +101,19 @@ Générez la meilleure configuration de poids dans le schéma JSON spécifié.`;
                 shadow: { type: "NUMBER" },
                 network: { type: "NUMBER" },
                 echo_state: { type: "NUMBER" },
-                gap_sequence: { type: "NUMBER" },
                 derived_neighbor: { type: "NUMBER" },
-                gap_pattern: { type: "NUMBER" },
-                sequence_pattern: { type: "NUMBER" },
                 gap_cadence: { type: "NUMBER" },
-                gap_trend: { type: "NUMBER" }
+                gap_trend: { type: "NUMBER" },
+                isolation_anomaly: { type: "NUMBER" },
+                gap_band_sequence: { type: "NUMBER" },
+                machine_transfer: { type: "NUMBER" },
+                inter_draw_resonance: { type: "NUMBER" }
               },
               required: [
                 "frequency", "gap", "spectral", "markov", "bayes", "momentum", "affinity",
                 "spatial", "temporal", "fractal", "shadow", "network", "echo_state",
-                "gap_sequence", "derived_neighbor", "gap_pattern", "sequence_pattern",
-                "gap_cadence", "gap_trend"
+                "derived_neighbor", "gap_cadence", "gap_trend", "isolation_anomaly",
+                "gap_band_sequence", "machine_transfer", "inter_draw_resonance"
               ]
             },
             rationale: { type: "STRING" },

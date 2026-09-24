@@ -124,7 +124,10 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     normalnoise: "Bruit blanc stochastique standard"
   };
 
-  const currentVerdict = report.failureMode || report.verdict || "normalnoise";
+  // Aucun diagnostic n'est présumé : un rapport sans classification reste sans verdict.
+  const currentVerdict = report.failureMode || report.verdict || null;
+  const stabilityScore =
+    report.postMortemStabilityScore ?? report.forensicScore;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
@@ -195,9 +198,13 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-2xl font-black text-slate-800 dark:text-white">
-                    {report.postMortemStabilityScore ?? report.forensicScore ?? 85}
+                    {stabilityScore === undefined ? "n/d" : stabilityScore}
                   </span>
-                  <span className="text-xs text-slate-400 font-bold">/ 100</span>
+                  {stabilityScore !== undefined && (
+                    <span className="text-xs text-slate-400 font-bold">
+                      / 100
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-2 mt-2">
@@ -206,9 +213,13 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                     ? 'bg-rose-500/10 text-rose-500 border-rose-500/20'
                     : report.severity === 'high'
                     ? 'bg-amber-500/10 text-amber-500 border-amber-500/20'
-                    : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                    : report.severity === 'medium'
+                    ? 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20'
+                    : report.severity === 'low'
+                    ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                    : 'bg-slate-500/10 text-slate-500 border-slate-500/20'
                 }`}>
-                  Sévérité : {report.severity || 'low'}
+                  Sévérité : {report.severity ?? "n/d"}
                 </span>
               </div>
             </div>
@@ -224,7 +235,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 </h4>
               </div>
               <span className="text-[10px] font-bold px-2.5 py-1 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl border border-indigo-500/20">
-                {verdictLabels[currentVerdict] || currentVerdict}
+                {currentVerdict
+                  ? verdictLabels[currentVerdict] || currentVerdict
+                  : "Diagnostic non classé"}
               </span>
             </div>
 
