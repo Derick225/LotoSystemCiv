@@ -70,10 +70,13 @@ export interface ModelEvolutionLineage {
 /**
  * Calcule l'empreinte ADN cryptographique/statistique déterministe d'une configuration de modèle
  */
-export const computeModelDnaFingerprint = (drawName: string, weights: AlgoWeights, timestamp: string): string => {
+export const computeModelDnaFingerprint = (drawName: string, weights: AlgoWeights): string => {
   const sortedEntries = Object.entries(weights).sort(([k1], [k2]) => k1.localeCompare(k2));
   let hash = 0;
-  const rawStr = `${drawName}::${sortedEntries.map(([k, v]) => `${k}:${(v || 0).toFixed(6)}`).join('|')}::${timestamp}`;
+  // L'empreinte identifie une configuration ADN (tirage + poids normalisés) : le timestamp
+  // en est volontairement exclu pour que le dédoublonnage sur empreinte soit effectif —
+  // une même configuration réenregistrée remplace sa version précédente au lieu de la dupliquer.
+  const rawStr = `${drawName}::${sortedEntries.map(([k, v]) => `${k}:${(v || 0).toFixed(6)}`).join('|')}`;
   for (let i = 0; i < rawStr.length; i++) {
     hash = (hash << 5) - hash + rawStr.charCodeAt(i);
     hash |= 0;
@@ -119,7 +122,7 @@ export const recordModelDnaVersion = async (
   const drawName = entry.drawName;
   const timestamp = entry.timestamp || new Date().toISOString();
   const normalizedWeights = normalizeWeights(entry.weights);
-  const fingerprint = computeModelDnaFingerprint(drawName, normalizedWeights, timestamp);
+  const fingerprint = computeModelDnaFingerprint(drawName, normalizedWeights);
   const specializations = extractSpecializations(normalizedWeights);
 
   const newRecord: ModelDnaRecord = {
@@ -246,7 +249,9 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
     const variance = weights.reduce((sum, w) => sum + Math.pow(w - avg, 2), 0) / weights.length;
     totalVarianceSum += variance;
     const peak = Math.max(...weights);
-    const driftCount = weights.filter((w, idx) => idx > 0 && Math.abs(w - weights[idx - 1]) > 0.02).length;
+    // Dérive : mouvement de poids dépassant la dispersion propre de l'algorithme
+    // (son écart-type historique), et non un seuil fixe arbitraire.
+    const driftCount = weights.filter((w, idx) => idx > 0 && Math.abs(w - weights[idx - 1]) > Math.sqrt(variance)).length;
 
     dominantList.push({
       algoKey: algo,
@@ -259,9 +264,12 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
   dominantList.sort((a, b) => b.averageWeight - a.averageWeight);
 
   const meanVariance = trackedAlgosCount > 0 ? totalVarianceSum / trackedAlgosCount : 0;
-  // Stabilité continue : 100 * exp(-10 * stdDev)
   const stdDev = Math.sqrt(meanVariance);
-  const stabilityIndex = Math.max(0, Math.min(100, Math.round(100.0 * Math.exp(-15.0 * stdDev))));
+  // Stabilité continue : dispersion des poids mesurée en parts uniformes (1/A par algorithme,
+  // A = nombre d'algorithmes suivis). Une dérive moyenne d'une part uniforme complète
+  // (réaffectation totale de l'influence moyenne d'un algorithme) correspond à e^-1 de stabilité.
+  const uniformShare = trackedAlgosCount > 0 ? 1.0 / trackedAlgosCount : 1.0;
+  const stabilityIndex = Math.max(0, Math.min(100, Math.round(100.0 * Math.exp(-stdDev / uniformShare))));
 
   return {
     drawName,

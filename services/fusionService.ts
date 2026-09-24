@@ -180,7 +180,18 @@ const calculateOracleVector = (
   const dnaInterDraw = interDrawWeightRaw / totalDnaWeight;
   
   const maxDepth = history.length - 1; // Pas de constante arbitraire "50", parcourt tout l'historique
-  
+
+  // ZÉRO NOMBRE MAGIQUE : statistiques hypergéométriques exactes du recouvrement de deux
+  // tirages de K numéros dans N=90 (espérance K²/N, variance K²(N-K)²/(N²(N-1))).
+  // Elles ancrent le centre et la pente de l'activation sur la dispersion réelle du signal.
+  const poolSize = 90;
+  const drawSize = Math.max(1, lastDrawNumbers.length);
+  const overlapMean = (drawSize * drawSize) / poolSize;
+  const overlapStd = Math.sqrt(
+    (drawSize * drawSize * Math.pow(poolSize - drawSize, 2)) /
+      (poolSize * poolSize * (poolSize - 1))
+  );
+
   for (let i = 2; i < maxDepth; i++) {
     const historicalRecent = history[i - 1].gagnants;
     const historicalOlder = history[i].gagnants;
@@ -194,9 +205,14 @@ const calculateOracleVector = (
     const maxCommon = lastDrawNumbers.length * lastWeight + prevDrawNumbers.length * prevWeight;
     const contextStrength = (commonWithLast * lastWeight + commonWithPrev * prevWeight) / (maxCommon || Number.EPSILON);
     
-    // Activation adaptative sigmoïdale dérivée du profil fractal et de Markov
-    const activationCenter = 0.25 + 0.10 * (1.0 - dnaFractal);
-    const activationGain = 5.0 + 10.0 * dnaMarkov;
+    // Activation adaptative : le seuil de « contexte fort » est le quantile 95% du
+    // recouvrement hypergéométrique (z95 écarts-types au-dessus de l'espérance), durci
+    // d'un écart-type par absence de structure fractale ; la pente vaut drawSize logits
+    // pour un balayage complet de la force de contexte, amplifiée par le poids Markov
+    // exprimé en écarts-types de recouvrement.
+    const activationCenter =
+      (overlapMean + (Z95_GAUSS + 1.0 - dnaFractal) * overlapStd) / drawSize;
+    const activationGain = drawSize * (1.0 + dnaMarkov / overlapStd);
     const activation = sigmoid(contextStrength, activationCenter, activationGain);
 
     const futureDraw = history[i - 2];
@@ -490,8 +506,14 @@ export const calculateFusion = (
   
   finalTicket.sort((a, b) => a - b);
   
-  // Confiance Logistique Analytique dérivée continûment de l'entropie de Shannon normalisée du système
-  const expectedEntropy = 0.95; // Seuil théorique de bruit blanc stochastique équilibré
+  // Confiance Logistique Analytique dérivée continûment de l'entropie de Shannon normalisée du système.
+  // Ancre théorique : milieu du domaine d'entropie informative d'un ticket à K numéros parmi 90 —
+  // borné par log2(K)/log2(90) (connaissance parfaite des K numéros) et 1.0 (bruit blanc pur).
+  // La pente 1/(1-ancre) donne ±1 logit exact aux deux bornes : confiance symétrique
+  // ~73% (décision maximale) à ~27% (bruit pur) autour de 50% au milieu du domaine.
+  const ticketSize = Math.max(1, finalTicket.length);
+  const minInformativeEntropy = Math.log2(ticketSize) / Math.log2(90);
+  const expectedEntropy = 0.5 * (minInformativeEntropy + 1.0);
   const slope = 1.0 / Math.max(Number.EPSILON, 1.0 - expectedEntropy);
   const confidenceRaw = 1.0 / (1.0 + Math.exp(slope * (normalizedEntropy - expectedEntropy)));
   const confidence = confidenceRaw * 100.0;

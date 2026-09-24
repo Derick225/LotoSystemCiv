@@ -189,7 +189,7 @@ export function buildUnifiedForensicScenario(params: {
   const { scenarioType, drawName, appliedWeights, mathMetadata, summary, payload } = params;
   const normalized = normalizeWeights(appliedWeights);
   const now = new Date().toISOString();
-  const fingerprint = computeModelDnaFingerprint(drawName, normalized, now);
+  const fingerprint = computeModelDnaFingerprint(drawName, normalized);
   const family = getPrimaryInterDrawFamily(drawName)?.name || 'ISOLATED';
   const id = `SCENARIO_${scenarioType}_${drawName}_${Date.now().toString(36).toUpperCase()}`;
 

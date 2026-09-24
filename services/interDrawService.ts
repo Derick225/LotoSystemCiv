@@ -41,6 +41,11 @@ import {
 const THEORETICAL_SINGLE_PROB =
   LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
 
+// Décroissance Hawkes neutre (Hurst = 0.5) : cas mémoire non dilatée de la formule
+// de demi-vie ln2 / (1.5 · dilatation mémoire) — sert de repli exact lorsque le moteur
+// n'expose pas sa propre valeur calculée.
+const HAWKES_NEUTRAL_BETA_DECAY = Math.LN2 / 1.5;
+
 export type {
   InterDrawCooccurrenceReport,
   InterDrawPatternReport,
@@ -438,7 +443,7 @@ export const runBayesianResonanceEngine = (
   // H > 0.5 (persistance) -> demi-vie plus longue (décroissance plus lente)
   // H < 0.5 (anti-persistance) -> amortissement rapide
   const memoryDilation = 1.0 + 2.0 * Math.tanh(effectiveHurst - 0.5);
-  const betaDecay = Math.LN2 / (1.5 * Math.max(0.2, memoryDilation));
+  const betaDecay = HAWKES_NEUTRAL_BETA_DECAY / Math.max(0.2, memoryDilation);
 
   const hawkesRes = computeCrossHawkesKernelHpc({
     predOccurrences: predLaggedOccurrences,
@@ -967,7 +972,7 @@ export const generateInterDrawReport = async (
     fullCandidateScores,
     hawkesMetrics: engine.hawkesTotalEnergy !== undefined ? {
       totalEnergy: engine.hawkesTotalEnergy,
-      betaDecay: engine.hawkesBetaDecay || 0.4621,
+      betaDecay: engine.hawkesBetaDecay || HAWKES_NEUTRAL_BETA_DECAY,
       lagExcitations: engine.hawkesLagExcitations || []
     } : undefined,
     cooccurrenceMetrics,

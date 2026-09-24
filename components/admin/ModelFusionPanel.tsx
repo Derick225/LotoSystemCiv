@@ -210,11 +210,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   // Compute live DNA fingerprint
   const currentFingerprint = useMemo(() => {
     if (!weights || Object.keys(weights).length === 0) return "DNA-INIT";
-    return computeModelDnaFingerprint(
-      selectedDrawName,
-      weights,
-      new Date().toISOString().slice(0, 10)
-    );
+    return computeModelDnaFingerprint(selectedDrawName, weights);
   }, [selectedDrawName, weights]);
 
   // Compute total active weight sum

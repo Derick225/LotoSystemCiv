@@ -117,11 +117,14 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
   describe('4. Base de Connaissances ADN des Modèles (modelDnaKnowledgeBase)', () => {
     it('calcule une empreinte ADN 100% reproductible et extrait les spécialisations', () => {
       const weights = { frequency: 0.35, gapTrend: 0.25, bayes: 0.20, markov: 0.20 };
-      const timestamp = '2026-01-01T00:00:00.000Z';
 
-      const fp1 = computeModelDnaFingerprint('TEST_DRAW', weights, timestamp);
-      const fp2 = computeModelDnaFingerprint('TEST_DRAW', weights, timestamp);
+      const fp1 = computeModelDnaFingerprint('TEST_DRAW', weights);
+      const fp2 = computeModelDnaFingerprint('TEST_DRAW', weights);
       expect(fp1).toBe(fp2);
+      // L'empreinte exclut le temps : une même configuration ADN reste dédoublonnable
+      // quelle que soit la date d'enregistrement.
+      const fpOtherDraw = computeModelDnaFingerprint('OTHER_DRAW', weights);
+      expect(fp1).not.toBe(fpOtherDraw);
 
       const specs = extractSpecializations(weights);
       expect(specs.length).toBeGreaterThan(0);

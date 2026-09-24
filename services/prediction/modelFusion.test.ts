@@ -103,9 +103,9 @@ describe('Model Fusion & ADN Knowledge Base Integration', () => {
   describe('Model DNA Knowledge Base & Draw Isolation', () => {
     it('should produce identical fingerprints for identical weights and drawName', () => {
       const weights = getDefaultWeights();
-      const fp1 = computeModelDnaFingerprint('Loto Test', weights, '2025-01-01');
-      const fp2 = computeModelDnaFingerprint('Loto Test', weights, '2025-01-01');
-      const fpOtherDraw = computeModelDnaFingerprint('EuroMillions', weights, '2025-01-01');
+      const fp1 = computeModelDnaFingerprint('Loto Test', weights);
+      const fp2 = computeModelDnaFingerprint('Loto Test', weights);
+      const fpOtherDraw = computeModelDnaFingerprint('EuroMillions', weights);
 
       expect(fp1).toBe(fp2);
       expect(fp1).not.toBe(fpOtherDraw);

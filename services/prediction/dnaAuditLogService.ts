@@ -114,8 +114,7 @@ export const logActivePredictionDna = async (
   const pureHistory = purifyHistoryForDraw(drawName, history);
   const normalizedWeights = normalizeWeights(activeWeights || getDefaultWeights());
   const now = Date.now();
-  const timestampIso = new Date(now).toISOString();
-  const dnaFingerprint = computeModelDnaFingerprint(drawName, normalizedWeights, timestampIso);
+  const dnaFingerprint = computeModelDnaFingerprint(drawName, normalizedWeights);
 
   const numbersMicroDna: Record<number, Record<string, number>> = {};
   const dominantAlgos: Record<number, string> = {};
@@ -561,11 +560,7 @@ export const calculateDnaPerformanceDrift = async (
     brierScore,
     hitCount: totalHits,
     hitRate: parseFloat(((totalHits / Math.max(1, totalEvaluations)) * 100).toFixed(1)),
-    injectedDnaFingerprint: computeModelDnaFingerprint(
-      drawName,
-      normalizedInjected,
-      new Date().toISOString()
-    ),
+    injectedDnaFingerprint: computeModelDnaFingerprint(drawName, normalizedInjected),
     activeWeights: normalizedInjected,
     algorithmDriftBreakdown: breakdown.sort((a, b) => Math.abs(b.driftDelta) - Math.abs(a.driftDelta)),
     winningNumbersAttribution: winningAttributions,
