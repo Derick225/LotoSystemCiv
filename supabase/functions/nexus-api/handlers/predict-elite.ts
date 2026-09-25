@@ -961,6 +961,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
     }
 
     const predictionResponse = {
+      drawName: validatedData.drawName,
       suggestedNumbers: selected,
       candidates: candidates,
       confidenceBand,
@@ -973,7 +974,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
       analysis: analysisMessage,
       timestamp: Date.now(),
       confidence: confidenceScore,
-      realityAlignment: 82,
+      realityAlignment: Math.max(10, Math.min(99, Math.round(stabilityScore * 50 + calculateCoherence(selected) * 0.5))),
       realityAlignmentNote: "Indicateur interne de cohérence du moteur — ne reflète PAS une probabilité de gain."
     };
 

@@ -12,7 +12,8 @@ export async function handleHybridPrediction(req: Request, reqBody?: any): Promi
   }
 
   try {
-    const { drawName, history, regime, hurst, entropy } = await req.json();
+    const body = reqBody || await req.json().catch(() => ({}));
+    const { drawName, history, regime, hurst, entropy } = body;
 
     if (!drawName || !history || !Array.isArray(history)) {
       return new Response(JSON.stringify({ error: "Paramètres 'drawName' et 'history' requis." }), {

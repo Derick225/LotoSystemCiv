@@ -330,7 +330,7 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
 
   try {
     const startTime = Date.now()
-    const body = await (req.method === 'POST' ? req.json().catch(() => ({})) : {});
+    const body = reqBody || await (req.method === 'POST' ? req.json().catch(() => ({})) : {});
     const validation = SelfLearnRequestSchema.safeParse(body);
 
     if (!validation.success) {

@@ -20,7 +20,7 @@ export async function handleAnalyzeDrift(req: Request, reqBody?: any): Promise<R
   }
 
   try {
-    const body = await (req.method === 'POST' ? req.json().catch(() => ({})) : {});
+    const body = reqBody || await (req.method === 'POST' ? req.json().catch(() => ({})) : {});
     const validation = DriftAnalysisSchema.safeParse(body);
     
     if (!validation.success) {

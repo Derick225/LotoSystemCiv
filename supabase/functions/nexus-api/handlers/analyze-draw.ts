@@ -8,7 +8,8 @@ export async function handleAnalyzeDraw(req: Request, reqBody?: any): Promise<Re
   }
 
   try {
-    const { history, drawName } = await req.json();
+    const body = reqBody || await req.json().catch(() => ({}));
+    const { history, drawName } = body;
 
     if (!history || !Array.isArray(history) || history.length === 0) {
       return new Response(JSON.stringify({ error: "Missing or invalid required payload: history" }), {
