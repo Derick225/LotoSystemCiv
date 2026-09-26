@@ -48,7 +48,7 @@ Pour activer l'IA (Gemini) et la synchronisation automatique :
 ## 🛠️ Architecture Nexus
 *   **Neural Kernel**: Moteur d'inférence basé sur Gemini 3 Pro pour le raisonnement narratif.
 *   **HPC Pipeline**: Calculs spectraux (FFT) et fractals (Hurst) via Web Workers.
-*   **Realtime Sync**: Table `draw_results` synchronisée via pg_cron et Edge Functions.
+*   **Realtime Sync**: Table `draw_results` synchronisée, via pg_cron et Edge Functions.
 
 ## ⚠️ Disclaimer
 LotoPro est un outil d'analyse statistique et de divertissement. Il ne garantit aucun gain.
