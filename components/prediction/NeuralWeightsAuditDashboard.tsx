@@ -265,6 +265,16 @@ const ALGO_REGISTRY: LayerMeta[] = [
   },
 ];
 
+// Comptages dérivés du registre réel (jamais codés en dur : ils suivent le registre).
+const CATEGORY_COUNTS: Record<LayerMeta["category"], number> = ALGO_REGISTRY.reduce(
+  (acc, m) => {
+    acc[m.category] = (acc[m.category] || 0) + 1;
+    return acc;
+  },
+  {} as Record<LayerMeta["category"], number>
+);
+const TOTAL_LAYER_COUNT = ALGO_REGISTRY.length;
+
 export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardProps> = ({
   onClose,
   onApplySuccess,
@@ -307,11 +317,13 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
   const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Check if active history contains machine draws
+  // ISOLATION TIRAGE : seul l'historique isolé du tirage actif est consulté. Sans
+  // repli sur l'historique complet (qui mélangerait des tirages étrangers), comme
+  // dans evaluateAlgoEmpiricalProof.
   const hasMachineDataInHistory = useMemo(() => {
     if (!history || history.length === 0) return false;
     const isolated = history.filter((d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
-    const sample = isolated.length > 0 ? isolated : history;
-    return sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+    return isolated.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
   }, [history, drawName]);
 
   // Empirical Proofs & Standard Deviations evaluation on active draw history
@@ -330,7 +342,10 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
     const result: Record<string, number> = {};
     ALGO_REGISTRY.forEach((meta) => {
       const val = Math.max(0, Number(localWeights[meta.key]) || 0);
-      result[meta.key] = rawSum > 0 ? (val / rawSum) * 100 : (100 / ALGO_REGISTRY.length);
+      // Somme nulle (tous poids à 0) : aucune répartition proportionnelle n'existe —
+      // on affiche 0% plutôt qu'une distribution uniforme fabriquée. Le moteur
+      // normalisateur appliquera de lui-même son plancher 1/(2N).
+      result[meta.key] = rawSum > 0 ? (val / rawSum) * 100 : 0;
     });
     return result;
   }, [localWeights]);
@@ -636,12 +651,12 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
       {/* Category Tabs */}
       <div className="flex flex-wrap gap-2 py-3 border-b border-slate-800/80 relative z-10 shrink-0">
         {[
-          { id: "all", label: "Toutes les Couches (23)" },
-          { id: "temp_freq", label: "1. Temporelle & Fréquence (4)" },
-          { id: "gaps_cadence", label: "2. Écarts & Cadences (6)" },
-          { id: "markov_point", label: "3. Markov & Hawkes (4)" },
-          { id: "chaos_bayes", label: "4. Chaos & Bayes (7)" },
-          { id: "transient_machine", label: "5. Machine Transfer (2)" },
+          { id: "all", label: `Toutes les Couches (${TOTAL_LAYER_COUNT})` },
+          { id: "temp_freq", label: `1. Temporelle & Fréquence (${CATEGORY_COUNTS["temp_freq"]})` },
+          { id: "gaps_cadence", label: `2. Écarts & Cadences (${CATEGORY_COUNTS["gaps_cadence"]})` },
+          { id: "markov_point", label: `3. Markov & Hawkes (${CATEGORY_COUNTS["markov_point"]})` },
+          { id: "chaos_bayes", label: `4. Chaos & Bayes (${CATEGORY_COUNTS["chaos_bayes"]})` },
+          { id: "transient_machine", label: `5. Machine Transfer (${CATEGORY_COUNTS["transient_machine"]})` },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -721,7 +736,9 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
                       </span>
                     </div>
                     <div className="text-[9px] text-slate-500">
-                      Hits: {proof ? (proof.empiricalHitRate * 100).toFixed(1) : "5.6"}% (espérance: 5.6%)
+                      {proof
+                        ? `Hits: ${(proof.empiricalHitRate * 100).toFixed(1)}% (espérance: ${(proof.baselineRate * 100).toFixed(1)}%)`
+                        : "Hits: n/d"}
                     </div>
                   </div>
 

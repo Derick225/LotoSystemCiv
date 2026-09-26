@@ -46,7 +46,7 @@ export interface GapRangeSequenceReport {
   dnaSieveInfo: {
     active: boolean;
     dominantAlgos: string[];
-    dnaConcordanceMean: number;
+    dnaConcordanceMean: number | null; // Null = aucune concordance mesurée (aucun numéro scoré)
     entropyBits?: number;
     sieveIntensityPercent?: number;
     activeGenesBreakdown?: { gene: string; weight: number; label: string }[];
@@ -132,6 +132,29 @@ export const gapRangeSequenceService = {
       const report5 = this.analyzeGapRangePatterns(drawName, history, 5, maxNumber, weights);
       const report10 = this.analyzeGapRangePatterns(drawName, history, 10, maxNumber, weights);
 
+      // RÈGLE D'HONNÊTETÉ : sans historique mesuré, aucune valeur fusionnée n'est
+      // synthétisée. Les anciens défauts ?? 50 fabriquaient 90 scores neutres qui
+      // pouvaient passer pour mesurés auprès de tout consommateur du rapport.
+      if (report5.totalDraws === 0) {
+        return {
+          drawName,
+          totalDraws: 0,
+          step: 'combined',
+          lastDrawWinningGaps: [],
+          lastDrawBinSignature: [],
+          lastDrawBinLabels: [],
+          bins: report5.bins,
+          topPredictedBins: report5.topPredictedBins,
+          scoresByNumber: {},
+          rawScoresByNumber: {},
+          dnaMultipliers: {},
+          dnaAffinity: {},
+          dnaSieveInfo: { active: false, dominantAlgos: ['Défaut'], dnaConcordanceMean: null },
+          currentGapsByNumber: {},
+          transitionMatrix: report5.transitionMatrix
+        };
+      }
+
       // Entropy-based dynamic information weighting (AGENTS.md: zero magic numbers)
       const totalBins5 = getTotalBins(5);
       const totalBins10 = getTotalBins(10);
@@ -175,33 +198,48 @@ export const gapRangeSequenceService = {
       const burstMomentumByNumber: Record<number, number> = {};
 
       for (let num = 1; num <= maxNumber; num++) {
-        const s5 = report5.scoresByNumber[num] ?? 50;
-        const s10 = report10.scoresByNumber[num] ?? 50;
+        // Chaque canal fusionné n'existe que s'il est réellement mesuré aux deux
+        // résolutions : aucune valeur par défaut n'est substituée (règle d'honnêteté).
+        const s5 = report5.scoresByNumber[num];
+        const s10 = report10.scoresByNumber[num];
+        if (s5 === undefined || s10 === undefined) continue;
         scoresByNumber[num] = parseFloat((step5Weight * s5 + step10Weight * s10).toFixed(2));
 
-        const r5 = report5.rawScoresByNumber[num] ?? s5;
-        const r10 = report10.rawScoresByNumber[num] ?? s10;
-        rawScoresByNumber[num] = parseFloat((step5Weight * r5 + step10Weight * r10).toFixed(2));
+        const r5 = report5.rawScoresByNumber[num];
+        const r10 = report10.rawScoresByNumber[num];
+        if (r5 !== undefined && r10 !== undefined) {
+          rawScoresByNumber[num] = parseFloat((step5Weight * r5 + step10Weight * r10).toFixed(2));
+        }
 
-        const z5 = report5.zScoresByNumber?.[num] ?? 0;
-        const z10 = report10.zScoresByNumber?.[num] ?? 0;
-        zScoresByNumber[num] = parseFloat((step5Weight * z5 + step10Weight * z10).toFixed(2));
+        const z5 = report5.zScoresByNumber?.[num];
+        const z10 = report10.zScoresByNumber?.[num];
+        if (z5 !== undefined && z10 !== undefined) {
+          zScoresByNumber[num] = parseFloat((step5Weight * z5 + step10Weight * z10).toFixed(2));
+        }
 
-        const l5 = report5.liftsByNumber?.[num] ?? 1.0;
-        const l10 = report10.liftsByNumber?.[num] ?? 1.0;
-        liftsByNumber[num] = parseFloat((step5Weight * l5 + step10Weight * l10).toFixed(2));
+        const l5 = report5.liftsByNumber?.[num];
+        const l10 = report10.liftsByNumber?.[num];
+        if (l5 !== undefined && l10 !== undefined) {
+          liftsByNumber[num] = parseFloat((step5Weight * l5 + step10Weight * l10).toFixed(2));
+        }
 
-        const q5 = report5.quantumCoherenceByNumber?.[num] ?? 50;
-        const q10 = report10.quantumCoherenceByNumber?.[num] ?? 50;
-        quantumCoherenceByNumber[num] = parseFloat((step5Weight * q5 + step10Weight * q10).toFixed(2));
+        const q5 = report5.quantumCoherenceByNumber?.[num];
+        const q10 = report10.quantumCoherenceByNumber?.[num];
+        if (q5 !== undefined && q10 !== undefined) {
+          quantumCoherenceByNumber[num] = parseFloat((step5Weight * q5 + step10Weight * q10).toFixed(2));
+        }
 
-        const p5 = report5.empiricalProofConfidence?.[num] ?? 50;
-        const p10 = report10.empiricalProofConfidence?.[num] ?? 50;
-        empiricalProofConfidence[num] = parseFloat((step5Weight * p5 + step10Weight * p10).toFixed(2));
+        const p5 = report5.empiricalProofConfidence?.[num];
+        const p10 = report10.empiricalProofConfidence?.[num];
+        if (p5 !== undefined && p10 !== undefined) {
+          empiricalProofConfidence[num] = parseFloat((step5Weight * p5 + step10Weight * p10).toFixed(2));
+        }
 
-        const b5 = report5.burstMomentumByNumber?.[num] ?? 50;
-        const b10 = report10.burstMomentumByNumber?.[num] ?? 50;
-        burstMomentumByNumber[num] = parseFloat((step5Weight * b5 + step10Weight * b10).toFixed(2));
+        const b5 = report5.burstMomentumByNumber?.[num];
+        const b10 = report10.burstMomentumByNumber?.[num];
+        if (b5 !== undefined && b10 !== undefined) {
+          burstMomentumByNumber[num] = parseFloat((step5Weight * b5 + step10Weight * b10).toFixed(2));
+        }
       }
 
       // Merge top predicted bins representation from both scales
@@ -229,7 +267,7 @@ export const gapRangeSequenceService = {
         resolutionWeights: { step5Weight, step10Weight },
         sequenceMatches: report5.sequenceMatches,
         markovOrder2Confidence: report5.markovOrder2Confidence,
-        entropyBits: parseFloat(((report5.entropyBits || entropy5) * step5Weight + (report10.entropyBits || entropy10) * step10Weight).toFixed(2))
+        entropyBits: parseFloat(((report5.entropyBits ?? entropy5) * step5Weight + (report10.entropyBits ?? entropy10) * step10Weight).toFixed(2))
       };
     }
 
@@ -270,7 +308,7 @@ export const gapRangeSequenceService = {
         rawScoresByNumber: {},
         dnaMultipliers: {},
         dnaAffinity: {},
-        dnaSieveInfo: { active: false, dominantAlgos: ['Défaut'], dnaConcordanceMean: 50 },
+        dnaSieveInfo: { active: false, dominantAlgos: ['Défaut'], dnaConcordanceMean: null },
         currentGapsByNumber: {},
         transitionMatrix: Array.from({ length: totalBins }, () => new Array(totalBins).fill(0))
       };
@@ -624,7 +662,7 @@ export const gapRangeSequenceService = {
       sumDnaAffinity += aff;
     }
 
-    const dnaConcordanceMean = maxNumber > 0 ? Math.round(sumDnaAffinity / maxNumber) : 50;
+    const dnaConcordanceMean: number | null = maxNumber > 0 ? Math.round(sumDnaAffinity / maxNumber) : null;
 
     return {
       drawName,
@@ -648,8 +686,8 @@ export const gapRangeSequenceService = {
         active: true,
         dominantAlgos,
         dnaConcordanceMean,
-        entropyBits: dnaEntropy || parseFloat(totalEntropyBits.toFixed(2)),
-        sieveIntensityPercent: sieveIntensityPercent || Math.round(dynamicSieveIntensity * 100),
+        entropyBits: dnaEntropy ?? parseFloat(totalEntropyBits.toFixed(2)),
+        sieveIntensityPercent,
         activeGenesBreakdown: activeGenesBreakdown || []
       },
       currentGapsByNumber,

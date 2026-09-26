@@ -12,11 +12,11 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
   ({ breakdown, suggestedNumbers }) => {
     const setHoveredNumber = useNexusStore((state) => state.setHoveredNumber);
 
-    const grid = useMemo(() => {
-      return Array.from({ length: 90 }, (_, i) => {
+    const { grid, maxIntensity } = useMemo(() => {
+      const cells = Array.from({ length: 90 }, (_, i) => {
         const num = i + 1;
         const scores = breakdown?.[num];
-        if (!scores) return { num, intensity: 0, topAlgo: "N/A" };
+        if (!scores) return { num, intensity: 0, topAlgo: "n/d", scored: false };
 
         let sum = 0;
         let count = 0;
@@ -26,9 +26,12 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
             count++;
           }
         });
-        const avg = count > 0 ? sum / count : 0;
+        if (count === 0) {
+          return { num, intensity: 0, topAlgo: "n/d", scored: false };
+        }
+        const avg = sum / count;
 
-        let maxScore = -1;
+        let maxScore = -Infinity;
         let topAlgo = "Consensus";
         Object.entries(scores).forEach(([key, val]) => {
           if (typeof val === "number" && val > maxScore) {
@@ -41,8 +44,13 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
           num,
           intensity: avg,
           topAlgo: topAlgo.charAt(0).toUpperCase() + topAlgo.slice(1),
+          scored: true,
         };
       });
+      // Normalisation continue dérivée des données : l'intensité colorimétrique
+      // est relative au score consensus maximal réellement mesuré sur la grille.
+      const maxIntensity = cells.reduce((m, c) => Math.max(m, c.intensity), 0);
+      return { grid: cells, maxIntensity };
     }, [breakdown]);
 
     return (
@@ -72,7 +80,8 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
         <div className="grid grid-cols-10 gap-1 sm:gap-2 md:gap-3 relative z-10">
           {grid.map((cell) => {
             const isSuggested = suggestedNumbers.includes(cell.num);
-            const colorIntensity = Math.min(1, cell.intensity / 100);
+            const colorIntensity =
+              maxIntensity > 0 ? cell.intensity / maxIntensity : 0;
 
             return (
               <div
@@ -110,10 +119,10 @@ export const NeuralHeatmapGrid: React.FC<NeuralHeatmapGridProps> = React.memo(
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
                         <span className="text-[10px] font-bold text-slate-500 uppercase">
-                          Probabilité
+                          Score Consensus
                         </span>
                         <span className="text-sm font-black text-white">
-                          {Math.round(cell.intensity)}%
+                          {cell.scored ? cell.intensity.toFixed(1) : "n/d"}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">

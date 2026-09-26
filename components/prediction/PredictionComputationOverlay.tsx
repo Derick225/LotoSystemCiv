@@ -74,47 +74,20 @@ export const PredictionComputationOverlay: React.FC<
           </div>
         )}
 
-        {/* Real-time Telemetry Dashboard */}
+        {/* Real-time Telemetry Dashboard — valeurs réelles uniquement :
+            nombre de tirages chargés (prop) et étape courante émise par le moteur. */}
         <div className="w-full bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-2xl p-5 text-left space-y-3 shadow-md max-h-[170px] overflow-y-auto font-mono text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed max-w-sm">
           <div className="flex items-start gap-2 border-b border-slate-50 dark:border-slate-850 pb-2">
             <span className="text-emerald-500 font-bold">✔</span>
-            <span>[GÉOPOLYGONAL] Filtre d'historique borné : N=90, K=5</span>
-          </div>
-          <div className="flex items-start gap-2 border-b border-slate-50 dark:border-slate-850 pb-2">
-            <span className="text-emerald-500 font-bold">✔</span>
-            <span>[SPECTRAL] Coefficients spectraux isolés</span>
-          </div>
-          <div className="flex items-start gap-2 border-b border-slate-50 dark:border-slate-850 pb-2">
-            <span
-              className={`font-bold ${computingStep.includes("Inférences") ? "text-indigo-500 animate-pulse" : "text-emerald-500"}`}
-            >
-              {computingStep.includes("Inférences") ? "•" : "✔"}
-            </span>
-            <span
-              className={
-                computingStep.includes("Inférences")
-                  ? "text-slate-800 dark:text-white font-semibold"
-                  : ""
-              }
-            >
-              [ORACLE] Évaluation de divergence KL sur {historyLength || 0}{" "}
-              tirages
+            <span>
+              [GÉOPOLYGONAL] Historique mesuré chargé : {historyLength}{" "}
+              {historyLength > 1 ? "tirages" : "tirage"}
             </span>
           </div>
           <div className="flex items-start gap-2">
-            <span
-              className={`font-bold ${computingStep.includes("Convergence") ? "text-indigo-500 animate-pulse" : "text-slate-400"}`}
-            >
-              {computingStep.includes("Convergence") ? "•" : "•"}
-            </span>
-            <span
-              className={
-                computingStep.includes("Convergence")
-                  ? "text-slate-800 dark:text-white font-semibold"
-                  : ""
-              }
-            >
-              [STREAK] Application anti-monoculture (Cosinus &gt; 0.40)
+            <span className="text-indigo-500 font-bold animate-pulse">•</span>
+            <span className="text-slate-800 dark:text-white font-semibold">
+              [ORACLE] {computingStep || "Initialisation du pipeline déterministe..."}
             </span>
           </div>
         </div>

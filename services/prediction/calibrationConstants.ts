@@ -138,3 +138,60 @@ export const INTEGRITY_INDEX_CALIBRATION = {
   /** Échelle de décroissance exponentielle de la réduction totale -> indice [0,100]. */
   DECAY_SCALE: 50.0,
 } as const;
+
+/**
+ * Fusion différentiable du score de décision des « Survivants de l'ADN Algorithmique ».
+ * Site : GapRangeSequenceWidget (score tamisé sievedScore).
+ *
+ * Les trois canaux (Markov brut, affinité ADN, multiplicateur de tamis ADN) sont projetés
+ * en espace Z puis mélangés linéairement avant sigmoïde :
+ *   zFused = W_MARKOV*zMarkov + W_DNA*zDna + W_DNA_MULTIPLIER*zMult
+ *   sievedScore = 100 / (1 + exp(-FUSED_SIGMOID_SLOPE * zFused))
+ * Les canaux [0,100] sont standardisés par PLATT_SCORE_STANDARDIZATION (mutualisé avec le
+ * moteur) ; le multiplicateur de tamis (neutre = 1.0) est projeté par DNA_MULTIPLIER_Z_SCALE.
+ * Les poids somment à 1.0 (combinaison convexe). Valeurs strictement identiques aux
+ * constantes auparavant codées en dur dans le widget.
+ */
+export const GAP_SURVIVOR_FUSION = {
+  /** Poids du canal Markov brut (transition de tranches d'écarts). */
+  W_MARKOV: 0.40,
+  /** Poids du canal d'affinité ADN algorithmique. */
+  W_DNA: 0.35,
+  /** Poids du multiplicateur de tamis ADN. */
+  W_DNA_MULTIPLIER: 0.25,
+  /** Pente de la sigmoïde de décision (température inverse). */
+  FUSED_SIGMOID_SLOPE: 1.5,
+  /** Projection du multiplicateur en espace Z (1.0 neutre -> 0, 1.5 -> 1). */
+  DNA_MULTIPLIER_Z_SCALE: 2.0,
+} as const;
+
+/**
+ * Catégorisation continue des survivants du widget « Séquences & Patterns des Écarts ».
+ * Site : GapRangeSequenceWidget (appartenance des survivants aux catégories/étiquettes).
+ *
+ * Chaque catégorie est une appartenance SIGMOÏDE (et non une porte binaire) centrée sur le
+ * seuil historique de l'étiquette : l'appartenance vaut exactement 0.5 au seuil. L'appartenance
+ * d'une conjonction (« Convergence Élite » = Markov ET ADN ET score fusionné) est la moyenne
+ * géométrique des appartenances, qui préserve le point 0.5 lorsque toutes les composantes sont
+ * à leur seuil. Largeurs des sigmoïdes : PLATT_SCORE_STANDARDIZATION.SCALE pour les canaux
+ * [0,100] ; l'écart-type empirique de la population mesurée pour les canaux sans échelle
+ * naturelle (écart courant, multiplicateur de tamis) ; l'unité propre du z-score pour le canal
+ * Z (0 = point neutre par définition). Un numéro n'arbore une étiquette que si son appartenance
+ * maximale dépasse 0.5 — le point neutre de la logistique, « la preuve penche pour » — sinon il
+ * reste « Survivant Standard ». Ces centres sont des paramètres d'échelle d'étiquetage
+ * présentationnel : ils ne créent aucune discontinuité dans les scores ni le tri.
+ */
+export const GAP_SURVIVOR_TAG_CENTERS = {
+  /** Score fusionné tamisé requis pour la catégorie « Convergence Élite ». */
+  CONVERGENCE_FUSED: 68.0,
+  /** Score Markov brut requis pour la catégorie « Convergence Élite ». */
+  CONVERGENCE_MARKOV: 58.0,
+  /** Affinité ADN requise pour la catégorie « Convergence Élite ». */
+  CONVERGENCE_DNA: 62.0,
+  /** Affinité ADN au-delà de laquelle le signal ADN est réputé dominant. */
+  DNA_DOMINANT: 68.0,
+  /** Score Markov brut au-delà duquel la transition d'écart est mise en avant. */
+  MARKOV: 62.0,
+  /** Confiance de preuve empirique requise pour l'étiquette « Preuve Statistique ». */
+  EMPIRICAL_PROOF: 60.0,
+} as const;

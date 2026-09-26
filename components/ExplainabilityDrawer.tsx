@@ -159,7 +159,7 @@ export const ExplainabilityDrawer: React.FC = () => {
                 </div>
                 <p className="text-xs text-indigo-900 dark:text-indigo-200 leading-relaxed font-medium">
                   {expData.narrativeInterpretation || (
-                    `Le numéro ${inspectingNumber} émerge avec une contribution primaire dominée par ${shapData[0]?.algo || "N/A"} et ${shapData[1]?.algo || "N/A"}. Sa résonance spectrale de ${expData.dnaOrbitingIndex?.toFixed(4) || "0.0000"} confirme sa convergence vers l'attracteur central du tirage.`
+                    `Le numéro ${inspectingNumber} émerge avec une contribution primaire dominée par ${shapData[0]?.algo || "N/A"} et ${shapData[1]?.algo || "N/A"}. Sa résonance spectrale de ${expData.dnaOrbitingIndex != null ? expData.dnaOrbitingIndex.toFixed(4) : "n/d"} confirme sa convergence vers l'attracteur central du tirage.`
                   )}
                 </p>
               </div>

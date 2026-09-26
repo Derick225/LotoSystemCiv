@@ -4,14 +4,13 @@ import { z } from 'zod';
 
 /**
  * Schéma Zod rigoureux pour valider et assainir les Feature Flags cybernétiques.
+ * Un flag n'existe ici que s'il est réellement consommé par le moteur d'inférence
+ * (voir usePredictionGenerator → generateMasterPredictionCore). Les anciens flags
+ * sans consommateur moteur ont été retirés : un interrupteur sans effet est un
+ * mensonge d'interface.
  */
 export const FeatureFlagsSchema = z.object({
   adversarialMode: z.boolean(),
-  dnaBackpropagation: z.boolean(),
-  quantumStateDenoising: z.boolean(),
-  spectralDenoising: z.boolean(),
-  kalmanAutoCalibration: z.boolean(),
-  bayesianShrinkage: z.boolean(),
 });
 
 export type FeatureFlags = z.infer<typeof FeatureFlagsSchema>;
@@ -20,50 +19,16 @@ const STORAGE_KEY = 'lotopro_feature_flags_v1';
 const SYNC_LOCAL_STORAGE_KEY = 'lotopro_flags_event_sync';
 
 /**
- * JSDoc exhaustive expliquant l'impact cybernétique et mathématique de chaque drapeau sur le moteur.
+ * JSDoc décrivant l'impact réel et vérifié du drapeau sur le moteur.
  */
 const DEFAULT_FLAGS: FeatureFlags = {
   /**
-   * @description Mode d'entraînement contradictoire cybernétique (Adversarial Mode) :
-   * Introduit des perturbations gaussiennes déterministes et continues sur l'ADN de pondération.
-   * Empêche l'ensemble d'algorithmes de sur-apprendre sur les régimes de tirages statiques.
+   * @description Mode adverse : élargit le vivier de candidats de l'orchestrateur
+   * de 10 à 15 numéros (même régime que l'application du shrinkage), ce qui durcit
+   * la sélection finale en imposant à la combinaison gagnante de surpasser un
+   * vivier plus large. Paramètre de la clé de cache déterministe du pipeline.
    */
   adversarialMode: false,
-
-  /**
-   * @description Rétropropagation de gradient sur l'ADN de pondération (DNA Backpropagation) :
-   * Optimise continuellement les poids des algorithmes d'une itération à l'autre en calculant
-   * les gradients de l'erreur quadratique moyenne par rapport aux résultats réels.
-   */
-  dnaBackpropagation: true,
-
-  /**
-   * @description Débruitage par état quantique (Quantum State Denoising) :
-   * Applique une réduction dimensionnelle via PCA Probabiliste (PPCA) sur la matrice
-   * d'affinité pour isoler les composantes de bruit de haute variance non-physiques.
-   */
-  quantumStateDenoising: false,
-
-  /**
-   * @description Filtrage d'énergie spectrale de Fourier (Spectral Denoising) :
-   * Effectue une transformée de Fourier discrète sur les écarts et tronque les fréquences
-   * ayant une densité d'énergie inférieure au seuil dérivé de l'entropie de Shannon globale.
-   */
-  spectralDenoising: true,
-
-  /**
-   * @description Auto-calibration par filtre Kalman récursif (Kalman Auto-Calibration) :
-   * Estime récursivement l'état latent de dérive des boules physiques en minimisant
-   * la variance de l'erreur d'innovation à chaque nouveau tirage inséré.
-   */
-  kalmanAutoCalibration: true,
-
-  /**
-   * @description Réduction bayésienne sur précision empirique (Bayesian Shrinkage) :
-   * Réduit les estimations de fréquences marginales locales vers l'a priori global uniforme
-   * en fonction du nombre de tirages disponibles pour stabiliser les prédictions court-terme.
-   */
-  bayesianShrinkage: true,
 };
 
 // Cache mémoire synchrone pour les opérations non asynchrones à l'initialisation

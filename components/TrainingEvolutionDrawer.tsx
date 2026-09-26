@@ -22,7 +22,7 @@ import {
 import { supabase, isSupabaseConfigured } from "../services/supabaseClient";
 
 export interface WeightHistoryEntry {
-  timestamp?: number | string;
+  timestamp?: number;
   created_at?: string;
   score?: number;
   fitness?: number;
@@ -30,8 +30,23 @@ export interface WeightHistoryEntry {
   improvement_delta?: number | string;
   weights?: Record<string, number>;
   applied_weights?: Record<string, number>;
-  source?: "supabase" | "local";
+  source?: "supabase" | "local" | "forensic" | "training";
 }
+
+/**
+ * Conversion d'un horodatage réel (epoch ms numérique ou chaîne ISO 8601) en epoch ms.
+ * Retourne null si la donnée est absente : aucune chronologie n'est jamais inventée.
+ */
+const toEpochMs = (value: unknown): number | null => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const asNumber = Number(value);
+    if (Number.isFinite(asNumber)) return asNumber;
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
 
 export const TrainingEvolutionDrawer: React.FC<{
   isOpen: boolean;
@@ -56,20 +71,23 @@ export const TrainingEvolutionDrawer: React.FC<{
         const lineage = await getModelEvolutionLineage(drawName);
         if (lineage && lineage.history && Array.isArray(lineage.history)) {
           lineage.history.forEach((rec) => {
+            const ts = toEpochMs(rec.timestamp);
+            if (ts === null) return;
             const fit = Number(rec.performance?.score) || 0;
             entries.push({
               created_at: rec.timestamp,
-              timestamp: new Date(rec.timestamp).getTime(),
+              timestamp: ts,
               score: fit,
               fitness: fit,
               relativeGain: rec.performance?.relativeGain || 0,
               weights: rec.weights || {},
               applied_weights: rec.weights || {},
-              source: rec.origin === "FORENSIC_AUTOPSY"
-                ? "forensic" as any
-                : rec.origin === "GENETIC_EVOLUTION"
-                ? "training" as any
-                : "local",
+              source:
+                rec.origin === "FORENSIC_AUTOPSY"
+                  ? "forensic"
+                  : rec.origin === "GENETIC_EVOLUTION"
+                    ? "training"
+                    : "local",
             });
           });
         }
@@ -88,6 +106,8 @@ export const TrainingEvolutionDrawer: React.FC<{
 
           if (!logsError && logs) {
             logs.forEach((item: any) => {
+              const ts = toEpochMs(item.created_at);
+              if (ts === null) return;
               const weights = item.applied_weights || {};
               const fit = Number(item.new_fitness) || 0;
               const prevFit = Number(item.previous_fitness) || 0;
@@ -95,7 +115,7 @@ export const TrainingEvolutionDrawer: React.FC<{
 
               entries.push({
                 created_at: item.created_at,
-                timestamp: new Date(item.created_at).getTime(),
+                timestamp: ts,
                 score: fit,
                 fitness: fit,
                 relativeGain: gain,
@@ -115,17 +135,18 @@ export const TrainingEvolutionDrawer: React.FC<{
           if (!sessionsError && sessions) {
             sessions.forEach((s: any) => {
               const sData = s.session_data || {};
-              if (sData.bestGenome) {
-                entries.push({
-                  created_at: s.created_at,
-                  timestamp: s.timestamp || new Date(s.created_at).getTime(),
-                  score: sData.bestFitness || sData.score || 0,
-                  fitness: sData.bestFitness || sData.score || 0,
-                  relativeGain: sData.improvement || 0,
-                  weights: sData.bestGenome,
-                  source: "supabase",
-                });
-              }
+              if (!sData.bestGenome) return;
+              const ts = toEpochMs(s.timestamp) ?? toEpochMs(s.created_at);
+              if (ts === null) return;
+              entries.push({
+                created_at: s.created_at,
+                timestamp: ts,
+                score: sData.bestFitness || sData.score || 0,
+                fitness: sData.bestFitness || sData.score || 0,
+                relativeGain: sData.improvement || 0,
+                weights: sData.bestGenome,
+                source: "supabase",
+              });
             });
           }
         } catch (e) {
@@ -142,10 +163,13 @@ export const TrainingEvolutionDrawer: React.FC<{
           if (localData) {
             const parsed = JSON.parse(localData);
             if (Array.isArray(parsed)) {
-              parsed.forEach((h: any, idx: number) => {
+              // Sans horodatage réel, une entrée ne peut pas être placée sur l'axe
+              // chronologique : elle est exclue plutôt que datée fictivement.
+              parsed.forEach((h: any) => {
+                const ts = toEpochMs(h.timestamp);
+                if (ts === null) return;
                 entries.push({
-                  timestamp:
-                    h.timestamp || Date.now() - (parsed.length - idx) * 3600000,
+                  timestamp: ts,
                   score: Number(h.score) || Number(h.fitness) || 0,
                   fitness: Number(h.fitness) || Number(h.score) || 0,
                   relativeGain: Number(h.relativeGain) || 0,
@@ -201,23 +225,28 @@ export const TrainingEvolutionDrawer: React.FC<{
       source: h.source || "local",
     };
 
-    // Extract weights normalized to 0-100%
+    // Extract weights normalized to 0-100%. Un poids absent ou non numérique
+    // laisse la clé absente (trou dans la courbe) plutôt qu'un faux 0 %.
     const weightsObj = h.weights || h.applied_weights || {};
     Object.keys(weightsObj).forEach((k) => {
-      const val = weightsObj[k];
-      base[k] = typeof val === "number" ? Number((val * 100).toFixed(1)) : 0;
+      const val = Number(weightsObj[k]);
+      if (Number.isFinite(val)) {
+        base[k] = Number((val * 100).toFixed(1));
+      }
     });
 
     return base;
   });
 
-  // Extract all unique algorithm keys present across the history entries
+  // Extract all unique algorithm keys that carry at least one measurable weight
   const allAlgoKeysSet = new Set<string>();
   const safeHistory = Array.isArray(history) ? history : [];
   safeHistory.forEach((h) => {
     if (!h) return;
     const w = h.weights || h.applied_weights || {};
-    Object.keys(w).forEach((k) => allAlgoKeysSet.add(k));
+    Object.keys(w).forEach((k) => {
+      if (Number.isFinite(Number(w[k]))) allAlgoKeysSet.add(k);
+    });
   });
   const availableAlgos = Array.from(allAlgoKeysSet);
 
