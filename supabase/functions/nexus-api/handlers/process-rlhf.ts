@@ -44,7 +44,7 @@ export async function handleProcessRlhf(req: Request, reqBody?: any): Promise<Re
         })
     }
 
-    const body = await req.json()
+    const body = reqBody || await req.json().catch(() => ({}));
     const validation = RLHFRequestSchema.safeParse(body);
 
     if (!validation.success) {

@@ -22,11 +22,19 @@ export async function handlePaymentWebhook(req: Request, reqBody?: any): Promise
     )
 
     // CinetPay sends data via POST as FormData
-    const formData = await req.formData()
-    const rawData: Record<string, any> = {};
-    formData.forEach((value, key) => {
+    let rawData: Record<string, any> = {};
+    if (reqBody && typeof (reqBody as any).forEach === "function") {
+      (reqBody as FormData).forEach((value, key) => {
         rawData[key] = value;
-    });
+      });
+    } else if (reqBody && typeof reqBody === "object") {
+      rawData = reqBody;
+    } else {
+      const formData = await req.formData().catch(() => new FormData());
+      formData.forEach((value, key) => {
+        rawData[key] = value;
+      });
+    }
 
     const validation = CinetPayWebhookSchema.safeParse(rawData);
     if (!validation.success) {

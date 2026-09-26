@@ -8,7 +8,8 @@ export async function handleGenerateForensicReport(req: Request, reqBody?: any):
   }
 
   try {
-    const { prediction, actualDraw, drawName } = await req.json();
+    const body = reqBody || await req.json().catch(() => ({}));
+    const { prediction, actualDraw, drawName } = body;
 
     if (!prediction || !actualDraw || !drawName) {
       return new Response(JSON.stringify({ error: "Missing required parameters: prediction, actualDraw, drawName" }), {

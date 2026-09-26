@@ -8,7 +8,8 @@ export async function handleOptimizeWeights(req: Request, reqBody?: any): Promis
   }
 
   try {
-    const { history: reqHistory, currentWeights: reqWeights, rlSignal, drawName } = await req.json();
+    const body = reqBody || await req.json().catch(() => ({}));
+    const { history: reqHistory, currentWeights: reqWeights, rlSignal, drawName } = body;
 
     if (!drawName) {
       return new Response(JSON.stringify({ error: "Missing drawName parameter" }), {
