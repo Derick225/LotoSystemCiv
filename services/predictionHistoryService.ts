@@ -361,14 +361,15 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
     
     enrichedMetrics.app_version = "v12.0";
     
+    // Prior bayésien uniforme si non fourni : entropie normalisée maximale (1.0) et marche brownienne neutre (H = 0.5)
     const currentEntropy = metrics?.statisticalBounds?.shannonEntropy !== undefined
         ? metrics.statisticalBounds.shannonEntropy
-        : 0.5; // Fallback
+        : 1.0; // Entropie d'information maximale uniforme (Hypothèse nulle d'entropie)
         
     enrichedMetrics.shannon_entropy = currentEntropy;
     enrichedMetrics.hurst_exponent = metrics?.statisticalBounds?.hurstExponent !== undefined
         ? metrics.statisticalBounds.hurstExponent
-        : 0.5; // Fallback
+        : 0.5; // Marche brownienne standard neutre (Hypothèse nulle H = 0.5)
         
     enrichedMetrics.fft_spectral_metrics = metrics?.spectral || [];
     

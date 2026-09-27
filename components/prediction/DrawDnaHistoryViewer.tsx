@@ -19,6 +19,7 @@ import {
   ArrowRight,
   Fingerprint,
   Layers,
+  ChevronLeft,
   ChevronRight,
   Info,
 } from "lucide-react";
@@ -120,14 +121,25 @@ export const DrawDnaHistoryViewer: React.FC<DrawDnaHistoryViewerProps> = ({
     );
   }, [selectedDraw, dnaLogs]);
 
-  // Filtered draw history list for navigation sidebar
-  const filteredDraws = useMemo(() => {
-    if (!filterText.trim()) return cleanHistory.slice(0, 30);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 15;
+
+  // Filtered draw history list for navigation sidebar (sans tronquage arbitraire)
+  const allFilteredDraws = useMemo(() => {
+    if (!filterText.trim()) return cleanHistory;
     const q = filterText.toLowerCase();
-    return cleanHistory
-      .filter((d) => d.date.includes(q) || d.gagnants.some((g) => g.toString() === q))
-      .slice(0, 30);
+    return cleanHistory.filter(
+      (d) => d.date.includes(q) || d.gagnants.some((g) => g.toString() === q)
+    );
   }, [cleanHistory, filterText]);
+
+  const totalPages = Math.max(1, Math.ceil(allFilteredDraws.length / itemsPerPage));
+  const safePage = Math.min(currentPage, totalPages);
+
+  const paginatedDraws = useMemo(() => {
+    const start = (safePage - 1) * itemsPerPage;
+    return allFilteredDraws.slice(start, start + itemsPerPage);
+  }, [allFilteredDraws, safePage, itemsPerPage]);
 
   const activeAttr = selectedNumber ? attributions[selectedNumber] : null;
 
@@ -243,8 +255,8 @@ export const DrawDnaHistoryViewer: React.FC<DrawDnaHistoryViewerProps> = ({
             </div>
 
             {/* Liste des Tirages Scrollable */}
-            <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-              {filteredDraws.map((draw, idx) => {
+            <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+              {paginatedDraws.map((draw, idx) => {
                 const realIndex = cleanHistory.findIndex((d) => d.id === draw.id);
                 const isSelected = realIndex === selectedDrawIndex;
                 const seq = cleanHistory.length - realIndex;
@@ -289,6 +301,35 @@ export const DrawDnaHistoryViewer: React.FC<DrawDnaHistoryViewerProps> = ({
                 );
               })}
             </div>
+
+            {/* Pagination déterministe */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+                <button
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setCurrentPage((p) => Math.max(1, p - 1));
+                  }}
+                  disabled={safePage <= 1}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer text-slate-300"
+                >
+                  <ChevronLeft size={12} /> Préc.
+                </button>
+                <span className="font-mono text-xs text-slate-300">
+                  Page {safePage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  }}
+                  disabled={safePage >= totalPages}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1 cursor-pointer text-slate-300"
+                >
+                  Suiv. <ChevronRight size={12} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

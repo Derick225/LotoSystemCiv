@@ -63,22 +63,21 @@ export const StorageOptimizationModal: React.FC<StorageOptimizationModalProps> =
     }
   }, [isOpen, loadAudit]);
 
+  const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
+
   if (!isOpen) return null;
 
-  const handlePurgeSimulations = async () => {
+  const handlePurgeSimulations = () => {
     if (!audit || audit.exploratorySimulationsCount === 0) {
       showToast("Aucune simulation exploratoire à purger.", "info");
       return;
     }
+    setShowPurgeConfirm(true);
+  };
 
-    if (
-      !window.confirm(
-        `Purger ${audit.exploratorySimulationsCount} simulation(s) exploratoire(s) ?\n` +
-        `Vos prédictions réelles enregistrées seront 100% conservées.`
-      )
-    ) {
-      return;
-    }
+  const executePurgeSimulations = async () => {
+    setShowPurgeConfirm(false);
+    if (!audit || audit.exploratorySimulationsCount === 0) return;
 
     try {
       setIsProcessing(true);
@@ -399,6 +398,37 @@ export const StorageOptimizationModal: React.FC<StorageOptimizationModalProps> =
           </button>
         </div>
       </div>
+
+      {showPurgeConfirm && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowPurgeConfirm(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <AlertTriangle size={20} />
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">Purger les simulations</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Purger {audit?.exploratorySimulationsCount || 0} simulation(s) exploratoire(s) ?<br />
+              Vos prédictions réelles enregistrées seront 100% conservées.
+            </p>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowPurgeConfirm(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={executePurgeSimulations}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95"
+              >
+                Purger
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

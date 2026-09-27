@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
-  runNeuralSelfOptimization,
+  runNeuralSelfOptimizationAsync,
   NeuralOptimizationResult,
   NeuralHyperparameters,
   DEFAULT_NEURAL_HYPERPARAMS,
@@ -56,11 +56,17 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
     DEFAULT_NEURAL_HYPERPARAMS
   );
   const [isTraining, setIsTraining] = useState(false);
+  const [epochProgress, setEpochProgress] = useState<{
+    epoch: number;
+    totalEpochs: number;
+    currentLoss: number;
+    currentAccDelta: number;
+  } | null>(null);
   const [optimizationResult, setOptimizationResult] =
     useState<NeuralOptimizationResult | null>(null);
 
-  // Lancement de la rétropropagation neurale
-  const handleRunBackprop = () => {
+  // Lancement de la rétropropagation neurale asynchrone non-bloquante
+  const handleRunBackprop = async () => {
     try {
       audioEngine.play("click");
     } catch (err) {
@@ -68,33 +74,40 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
     }
 
     setIsTraining(true);
+    setEpochProgress({
+      epoch: 1,
+      totalEpochs: hyperparams.epochs,
+      currentLoss: 0,
+      currentAccDelta: 0,
+    });
 
-    // Timeout court pour laisser le thread UI afficher le spinner
-    setTimeout(() => {
-      try {
-        const result = runNeuralSelfOptimization(
-          drawName,
-          history,
-          globalWeights,
-          hyperparams
-        );
-        setOptimizationResult(result);
-        try {
-          audioEngine.play("success");
-        } catch (err) {
-          logger.debug({ err }, "Audio error non-bloquant");
+    try {
+      const result = await runNeuralSelfOptimizationAsync(
+        drawName,
+        history,
+        globalWeights,
+        hyperparams,
+        (epoch, totalEpochs, currentLoss, currentAccDelta) => {
+          setEpochProgress({ epoch, totalEpochs, currentLoss, currentAccDelta });
         }
-        showToast(
-          `Rétropropagation terminée : perte réduite de ${result.lossReductionPct}% (Gain précision : +${result.accuracyGain}%).`,
-          "success"
-        );
+      );
+      setOptimizationResult(result);
+      try {
+        audioEngine.play("success");
       } catch (err) {
-        console.error("Neural Optimization Error:", err);
-        showToast("Erreur lors de la rétropropagation neurale.", "error");
-      } finally {
-        setIsTraining(false);
+        logger.debug({ err }, "Audio error non-bloquant");
       }
-    }, 100);
+      showToast(
+        `Rétropropagation terminée : perte réduite de ${result.lossReductionPct}% (Gain précision : +${result.accuracyGain}%).`,
+        "success"
+      );
+    } catch (err) {
+      console.error("Neural Optimization Error:", err);
+      showToast("Erreur lors de la rétropropagation neurale.", "error");
+    } finally {
+      setIsTraining(false);
+      setEpochProgress(null);
+    }
   };
 
   // Application des poids optimisés au store
@@ -197,6 +210,32 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
             )}
           </div>
         </div>
+
+        {/* BARRE DE PROGRESSION EN DIRECT PAR ÉPOQUE */}
+        {isTraining && epochProgress && (
+          <div className="mt-4 p-3 bg-slate-950/80 rounded-2xl border border-cyan-500/30 space-y-2 animate-fade-in">
+            <div className="flex justify-between items-center text-xs">
+              <span className="font-bold text-cyan-400 flex items-center gap-1.5">
+                <Cpu size={14} className="animate-spin text-cyan-300" />
+                Époque {epochProgress.epoch} / {epochProgress.totalEpochs}
+              </span>
+              <span className="font-mono text-slate-300 text-[11px]">
+                Perte : {epochProgress.currentLoss > 0 ? epochProgress.currentLoss.toFixed(4) : "Calcul..."} | ΔPrécision :{" "}
+                {epochProgress.currentAccDelta >= 0
+                  ? `+${epochProgress.currentAccDelta.toFixed(1)}%`
+                  : `${epochProgress.currentAccDelta.toFixed(1)}%`}
+              </span>
+            </div>
+            <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-cyan-500 to-indigo-500 h-full transition-all duration-150"
+                style={{
+                  width: `${Math.round((epochProgress.epoch / epochProgress.totalEpochs) * 100)}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* CONTRÔLE DES HYPERPARAMÈTRES NEURAUX */}
         <div className="mt-6 pt-4 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

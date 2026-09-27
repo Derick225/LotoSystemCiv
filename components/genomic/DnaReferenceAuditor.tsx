@@ -39,6 +39,7 @@ export const DnaReferenceAuditor: React.FC<{
   const [report, setReport] = useState<DnaAuditReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [syncing, setSyncing] = useState<boolean>(false);
+  const [showConfirmSync, setShowConfirmSync] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
 
@@ -204,7 +205,13 @@ export const DnaReferenceAuditor: React.FC<{
 
             <button
               id="sync-all-dna-btn"
-              onClick={handleSynchronizeAll}
+              onClick={() => {
+                if (report && !report.isFullySynchronized) {
+                  setShowConfirmSync(true);
+                } else {
+                  handleSynchronizeAll();
+                }
+              }}
               disabled={syncing || loading}
               className={`px-6 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2.5 shadow-xl transition-all active:scale-95 text-white ${
                 report?.isFullySynchronized
@@ -440,6 +447,60 @@ export const DnaReferenceAuditor: React.FC<{
           <p className="text-sm font-bold text-slate-400">
             Aucun algorithme ne correspond aux critères de filtre.
           </p>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMATION DE SYNCHRONISATION ADN */}
+      {showConfirmSync && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in p-4"
+          onClick={() => setShowConfirmSync(false)}
+        >
+          <div
+            className="bg-slate-900 border border-indigo-500/40 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl space-y-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <span className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                <Dna size={22} />
+              </span>
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                  Synchronisation ADN
+                </h3>
+                <span className="text-[11px] font-mono text-indigo-300">
+                  {drawName}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Cette action va aligner les poids de l'ensemble des{" "}
+              <strong className="text-white">
+                {report?.driftedAlgorithmsCount ?? 0} algorithme(s) en dérive
+              </strong>{" "}
+              sur l'ADN canonique normalisé du tirage actif, portant la cohérence
+              systémique à 100%.
+            </p>
+
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowConfirmSync(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmSync(false);
+                  handleSynchronizeAll();
+                }}
+                className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95"
+              >
+                Synchroniser Tout
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -439,3 +439,258 @@ export const runNeuralSelfOptimization = (
     convergenceStatus: lossReductionPct > 5 ? 'CONVERGED' : 'PLATEAU',
   };
 };
+
+/**
+ * Version asynchrone non-bloquante avec notification progressive de chaque époque
+ * pour une fluidité UI maximale sur les grands historiques.
+ */
+export const runNeuralSelfOptimizationAsync = async (
+  drawName: string,
+  history: DrawResult[],
+  initialWeights: AlgoWeights,
+  params: Partial<NeuralHyperparameters> = {},
+  onEpochProgress?: (epoch: number, totalEpochs: number, currentLoss: number, currentAccDelta: number) => void
+): Promise<NeuralOptimizationResult> => {
+  const startTime = Date.now();
+  const hyperparams: NeuralHyperparameters = { ...DEFAULT_NEURAL_HYPERPARAMS, ...params };
+  const pureHistory = purifyHistoryForDraw<DrawResult>(drawName, history);
+  
+  const validKeys = Object.values(AlgoKey);
+  const numAlgos = validKeys.length;
+  const proofMap = evaluateAlgoEmpiricalProof(drawName, pureHistory);
+
+  const batchDepth = Math.min(hyperparams.batchDepth, Math.max(5, pureHistory.length - 1));
+  const trainingBatch = pureHistory.slice(0, batchDepth);
+
+  const featureTensors: Array<{
+    targetGagnants: Set<number>;
+    features: Record<number, Record<AlgoKey, number>>;
+  }> = [];
+
+  for (let t = 0; t < trainingBatch.length; t++) {
+    const targetDraw = trainingBatch[t];
+    const pastSubset = pureHistory.slice(t + 1);
+    if (pastSubset.length < 3) continue;
+
+    const featuresByBall = computeFastHistoricalFeatures(pastSubset, validKeys);
+    const targetGagnants = new Set<number>(targetDraw.gagnants || []);
+
+    featureTensors.push({
+      targetGagnants,
+      features: featuresByBall,
+    });
+  }
+
+  const effectiveBatchSize = featureTensors.length;
+  if (effectiveBatchSize === 0) {
+    return runNeuralSelfOptimization(drawName, history, initialWeights, params);
+  }
+
+  const currentW: Record<AlgoKey, number> = { ...initialWeights };
+  const momentumV: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  validKeys.forEach((k) => { momentumV[k] = 0; });
+
+  const epochHistory: NeuralEpochLog[] = [];
+  let initialLoss = 0;
+  let finalLoss = 0;
+
+  const computeAccuracy = (w: Record<AlgoKey, number>): number => {
+    let totalHits = 0;
+    let totalDraws = 0;
+
+    featureTensors.forEach(({ targetGagnants, features }) => {
+      const scores = new Float64Array(91);
+      for (let b = 1; b <= 90; b++) {
+        let s = 0;
+        validKeys.forEach((k) => {
+          s += (w[k] || 0) * (features[b]?.[k] || 0);
+        });
+        scores[b] = s;
+      }
+
+      const top5 = Array.from({ length: 90 }, (_, i) => i + 1)
+        .sort((a, b) => scores[b] - scores[a])
+        .slice(0, 5);
+
+      const hits = top5.filter((n) => targetGagnants.has(n)).length;
+      totalHits += hits;
+      totalDraws++;
+    });
+
+    return totalDraws > 0 ? (totalHits / (totalDraws * 5)) * 100 : 0;
+  };
+
+  const initialAccuracy = computeAccuracy(currentW);
+  const maxEpochs = hyperparams.epochs;
+  let lastGradients: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+
+  for (let ep = 0; ep < maxEpochs; ep++) {
+    const gradients: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+    validKeys.forEach((k) => { gradients[k] = 0; });
+
+    let epochLoss = 0;
+    let epochEntropySum = 0;
+
+    for (let t = 0; t < effectiveBatchSize; t++) {
+      const { targetGagnants, features } = featureTensors[t];
+      
+      const logits = new Float64Array(91);
+      let maxLogit = -Infinity;
+      for (let b = 1; b <= 90; b++) {
+        let s = 0;
+        validKeys.forEach((k) => {
+          s += currentW[k] * (features[b]?.[k] || 0);
+        });
+        logits[b] = s;
+        if (s > maxLogit) maxLogit = s;
+      }
+
+      const probs = new Float64Array(91);
+      let sumExp = 0;
+      for (let b = 1; b <= 90; b++) {
+        probs[b] = Math.exp(Math.min(30, Math.max(-30, logits[b] - maxLogit)));
+        sumExp += probs[b];
+      }
+
+      for (let b = 1; b <= 90; b++) {
+        probs[b] /= (sumExp || 1);
+        if (probs[b] > 0) {
+          epochEntropySum -= probs[b] * Math.log2(probs[b]);
+        }
+      }
+
+      const targetCount = targetGagnants.size || 5;
+      targetGagnants.forEach((winningBall) => {
+        if (winningBall >= 1 && winningBall <= 90) {
+          epochLoss -= Math.log(Math.max(1e-9, probs[winningBall]));
+        }
+      });
+
+      for (let b = 1; b <= 90; b++) {
+        const y_b = targetGagnants.has(b) ? (1.0 / targetCount) : 0.0;
+        const error_b = probs[b] - y_b;
+
+        validKeys.forEach((k) => {
+          gradients[k] += error_b * (features[b]?.[k] || 0);
+        });
+      }
+    }
+
+    let gradNormSq = 0;
+    validKeys.forEach((k) => {
+      gradients[k] = (gradients[k] / effectiveBatchSize) + (hyperparams.l2Regularization * currentW[k]);
+      gradNormSq += gradients[k] * gradients[k];
+    });
+
+    const gradNorm = Math.sqrt(gradNormSq);
+    lastGradients = { ...gradients };
+
+    const progress = ep / Math.max(1, maxEpochs - 1);
+    const dynamicLR = hyperparams.learningRate * (0.5 * (1.0 + Math.cos(Math.PI * progress)));
+
+    validKeys.forEach((k) => {
+      momentumV[k] = (hyperparams.momentum * momentumV[k]) + ((1.0 - hyperparams.momentum) * gradients[k]);
+      
+      const proof = proofMap[k];
+      const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
+      let step = dynamicLR * momentumV[k];
+      
+      if (!hasProof && step < 0) {
+        step = 0;
+      }
+      
+      currentW[k] = Math.max(0.0001, currentW[k] - step);
+    });
+
+    const normalizedW = normalizeWeights(currentW);
+    validKeys.forEach((k) => {
+      currentW[k] = normalizedW[k];
+    });
+
+    const meanEntropy = epochEntropySum / (effectiveBatchSize * Math.log2(90));
+    const meanLoss = epochLoss / effectiveBatchSize;
+
+    if (ep === 0) initialLoss = meanLoss;
+    finalLoss = meanLoss;
+
+    const accDelta = parseFloat((computeAccuracy(currentW) - initialAccuracy).toFixed(2));
+
+    epochHistory.push({
+      epoch: ep + 1,
+      loss: parseFloat(meanLoss.toFixed(5)),
+      accuracyDelta: accDelta,
+      gradientNorm: parseFloat(gradNorm.toFixed(5)),
+      learningRate: parseFloat(dynamicLR.toFixed(5)),
+      meanEntropy: parseFloat(meanEntropy.toFixed(4)),
+    });
+
+    if (onEpochProgress) {
+      onEpochProgress(ep + 1, maxEpochs, meanLoss, accDelta);
+      // Fluidité UI : libérer le micro-task thread
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  const finalAccuracy = computeAccuracy(currentW);
+  const optimizedWeights = normalizeWeights(currentW);
+  const duration = Date.now() - startTime;
+
+  const algoGradients: AlgoNeuralGradientInfo[] = validKeys.map((algoKey) => {
+    const label = LABELS_MAP[algoKey] || algoKey;
+    const category = getCategoryName(algoKey);
+    const initW = initialWeights[algoKey] || (1.0 / numAlgos);
+    const optW = optimizedWeights[algoKey] || 0;
+    const delta = optW - initW;
+    const deltaPct = initW > 0 ? (delta / initW) * 100 : 0;
+    
+    const proof = proofMap[algoKey];
+    const proofScore = proof?.proofScore || 0;
+    const hasEmpiricalProof = Boolean(proof?.hasProof && proofScore > 0);
+    const grad = lastGradients[algoKey] || 0;
+    const mom = momentumV[algoKey] || 0;
+
+    let gatingAction: AlgoNeuralGradientInfo['gatingAction'] = 'MAINTAINED';
+    if (!hasEmpiricalProof && grad < 0) {
+      gatingAction = 'PROOF_LOCKED';
+    } else if (delta > 0.005) {
+      gatingAction = 'BOOSTED';
+    } else if (delta < -0.005) {
+      gatingAction = 'DAMPENED';
+    }
+
+    return {
+      algoKey,
+      label,
+      category,
+      initialWeight: parseFloat(initW.toFixed(5)),
+      optimizedWeight: parseFloat(optW.toFixed(5)),
+      weightDelta: parseFloat(delta.toFixed(5)),
+      weightDeltaPct: parseFloat(deltaPct.toFixed(2)),
+      gradient: parseFloat(grad.toFixed(6)),
+      momentum: parseFloat(mom.toFixed(6)),
+      hasEmpiricalProof,
+      proofScore: parseFloat(proofScore.toFixed(2)),
+      gatingAction,
+    };
+  }).sort((a, b) => b.optimizedWeight - a.optimizedWeight);
+
+  const lossReductionPct = initialLoss > 0 ? ((initialLoss - finalLoss) / initialLoss) * 100 : 0;
+
+  return {
+    drawName,
+    epochsCompleted: maxEpochs,
+    initialLoss: parseFloat(initialLoss.toFixed(5)),
+    finalLoss: parseFloat(finalLoss.toFixed(5)),
+    lossReductionPct: parseFloat(lossReductionPct.toFixed(2)),
+    initialAccuracy: parseFloat(initialAccuracy.toFixed(2)),
+    finalAccuracy: parseFloat(finalAccuracy.toFixed(2)),
+    accuracyGain: parseFloat((finalAccuracy - initialAccuracy).toFixed(2)),
+    batchSize: effectiveBatchSize,
+    initialWeights,
+    optimizedWeights,
+    algoGradients,
+    epochHistory,
+    trainingDurationMs: duration,
+    convergenceStatus: lossReductionPct > 5 ? 'CONVERGED' : 'PLATEAU',
+  };
+};

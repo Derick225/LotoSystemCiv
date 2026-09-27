@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   GitBranch,
   Target,
@@ -12,22 +12,67 @@ import {
   ArrowRight,
   ShieldCheck,
   Percent,
+  Calendar,
+  Compass,
 } from 'lucide-react';
-import { InterDrawPostMortemAudit } from '../../services/prediction/interDrawPostMortemService';
+import {
+  InterDrawPostMortemAudit,
+  auditInterDrawPatternsPostMortem,
+} from '../../services/prediction/interDrawPostMortemService';
+import { useNexusStore } from '../../store/useNexusStore';
+import { purifyHistoryForDraw } from '../../utils/arrayUtils';
+import { getInterDrawFamiliesForDraw } from '../../constants';
 
 interface InterDrawPostMortemAuditViewProps {
-  audit: InterDrawPostMortemAudit;
+  audit?: InterDrawPostMortemAudit | null;
+  drawName?: string;
 }
 
 export const InterDrawPostMortemAuditView: React.FC<InterDrawPostMortemAuditViewProps> = ({
-  audit,
+  audit: propAudit,
+  drawName: propDrawName,
 }) => {
+  const storeHistory = useNexusStore((state) => state.history);
+  const activeDrawName = useNexusStore((state) => state.drawName);
+  const drawName = propDrawName || activeDrawName;
+
+  const [selectedDrawIndex, setSelectedDrawIndex] = useState<number>(0);
   const [detailTab, setDetailTab] = useState<'pairs' | 'dyads' | 'cascades'>('pairs');
+
+  const cleanHistory = useMemo(() => {
+    return purifyHistoryForDraw(drawName, storeHistory);
+  }, [drawName, storeHistory]);
+
+  const families = useMemo(() => {
+    return getInterDrawFamiliesForDraw(drawName);
+  }, [drawName]);
+
+  const audit = useMemo(() => {
+    if (propAudit) return propAudit;
+    if (!drawName || cleanHistory.length < 2) return null;
+    return auditInterDrawPatternsPostMortem(drawName, selectedDrawIndex, storeHistory);
+  }, [propAudit, drawName, selectedDrawIndex, cleanHistory.length, storeHistory]);
+
+  if (!audit) {
+    return (
+      <div className="p-8 bg-slate-900/80 rounded-3xl border border-indigo-500/20 text-center space-y-3 font-sans">
+        <AlertCircle size={28} className="text-amber-400 mx-auto" />
+        <h4 className="text-sm font-black text-white uppercase">
+          Aucun Signal Inter-Tirages Auditable
+        </h4>
+        <p className="text-xs text-slate-400 max-w-lg mx-auto">
+          {families.length === 0
+            ? `Le tirage "${drawName}" ne fait partie d'aucune des 3 familles étanches autorisées (Famille Nationale LONACI, Famille Zénith 13H, Famille Nocturne 19H55). Aucune corrélation inter-tirages n'est calculée pour préserver l'isolation stricte.`
+            : `Historique insuffisant pour confronter les projections antérieures (${cleanHistory.length} tirages trouvés, minimum 2 requis).`}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 bg-slate-900/80 rounded-3xl border border-indigo-500/20 space-y-6 shadow-xl font-sans">
       {/* HEADER */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-white/5 pb-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/5 pb-4">
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 font-black text-[10px] rounded-lg uppercase tracking-wider">
             <GitBranch size={13} className="text-indigo-400" />
@@ -38,11 +83,28 @@ export const InterDrawPostMortemAuditView: React.FC<InterDrawPostMortemAuditView
             Audit Rétrospectif & Calibration des Signaux Inter-Tirages
           </h4>
           <p className="text-xs text-slate-400">
-            Confrontation empirique des projections probabilistes formulées à $t-1$ face aux gagnants réels du tirage ({audit.targetDrawDate}).
+            Confrontation empirique des projections probabilistes formulées à t-1 face aux gagnants réels du tirage ({audit.targetDrawDate}).
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2.5">
+          {!propAudit && cleanHistory.length > 2 && (
+            <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-white/10">
+              <Calendar size={13} className="text-slate-400" />
+              <select
+                value={selectedDrawIndex}
+                onChange={(e) => setSelectedDrawIndex(Number(e.target.value))}
+                className="bg-transparent text-white text-xs font-mono font-bold focus:outline-none cursor-pointer"
+              >
+                {cleanHistory.slice(0, Math.min(cleanHistory.length - 1, 30)).map((d, idx) => (
+                  <option key={d.id || idx} value={idx} className="bg-slate-900 text-white">
+                    Tirage {d.date || `#${idx + 1}`} ({d.gagnants?.join(', ') || ''})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 border border-emerald-800/40 px-3 py-1.5 rounded-xl font-bold">
             Efficacité Calibration : {audit.calibrationEfficiency}%
           </span>

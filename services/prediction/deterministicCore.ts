@@ -147,3 +147,32 @@ export const softmax = (logits: number[]): number[] => {
     const sum = scaled.reduce((a, b) => a + b, 0);
     return scaled.map(v => v / sum);
 };
+
+/**
+ * Fonction de Répartition Gaussienne (Normal CDF) continue et différentiable.
+ * Approximation de haute précision (Abramowitz & Stegun 7.1.26, erreur max < 1.5e-7).
+ */
+export const gaussianCDF = (x: number, mean: number = 0, stdDev: number = 1): number => {
+    const safeStd = Math.max(Number.EPSILON, stdDev);
+    const z = (x - mean) / (safeStd * Math.SQRT2);
+    const t = 1.0 / (1.0 + 0.3275911 * Math.abs(z));
+    const poly = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    const erf = 1.0 - poly * Math.exp(-z * z);
+    return 0.5 * (1.0 + (z >= 0 ? erf : -erf));
+};
+
+/**
+ * Fonction de Répartition de Cauchy continue pour modéliser les événements à queues épaisses.
+ */
+export const cauchyCDF = (x: number, x0: number = 0, gamma: number = 1): number => {
+    const safeGamma = Math.max(Number.EPSILON, gamma);
+    return 0.5 + (1 / Math.PI) * Math.atan((x - x0) / safeGamma);
+};
+
+/**
+ * Mapping continu à réponse symétrique différentiable [-1, +1].
+ */
+export const hyperbolicTangentMapping = (x: number, scale: number = 1): number => {
+    return Math.tanh(x * scale);
+};
+

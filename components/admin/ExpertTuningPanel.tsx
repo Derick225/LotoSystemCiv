@@ -367,6 +367,9 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     );
   };
 
+  const [showShiftConfirm, setShowShiftConfirm] = useState(false);
+  const [pendingShift, setPendingShift] = useState<number>(0);
+
   const handleSave = async () => {
     audioEngine.play("click");
     let weightsToSave = { ...localWeights };
@@ -381,15 +384,16 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
 
     if (totalShift > 0.25) {
       // 25% global shift is a "drastic" re-calibration
-      const confirmChange = window.confirm(
-        `[Garde-fous Réglementaire] Changement structurel massif détecté (Dérive: ${(totalShift * 100).toFixed(1)}%). Voulez-vous vraiment écraser la matrice originelle ? Un audit de cette mutation sera enregistré.`,
-      );
-      if (!confirmChange) {
-        showToast("Mutation annulée par l'opérateur.", "info");
-        return;
-      }
+      setPendingShift(totalShift);
+      setShowShiftConfirm(true);
+      return;
     }
 
+    await executeSave(weightsToSave, totalShift);
+  };
+
+  const executeSave = async (weightsToSave: AlgoWeights, totalShift: number) => {
+    setShowShiftConfirm(false);
     // Auto-correction was removed here to prevent "instant reverts" when the user clicks save.
     // The engine normalizes weights on the fly during predictions anyway.
 
@@ -835,6 +839,39 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
           </div>
         </div>
       </div>
+
+      {showShiftConfirm && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowShiftConfirm(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <AlertTriangle size={20} />
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">[Garde-fous Réglementaire] Changement Structurel Massif</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Changement structurel massif détecté (Dérive: {(pendingShift * 100).toFixed(1)}%). Voulez-vous vraiment écraser la matrice originelle ? Un audit de cette mutation sera enregistré.
+            </p>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <button
+                onClick={() => {
+                  setShowShiftConfirm(false);
+                  showToast("Mutation annulée par l'opérateur.", "info");
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => executeSave({ ...localWeights }, pendingShift)}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-600/30 cursor-pointer active:scale-95"
+              >
+                Confirmer Mutation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -728,3 +728,122 @@ export const executeClosedLoopAutoAdjustment = async (
   };
 };
 
+export interface BatchClosedLoopAutopsyResult {
+  drawName: string;
+  batchSize: number;
+  meanCalibrationAccuracy: number;
+  meanBrierScore: number;
+  totalDirectHitsTop5: number;
+  totalDirectHitsTop10: number;
+  totalNearMisses: number;
+  aggregatedGradients: AlgoGradientBreakdown[];
+  recommendedWeights: AlgoWeights;
+  reports: ClosedLoopAutopsyReport[];
+}
+
+/**
+ * Exécute l'autopsie en boucle fermée par lots sur les K derniers tirages disponibles
+ * pour stabiliser la rétropropagation contre les fluctuations aléatoires ponctuelles.
+ * ZÉRO NOMBRE MAGIQUE : La profondeur est fonction de sqrt(N) et de l'historique disponible.
+ */
+export const executeBatchClosedLoopAutopsy = async (
+  drawName: string,
+  rawHistory: DrawResult[],
+  currentWeights: AlgoWeights,
+  requestedDepth: number = 5,
+  onProgress?: (current: number, total: number) => void
+): Promise<BatchClosedLoopAutopsyResult> => {
+  const history = purifyHistoryForDraw(drawName, rawHistory);
+  const maxPossible = Math.max(1, history.length - 2);
+  const depth = Math.min(maxPossible, Math.max(2, requestedDepth));
+
+  const reports: ClosedLoopAutopsyReport[] = [];
+  const validKeys = Object.values(AlgoKey);
+  const gradientSums: Record<string, number> = {};
+  const attributionSums: Record<string, number> = {};
+  validKeys.forEach((k) => {
+    gradientSums[k] = 0;
+    attributionSums[k] = 0;
+  });
+
+  let sumCalibration = 0;
+  let sumBrier = 0;
+  let totalHitsTop5 = 0;
+  let totalHitsTop10 = 0;
+  let totalNearMisses = 0;
+
+  for (let i = 0; i < depth; i++) {
+    onProgress?.(i + 1, depth);
+    try {
+      const rep = await executeClosedLoopAutopsy(drawName, i, rawHistory, currentWeights);
+      reports.push(rep);
+
+      sumCalibration += rep.calibrationAccuracy;
+      sumBrier += rep.brierScore;
+      totalHitsTop5 += rep.directHitsTop5.length;
+      totalHitsTop10 += rep.directHitsTop10.length;
+      totalNearMisses += rep.nearMisses.length;
+
+      rep.algoGradients.forEach((g) => {
+        gradientSums[g.key] = (gradientSums[g.key] || 0) + g.gradient;
+        attributionSums[g.key] = (attributionSums[g.key] || 0) + g.attributionToWinners;
+      });
+    } catch (e) {
+      console.warn(`[Batch Autopsy] Tirage ${i} ignoré :`, e);
+    }
+  }
+
+  const effectiveCount = Math.max(1, reports.length);
+  const meanCalibration = sumCalibration / effectiveCount;
+  const meanBrier = sumBrier / effectiveCount;
+
+  // Calcul des gradients moyens et des nouveaux poids proposés
+  const rawUpdatedWeights: Record<string, number> = {};
+  const currentNormalized = normalizeWeights(currentWeights);
+  const meanLearningRate = reports.reduce((acc, r) => acc + r.learningRate, 0) / effectiveCount;
+
+  const aggregatedGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
+    const meanGrad = (gradientSums[key] || 0) / effectiveCount;
+    const meanAttr = (attributionSums[key] || 0) / effectiveCount;
+    const currentW = currentNormalized[key] || (1.0 / validKeys.length);
+
+    // Softmax update régularisé
+    const newWeight = currentW * Math.exp(-meanLearningRate * meanGrad * 3.0);
+    rawUpdatedWeights[key] = newWeight;
+
+    return {
+      key,
+      label: LABELS_MAP[key] || key,
+      currentWeight: currentW,
+      gradient: parseFloat(meanGrad.toFixed(4)),
+      predictedScoreSum: 0,
+      attributionToWinners: parseFloat(meanAttr.toFixed(4)),
+      recommendedWeight: newWeight,
+      deltaPercent: 0,
+    };
+  });
+
+  const recommendedWeights = normalizeWeights(rawUpdatedWeights as AlgoWeights);
+
+  aggregatedGradients.forEach((g) => {
+    g.recommendedWeight = recommendedWeights[g.key] || (1.0 / validKeys.length);
+    g.deltaPercent = parseFloat((((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100).toFixed(1));
+  });
+
+  aggregatedGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
+
+  return {
+    drawName,
+    batchSize: effectiveCount,
+    meanCalibrationAccuracy: parseFloat(meanCalibration.toFixed(1)),
+    meanBrierScore: parseFloat(meanBrier.toFixed(4)),
+    totalDirectHitsTop5: totalHitsTop5,
+    totalDirectHitsTop10: totalHitsTop10,
+    totalNearMisses,
+    aggregatedGradients,
+    recommendedWeights,
+    reports,
+  };
+};
+
+

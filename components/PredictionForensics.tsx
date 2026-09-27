@@ -42,14 +42,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
   const history = useNexusStore((state) => state.history);
   const [isApplyingAdjustments, setIsApplyingAdjustments] = useState(false);
   const [adjustmentsApplied, setAdjustmentsApplied] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleDeleteReport = async () => {
-    if (
-      !window.confirm(
-        "Êtes-vous sûr de vouloir supprimer définitivement ce rapport d'autopsie forensique ?",
-      )
-    )
-      return;
+  const confirmDeleteReport = async () => {
     try {
       audioEngine.play("click");
       await deleteForensicReportLocal(report.id, report.predictionId);
@@ -58,11 +53,17 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
       if (onDelete) {
         onDelete(report.id);
       }
+      setShowDeleteConfirm(false);
       onClose();
     } catch (error) {
       logError(error, { action: "delete_report_failed" });
       showToast("Erreur lors de la suppression du rapport", "error");
     }
+  };
+
+  const handleDeleteReport = () => {
+    audioEngine.play("click");
+    setShowDeleteConfirm(true);
   };
 
   const isHit = (n: number) => {
@@ -496,6 +497,36 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
           </div>
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowDeleteConfirm(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400">
+                <AlertTriangle size={20} />
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">Suppression Définitive</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Êtes-vous sûr de vouloir supprimer définitivement ce rapport d'autopsie forensique ? Cette action est irréversible.
+            </p>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmDeleteReport}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95"
+              >
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

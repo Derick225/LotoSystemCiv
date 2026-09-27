@@ -102,10 +102,12 @@ export const calculateStochasticEntropyForensics = (
       });
     }
 
-    const wFreq = globalWeights[AlgoKey.FREQUENCY] ?? 0.15;
-    const wGaps = globalWeights[AlgoKey.GAPS] ?? 0.12;
-    const wMarkov = globalWeights[AlgoKey.MARKOV] ?? 0.10;
-    const wAffinity = globalWeights[AlgoKey.AFFINITY] ?? 0.08;
+    const totalAlgoKeys = Object.keys(globalWeights).length || 1;
+    const uniformFallback = 1.0 / totalAlgoKeys;
+    const wFreq = globalWeights[AlgoKey.FREQUENCY] ?? uniformFallback;
+    const wGaps = globalWeights[AlgoKey.GAPS] ?? uniformFallback;
+    const wMarkov = globalWeights[AlgoKey.MARKOV] ?? uniformFallback;
+    const wAffinity = globalWeights[AlgoKey.AFFINITY] ?? uniformFallback;
 
     for (let i = 1; i <= 90; i++) {
       const fNorm = freq[i] / numPast;

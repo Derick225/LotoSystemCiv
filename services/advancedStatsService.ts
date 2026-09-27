@@ -1,6 +1,7 @@
 import { DrawResult } from '../types';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { gaussianCDF } from './prediction/deterministicCore';
 
 export interface NumberFrequencyStat {
   number: number;
@@ -9,6 +10,8 @@ export interface NumberFrequencyStat {
   expectedCount: number;
   zScore: number;
   regime: 'Chaud' | 'Froid' | 'Neutre';
+  thermalIndex: number;
+  pValue: number;
 }
 
 export interface PairStat {
@@ -94,13 +97,18 @@ export const advancedStatsService = {
         if (zScore > 1.0) regime = 'Chaud';
         else if (zScore < -1.0) regime = 'Froid';
 
+        const thermalIndex = Number(Math.tanh(zScore).toFixed(4));
+        const pValue = Number((2 * (1 - gaussianCDF(Math.abs(zScore), 0, 1))).toFixed(4));
+
         frequencies.push({
           number: num,
           count,
           percentage: Number(percentage.toFixed(2)),
           expectedCount: Number(expectedSingle.toFixed(2)),
           zScore: Number(zScore.toFixed(3)),
-          regime
+          regime,
+          thermalIndex,
+          pValue,
         });
       }
       frequencies.sort((a, b) => b.count - a.count);

@@ -3,8 +3,10 @@ import { useNexusStore } from "../store/useNexusStore";
 import {
   executeClosedLoopAutopsy,
   executeClosedLoopAutoAdjustment,
+  executeBatchClosedLoopAutopsy,
   ClosedLoopAutopsyReport,
   ClosedLoopAutoAdjustmentResult,
+  BatchClosedLoopAutopsyResult,
 } from "../services/prediction/closedLoopAutopsyService";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useToast } from "./ui/Toast";
@@ -55,6 +57,9 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
   const [isApplying, setIsApplying] = useState<boolean>(false);
   const [applied, setApplied] = useState<boolean>(false);
   const [lastAdjustmentResult, setLastAdjustmentResult] = useState<ClosedLoopAutoAdjustmentResult | null>(null);
+  const [batchResult, setBatchResult] = useState<BatchClosedLoopAutopsyResult | null>(null);
+  const [isBatchRunning, setIsBatchRunning] = useState<boolean>(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Filtrage strict par tirage (Tirage Isolation)
   const drawHistory = useMemo(() => {
@@ -77,6 +82,49 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       showToast(e.message || "Erreur lors de l'autopsie en boucle fermée", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRunBatchAutopsy = async () => {
+    if (drawHistory.length < 3) return;
+    try {
+      setIsBatchRunning(true);
+      audioEngine.play("scan");
+      const targetDepth = Math.min(drawHistory.length - 2, Math.max(3, Math.ceil(Math.sqrt(drawHistory.length))));
+      setBatchProgress({ current: 1, total: targetDepth });
+
+      const res = await executeBatchClosedLoopAutopsy(
+        drawName,
+        drawHistory,
+        globalWeights,
+        targetDepth,
+        (current, total) => setBatchProgress({ current, total })
+      );
+
+      setBatchResult(res);
+      showToast(`Autopsie Multi-Tirages complétée sur ${res.batchSize} tirages (Calibration moyenne : ${res.meanCalibrationAccuracy}%)`, "success");
+      audioEngine.play("success");
+    } catch (e: any) {
+      showToast(e.message || "Erreur lors de l'autopsie multi-tirages", "error");
+    } finally {
+      setIsBatchRunning(false);
+      setBatchProgress(null);
+    }
+  };
+
+  const handleApplyBatchWeights = async () => {
+    if (!batchResult) return;
+    try {
+      setIsApplying(true);
+      audioEngine.play("click");
+      setGlobalWeights(batchResult.recommendedWeights);
+      setApplied(true);
+      showToast(`Poids stabilisés par consensus multi-tirages appliqués avec succès (${batchResult.batchSize} tirages)`, "success");
+      audioEngine.play("success");
+    } catch (e: any) {
+      showToast(e.message || "Erreur lors de l'application des poids de batch", "error");
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -246,7 +294,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
               onChange={(e) => setSelectedDrawIndex(Number(e.target.value))}
               className="w-full md:w-56 px-3 py-2 bg-slate-950 text-white rounded-xl border border-white/10 text-xs font-mono font-bold focus:outline-none focus:border-indigo-500"
             >
-              {drawHistory.slice(0, 30).map((d, idx) => (
+              {drawHistory.slice(0, Math.min(drawHistory.length - 1, 40)).map((d, idx) => (
                 <option key={d.id || idx} value={idx}>
                   {d.date} - ({d.gagnants?.join(", ")})
                 </option>
@@ -254,14 +302,24 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
             </select>
           </div>
 
-          <div className="flex items-center gap-2 mt-4">
+          <div className="flex items-center gap-2 mt-4 flex-wrap">
             <button
               onClick={() => runAutopsy(selectedDrawIndex)}
-              disabled={loading}
+              disabled={loading || isBatchRunning}
               className="p-2.5 bg-slate-800 text-slate-300 hover:text-white rounded-xl transition-all cursor-pointer"
               title="Recalculer"
             >
               <RefreshCw size={16} className={loading ? "animate-spin text-indigo-400" : ""} />
+            </button>
+
+            <button
+              onClick={handleRunBatchAutopsy}
+              disabled={isBatchRunning || loading || drawHistory.length < 3}
+              className="px-3 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-purple-600/30 flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+              title="Exécuter un audit rétrospectif multi-tirages par consensus de gradient"
+            >
+              <Layers size={13} className={isBatchRunning ? "animate-spin" : ""} />
+              <span>{isBatchRunning ? (batchProgress ? `${batchProgress.current}/${batchProgress.total}` : "Batch...") : "Audit Multi-Tirages"}</span>
             </button>
 
             <button
@@ -300,6 +358,34 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
           </div>
         </div>
       </div>
+
+      {/* BATCH CONSENSUS BANNER */}
+      {batchResult && (
+        <div className="p-5 bg-gradient-to-r from-purple-950/80 to-indigo-950/80 rounded-3xl border border-purple-500/30 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-fade-in">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 bg-purple-500/20 text-purple-300 border border-purple-500/40 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                Consensus Multi-Tirages ({batchResult.batchSize} tirages)
+              </span>
+              <span className="text-xs font-mono text-emerald-400 font-bold">
+                Calibration moyenne : {batchResult.meanCalibrationAccuracy}%
+              </span>
+            </div>
+            <p className="text-xs text-slate-300">
+              Gradients consolidés sur l'échantillon historique : Brier moyen {batchResult.meanBrierScore.toFixed(4)}, {batchResult.totalDirectHitsTop5} hits Top 5 cumulés et {batchResult.totalNearMisses} frôlements.
+            </p>
+          </div>
+
+          <button
+            onClick={handleApplyBatchWeights}
+            disabled={isApplying}
+            className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+          >
+            <Sparkles size={14} />
+            <span>Appliquer Consensus ({batchResult.batchSize} tirages)</span>
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-20 text-center space-y-3">

@@ -346,14 +346,18 @@ export const calculateFusion = (
   const corrLI = covLI / (stdP * stdO + Number.EPSILON);
   const corrPI = covPI / (stdQ * stdO + Number.EPSILON);
 
-  // Déflation continue des redondances (évite la surpondération lorsque 2 capteurs sont colinéaires)
-  const redLP = Math.max(0, Math.abs(corrLP) - 0.70);
-  const redLI = Math.max(0, Math.abs(corrLI) - 0.70);
-  const redPI = Math.max(0, Math.abs(corrPI) - 0.70);
-  const dampP = Math.exp(-redLP - redLI);
-  const dampQ = Math.exp(-redLP - redPI);
-  const dampO = Math.exp(-redLI - redPI);
-  const orthogonalizationApplied = (redLP + redLI + redPI) > 0.05;
+  // Déflation continue et différentiable des redondances fondée sur la part de variance partagée r²
+  // et la pente continue tanh (Zéro nombre magique, dérive directement de la colinéarité mesurée).
+  const sharedVarLP = Math.pow(corrLP, 2);
+  const sharedVarLI = Math.pow(corrLI, 2);
+  const sharedVarPI = Math.pow(corrPI, 2);
+  const redLP = Math.tanh(sharedVarLP * Math.PI);
+  const redLI = Math.tanh(sharedVarLI * Math.PI);
+  const redPI = Math.tanh(sharedVarPI * Math.PI);
+  const dampP = Math.exp(-0.5 * (redLP + redLI));
+  const dampQ = Math.exp(-0.5 * (redLP + redPI));
+  const dampO = Math.exp(-0.5 * (redLI + redPI));
+  const orthogonalizationApplied = (redLP + redLI + redPI) > (3.0 / Math.sqrt(90));
   const coherenceIndex = Math.max(0, Math.min(100, Math.round(100.0 * (1.0 - (redLP + redLI + redPI) / 3.0))));
 
   // Matrices de Précision Régularisées et dé-redondées

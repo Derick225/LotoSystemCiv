@@ -371,11 +371,15 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     audioEngine.play("success");
   };
 
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
   // Reset Weights to Canonical Defaults
-  const handleResetToDefault = async () => {
-    if (!window.confirm(`Réinitialiser l'ADN algorithmique aux valeurs canoniques par défaut pour ${drawName} ?`)) {
-      return;
-    }
+  const handleResetToDefault = () => {
+    setShowResetConfirm(true);
+  };
+
+  const confirmResetToDefault = async () => {
+    setShowResetConfirm(false);
     audioEngine.play("click");
     const defaultNormalized = normalizeWeights(DEFAULT_ALGO_WEIGHTS);
     await saveAlgoWeights(drawName, defaultNormalized);
@@ -1138,6 +1142,36 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         onClose={() => setIsEvolutionDrawerOpen(false)}
         drawName={drawName}
       />
+
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowResetConfirm(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
+                <AlertTriangle size={20} />
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">Réinitialiser l'ADN</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Réinitialiser l'ADN algorithmique aux valeurs canoniques par défaut pour {drawName} ?
+            </p>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmResetToDefault}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-600/30 cursor-pointer active:scale-95"
+              >
+                Réinitialiser
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

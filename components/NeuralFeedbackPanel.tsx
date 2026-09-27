@@ -17,6 +17,7 @@ import {
   Activity,
   Database,
   Sliders,
+  AlertTriangle,
 } from "lucide-react";
 import { audioEngine } from "../utils/audioEngine";
 import { logger } from "../utils/logger";
@@ -35,6 +36,7 @@ export const NeuralFeedbackPanel: React.FC<{ drawName?: string }> = ({
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedAlgo, setSelectedAlgo] = useState<string>("ALL");
   const [selectedDirection, setSelectedDirection] = useState<string>("ALL");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const { showToast } = useToast();
 
   const handleClearLogs = () => {
@@ -44,19 +46,18 @@ export const NeuralFeedbackPanel: React.FC<{ drawName?: string }> = ({
       logger.debug({ err }, "Audio playback non-bloquant");
     }
     if (neuralFeedbackLogs.length === 0) return;
-    if (
-      window.confirm(
-        "Voulez-vous réinitialiser l'historique du feedback neuronal (session actuelle) ?",
-      )
-    ) {
-      useNexusStore.setState({ neuralFeedbackLogs: [] });
-      try {
-        audioEngine.play("success");
-      } catch (err) {
-        logger.debug({ err }, "Audio playback non-bloquant");
-      }
-      showToast("Historique de feedback nettoyé.", "info");
+    setShowClearConfirm(true);
+  };
+
+  const confirmClearLogs = () => {
+    setShowClearConfirm(false);
+    useNexusStore.setState({ neuralFeedbackLogs: [] });
+    try {
+      audioEngine.play("success");
+    } catch (err) {
+      logger.debug({ err }, "Audio playback non-bloquant");
     }
+    showToast("Historique de feedback nettoyé.", "info");
   };
 
   // Extract unique algorithm names from logs for filtering
@@ -322,6 +323,36 @@ export const NeuralFeedbackPanel: React.FC<{ drawName?: string }> = ({
             {filteredLogs.length === neuralFeedbackLogs.length
               ? `${neuralFeedbackLogs.length} signaux actifs`
               : `${filteredLogs.length} / ${neuralFeedbackLogs.length} filtrés`}
+          </div>
+        </div>
+      )}
+
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowClearConfirm(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <span className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400">
+                <AlertTriangle size={20} />
+              </span>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">Réinitialiser Feedback</h3>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Voulez-vous réinitialiser l'historique du feedback neuronal (session actuelle) ?
+            </p>
+            <div className="flex items-center gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={confirmClearLogs}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95"
+              >
+                Réinitialiser
+              </button>
+            </div>
           </div>
         </div>
       )}
