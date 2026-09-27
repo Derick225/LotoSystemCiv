@@ -32,6 +32,8 @@ import {
   Sparkles,
   Binary,
   Code2,
+  Search,
+  ArrowUpDown,
 } from "lucide-react";
 import { DataIntegrityMonitor } from "./DataIntegrityMonitor";
 import { audioEngine } from "../../utils/audioEngine";
@@ -76,6 +78,9 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
   const [formWin, setFormWin] = useState<string[]>(Array(5).fill(""));
   const [formMac, setFormMac] = useState<string[]>(Array(5).fill(""));
   const [isSaving, setIsSaving] = useState(false);
+  const [quickFillWin, setQuickFillWin] = useState("");
+  const [quickFillMac, setQuickFillMac] = useState("");
+  const [historySearchTerm, setHistorySearchTerm] = useState("");
 
   // Bulk Import State Enhanced
   const [isImporting, setIsImporting] = useState(false);
@@ -180,7 +185,98 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     setFormWin(Array(5).fill(""));
     setFormMac(Array(5).fill(""));
     setFormDate(new Date().toISOString().split("T")[0]);
+    setQuickFillWin("");
+    setQuickFillMac("");
   };
+
+  const handleStartEdit = (r: DrawResult) => {
+    audioEngine.play("click");
+    setIsEditing(true);
+    setEditId(r.id);
+    setFormWin(r.gagnants.map(String));
+    if (r.machine && r.machine.length > 0) {
+      setFormMac(r.machine.map(String));
+    } else {
+      setFormMac(Array(5).fill(""));
+    }
+
+    // Convert date DD/MM/YYYY to YYYY-MM-DD for HTML input[type=date]
+    const matchDMY = r.date.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (matchDMY) {
+      setFormDate(`${matchDMY[3]}-${matchDMY[2].padStart(2, "0")}-${matchDMY[1].padStart(2, "0")}`);
+    } else {
+      setFormDate(r.date);
+    }
+  };
+
+  const handleDeleteSingle = async (id: string) => {
+    audioEngine.play("click");
+    if (!confirm("Voulez-vous vraiment supprimer ce tirage du registre ?")) return;
+    try {
+      await deleteResult(drawName, id);
+      audioEngine.play("success");
+      showToast("Tirage supprimé du registre.", "success");
+      loadData();
+    } catch (e) {
+      audioEngine.play("error");
+      showToast(`Échec suppression : ${e instanceof Error ? e.message : String(e)}`, "error");
+    }
+  };
+
+  const handleQuickFill = (text: string, target: "win" | "mac") => {
+    const nums = text
+      .split(/[\s,;]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n) && n >= 1 && n <= 90);
+
+    if (nums.length === 0) return;
+    const padded = nums.slice(0, 5).map(String);
+    while (padded.length < 5) padded.push("");
+
+    if (target === "win") {
+      setFormWin(padded);
+      setQuickFillWin("");
+      showToast(`${Math.min(5, nums.length)} numéros ajoutés aux gagnants`, "info");
+    } else {
+      setFormMac(padded);
+      setQuickFillMac("");
+      showToast(`${Math.min(5, nums.length)} numéros ajoutés à la machine`, "info");
+    }
+  };
+
+  const handleSortNumbers = (target: "win" | "mac") => {
+    audioEngine.play("click");
+    if (target === "win") {
+      const valid = formWin
+        .map(Number)
+        .filter((n) => !isNaN(n) && n >= 1 && n <= 90)
+        .sort((a, b) => a - b);
+      const padded = valid.map(String);
+      while (padded.length < 5) padded.push("");
+      setFormWin(padded);
+      showToast("Gagnants triés par ordre croissant", "success");
+    } else {
+      const valid = formMac
+        .map(Number)
+        .filter((n) => !isNaN(n) && n >= 1 && n <= 90)
+        .sort((a, b) => a - b);
+      const padded = valid.map(String);
+      while (padded.length < 5) padded.push("");
+      setFormMac(padded);
+      showToast("Machine triée par ordre croissant", "success");
+    }
+  };
+
+  const filteredHistory = useMemo(() => {
+    if (!historySearchTerm.trim()) return results;
+    const term = historySearchTerm.trim().toLowerCase();
+    return results.filter((r) => {
+      if (r.date.toLowerCase().includes(term)) return true;
+      if (r.gagnants.some((n) => String(n) === term)) return true;
+      if (r.machine && r.machine.some((n) => String(n) === term)) return true;
+      return false;
+    });
+  }, [results, historySearchTerm]);
 
   // --- BULK IMPORT LOGIC (ENHANCED FOR HISTORICAL FILES) ---
 
@@ -750,7 +846,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
               audioEngine.play("click");
               setActiveSubTab("audit");
             }}
-            className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[10px] md:text-xs font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === "audit" ? "bg-emerald-50 text-white shadow-xl" : "bg-white/5 text-slate-400 hover:bg-white/10"}`}
+            className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[10px] md:text-xs font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === "audit" ? "bg-emerald-600 text-white shadow-xl" : "bg-white/5 text-slate-400 hover:bg-white/10"}`}
           >
             <Stethoscope size={12} /> Audit
           </button>
@@ -806,13 +902,23 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
               </div>
 
               <div>
-                <label className="text-xs font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
-                  <span>Gagnants</span>
-                  <span className="text-indigo-500 flex items-center gap-1 text-[10px]">
-                    <Sparkles size={10} /> 5
-                  </span>
-                </label>
-                <div className="grid grid-cols-5 gap-2">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5">
+                    <span>Gagnants</span>
+                    <span className="text-indigo-500 flex items-center gap-1 text-[10px]">
+                      <Sparkles size={10} /> 5 numéros requis
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleSortNumbers("win")}
+                    className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider hover:underline flex items-center gap-1"
+                  >
+                    <ArrowUpDown size={11} /> Trier 1..90
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-5 gap-2 mb-2">
                   {formWin.map((val, idx) => (
                     <input
                       key={`win-${idx}`}
@@ -830,15 +936,51 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     />
                   ))}
                 </div>
+
+                {/* Quick Fill for Winners */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Saisie rapide (ex: 12 45 67 89 2)..."
+                    value={quickFillWin}
+                    onChange={(e) => setQuickFillWin(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleQuickFill(quickFillWin, "win");
+                      }
+                    }}
+                    className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] font-medium outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleQuickFill(quickFillWin, "win")}
+                    className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl text-[10px] font-black uppercase tracking-wider"
+                  >
+                    Remplir
+                  </button>
+                </div>
               </div>
 
               <div>
-                <label className="text-xs font-black uppercase text-slate-400 tracking-widest mb-2 flex justify-between">
-                  <span>Machine</span>
-                  <span className="text-slate-500 flex items-center gap-1 text-[10px]">
-                    <Binary size={10} /> {isDrawWithoutMachine(drawName) ? "Non disponible" : "Opt."}
-                  </span>
-                </label>
+                <div className="flex justify-between items-center mb-2">
+                  <label className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-1.5">
+                    <span>Machine</span>
+                    <span className="text-slate-500 flex items-center gap-1 text-[10px]">
+                      <Binary size={10} /> {isDrawWithoutMachine(drawName) ? "Non disponible" : "Optionnel"}
+                    </span>
+                  </label>
+                  {!isDrawWithoutMachine(drawName) && (
+                    <button
+                      type="button"
+                      onClick={() => handleSortNumbers("mac")}
+                      className="text-[10px] text-slate-500 font-bold uppercase tracking-wider hover:underline flex items-center gap-1"
+                    >
+                      <ArrowUpDown size={11} /> Trier
+                    </button>
+                  )}
+                </div>
+
                 {isDrawWithoutMachine(drawName) ? (
                   <div className="p-3 bg-slate-50 dark:bg-slate-900/50 border border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center">
                     <p className="text-[11px] font-semibold text-slate-400">
@@ -846,24 +988,49 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     </p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-5 gap-2">
-                    {formMac.map((val, idx) => (
+                  <>
+                    <div className="grid grid-cols-5 gap-2 mb-2">
+                      {formMac.map((val, idx) => (
+                        <input
+                          key={`mac-${idx}`}
+                          type="number"
+                          min="1"
+                          max="90"
+                          value={val}
+                          onChange={(e) => {
+                            const n = [...formMac];
+                            n[idx] = e.target.value;
+                            setFormMac(n);
+                          }}
+                          className="w-full aspect-square text-center font-bold text-sm md:text-base bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-xl border-2 border-slate-100 dark:border-slate-800 focus:border-slate-400 outline-none transition-all"
+                          placeholder="-"
+                        />
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2">
                       <input
-                        key={`mac-${idx}`}
-                        type="number"
-                        min="1"
-                        max="90"
-                        value={val}
-                        onChange={(e) => {
-                          const n = [...formMac];
-                          n[idx] = e.target.value;
-                          setFormMac(n);
+                        type="text"
+                        placeholder="Saisie rapide machine..."
+                        value={quickFillMac}
+                        onChange={(e) => setQuickFillMac(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleQuickFill(quickFillMac, "mac");
+                          }
                         }}
-                        className="w-full aspect-square text-center font-bold text-sm md:text-base bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 rounded-xl border-2 border-slate-100 dark:border-slate-800 focus:border-slate-400 outline-none transition-all"
-                        placeholder="-"
+                        className="flex-1 px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 text-[11px] font-medium outline-none"
                       />
-                    ))}
-                  </div>
+                      <button
+                        type="button"
+                        onClick={() => handleQuickFill(quickFillMac, "mac")}
+                        className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-[10px] font-black uppercase tracking-wider"
+                      >
+                        Remplir
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -885,15 +1052,36 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
           </div>
 
           {/* Liste Historique */}
-          <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl md:rounded-3xl border border-slate-200 dark:border-slate-800 h-[500px] md:h-[600px] flex flex-col">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">
-              Derniers Enregistrements
-            </h4>
+          <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-2xl md:rounded-3xl border border-slate-200 dark:border-slate-800 h-[520px] md:h-[620px] flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                Registre ({results.length} tirages)
+              </h4>
+              <span className="text-[10px] font-mono text-slate-400">
+                Affichage: {filteredHistory.length}
+              </span>
+            </div>
+
+            {/* History Search Bar */}
+            <div className="relative mb-4">
+              <input
+                type="text"
+                placeholder="Filtrer par date (ex: 2024, 05/12) ou numéro..."
+                value={historySearchTerm}
+                onChange={(e) => setHistorySearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-medium outline-none focus:ring-2 ring-indigo-500"
+              />
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+            </div>
+
             <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-              {results.slice(0, 50).map((r) => (
+              {filteredHistory.slice(0, 80).map((r) => (
                 <div
                   key={r.id}
-                  className="bg-white dark:bg-slate-800 p-3 md:p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex justify-between items-center group"
+                  className="bg-white dark:bg-slate-800 p-3 md:p-4 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex justify-between items-center group hover:border-indigo-300 dark:hover:border-indigo-600 transition-all"
                 >
                   <div>
                     <div className="text-[10px] md:text-xs font-black text-slate-800 dark:text-white">
@@ -908,32 +1096,37 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                           {n}
                         </span>
                       ))}
+                      {r.machine && r.machine.length > 0 && (
+                        <span className="text-slate-400 text-[10px] self-center ml-1">
+                          | M: {r.machine.join(",")}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div className="flex gap-1 md:gap-2">
+                  <div className="flex gap-1 md:gap-2 shrink-0">
                     <button
-                      onClick={() => {
-                        setIsEditing(true);
-                        setEditId(r.id);
-                        setFormWin(r.gagnants.map(String));
-                        if (r.machine) setFormMac(r.machine.map(String));
-                      }}
-                      className="p-2 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg hover:text-indigo-600"
+                      onClick={() => handleStartEdit(r)}
+                      className="p-2 bg-slate-100 dark:bg-slate-700 text-slate-500 rounded-lg hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 transition-all"
+                      title="Modifier ce tirage"
                     >
                       <Pencil size={12} />
                     </button>
                     <button
-                      onClick={() => {
-                        if (confirm("Supprimer ?"))
-                          deleteResult(drawName, r.id).then(loadData);
-                      }}
-                      className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-lg"
+                      onClick={() => handleDeleteSingle(r.id)}
+                      className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-500 rounded-lg hover:bg-rose-100 transition-all"
+                      title="Supprimer ce tirage"
                     >
                       <Trash2 size={12} />
                     </button>
                   </div>
                 </div>
               ))}
+
+              {filteredHistory.length === 0 && (
+                <div className="p-8 text-center text-slate-400 italic text-xs">
+                  Aucun tirage correspondant au filtre.
+                </div>
+              )}
             </div>
           </div>
         </div>

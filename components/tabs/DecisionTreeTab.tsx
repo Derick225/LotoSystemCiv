@@ -249,13 +249,13 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                   </span>
                   {diagnostics && (
                     <span className="text-[9px] font-black tracking-widest text-emerald-400 uppercase bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                      Gini: {diagnostics.giniImpurity ?? '0.18'} • ΔH: {diagnostics.entropyReduction ?? '0.82'}
+                      Gini: {diagnostics.giniImpurity != null ? diagnostics.giniImpurity : "n/d"} • ΔH: {diagnostics.entropyReduction != null ? diagnostics.entropyReduction : "n/d"}
                     </span>
                   )}
                   {dnaSieveInfo && (
                     <span className="text-[9px] font-black tracking-widest text-amber-300 uppercase bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                       <Sparkles size={10} className="text-amber-400" />
-                      Tamis ADN : {dnaSieveInfo.dominantAlgos.slice(0, 2).join(' • ') || 'Actif'} ({dnaSieveInfo.dnaConcordanceMean}% • Tamisage: {dnaSieveInfo.sieveIntensityPercent ?? 60}%)
+                      Tamis ADN : {dnaSieveInfo.dominantAlgos.slice(0, 2).join(' • ') || 'Actif'} ({dnaSieveInfo.dnaConcordanceMean}% • Tamisage: {dnaSieveInfo.sieveIntensityPercent != null ? `${dnaSieveInfo.sieveIntensityPercent}%` : "n/d"})
                     </span>
                   )}
                 </div>

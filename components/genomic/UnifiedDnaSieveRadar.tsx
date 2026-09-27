@@ -371,9 +371,11 @@ export const UnifiedDnaSieveRadar: React.FC<{
     const neutrals = sieveGridData.filter((d) => d.category === "NEUTRAL");
     const avgMultiplier =
       sieveGridData.reduce((acc, d) => acc + d.multiplier, 0) / 90.0;
+    // RÈGLE D'HONNÊTETÉ : sans écart-type ADN mesuré (historique vide), le SNR
+    // reste indéfini plutôt que de fabriquer une intensité de tamisage.
     const snr = dnaSieve.stdDevDna
       ? (dnaSieve.stdDevDna / (dnaSieve.meanDna || 1)) * 100
-      : 50;
+      : null;
 
     return {
       elitesCount: elites.length,
@@ -381,9 +383,8 @@ export const UnifiedDnaSieveRadar: React.FC<{
       neutralsCount: neutrals.length,
       retentionRatePct: Number(((elites.length / 90) * 100).toFixed(1)),
       avgMultiplier: parseFloat(avgMultiplier.toFixed(2)),
-      sieveIntensitySNR: Number(Math.min(100, Math.max(20, snr * 2.5)).toFixed(1)),
-      concordanceMean: dnaSieve.dnaConcordanceMean || 50,
-      entropy: dnaSieve.entropyBits || 0,
+      sieveIntensitySNR: snr === null ? null : Number(Math.min(100, Math.max(20, snr * 2.5)).toFixed(1)),
+      entropy: dnaSieve.entropyBits ?? null,
       dominantAlgos: dnaSieve.dominantAlgos || [],
     };
   }, [sieveGridData, dnaSieve]);
@@ -598,7 +599,9 @@ export const UnifiedDnaSieveRadar: React.FC<{
             <div className="text-2xl font-black font-mono text-white">
               {auditReport
                 ? auditReport.genomicHarmonyIndex.toFixed(1)
-                : dnaSieve.dnaConcordanceMean || 50}
+                : dnaSieve.dnaConcordanceMean != null
+                  ? dnaSieve.dnaConcordanceMean.toFixed(1)
+                  : "n/d"}
               <span className="text-xs text-slate-500 font-normal"> / 100</span>
             </div>
             <span className="text-[9px] text-slate-400 block">
@@ -609,7 +612,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
             <div
               className="bg-amber-400 h-full rounded-full"
               style={{
-                width: `${auditReport?.genomicHarmonyIndex || dnaSieve.dnaConcordanceMean || 50}%`,
+                width: `${auditReport?.genomicHarmonyIndex ?? dnaSieve.dnaConcordanceMean ?? 0}%`,
               }}
             />
           </div>
@@ -625,7 +628,9 @@ export const UnifiedDnaSieveRadar: React.FC<{
           </div>
           <div className="my-1.5">
             <div className="text-2xl font-black font-mono text-violet-400">
-              {sieveStats.sieveIntensitySNR}%
+              {sieveStats.sieveIntensitySNR != null
+                ? `${sieveStats.sieveIntensitySNR}%`
+                : "n/d"}
             </div>
             <span className="text-[9px] text-slate-400 block">
               Contraste signal/bruit 1-90
@@ -634,7 +639,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
             <div
               className="bg-violet-400 h-full rounded-full"
-              style={{ width: `${sieveStats.sieveIntensitySNR}%` }}
+              style={{ width: `${sieveStats.sieveIntensitySNR ?? 0}%` }}
             />
           </div>
         </div>
@@ -677,7 +682,9 @@ export const UnifiedDnaSieveRadar: React.FC<{
           </div>
           <div className="my-1.5">
             <div className="text-2xl font-black font-mono text-indigo-400">
-              {sieveStats.entropy.toFixed(2)}
+              {sieveStats.entropy != null
+                ? sieveStats.entropy.toFixed(2)
+                : "n/d"}
               <span className="text-xs text-slate-500 font-normal"> bits</span>
             </div>
             <span className="text-[9px] text-slate-400 block truncate">

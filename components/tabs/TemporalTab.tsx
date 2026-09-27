@@ -313,25 +313,33 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
               <div className="p-4 rounded-2xl bg-slate-950/70 border border-indigo-500/20 space-y-3">
                 <div className="flex items-center justify-between text-[11px] font-black text-indigo-300 uppercase tracking-wide">
                   <span className="flex items-center gap-1.5"><Activity size={14} className="text-emerald-400" /> Concordance ADN Moyenne</span>
-                  <span className="text-emerald-400 font-mono font-bold text-sm">{crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean || 50}%</span>
+                  <span className="text-emerald-400 font-mono font-bold text-sm">
+                    {crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean != null
+                      ? `${crossMonthResonance.dnaSieveInfo.dnaConcordanceMean}%`
+                      : "n/d"}
+                  </span>
                 </div>
                 <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden p-0.5">
-                  <div 
+                  <div
                     className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 rounded-full transition-all duration-700"
-                    style={{ width: `${crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean || 50}%` }}
+                    style={{ width: `${crossMonthResonance.dnaSieveInfo?.dnaConcordanceMean ?? 0}%` }}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2 pt-1 text-[10px] border-t border-slate-800/80">
                   <div>
                     <span className="text-slate-500 uppercase font-black block">Intensité Tamis :</span>
                     <span className="text-amber-400 font-mono font-bold">
-                      {crossMonthResonance.dnaSieveInfo?.sieveIntensityPercent ?? 65}%
+                      {crossMonthResonance.dnaSieveInfo?.sieveIntensityPercent != null
+                        ? `${crossMonthResonance.dnaSieveInfo.sieveIntensityPercent}%`
+                        : "n/d"}
                     </span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-500 uppercase font-black block">Entropie Shannon :</span>
                     <span className="text-cyan-300 font-mono font-bold">
-                      {crossMonthResonance.dnaSieveInfo?.entropyBits ?? 3.9} bits
+                      {crossMonthResonance.dnaSieveInfo?.entropyBits != null
+                        ? `${crossMonthResonance.dnaSieveInfo.entropyBits} bits`
+                        : "n/d"}
                     </span>
                   </div>
                 </div>

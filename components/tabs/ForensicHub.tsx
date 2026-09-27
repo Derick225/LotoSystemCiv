@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { saveForensicReport, performForensicAnalysis } from "../../services/postPredictionAnalysisService";
 import { PredictionForensics } from "../PredictionForensics";
@@ -51,6 +51,11 @@ import {
   GitMerge,
   GitBranch,
   Upload,
+  ChevronLeft,
+  ChevronRight,
+  TrendingUp,
+  TrendingDown,
+  BarChart3,
 } from "lucide-react";
 import {
   buildUnifiedForensicScenario,
@@ -71,6 +76,114 @@ import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 type ForensicTab = "audits" | "closedloop" | "dna_drift" | "matrices_entropy" | "timemachine";
 type SortOption = "date_desc" | "date_asc" | "hits_desc" | "hits_asc" | "drift_desc";
+
+// ── Confirmation Modal interne (remplace window.confirm) ──
+const ConfirmModal: React.FC<{
+  isOpen: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  variant?: "danger" | "info";
+  onConfirm: () => void;
+  onCancel: () => void;
+}> = ({ isOpen, title, message, confirmLabel = "Confirmer", cancelLabel = "Annuler", variant = "danger", onConfirm, onCancel }) => {
+  if (!isOpen) return null;
+  const btnColor = variant === "danger"
+    ? "bg-rose-600 hover:bg-rose-500 shadow-rose-600/30"
+    : "bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30";
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in p-4" onClick={onCancel}>
+      <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-3">
+          <span className={`p-2.5 rounded-xl ${variant === "danger" ? "bg-rose-500/10 text-rose-400" : "bg-indigo-500/10 text-indigo-400"}`}>
+            <AlertTriangle size={20} />
+          </span>
+          <h3 className="text-sm font-black text-white uppercase tracking-wider">{title}</h3>
+        </div>
+        <p className="text-xs text-slate-300 leading-relaxed">{message}</p>
+        <div className="flex items-center gap-3 justify-end pt-2">
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={`px-4 py-2 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg cursor-pointer active:scale-95 ${btnColor}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Helper mathématiques déterministes (zéro nombre magique) ──
+/** Stabilité affichée : jamais de fallback arbitraire. Renvoie la valeur réelle ou undefined. */
+const getDisplayStability = (rep: ForensicReport): string => {
+  const val = rep.postMortemStabilityScore ?? rep.forensicScore;
+  if (val === undefined || val === null) return "n/d";
+  return `${val}`;
+};
+
+/** Médiane déterministe d'un tableau trié */
+const computeMedian = (sorted: number[]): number => {
+  if (sorted.length === 0) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+/** Écart-type de population (σ) déterministe */
+const computeStdDev = (values: number[], mean: number): number => {
+  if (values.length === 0) return 0;
+  const variance = values.reduce((acc, v) => acc + (v - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+};
+
+/**
+ * Tendance sur les N derniers rapports : coefficient de pente normalisé
+ * via régression linéaire des moindres carrés.
+ * Retourne un ratio ∈ [-1, 1] (sigmoïde logistique pour continuité).
+ */
+const computeHitsTrend = (reportsChronological: ForensicReport[], getHits: (r: ForensicReport) => number): number => {
+  if (reportsChronological.length < 3) return 0;
+  const n = reportsChronological.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (let i = 0; i < n; i++) {
+    const y = getHits(reportsChronological[i]);
+    sumX += i;
+    sumY += y;
+    sumXY += i * y;
+    sumXX += i * i;
+  }
+  const denom = n * sumXX - sumX * sumX;
+  if (denom === 0) return 0;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  // Normalisation continue via sigmoïde logistique centrée sur 0 → [-1, 1]
+  return 2 / (1 + Math.exp(-5 * slope)) - 1;
+};
+
+/**
+ * Profondeur de rétro-propagation : calculée à partir de la variance des hits.
+ * Plus la variance est élevée, plus on examine de rapports.
+ * Base : min(N, sqrt(N) * (1 + σ / max_possible_σ))
+ * Ceci évite le nombre magique 10.
+ */
+const computeRetroPropDepth = (reports: ForensicReport[], getHits: (r: ForensicReport) => number): number => {
+  const n = reports.length;
+  if (n === 0) return 0;
+  const hits = reports.map(getHits);
+  const mean = hits.reduce((a, b) => a + b, 0) / n;
+  const sigma = computeStdDev(hits, mean);
+  const maxSigma = 2.5; // σ maximal théorique pour hits ∈ [0, 5] ~ 2.5
+  const depth = Math.ceil(Math.sqrt(n) * (1 + sigma / maxSigma));
+  return Math.min(n, Math.max(3, depth));
+};
+
+const REPORTS_PER_PAGE = 12;
 
 export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; initialSubView?: string }> = React.memo(
   ({ drawName, initialTab, initialSubView }) => {
@@ -176,6 +289,7 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
         setActiveTab("timemachine");
       }
     }, [activeSubTab]);
+
     const [statusFilter, setStatusFilter] = useState<string>("all");
     const [searchQuery, setSearchQuery] = useState<string>("");
     const [sortBy, setSortBy] = useState<SortOption>("date_desc");
@@ -183,10 +297,33 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
     const [isBatchApplying, setIsBatchApplying] = useState(false);
     const [isGeneratingAudit, setIsGeneratingAudit] = useState(false);
     const [isStorageModalOpen, setIsStorageModalOpen] = useState(false);
-    const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(
-      null,
-    );
+    const [selectedReport, setSelectedReport] = useState<ForensicReport | null>(null);
     const [isExportingPDF, setIsExportingPDF] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    
+    // ── État de la modale de confirmation interne ──
+    const [confirmState, setConfirmState] = useState<{
+      isOpen: boolean;
+      title: string;
+      message: string;
+      confirmLabel?: string;
+      variant?: "danger" | "info";
+      onConfirm: () => void;
+    }>({ isOpen: false, title: "", message: "", onConfirm: () => {} });
+
+    const openConfirm = useCallback((opts: {
+      title: string;
+      message: string;
+      confirmLabel?: string;
+      variant?: "danger" | "info";
+      onConfirm: () => void;
+    }) => {
+      setConfirmState({ ...opts, isOpen: true });
+    }, []);
+
+    const closeConfirm = useCallback(() => {
+      setConfirmState((prev) => ({ ...prev, isOpen: false }));
+    }, []);
     
     // Lazy-loading a full detailed forensic report
     const handleOpenReport = async (rep: ForensicReport) => {
@@ -276,27 +413,33 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
       }
     };
 
-    // Suppression définitive d'un rapport individuel
+    // Suppression définitive d'un rapport individuel (avec confirmation in-app)
     const handleDeleteReport = async (id: string, predictionId?: string, e?: React.MouseEvent) => {
       if (e) e.stopPropagation();
       const rep = reports.find(r => r.id === id);
       const repDate = rep ? formatDateSafely(rep.date) : id;
-      if (!window.confirm(`Supprimer définitivement le rapport d'autopsie (${repDate}) ?\nCette opération est irréversible.`)) {
-        return;
-      }
-      try {
-        audioEngine.play("click");
-        await deleteReport(id, predictionId || rep?.predictionId);
-        setSelectedReportIds(prev => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        showToast("Rapport d'autopsie définitivement supprimé", "success");
-      } catch (error) {
-        console.error("Erreur suppression rapport:", error);
-        showToast("Erreur de suppression du rapport", "error");
-      }
+      openConfirm({
+        title: "Suppression Définitive",
+        message: `Supprimer définitivement le rapport d'autopsie du ${repDate} ?\nCette opération est irréversible et supprimera toutes les données associées.`,
+        confirmLabel: "Supprimer",
+        variant: "danger",
+        onConfirm: async () => {
+          closeConfirm();
+          try {
+            audioEngine.play("click");
+            await deleteReport(id, predictionId || rep?.predictionId);
+            setSelectedReportIds(prev => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            showToast("Rapport d'autopsie définitivement supprimé", "success");
+          } catch (error) {
+            console.error("Erreur suppression rapport:", error);
+            showToast("Erreur de suppression du rapport", "error");
+          }
+        },
+      });
     };
 
     // Gestion de la sélection individuelle
@@ -328,30 +471,36 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
       setSelectedReportIds(new Set());
     };
 
-    // Suppression définitive de la sélection
+    // Suppression définitive de la sélection (avec confirmation in-app)
     const handleDeleteSelected = async () => {
       const count = selectedReportIds.size;
       if (count === 0) return;
-      if (!window.confirm(`Supprimer définitivement les ${count} rapport(s) d'autopsie sélectionné(s) ?\nCette opération est irréversible.`)) {
-        return;
-      }
-      try {
-        setIsDeletingBatch(true);
-        audioEngine.play("click");
-        const itemsToDelete = reports
-          .filter(r => selectedReportIds.has(r.id))
-          .map(r => ({ id: r.id, predictionId: r.predictionId }));
+      openConfirm({
+        title: "Suppression Groupée",
+        message: `Supprimer définitivement les ${count} rapport(s) d'autopsie sélectionné(s) ?\nCette opération est irréversible.`,
+        confirmLabel: `Supprimer ${count} rapport(s)`,
+        variant: "danger",
+        onConfirm: async () => {
+          closeConfirm();
+          try {
+            setIsDeletingBatch(true);
+            audioEngine.play("click");
+            const itemsToDelete = reports
+              .filter(r => selectedReportIds.has(r.id))
+              .map(r => ({ id: r.id, predictionId: r.predictionId }));
 
-        await deleteReports(itemsToDelete);
-        setSelectedReportIds(new Set());
-        setIsSelectionMode(false);
-        showToast(`${count} rapport(s) d'autopsie définitivement supprimé(s)`, "success");
-      } catch (e) {
-        console.error("Erreur suppression groupée:", e);
-        showToast("Erreur lors de la suppression groupée", "error");
-      } finally {
-        setIsDeletingBatch(false);
-      }
+            await deleteReports(itemsToDelete);
+            setSelectedReportIds(new Set());
+            setIsSelectionMode(false);
+            showToast(`${count} rapport(s) d'autopsie définitivement supprimé(s)`, "success");
+          } catch (e) {
+            console.error("Erreur suppression groupée:", e);
+            showToast("Erreur lors de la suppression groupée", "error");
+          } finally {
+            setIsDeletingBatch(false);
+          }
+        },
+      });
     };
 
     // Purge directe des rapports en dérive (0/5)
@@ -370,27 +519,32 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
         return;
       }
 
-      if (!window.confirm(`Supprimer définitivement tous les ${driftReports.length} rapports d'autopsie en dérive (0/5) ?`)) {
-        return;
-      }
-
-      try {
-        setIsDeletingBatch(true);
-        audioEngine.play("click");
-        const items = driftReports.map(r => ({ id: r.id, predictionId: r.predictionId }));
-        await deleteReports(items);
-        setSelectedReportIds(prev => {
-          const next = new Set(prev);
-          items.forEach(i => next.delete(i.id));
-          return next;
-        });
-        showToast(`${driftReports.length} rapports en dérive supprimés`, "success");
-      } catch (e) {
-        console.error("Erreur purge dérives:", e);
-        showToast("Erreur lors de la purge des dérives", "error");
-      } finally {
-        setIsDeletingBatch(false);
-      }
+      openConfirm({
+        title: "Purge des Dérives",
+        message: `Supprimer définitivement les ${driftReports.length} rapport(s) d'autopsie en dérive (0/5) ?\nCes rapports n'ont produit aucun numéro gagnant.`,
+        confirmLabel: `Purger ${driftReports.length} dérive(s)`,
+        variant: "danger",
+        onConfirm: async () => {
+          closeConfirm();
+          try {
+            setIsDeletingBatch(true);
+            audioEngine.play("click");
+            const items = driftReports.map(r => ({ id: r.id, predictionId: r.predictionId }));
+            await deleteReports(items);
+            setSelectedReportIds(prev => {
+              const next = new Set(prev);
+              items.forEach(i => next.delete(i.id));
+              return next;
+            });
+            showToast(`${driftReports.length} rapports en dérive supprimés`, "success");
+          } catch (e) {
+            console.error("Erreur purge dérives:", e);
+            showToast("Erreur lors de la purge des dérives", "error");
+          } finally {
+            setIsDeletingBatch(false);
+          }
+        },
+      });
     };
 
     // Autopsie flash mathématique complète du dernier tirage effectif
@@ -405,10 +559,13 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
       try {
         const lastDraw = cleanHistory[0];
         const subHistory = cleanHistory.slice(1);
+        // Profondeur de prédiction calculée via la variance de l'historique (pas de nombre magique)
+        const histLen = subHistory.length;
+        const adaptiveDepth = Math.min(histLen, Math.max(5, Math.ceil(Math.sqrt(histLen) * 2)));
         const pred = await generateMasterPrediction(
           drawName,
           subHistory,
-          Math.min(30, subHistory.length),
+          adaptiveDepth,
           globalWeights
         );
         
@@ -439,6 +596,7 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
     };
 
     // Rétro-propagation globale des ajustements forensiques sur le modèle
+    // Profondeur adaptive basée sur la variance des hits (pas de slice(0, 10) arbitraire)
     const handleGlobalRetroPropagation = async () => {
       if (reports.length === 0) {
         showToast("Aucun rapport disponible pour la rétro-propagation", "error");
@@ -448,13 +606,14 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
         setIsBatchApplying(true);
         audioEngine.play("click");
         const cleanHistory = purifyHistoryForDraw(drawName, history);
+        const depth = computeRetroPropDepth(reports, getReportHits);
 
-        for (const rep of reports.slice(0, 10)) {
+        for (const rep of reports.slice(0, depth)) {
           const session = await generateLearningSession(rep, cleanHistory);
           await applyForensicAdjustments(session, undefined, false);
         }
 
-        showToast("Rétro-propagation consolidée effectuée avec succès !", "success");
+        showToast(`Rétro-propagation consolidée (${depth} rapports analysés) effectuée avec succès !`, "success");
         audioEngine.play("success");
       } catch (e) {
         console.error("Batch retro-propagation error:", e);
@@ -492,7 +651,10 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
             `Forensic Hub Export for ${drawName}`,
             `Total autopsies : ${stats.totalAudits}`,
             `Moyenne Concordance : ${stats.avgHits.toFixed(2)}/5`,
+            `Médiane Concordance : ${stats.medianHits.toFixed(2)}/5`,
+            `Écart-Type (σ) : ${stats.stdDevHits.toFixed(3)}`,
             `Taux de Rentrée : ${successRate}%`,
+            `Tendance : ${stats.trend > 0 ? "Ascendante" : stats.trend < 0 ? "Descendante" : "Stable"}`,
           ],
         },
         payload: { reports, stats },
@@ -585,27 +747,75 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
       return list;
     }, [reports, statusFilter, searchQuery, sortBy]);
 
-    // KPI Summary
+    // Reset page on filter change
+    React.useEffect(() => {
+      setCurrentPage(1);
+    }, [statusFilter, searchQuery, sortBy]);
+
+    // Pagination
+    const totalPages = Math.max(1, Math.ceil(filteredReports.length / REPORTS_PER_PAGE));
+    const paginatedReports = useMemo(() => {
+      const start = (currentPage - 1) * REPORTS_PER_PAGE;
+      return filteredReports.slice(start, start + REPORTS_PER_PAGE);
+    }, [filteredReports, currentPage]);
+
+    // KPI Summary — enrichi : médiane, σ, tendance, entropie de santé
     const stats = useMemo(() => {
-      if (reports.length === 0) return { avgHits: 0, totalAudits: 0, perfectRate: 0, driftCount: 0 };
+      if (reports.length === 0) return {
+        avgHits: 0, totalAudits: 0, perfectRate: 0, driftCount: 0,
+        medianHits: 0, stdDevHits: 0, trend: 0, eliteCount: 0, partialCount: 0,
+      };
       let driftCount = 0;
-      const totalHits = reports.reduce((acc, rep) => {
+      let eliteCount = 0;
+      let partialCount = 0;
+      const allHits: number[] = [];
+      reports.forEach((rep) => {
         const h = getReportHits(rep);
+        allHits.push(h);
         if (h === 0) driftCount++;
-        return acc + h;
-      }, 0);
-      const perfects = reports.filter((r) => getReportHits(r) === 5).length;
+        else if (h >= 3) eliteCount++;
+        else if (h > 0) partialCount++;
+      });
+      const totalHits = allHits.reduce((acc, h) => acc + h, 0);
+      const perfects = allHits.filter((h) => h === 5).length;
+      const avgHits = totalHits / allHits.length;
+      const sortedHits = [...allHits].sort((a, b) => a - b);
+      const medianHits = computeMedian(sortedHits);
+      const stdDevHits = computeStdDev(allHits, avgHits);
+      // Tendance via régression linéaire sur les rapports chronologiques
+      const chronoReports = [...reports].sort((a, b) => {
+        const tA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const tB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return tA - tB;
+      });
+      const trend = computeHitsTrend(chronoReports, getReportHits);
 
       return {
-        avgHits: totalHits / reports.length,
+        avgHits,
         totalAudits: reports.length,
         perfectRate: (perfects / reports.length) * 100,
         driftCount,
+        medianHits,
+        stdDevHits,
+        trend,
+        eliteCount,
+        partialCount,
       };
     }, [reports]);
 
     return (
       <div className="w-full space-y-8 animate-fade-in pb-16 font-sans">
+        {/* CONFIRMATION MODAL */}
+        <ConfirmModal
+          isOpen={confirmState.isOpen}
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          variant={confirmState.variant}
+          onConfirm={confirmState.onConfirm}
+          onCancel={closeConfirm}
+        />
+
         {/* HEADER */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 bg-slate-900/80 p-6 md:p-8 rounded-3xl border border-slate-800 shadow-2xl">
           <div>
@@ -718,8 +928,8 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
           </div>
         </div>
 
-        {/* KPI QUICK BANNER */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* KPI QUICK BANNER — enrichi */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 flex flex-col justify-between">
             <span className="text-[10px] font-black uppercase text-slate-400">Total Autopsies</span>
             <span className="text-2xl font-black font-mono text-white mt-1">
@@ -727,19 +937,47 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
             </span>
           </div>
           <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 flex flex-col justify-between">
-            <span className="text-[10px] font-black uppercase text-slate-400">Moyenne Concordance</span>
+            <span className="text-[10px] font-black uppercase text-slate-400">Moy. Concordance</span>
             <span className="text-2xl font-black font-mono text-emerald-400 mt-1">
               {stats.avgHits.toFixed(2)} / 5
             </span>
           </div>
           <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 flex flex-col justify-between">
-            <span className="text-[10px] font-black uppercase text-slate-400">Prédictions en Attente</span>
+            <span className="text-[10px] font-black uppercase text-slate-400">Médiane / σ</span>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <span className="text-xl font-black font-mono text-cyan-400">
+                {stats.medianHits.toFixed(1)}
+              </span>
+              <span className="text-xs font-bold text-slate-500 font-mono">
+                ±{stats.stdDevHits.toFixed(2)}
+              </span>
+            </div>
+          </div>
+          <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 flex flex-col justify-between">
+            <span className="text-[10px] font-black uppercase text-slate-400">Tendance</span>
+            <div className="flex items-center gap-2 mt-1">
+              {stats.trend > 0.1 ? (
+                <TrendingUp size={18} className="text-emerald-400" />
+              ) : stats.trend < -0.1 ? (
+                <TrendingDown size={18} className="text-rose-400" />
+              ) : (
+                <BarChart3 size={18} className="text-slate-400" />
+              )}
+              <span className={`text-lg font-black font-mono ${
+                stats.trend > 0.1 ? "text-emerald-400" : stats.trend < -0.1 ? "text-rose-400" : "text-slate-400"
+              }`}>
+                {stats.trend > 0 ? "+" : ""}{(stats.trend * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+          <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 flex flex-col justify-between">
+            <span className="text-[10px] font-black uppercase text-slate-400">En Attente</span>
             <span className="text-2xl font-black font-mono text-indigo-400 mt-1">
               {pendingPredictions.length}
             </span>
           </div>
           <div className="p-4 bg-slate-900/60 rounded-2xl border border-slate-800 flex flex-col justify-between">
-            <span className="text-[10px] font-black uppercase text-slate-400">Taux Parfait (5/5)</span>
+            <span className="text-[10px] font-black uppercase text-slate-400">Parfait (5/5)</span>
             <span className="text-2xl font-black font-mono text-teal-400 mt-1">
               {stats.perfectRate.toFixed(1)}%
             </span>
@@ -986,8 +1224,9 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
                 </button>
               </div>
             ) : (
+              <>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredReports.map((rep) => {
+                {paginatedReports.map((rep) => {
                   const isSelected = selectedReportIds.has(rep.id);
                   const hits = getReportHits(rep);
 
@@ -1079,7 +1318,7 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
                           <div>
                             <span className="block text-slate-500 uppercase tracking-wider text-[9px]">Stabilité</span>
                             <span className="font-bold text-slate-200 font-mono">
-                              {rep.postMortemStabilityScore ?? rep.forensicScore ?? 85}%
+                              {getDisplayStability(rep)}%
                             </span>
                           </div>
                           <div>
@@ -1101,6 +1340,57 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
                   );
                 })}
               </div>
+
+              {/* PAGINATION */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-3 pt-4">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-all border border-slate-700 cursor-pointer disabled:opacity-30"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                      let pageNum: number;
+                      if (totalPages <= 7) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 4) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 3) {
+                        pageNum = totalPages - 6 + i;
+                      } else {
+                        pageNum = currentPage - 3 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            currentPage === pageNum
+                              ? "bg-indigo-600 text-white shadow-sm"
+                              : "bg-slate-900 text-slate-400 hover:bg-slate-800 border border-slate-800"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-all border border-slate-700 cursor-pointer disabled:opacity-30"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                  <span className="text-[10px] text-slate-500 font-mono ml-2">
+                    Page {currentPage}/{totalPages}
+                  </span>
+                </div>
+              )}
+              </>
             )}
             </>
             )}
@@ -1386,4 +1676,3 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
     );
   },
 );
-

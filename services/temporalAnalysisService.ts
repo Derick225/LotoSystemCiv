@@ -376,12 +376,13 @@ export const calculateDnaSieveWeights = (
     const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
 
     if (!history || history.length === 0) {
-        return { 
-            multipliers, 
-            affinityPercent, 
+        // RÈGLE D'HONNÊTETÉ : sans historique mesuré, les tableaux restent au
+        // prior neutre du moteur (1.0 / 50.0) mais aucune métrique d'analyse
+        // n'est synthétisée : concordance et entropie restent indéfinies.
+        return {
+            multipliers,
+            affinityPercent,
             dominantAlgos: ['Génome Global'],
-            dnaConcordanceMean: 50,
-            entropyBits: 0,
             activeGenesBreakdown: []
         };
     }
@@ -893,7 +894,7 @@ export interface CrossMonthResonanceAnalysis {
     dnaSieveInfo: {
         active: boolean;
         dominantAlgos: string[];
-        dnaConcordanceMean: number;
+        dnaConcordanceMean: number | null;
         entropyBits?: number;
         sieveIntensityPercent?: number;
         activeGenesBreakdown?: { gene: string; weight: number; label: string }[];
@@ -940,9 +941,7 @@ export const getCrossMonthResonanceAnalysis = (
         dnaSieveInfo: {
             active: true,
             dominantAlgos: [],
-            dnaConcordanceMean: 50,
-            entropyBits: 0,
-            sieveIntensityPercent: 50,
+            dnaConcordanceMean: null,
             activeGenesBreakdown: []
         }
     };
@@ -1090,7 +1089,7 @@ export const getCrossMonthResonanceAnalysis = (
             });
 
         result.topNumbers = numbersScores.slice(0, 12);
-        result.dnaSieveInfo.dnaConcordanceMean = countSieved > 0 ? Math.round(sumConcordance / countSieved) : 50;
+        result.dnaSieveInfo.dnaConcordanceMean = countSieved > 0 ? Math.round(sumConcordance / countSieved) : null;
     }
 
     if (drawName) {
