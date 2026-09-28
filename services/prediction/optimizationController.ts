@@ -8,8 +8,7 @@ import {
   extractSpecializations,
   computeModelDnaFingerprint,
 } from './modelDnaKnowledgeBase';
-import { computeDeterministicCriticalThreshold } from './dnaAuditService';
-import { calculateShannonEntropy, calculateVariance } from './deterministicCore';
+import { computeDrawCriticalThreshold } from './dnaAuditService';
 import { updateWeightsWithKalmanFilter } from './kalmanWeightsFilter';
 import { useNexusStore } from '../../store/useNexusStore';
 import { logger } from '../../utils/logger';
@@ -55,15 +54,13 @@ export interface OptimizationResponse {
 }
 
 /**
- * Calcule l'écart maximum (Z-drift) et la dérive globale entre deux configurations de poids.
+ * Calcule l'écart maximum (Z-drift) entre deux configurations de poids.
  */
 export function calculateWeightDriftMetrics(
   currentWeights: AlgoWeights,
   targetWeights: AlgoWeights
-): { maxDelta: number; totalEnergy: number; driftedCount: number } {
+): { maxDelta: number } {
   let maxDelta = 0;
-  let totalEnergy = 0;
-  let driftedCount = 0;
 
   const allKeys = Array.from(
     new Set([...Object.keys(currentWeights), ...Object.keys(targetWeights)])
@@ -74,15 +71,9 @@ export function calculateWeightDriftMetrics(
     const tgt = (targetWeights as any)[key] ?? 0;
     const diff = Math.abs(tgt - cur);
     if (diff > maxDelta) maxDelta = diff;
-    totalEnergy += diff * diff;
-    if (diff > 0.01) driftedCount++;
   }
 
-  return {
-    maxDelta,
-    totalEnergy: Math.sqrt(totalEnergy),
-    driftedCount,
-  };
+  return { maxDelta };
 }
 
 /**
@@ -119,34 +110,11 @@ export async function applyOptimizedWeights(
 
   // 3. Calcul de la dérive et du seuil critique statistique continu (Zéro nombre magique)
   const algoCount = Object.keys(targetNormalized).length;
-  
-  let entropyVal = 0.85;
-  let varianceVal = 0.005;
-
-  if (history && history.length > 0) {
-    const counts = new Array(91).fill(0);
-    for (const d of history) {
-      if (d.gagnants) {
-        for (const num of d.gagnants) {
-          if (num >= 1 && num <= 90) counts[num]++;
-        }
-      }
-    }
-    const totalHits = counts.reduce((a, b) => a + b, 0);
-    if (totalHits > 0) {
-      const probs = counts.slice(1).map((c) => c / totalHits);
-      const hShannon = calculateShannonEntropy(probs);
-      entropyVal = hShannon / Math.log2(90);
-      varianceVal = calculateVariance(probs);
-    }
-  }
-
-  const criticalThreshold = computeDeterministicCriticalThreshold(
-    algoCount,
-    entropyVal,
-    varianceVal,
-    90
-  );
+  const {
+    criticalThreshold,
+    entropy: entropyVal,
+    variance: varianceVal,
+  } = computeDrawCriticalThreshold(history, algoCount);
 
   const { maxDelta } = calculateWeightDriftMetrics(normalizedCurrent, targetNormalized);
   const isCriticalDrift = maxDelta > criticalThreshold;
@@ -186,11 +154,13 @@ export async function applyOptimizedWeights(
   // 5. Persistance des poids
   await saveAlgoWeights(drawName, appliedWeights);
 
-  // 6. Enregistrement systématique dans la base de connaissances ADN
+  // 6. Enregistrement systématique dans la base de connaissances ADN.
+  // Aucune mesure n'est inventée : un score/gain absent reste absent (affiché "n/d")
+  // plutôt que dérivé d'une métrique de dérive qui n'est pas une performance.
   const timestamp = new Date().toISOString();
   const calculatedPerformance = {
-    score: performance.score ?? (100 - Math.min(100, maxDelta * 100)),
-    relativeGain: performance.relativeGain ?? 0,
+    score: performance.score,
+    relativeGain: performance.relativeGain,
     brierScore: performance.brierScore,
     rmse: performance.rmse,
     topologicalLoss: performance.topologicalLoss,

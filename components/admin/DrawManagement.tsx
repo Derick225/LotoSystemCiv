@@ -53,6 +53,49 @@ interface PreviewRow {
   rawLine?: string;
 }
 
+const parseHtmlInputDate = (dateStr: string): Date => {
+  const parts = dateStr.split("-");
+  if (parts.length === 3) {
+    return new Date(
+      parseInt(parts[0], 10),
+      parseInt(parts[1], 10) - 1,
+      parseInt(parts[2], 10),
+    );
+  }
+  return new Date(dateStr);
+};
+
+const parseLocalDrawDate = (dateStr: string): Date | null => {
+  const parts = dateStr.split("/");
+  if (parts.length === 3) {
+    return new Date(
+      parseInt(parts[2]),
+      parseInt(parts[1]) - 1,
+      parseInt(parts[0]),
+    );
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+// Bornes inclusives jour entier (00:00:00.000 → 23:59:59.999) comparées à midi local du tirage.
+const filterResultsInDateRange = (
+  list: DrawResult[],
+  startStr: string,
+  endStr: string,
+): DrawResult[] => {
+  const start = parseHtmlInputDate(startStr);
+  start.setHours(0, 0, 0, 0);
+  const end = parseHtmlInputDate(endStr);
+  end.setHours(23, 59, 59, 999);
+  return list.filter((r) => {
+    const d = parseLocalDrawDate(r.date);
+    if (!d) return false;
+    d.setHours(12, 0, 0, 0);
+    return d >= start && d <= end;
+  });
+};
+
 export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
   const { showToast } = useToast();
   const navigateToModule = useNexusStore((state) => state.navigateToModule);
@@ -533,18 +576,17 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
       await bulkAddResults(drawName, batch);
 
       audioEngine.play("success");
-      showToast(`${batch.length} tirages historiques importés.`, "success");
+      showToast(
+        `${batch.length} tirages historiques importés. Redirection vers l'Entraînement...`,
+        "success",
+      );
 
       // Reset
       setPreviewData([]);
       setImportStep("upload");
       loadData();
 
-      // Suggestion d'aller vers le training
-      showToast("Lancement de l'analyse post-import...", "info");
-      setTimeout(() => {
-        navigateToModule("admin", "training");
-      }, 1500);
+      navigateToModule("admin", "training");
     } catch (e: unknown) {
       audioEngine.play("error");
       showToast(
@@ -594,45 +636,14 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     showToast("Script Python généré.", "success");
   };
 
-  const parseHTMLInputDate = (dateStr: string): Date => {
-    const parts = dateStr.split("-");
-    if (parts.length === 3) {
-      return new Date(
-        parseInt(parts[0], 10),
-        parseInt(parts[1], 10) - 1,
-        parseInt(parts[2], 10),
-      );
-    }
-    return new Date(dateStr);
-  };
-
-  const rangeMatchCount = useMemo(() => {
-    if (!deleteStartDate || !deleteEndDate) return 0;
-    const start = parseHTMLInputDate(deleteStartDate);
-    start.setHours(0, 0, 0, 0);
-    const end = parseHTMLInputDate(deleteEndDate);
-    end.setHours(23, 59, 59, 999);
-
-    const parseLocalDrawDate = (dateStr: string): Date | null => {
-      const parts = dateStr.split("/");
-      if (parts.length === 3) {
-        return new Date(
-          parseInt(parts[2]),
-          parseInt(parts[1]) - 1,
-          parseInt(parts[0]),
-        );
-      }
-      const d = new Date(dateStr);
-      return isNaN(d.getTime()) ? null : d;
-    };
-
-    return results.filter((r) => {
-      const d = parseLocalDrawDate(r.date);
-      if (!d) return false;
-      d.setHours(12, 0, 0, 0);
-      return d >= start && d <= end;
-    }).length;
-  }, [deleteStartDate, deleteEndDate, results]);
+  const rangeMatchCount = useMemo(
+    () =>
+      !deleteStartDate || !deleteEndDate
+        ? 0
+        : filterResultsInDateRange(results, deleteStartDate, deleteEndDate)
+            .length,
+    [deleteStartDate, deleteEndDate, results],
+  );
 
   const toggleSelectId = (id: string) => {
     const next = new Set(selectedIds);
@@ -686,32 +697,11 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
   const handleDeleteDateRange = async () => {
     if (!deleteStartDate || !deleteEndDate) return;
 
-    const start = parseHTMLInputDate(deleteStartDate);
-    start.setHours(0, 0, 0, 0);
-    const end = parseHTMLInputDate(deleteEndDate);
-    end.setHours(23, 59, 59, 999);
-
-    const parseLocalDrawDate = (dateStr: string): Date | null => {
-      const parts = dateStr.split("/");
-      if (parts.length === 3) {
-        return new Date(
-          parseInt(parts[2]),
-          parseInt(parts[1]) - 1,
-          parseInt(parts[0]),
-        );
-      }
-      const d = new Date(dateStr);
-      return isNaN(d.getTime()) ? null : d;
-    };
-
-    const idsToDelete = results
-      .filter((r) => {
-        const d = parseLocalDrawDate(r.date);
-        if (!d) return false;
-        d.setHours(12, 0, 0, 0);
-        return d >= start && d <= end;
-      })
-      .map((r) => r.id);
+    const idsToDelete = filterResultsInDateRange(
+      results,
+      deleteStartDate,
+      deleteEndDate,
+    ).map((r) => r.id);
 
     if (idsToDelete.length === 0) return;
 
@@ -1582,10 +1572,10 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     </h4>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed mb-6">
-                    Cette action supprimera **définitivement** tout l'historique
-                    disponible de **{drawName}** ({results.length}{" "}
-                    enregistrements) à la fois sur votre stockage local et sur
-                    les serveurs cloud.
+                    Cette action supprimera <strong>définitivement</strong> tout
+                    l'historique disponible de <strong>{drawName}</strong> (
+                    {results.length} enregistrements) à la fois sur votre
+                    stockage local et sur les serveurs cloud.
                   </p>
                 </div>
 

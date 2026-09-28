@@ -176,7 +176,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       appliedWeights: report.correctedWeights || globalWeights,
       mathMetadata: mathMeta,
       summary: {
-        hitRate: report.calibrationAccuracy,
+        hitRate: (report.directHitsTop5.length / 5) * 100,
         accuracyScore: report.calibrationAccuracy,
         sampleCount: drawHistory.length,
         regime: report.cyclicPhaseProfile?.phaseLabel || 'STOCHASTIQUE',
@@ -213,7 +213,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
         appliedWeights: report.correctedWeights || globalWeights,
         mathMetadata: mathMeta,
         summary: {
-          hitRate: report.calibrationAccuracy,
+          hitRate: (report.directHitsTop5.length / 5) * 100,
           accuracyScore: report.calibrationAccuracy,
           sampleCount: drawHistory.length,
           regime: report.cyclicPhaseProfile?.phaseLabel || 'STOCHASTIQUE',

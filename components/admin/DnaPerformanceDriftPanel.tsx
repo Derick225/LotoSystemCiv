@@ -84,20 +84,18 @@ export const DnaPerformanceDriftPanel: React.FC<DnaPerformanceDriftPanelProps> =
       });
 
       const { applyOptimizedWeights } = await import("../../services/prediction/optimizationController");
+      // Aucun score prédictif n'est mesuré ici : la dérive, son erreur
+      // quadratique et le taux d'attribution ne sont pas des performances de
+      // prédiction. Les champs de performance restent donc absents (n/d).
       const optResult = await applyOptimizedWeights({
         drawName,
         weights: updatedWeights,
         origin: "HYPERPARAM_TUNER",
-        performance: {
-          score: Math.max(0, 100 - (report.overallDriftPercentage || 0)),
-          relativeGain: report.overallDriftPercentage || 0,
-          hitRate: report.hitRate,
-          brierScore: report.brierScore,
-        },
         causalAuditTrail: [
           `Compensation de dérive ADN appliquée sur ${drawName}`,
-          `Dérive globale: ${(report.overallDriftPercentage || 0).toFixed(1)}%`,
-          `Ajustements: ${report.recommendedDnaAdjustments.length} algorithmes recalibrés`,
+          `Dérive globale mesurée: ${(report.overallDriftPercentage || 0).toFixed(1)}%`,
+          `Erreur quadratique de dérive: ${(report.brierScore || 0).toFixed(4)} | Divergence KL: ${(report.klDivergence || 0).toFixed(2)} nats`,
+          `Recalibration continue: ${report.recommendedDnaAdjustments.length} algorithmes évalués, ${(report.algorithmDriftBreakdown || []).filter((a) => a.status !== "OPTIMAL").length} hors bande typique`,
         ],
         reason: `Régulation Dérive ADN (${(report.overallDriftPercentage || 0).toFixed(1)}%)`,
         history,

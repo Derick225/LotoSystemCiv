@@ -4,6 +4,7 @@ import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
 import { normalizeWeights, getDefaultWeights } from './weightsManager';
 import { calculateMicroDNAPerNumber } from './microDnaService';
 import { calculateStatisticalBounds } from '../mathService';
+import { calculateShannonEntropy, calculateVariance } from './deterministicCore';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { computeAdvancedMetrics } from './advancedMetricsCalculator';
@@ -81,6 +82,50 @@ export function computeDeterministicCriticalThreshold(
 
   const threshold = baseTolerance * entropyDamping * varianceCorrection;
   return parseFloat(Math.max(0.015, threshold).toFixed(4));
+}
+
+/**
+ * Seuil de dérive critique déterministe d'un tirage, dérivé de l'entropie de Shannon
+ * normalisée et de la variance des fréquences réelles de l'historique isolé.
+ * Source unique de vérité partagée par le rapport d'audit ADN, le contrôleur
+ * d'optimisation et les panneaux de calibration : le seuil affiché est exactement
+ * celui appliqué par le moteur.
+ */
+export function computeDrawCriticalThreshold(
+  history: DrawResult[],
+  algoCount: number
+): { criticalThreshold: number; entropy: number; variance: number } {
+  let entropyVal = 0.85;
+  let varianceVal = 0.005;
+
+  if (history && history.length > 0) {
+    const counts = new Array(91).fill(0);
+    for (const d of history) {
+      if (d.gagnants) {
+        for (const num of d.gagnants) {
+          if (num >= 1 && num <= 90) counts[num]++;
+        }
+      }
+    }
+    const totalHits = counts.reduce((a, b) => a + b, 0);
+    if (totalHits > 0) {
+      const probs = counts.slice(1).map((c) => c / totalHits);
+      const hShannon = calculateShannonEntropy(probs);
+      entropyVal = hShannon / Math.log2(90);
+      varianceVal = calculateVariance(probs);
+    }
+  }
+
+  return {
+    criticalThreshold: computeDeterministicCriticalThreshold(
+      algoCount,
+      entropyVal,
+      varianceVal,
+      90
+    ),
+    entropy: entropyVal,
+    variance: varianceVal,
+  };
 }
 
 /**
@@ -205,12 +250,12 @@ export const runSystematicDnaAudit = async (
   const driftedCount = totalAlgos - alignedCount;
   const coherenceScore = Math.round((alignedCount / totalAlgos) * 100);
 
-  // Calcul du seuil critique continu basé sur les bornes statistiques isolées
-  const criticalDriftThreshold = computeDeterministicCriticalThreshold(
-    totalAlgos,
-    bounds.shannonEntropy,
-    bounds.variance
-  );
+  // Seuil critique : exactement celui appliqué par le contrôleur d'optimisation
+  // (mêmes unités, même historique isolé) — le seuil affiché n'est jamais divergent.
+  const criticalDriftThreshold = computeDrawCriticalThreshold(
+    pureHistory,
+    totalAlgos
+  ).criticalThreshold;
 
   const maxWeightDriftDelta = algorithmAuditList.length > 0
     ? Math.max(...algorithmAuditList.map(a => a.weightDriftDelta))

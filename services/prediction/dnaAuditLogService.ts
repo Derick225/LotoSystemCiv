@@ -464,23 +464,35 @@ export const calculateDnaPerformanceDrift = async (
   const breakdown: DnaPerformanceDriftReport['algorithmDriftBreakdown'] = [];
   const adjustments: DnaPerformanceDriftReport['recommendedDnaAdjustments'] = [];
 
-  keys.forEach((k) => {
-    const injectedW = Number(normalizedInjected[k]) || 0;
-    const empiricalU = empiricalUtilities[k] || 0;
-    const driftDelta = injectedW - empiricalU;
-    squaredDriftSum += driftDelta * driftDelta;
+  const driftEntries = keys
+    .map((k) => {
+      const injectedW = Number(normalizedInjected[k]) || 0;
+      const empiricalU = empiricalUtilities[k] || 0;
+      const driftDelta = injectedW - empiricalU;
+      squaredDriftSum += driftDelta * driftDelta;
 
-    // KL divergence locale continue
-    const p = Math.max(1e-6, injectedW);
-    const q = Math.max(1e-6, empiricalU);
-    klDivSum += p * Math.log(p / q);
+      // KL divergence locale continue
+      const p = Math.max(1e-6, injectedW);
+      const q = Math.max(1e-6, empiricalU);
+      klDivSum += p * Math.log(p / q);
 
+      return { k, injectedW, empiricalU, driftDelta };
+    });
+
+  // Dispersion observée : RMS des dérives (moyenne nulle car Σ injecté = Σ empirique = 1).
+  const rmsDrift = Math.sqrt(squaredDriftSum / keys.length);
+
+  driftEntries.forEach(({ k, injectedW, empiricalU, driftDelta }) => {
+    const z = rmsDrift > 0 ? driftDelta / rmsDrift : 0;
+    const absZ = Math.abs(z);
+
+    // Classification par couverture Gaussienne : dispersion typique à 1σ, divergence hors 2σ.
     let status: 'OPTIMAL' | 'OVER_WEIGHTED' | 'UNDER_WEIGHTED' | 'DIVERGENT' = 'OPTIMAL';
-    if (Math.abs(driftDelta) > 0.05) {
+    if (absZ > 2) {
       status = 'DIVERGENT';
-    } else if (driftDelta > 0.015) {
+    } else if (z > 1) {
       status = 'OVER_WEIGHTED';
-    } else if (driftDelta < -0.015) {
+    } else if (z < -1) {
       status = 'UNDER_WEIGHTED';
     }
 
@@ -494,20 +506,20 @@ export const calculateDnaPerformanceDrift = async (
       hitContributionCount: hitCountsPerAlgo[k] || 0,
     });
 
-    if (Math.abs(driftDelta) > 0.01) {
-      const step = 0.5 * driftDelta;
-      const recommended = Math.max(0.005, injectedW - step);
-      adjustments.push({
-        algoKey: k,
-        currentWeight: parseFloat(injectedW.toFixed(4)),
-        recommendedWeight: parseFloat(recommended.toFixed(4)),
-        adjustmentDelta: parseFloat((-step).toFixed(4)),
-        reason:
-          driftDelta > 0
-            ? `Surpondéré de ${(driftDelta * 100).toFixed(1)}% par rapport aux sorties réelles.`
-            : `Sous-pondéré : le modèle a manqué ${(Math.abs(driftDelta) * 100).toFixed(1)}% d'affinité observée.`,
-      });
-    }
+    // Pas de correction continue : pertinence tanh(|z|), les micro-dérives s'éteignent sans porte binaire.
+    const relevance = Math.tanh(absZ);
+    const step = 0.5 * driftDelta * relevance;
+    const recommended = Math.max(0.005, injectedW - step);
+    adjustments.push({
+      algoKey: k,
+      currentWeight: parseFloat(injectedW.toFixed(4)),
+      recommendedWeight: parseFloat(recommended.toFixed(4)),
+      adjustmentDelta: parseFloat((-step).toFixed(4)),
+      reason:
+        driftDelta > 0
+          ? `Surpondéré de ${(driftDelta * 100).toFixed(1)}% (${absZ.toFixed(2)}σ) par rapport aux sorties réelles.`
+          : `Sous-pondéré : le modèle a manqué ${(Math.abs(driftDelta) * 100).toFixed(1)}% d'affinité observée (${absZ.toFixed(2)}σ).`,
+    });
   });
 
   // Normalisation L1 des poids recommandés
@@ -519,7 +531,6 @@ export const calculateDnaPerformanceDrift = async (
   }
 
   // Drift global continu via tangente hyperbolique (0 - 100%)
-  const rmsDrift = Math.sqrt(squaredDriftSum / keys.length);
   const overallDriftPercentage = parseFloat((Math.tanh(3.5 * rmsDrift) * 100).toFixed(1));
   const brierScore = parseFloat((squaredDriftSum / keys.length).toFixed(4));
   const klDivergence = parseFloat(Math.max(0, klDivSum).toFixed(4));

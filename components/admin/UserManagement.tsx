@@ -88,6 +88,14 @@ export const UserManagement: React.FC = () => {
   const handleRoleToggle = async (user: AdminUser) => {
     audioEngine.play("click");
     const targetRole = user.role === "admin" ? "user" : "admin";
+    if (user.role === "admin" && metrics.adminCount <= 1) {
+      audioEngine.play("error");
+      showToast(
+        "Rétrogradation refusée : ce compte est le dernier administrateur.",
+        "error",
+      );
+      return;
+    }
     setProcessingId(user.id);
     try {
       const ok = await adminService.updateUserRole(user.id, targetRole);
@@ -113,14 +121,22 @@ export const UserManagement: React.FC = () => {
     setEditingSubUser(user);
     setSubStatus(user.subscription?.status || "active");
     setSubPlan(user.subscription?.plan || "premium");
-    const currentExp = user.subscription?.expires_at
-      ? new Date(user.subscription.expires_at).toISOString().split("T")[0]
-      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-    setSubExpiresAt(currentExp);
+    // Aucune date inventée : sans abonnement existant, le champ reste vide et
+    // doit être renseigné explicitement avant l'enregistrement.
+    setSubExpiresAt(
+      user.subscription?.expires_at
+        ? new Date(user.subscription.expires_at).toISOString().split("T")[0]
+        : "",
+    );
   };
 
   const handleSaveSub = async () => {
     if (!editingSubUser) return;
+    if (!subExpiresAt) {
+      audioEngine.play("error");
+      showToast("Veuillez renseigner une date d'expiration.", "error");
+      return;
+    }
     audioEngine.play("click");
     setIsUpdatingSub(true);
     try {
@@ -237,11 +253,12 @@ export const UserManagement: React.FC = () => {
     const isExpired = new Date(sub.expires_at).getTime() < Date.now();
     const isActive = (sub.status === "active" || sub.status === "trial") && !isExpired;
     const isPremium = sub.plan === "premium";
+    const statusLabel =
+      sub.status === "suspended" ? "Suspendu" : isActive ? "Actif" : "Expiré";
 
     return (
-      <button
-        onClick={() => {}}
-        className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
+      <span
+        className={`px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center gap-1.5 transition-all ${
           isActive
             ? isPremium
               ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
@@ -252,9 +269,9 @@ export const UserManagement: React.FC = () => {
         {isPremium && <Crown size={12} className="text-amber-500" />}
         <span>{sub.plan.toUpperCase()}</span>
         <span className="text-[10px] opacity-75">
-          ({isActive ? "Actif" : "Expiré"})
+          ({statusLabel})
         </span>
-      </button>
+      </span>
     );
   };
 

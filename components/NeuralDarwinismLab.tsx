@@ -30,8 +30,8 @@ import { ExportService } from "../services/exportService";
 interface TelemetryPoint {
   gen: number;
   bestFitness: number;
-  avgFitness: number;
-  diversity: number;
+  avgFitness?: number;
+  diversity?: number;
 }
 
 export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
@@ -56,9 +56,10 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
   const [evolutionResult, setEvolutionResult] = useState<{
     bestWeights: AlgoWeights;
     improvement: number;
+    relativeGainPct: number | null;
     report: TrainingReport;
     isGeneralizable?: boolean | "unverifiable";
-    overfittingRatio?: number;
+    overfittingRatio?: number | null;
   } | null>(null);
 
   const runEvolution = async () => {
@@ -84,17 +85,31 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
         globalWeights,
         { generations, sampleSize, optimizerType },
         (logData) => {
-          if (logData?.gen !== undefined) {
+          if (
+            logData?.gen !== undefined &&
+            typeof logData.bestFitness === "number"
+          ) {
             setTelemetryCurve((prev) => [
               ...prev,
               {
                 gen: logData.gen,
-                bestFitness: logData.bestFitness || 0,
-                avgFitness: logData.avgFitness || 0,
-                diversity: logData.diversity || 0,
+                bestFitness: logData.bestFitness,
+                avgFitness:
+                  typeof logData.avgFitness === "number"
+                    ? logData.avgFitness
+                    : undefined,
+                diversity:
+                  typeof logData.diversity === "number"
+                    ? logData.diversity
+                    : undefined,
               },
             ]);
-            const logMsg = `Gen ${logData.gen} | Fitness max: ${logData.bestFitness?.toFixed(3)} | Div: ${((logData.diversity || 0) * 100).toFixed(1)}%`;
+            // Une mesure absente n'est jamais affichée comme un 0 fabriqué.
+            const logMsg =
+              `Gen ${logData.gen} | Fitness max: ${logData.bestFitness.toFixed(3)}` +
+              (typeof logData.diversity === "number"
+                ? ` | Div: ${(logData.diversity * 100).toFixed(1)}%`
+                : "");
             setTelemetryLogs((prev) => [...prev.slice(-10), logMsg]);
           } else if (logData?.message) {
             setTelemetryLogs((prev) => [...prev.slice(-10), logData.message]);
@@ -104,8 +119,14 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
 
       setEvolutionResult(result);
       audioEngine.play("success");
+      // `improvement` est un écart de score en points (échelle 0-100), pas un
+      // pourcentage : le gain relatif réel est `relativeGainPct` (n/d si non mesurable).
+      const relativeGainLabel =
+        result.relativeGainPct != null
+          ? `${result.relativeGainPct >= 0 ? "+" : ""}${result.relativeGainPct.toFixed(2)}%`
+          : "n/d";
       showToast(
-        `Évolution terminée avec succès : Gain d'efficacité ${(result.improvement * 100) >= 0 ? "+" : ""}${(result.improvement * 100).toFixed(1)}%`,
+        `Évolution terminée : Gain de score ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)} points (0-100) | Gain relatif : ${relativeGainLabel}`,
         "success",
       );
     } catch (err: any) {
@@ -129,13 +150,13 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
         weights: evolutionResult.bestWeights,
         origin: "GENETIC_EVOLUTION",
         performance: {
-          score: evolutionResult.report?.score || 0,
-          relativeGain: evolutionResult.improvement * 100,
+          score: evolutionResult.report?.score,
+          relativeGain: evolutionResult.relativeGainPct ?? undefined,
         },
         causalAuditTrail: [
           `Laboratoire Darwinien exécuté sur ${drawName}`,
           `Générations: ${generations}, Échantillon: ${sampleSize}, Optimiseur: ${optimizerType.toUpperCase()}`,
-          `Score atteint: ${(evolutionResult.report?.score || 0).toFixed(1)}/100`,
+          `Score backtest mesuré: ${evolutionResult.report?.score != null ? `${evolutionResult.report.score.toFixed(1)}/100` : "n/d"}`,
         ],
         reason: `Laboratoire Darwinien - ${optimizerType.toUpperCase()}`,
         history,
@@ -431,7 +452,7 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
                     ? "Généralisable (Zéro Sur-ajustement)"
                     : evolutionResult.isGeneralizable === false
                     ? "Régularisé par Blending"
-                    : "Échantillon Restreint"}
+                    : "Non Vérifiable (Holdout Insuffisant)"}
                 </span>
               </p>
             </div>
@@ -448,11 +469,17 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800/80">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Gain d'Efficacité
+                Gain de Score (points 0-100)
               </span>
               <span className="text-2xl font-black text-emerald-500 mt-1 block font-mono">
-                {(evolutionResult.improvement * 100) >= 0 ? "+" : ""}
-                {(evolutionResult.improvement * 100).toFixed(1)}%
+                {evolutionResult.improvement >= 0 ? "+" : ""}
+                {evolutionResult.improvement.toFixed(2)}
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                Relatif :{" "}
+                {evolutionResult.relativeGainPct != null
+                  ? `${evolutionResult.relativeGainPct >= 0 ? "+" : ""}${evolutionResult.relativeGainPct.toFixed(2)}%`
+                  : "n/d"}
               </span>
             </div>
             <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800/80">
@@ -468,7 +495,9 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
                 Score Fitness Global
               </span>
               <span className="text-2xl font-black text-slate-800 dark:text-white mt-1 block font-mono">
-                {evolutionResult.report.score.toFixed(1)}
+                {evolutionResult.report?.score != null
+                  ? evolutionResult.report.score.toFixed(1)
+                  : "n/d"}
               </span>
             </div>
             <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-100 dark:border-slate-800/80">
@@ -477,14 +506,15 @@ export const NeuralDarwinismLab: React.FC<{ drawName: string }> = ({
               </span>
               <span
                 className={`text-2xl font-black mt-1 block font-mono ${
-                  evolutionResult.overfittingRatio && evolutionResult.overfittingRatio > 1.25
+                  evolutionResult.overfittingRatio != null &&
+                  evolutionResult.overfittingRatio > 1
                     ? "text-amber-500"
                     : "text-emerald-500"
                 }`}
               >
-                {evolutionResult.overfittingRatio
+                {evolutionResult.overfittingRatio != null
                   ? evolutionResult.overfittingRatio.toFixed(2)
-                  : "1.00"}
+                  : "n/d"}
               </span>
             </div>
           </div>

@@ -39,7 +39,13 @@ export const SyncMonitoringDashboard: React.FC = () => {
 
   return (
     <div className="glass-card neural-border rounded-xl p-6 text-white font-mono relative overflow-hidden shadow-2xl">
-      <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5 pointer-events-none mix-blend-screen"></div>
+      <div
+        className="absolute inset-0 opacity-5 pointer-events-none mix-blend-screen"
+        style={{
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48'%3E%3Cpath d='M24 6 42 24 24 42 6 24Z' fill='none' stroke='%2367e8f9' stroke-opacity='0.6'/%3E%3C/svg%3E\")",
+        }}
+      ></div>
 
       <div className="flex justify-between items-center mb-6 relative z-10 border-b border-slate-700/50 pb-4">
         <div className="flex items-center gap-3">

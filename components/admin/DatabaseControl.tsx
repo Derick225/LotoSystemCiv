@@ -28,14 +28,21 @@ import {
 import { audioEngine } from "../../utils/audioEngine";
 import { keys as idbKeys, clear as idbClear, delMany as idbDelMany, getMany as idbGetMany, setMany as idbSetMany } from "idb-keyval";
 
+// Les jetons de session (Supabase Auth `sb-*-auth-token`, clés NEXUS) sont
+// exclus des snapshots exportés et jamais écrasés lors d'une importation.
+const isAuthStorageKey = (key: string): boolean =>
+  /auth[-_]token/i.test(key) || key.startsWith("nexus_auth");
+
 export const DatabaseControl: React.FC = () => {
   const { showToast } = useToast();
+  // Les compteurs cloud restent null tant qu'aucune mesure réelle n'a abouti :
+  // l'UI affiche « n/d » plutôt qu'un zéro inventé.
   const [metrics, setMetrics] = useState({
-    draws: 0,
-    analytics: 0,
-    weights: 0,
-    feedback: 0,
-    subscriptions: 0,
+    draws: null as number | null,
+    analytics: null as number | null,
+    weights: null as number | null,
+    feedback: null as number | null,
+    subscriptions: null as number | null,
     localStorageSize: 0,
     idbKeyCount: 0,
     idbEstimatedMb: 0,
@@ -92,12 +99,13 @@ export const DatabaseControl: React.FC = () => {
     if (!isSupabaseConfigured()) {
       setConnectionStatus("error");
       setLastError("Configuration .env Supabase absente (Mode Déconnecté)");
+      setTableStatus({});
       setMetrics({
-        draws: 0,
-        analytics: 0,
-        weights: 0,
-        feedback: 0,
-        subscriptions: 0,
+        draws: null,
+        analytics: null,
+        weights: null,
+        feedback: null,
+        subscriptions: null,
         localStorageSize: Math.round(localTotal / 1024),
         idbKeyCount: idbCount,
         idbEstimatedMb: idbEstMb,
@@ -115,6 +123,18 @@ export const DatabaseControl: React.FC = () => {
       if (!conn.success) {
         setConnectionStatus("error");
         setLastError(conn.error || "Erreur de connexion");
+        setTableStatus({});
+        setMetrics({
+          draws: null,
+          analytics: null,
+          weights: null,
+          feedback: null,
+          subscriptions: null,
+          localStorageSize: Math.round(localTotal / 1024),
+          idbKeyCount: idbCount,
+          idbEstimatedMb: idbEstMb,
+          pingLatencyMs: null,
+        });
         setLoading(false);
         return;
       }
@@ -124,7 +144,9 @@ export const DatabaseControl: React.FC = () => {
       // Probe each table independently to identify partial migrations
       const tables = ["draw_results", "draw_analytics", "algo_weights", "prediction_feedback", "subscriptions"];
       const statuses: Record<string, "ok" | "missing" | "error"> = {};
-      const counts: Record<string, number> = {};
+      // Un compte reste null si la table est absente ou en erreur : on ne
+      // présente jamais « 0 » comme une mesure réelle.
+      const counts: Record<string, number | null> = {};
 
       await Promise.all(
         tables.map(async (t) => {
@@ -134,25 +156,25 @@ export const DatabaseControl: React.FC = () => {
               .select("*", { count: "exact", head: true });
             if (error) {
               statuses[t] = error.code === "42P01" ? "missing" : "error";
-              counts[t] = 0;
+              counts[t] = null;
             } else {
               statuses[t] = "ok";
-              counts[t] = count || 0;
+              counts[t] = count ?? 0;
             }
           } catch {
             statuses[t] = "error";
-            counts[t] = 0;
+            counts[t] = null;
           }
         })
       );
 
       setTableStatus(statuses);
       setMetrics({
-        draws: counts["draw_results"] || 0,
-        analytics: counts["draw_analytics"] || 0,
-        weights: counts["algo_weights"] || 0,
-        feedback: counts["prediction_feedback"] || 0,
-        subscriptions: counts["subscriptions"] || 0,
+        draws: counts["draw_results"] ?? null,
+        analytics: counts["draw_analytics"] ?? null,
+        weights: counts["algo_weights"] ?? null,
+        feedback: counts["prediction_feedback"] ?? null,
+        subscriptions: counts["subscriptions"] ?? null,
         localStorageSize: Math.round(localTotal / 1024),
         idbKeyCount: idbCount,
         idbEstimatedMb: idbEstMb,
@@ -239,11 +261,9 @@ export const DatabaseControl: React.FC = () => {
     try {
       await idbClear();
       localStorage.clear();
-      audioEngine.play("success");
-      showToast("Réinitialisation complète terminée. Redémarrage...", "success");
-      setTimeout(() => {
-        window.location.reload();
-      }, 800);
+      // Rechargement immédiat : tous les stores en mémoire référencent le
+      // stockage purgé, aucun délai d'affichage n'apporte d'information.
+      window.location.reload();
     } catch {
       audioEngine.play("error");
       showToast("Erreur lors de la réinitialisation", "error");
@@ -263,7 +283,7 @@ export const DatabaseControl: React.FC = () => {
       const localData: Record<string, string> = {};
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        if (key) {
+        if (key && !isAuthStorageKey(key)) {
           localData[key] = localStorage.getItem(key) || "";
         }
       }
@@ -274,6 +294,7 @@ export const DatabaseControl: React.FC = () => {
           version: "12.0.0",
           exportedAt: new Date().toISOString(),
           tablesStatus: tableStatus,
+          authTokensExcluded: true,
         },
         localStorage: localData,
         indexedDB: idbData,
@@ -311,10 +332,13 @@ export const DatabaseControl: React.FC = () => {
           throw new Error("Format de snapshot invalide");
         }
 
-        // Restore localStorage
+        // Restore localStorage, hors jetons de session : un snapshot importé ne
+        // doit jamais écraser la session active du navigateur.
         if (snapshot.localStorage) {
           Object.entries(snapshot.localStorage).forEach(([k, v]) => {
-            localStorage.setItem(k, v as string);
+            if (!isAuthStorageKey(k)) {
+              localStorage.setItem(k, v as string);
+            }
           });
         }
 
@@ -326,11 +350,10 @@ export const DatabaseControl: React.FC = () => {
           await idbSetMany(keysToSet.map((k, idx) => [k, valsToSet[idx]]));
         }
 
-        audioEngine.play("success");
-        showToast("Restauration réussie ! Actualisation...", "success");
-        setTimeout(() => {
-          window.location.reload();
-        }, 1200);
+        setIsRestoring(false);
+        // Rechargement immédiat : les stores en mémoire doivent se réhydrater
+        // depuis le stockage restauré.
+        window.location.reload();
       } catch (err: any) {
         audioEngine.play("error");
         showToast(`Échec restauration : ${err.message || "Fichier invalide"}`, "error");
@@ -466,10 +489,16 @@ export const DatabaseControl: React.FC = () => {
                 className={`absolute top-4 right-4 text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
                   m.status === "ok"
                     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300"
-                    : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                    : m.status === "missing"
+                      ? "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300"
+                      : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
                 }`}
               >
-                {m.status === "ok" ? "En ligne" : "Table absente"}
+                {m.status === "ok"
+                  ? "En ligne"
+                  : m.status === "missing"
+                    ? "Table absente"
+                    : "Erreur requête"}
               </span>
             )}
             <div
@@ -478,7 +507,7 @@ export const DatabaseControl: React.FC = () => {
               {m.icon}
             </div>
             <div className="text-2xl font-black text-slate-800 dark:text-white">
-              {m.val}
+              {m.val ?? "n/d"}
             </div>
             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
               {m.label}
@@ -552,7 +581,7 @@ export const DatabaseControl: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
-              Téléchargez une image intégrale de votre environnement de calcul (poids d'apprentissage, historique de navigation, modèles fusions) pour réplication ou secours.
+              Téléchargez une image intégrale de votre environnement de calcul (poids d'apprentissage, historique de navigation, modèles fusions) pour réplication ou secours. Les jetons de session (authentification) sont exclus du fichier et ne sont jamais écrasés par une restauration.
             </p>
           </div>
 

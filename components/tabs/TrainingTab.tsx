@@ -7,9 +7,10 @@ import {
 import {
   normalizeWeights,
   getAlgoWeights,
-  saveAlgoWeights,
   evaluateAlgoEmpiricalProof,
 } from "../../services/predictionEngine";
+import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
+import { LOTTERY_CONSTANTS } from "../../services/lotteryService";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
@@ -52,8 +53,9 @@ import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { LABELS_MAP } from "../../hooks/useAlgorithmSync";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import {
-  AreaChart,
+  ComposedChart,
   Area,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -71,7 +73,6 @@ type SubTabType = "training" | "neural-opt" | "darwinian" | "replay" | "feedback
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
-  const updateGlobalWeights = useNexusStore((state) => state.updateGlobalWeights);
   const refreshData = useNexusStore((state) => state.refreshData);
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
@@ -91,10 +92,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const [evolutionData, setEvolutionData] = useState<Array<{ 
     gen: number; 
     bestFitness: number; 
-    diversity: number; 
-    loss?: number;
-    crossEntropy?: number;
-    klDivergence?: number;
+    avgFitness?: number;
+    diversity?: number; 
     bestGenome: AlgoWeights;
   }>>([]);
   
@@ -105,6 +104,13 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     return globalWeights && Object.keys(globalWeights).length > 0 ? globalWeights : DEFAULT_ALGO_WEIGHTS;
   });
   const [finalReport, setFinalReport] = useState<TrainingReport | null>(null);
+  // Mesures réelles du dernier entraînement (aucune valeur inventée) :
+  // improvement = écart de score backtest avant/après (points 0-100),
+  // relativeGainPct = gain relatif mesuré (null si non mesurable → "n/d").
+  const [lastEvolution, setLastEvolution] = useState<{
+    improvement: number;
+    relativeGainPct: number | null;
+  } | null>(null);
 
   // Modals & Drawers State
   const [isEvolutionDrawerOpen, setIsEvolutionDrawerOpen] = useState(false);
@@ -265,6 +271,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     setStatus("running");
     setEvolutionData([]);
+    setLastEvolution(null);
     setLogs([]);
     addLog(`Démarrage de l'optimiseur : ${optimizerType.toUpperCase()}`);
     addLog(`Isolement strict du tirage : ${drawName} (Zéro contamination inter-tirages)`);
@@ -282,28 +289,41 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           history: effectiveHistory,
         },
         (data) => {
-          // Synthetic continuous loss metrics computation for real-time visualization
-          const fitness = data.bestFitness;
-          const diversity = data.diversity;
-          // Loss is inversely proportional to fitness with continuous logarithmic mapping
-          const continuousLoss = Math.max(0.01, -Math.log(Math.max(0.001, Math.min(0.999, fitness / 100))));
-          const crossEntropy = continuousLoss * 0.72;
-          const klDivergence = Math.max(0.005, (1 - diversity) * 0.35);
+          // Événement purement informationnel (ex. résultat servi depuis le cache :
+          // aucune génération n'a été exécutée, donc aucune courbe n'est rejouée).
+          if (typeof data?.message === "string") {
+            addLog(data.message);
+            return;
+          }
+
+          // Télémétrie réelle de l'optimiseur : seules les mesures effectivement
+          // émises sont tracées (pas de métriques de perte synthétiques).
+          if (
+            typeof data?.gen !== "number" ||
+            typeof data?.bestFitness !== "number" ||
+            !data.bestGenome
+          ) {
+            return;
+          }
 
           setEvolutionData((prev) => [
             ...prev,
             {
-              ...data,
-              loss: Number(continuousLoss.toFixed(4)),
-              crossEntropy: Number(crossEntropy.toFixed(4)),
-              klDivergence: Number(klDivergence.toFixed(4)),
+              gen: data.gen as number,
+              bestFitness: data.bestFitness as number,
+              avgFitness: typeof data.avgFitness === "number" ? data.avgFitness : undefined,
+              diversity: typeof data.diversity === "number" ? data.diversity : undefined,
+              bestGenome: data.bestGenome,
             },
           ]);
           setLiveWeights(normalizeWeights(data.bestGenome));
-          
+
           if (data.gen % 5 === 0 || data.gen === 1) {
             addLog(
-              `Génération ${data.gen}/${generations} | Fitness : ${data.bestFitness.toFixed(2)}% | Perte : ${continuousLoss.toFixed(3)} | Div : ${(diversity * 100).toFixed(1)}%`
+              `Génération ${data.gen}/${generations} | Fitness : ${data.bestFitness.toFixed(3)}` +
+                (typeof data.diversity === "number"
+                  ? ` | Diversité : ${(data.diversity * 100).toFixed(1)}%`
+                  : "")
             );
           }
         }
@@ -311,10 +331,18 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
       if (result.report) {
         setFinalReport(result.report);
+        setLastEvolution({
+          improvement: result.improvement,
+          relativeGainPct: result.relativeGainPct ?? null,
+        });
         setLiveWeights(normalizeWeights(result.bestWeights));
         setFineTuningWeights(normalizeWeights(result.bestWeights));
         setStatus("completed");
         addLog(`Convergence globale atteinte ! Meilleur génome synthétisé avec succès.`);
+        addLog(
+          `Écart de score backtest (avant/après) : ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)} points (0-100)` +
+            (result.relativeGainPct != null ? ` | Gain relatif : ${result.relativeGainPct >= 0 ? "+" : ""}${result.relativeGainPct.toFixed(2)}%` : " | Gain relatif : n/d")
+        );
         audioEngine.play("success");
       }
     } catch (e: any) {
@@ -336,37 +364,38 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const applyWeights = async () => {
     if (status === "running") return;
     audioEngine.play("scan");
-    addLog("Persistance du nouveau génome dans la base de données isolée...");
-    
+    addLog("Persistance du nouveau génome via la passerelle d'optimisation unifiée...");
+
     const safeWeights = normalizeWeights(liveWeights);
-    await updateGlobalWeights(safeWeights, drawName);
+    const response = await applyOptimizedWeights({
+      drawName,
+      weights: safeWeights,
+      origin: "GENETIC_EVOLUTION",
+      allowCriticalDrift: true,
+      history: cleanHistory,
+      performance: finalReport
+        ? {
+            score: finalReport.score,
+            relativeGain: lastEvolution?.relativeGainPct ?? undefined,
+            hitRate:
+              finalReport.averageHits != null
+                ? (finalReport.averageHits / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) * 100
+                : undefined,
+          }
+        : undefined,
+      causalAuditTrail: [
+        `Optimisation génomique exécutée (${optimizerType.toUpperCase()}) sur ${drawName}`,
+        `Générations: ${generations}, Échantillon: ${sampleSize} tirages`,
+        ...(finalReport
+          ? [`Score backtest mesuré: ${finalReport.score.toFixed(1)}/100`]
+          : ["Aucun backtest mesuré pour ce génome (n/d)"]),
+      ],
+      reason: "Application du meilleur génome issu de l'entraînement",
+    });
     await refreshData(drawName, true);
 
-    // Enregistrement dans la base de connaissances ADN (Model DNA Lineage)
-    try {
-      const { recordModelDnaVersion } = await import("../../services/prediction/modelDnaKnowledgeBase");
-      const relativeGain = finalReport?.score ? ((finalReport.score - 50) / 50) * 100 : 0;
-      await recordModelDnaVersion({
-        drawName,
-        origin: "GENETIC_EVOLUTION",
-        weights: safeWeights,
-        performance: {
-          score: finalReport?.score || 0,
-          relativeGain,
-          hitRate: finalReport?.averageHits ? (finalReport.averageHits / 5) * 100 : undefined,
-        },
-        causalAuditTrail: [
-          `Optimisation génomique exécutée (${optimizerType.toUpperCase()}) sur ${drawName}`,
-          `Générations: ${generations}, Échantillon: ${sampleSize} tirages`,
-          `Score atteint: ${(finalReport?.score || 0).toFixed(1)}/100`,
-        ],
-      });
-    } catch (err) {
-      console.warn("[TrainingTab] Erreur archivage ADN :", err);
-    }
-    
-    setOriginalWeights(safeWeights);
-    addLog("ADN mis à jour avec succès dans le moteur prédictif et archivé dans la lignée.");
+    setOriginalWeights(response.appliedWeights);
+    addLog(response.message);
     showToast("ADN mis à jour avec succès !", "success");
     audioEngine.play("success");
   };
@@ -382,14 +411,21 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     setShowResetConfirm(false);
     audioEngine.play("click");
     const defaultNormalized = normalizeWeights(DEFAULT_ALGO_WEIGHTS);
-    await saveAlgoWeights(drawName, defaultNormalized);
-    await updateGlobalWeights(defaultNormalized, drawName);
+    const response = await applyOptimizedWeights({
+      drawName,
+      weights: defaultNormalized,
+      origin: "MANUAL_CALIBRATION",
+      allowCriticalDrift: true,
+      history: cleanHistory,
+      causalAuditTrail: [`Réinitialisation aux poids canoniques par défaut sur ${drawName}`],
+      reason: "Réinitialisation manuelle de l'ADN algorithmique",
+    });
     await refreshData(drawName, true);
-    
-    setOriginalWeights(defaultNormalized);
-    setLiveWeights(defaultNormalized);
-    setFineTuningWeights(defaultNormalized);
-    addLog("ADN réinitialisé avec succès aux poids canoniques par défaut.");
+
+    setOriginalWeights(response.appliedWeights);
+    setLiveWeights(response.appliedWeights);
+    setFineTuningWeights(response.appliedWeights);
+    addLog(response.message);
     showToast("Poids réinitialisés aux valeurs par défaut", "success");
     audioEngine.play("success");
   };
@@ -407,14 +443,21 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       audioEngine.play("click");
       const importedWeights = await ExportService.importDNA();
       const normalized = normalizeWeights(importedWeights);
-      await saveAlgoWeights(drawName, normalized);
-      await updateGlobalWeights(normalized, drawName);
+      const response = await applyOptimizedWeights({
+        drawName,
+        weights: normalized,
+        origin: "MANUAL_CALIBRATION",
+        allowCriticalDrift: true,
+        history: cleanHistory,
+        causalAuditTrail: [`Profil ADN externe importé (fichier JSON) sur ${drawName}`],
+        reason: "Import manuel d'un profil ADN externe",
+      });
       await refreshData(drawName, true);
-      
-      setOriginalWeights(normalized);
-      setLiveWeights(normalized);
-      setFineTuningWeights(normalized);
-      addLog("Profil ADN externe importé et appliqué avec succès.");
+
+      setOriginalWeights(response.appliedWeights);
+      setLiveWeights(response.appliedWeights);
+      setFineTuningWeights(response.appliedWeights);
+      addLog(response.message);
       showToast("Profil ADN importé et activé !", "success");
       audioEngine.play("success");
     } catch (e: any) {
@@ -479,32 +522,21 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const handleApplyFineTunedWeights = async () => {
     audioEngine.play("scan");
     const normalized = normalizeWeights(fineTuningWeights);
-    await saveAlgoWeights(drawName, normalized);
-    await updateGlobalWeights(normalized, drawName);
+    const response = await applyOptimizedWeights({
+      drawName,
+      weights: normalized,
+      origin: "MANUAL_CALIBRATION",
+      allowCriticalDrift: true,
+      history: cleanHistory,
+      causalAuditTrail: [`Calibrage manuel des poids appliqué sur ${drawName}`],
+      reason: "Ajustement fin manuel des gènes de l'ADN",
+    });
     await refreshData(drawName, true);
 
-    // Enregistrement dans la base de connaissances ADN
-    try {
-      const { recordModelDnaVersion } = await import("../../services/prediction/modelDnaKnowledgeBase");
-      await recordModelDnaVersion({
-        drawName,
-        origin: "MANUAL_CALIBRATION",
-        weights: normalized,
-        performance: {
-          score: 50,
-        },
-        causalAuditTrail: [
-          `Calibrage manuel des poids appliqué sur ${drawName}`,
-        ],
-      });
-    } catch (err) {
-      console.warn("[TrainingTab] Erreur archivage calibrage manuel ADN :", err);
-    }
-    
-    setOriginalWeights(normalized);
-    setLiveWeights(normalized);
+    setOriginalWeights(response.appliedWeights);
+    setLiveWeights(response.appliedWeights);
     setIsFineTuningOpen(false);
-    addLog("ADN ajusté manuellement et synchronisé avec le moteur de prédiction.");
+    addLog(response.message);
     showToast("Ajustements manuels appliqués avec succès !", "success");
     audioEngine.play("success");
   };
@@ -534,8 +566,36 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     };
   }).sort((a, b) => b.current - a.current);
 
-  // Real-time Loss Metrics
+  // Dernières mesures réellement émises par l'optimiseur (n/d si absentes)
   const lastMetrics = evolutionData[evolutionData.length - 1];
+
+  // Référence théorique uniforme : probabilité moyenne de toucher un numéro gagnant
+  const randomBaselineHitRatePct = (LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS) * 100;
+
+  // Plis hors-échantillon construits sur les résultats réels du backtest walk-forward
+  // (chaque prédiction n'utilise que les tirages antérieurs : aucune fuite temporelle).
+  const oosFolds = useMemo(() => {
+    const results = finalReport?.history ?? [];
+    if (results.length === 0) return [];
+
+    // history[0] = tirage testé le plus récent → on remet en ordre chronologique
+    const chronological = [...results].reverse();
+    const foldCount = Math.min(5, chronological.length);
+    const foldSize = Math.floor(chronological.length / foldCount);
+
+    return Array.from({ length: foldCount }, (_, idx) => {
+      const start = idx * foldSize;
+      const end = idx === foldCount - 1 ? chronological.length : start + foldSize;
+      const block = chronological.slice(start, end);
+      const meanHits = block.reduce((sum, r) => sum + r.hitCount, 0) / (block.length || 1);
+      return {
+        index: idx + 1,
+        drawCount: block.length,
+        meanHits: Number(meanHits.toFixed(3)),
+        hitRatePct: Number(((meanHits / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) * 100).toFixed(2)),
+      };
+    });
+  }, [finalReport]);
 
   return (
     <div className="w-full text-slate-300 font-sans pb-24 animate-fade-in space-y-8">
@@ -816,16 +876,26 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 )}
               </div>
 
-              {/* Quick Metrics Badge */}
+              {/* Quick Metrics Badge — mesures réelles émises par l'optimiseur */}
               {lastMetrics && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
-                    <span className="text-[9px] font-black uppercase text-slate-400 block">Cross-Entropy Loss</span>
-                    <span className="text-lg font-black font-mono text-amber-400">{lastMetrics.crossEntropy || "0.000"}</span>
+                    <span className="text-[9px] font-black uppercase text-slate-400 block">Fitness Moyenne (Population)</span>
+                    <span
+                      className="text-lg font-black font-mono text-indigo-400"
+                      title="Score multi-objectif brut de la population à la dernière génération (échelle de fitness, pas un pourcentage)"
+                    >
+                      {lastMetrics.avgFitness != null ? lastMetrics.avgFitness.toFixed(3) : "n/d"}
+                    </span>
                   </div>
                   <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-2xl">
-                    <span className="text-[9px] font-black uppercase text-slate-400 block">Divergence KL</span>
-                    <span className="text-lg font-black font-mono text-cyan-400">{lastMetrics.klDivergence || "0.000"}</span>
+                    <span className="text-[9px] font-black uppercase text-slate-400 block">Diversité Génétique</span>
+                    <span
+                      className="text-lg font-black font-mono text-cyan-400"
+                      title="Indice de diversité de la population (1 − Σw²) à la dernière génération"
+                    >
+                      {lastMetrics.diversity != null ? `${(lastMetrics.diversity * 100).toFixed(1)}%` : "n/d"}
+                    </span>
                   </div>
                 </div>
               )}
@@ -834,15 +904,15 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             {/* Right Column: Visualization & Diagnostic Matrix */}
             <div className="lg:col-span-8 space-y-6">
               
-              {/* Dual-Metric Trajectory Chart: Fitness vs Loss */}
+              {/* Dual-Metric Trajectory Chart: Fitness vs Diversity */}
               <div className="bg-slate-900/60 p-6 md:p-8 rounded-3xl border border-slate-800 shadow-xl space-y-4">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                   <div>
                     <h3 className="text-sm font-black uppercase tracking-wider text-white flex items-center gap-2">
-                      <LineChart size={16} className="text-indigo-400" /> Trajectoire de Convergence & Fonction de Perte
+                      <LineChart size={16} className="text-indigo-400" /> Trajectoire de Convergence & Diversité Génétique
                     </h3>
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      Évolution synchronisée du Fitness (%) et de la Perte continue logarithmique
+                      Télémétrie réelle de l'optimiseur : fitness multi-objectif (échelle brute) et diversité de la population
                     </p>
                   </div>
 
@@ -859,47 +929,64 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 <div className="h-64 w-full">
                   {evolutionData.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={evolutionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <ComposedChart data={evolutionData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>
                           <linearGradient id="fitGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#818cf8" stopOpacity={0.4}/>
                             <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
                           </linearGradient>
-                          <linearGradient id="lossGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                          <linearGradient id="divGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
+                            <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" opacity={0.5} />
                         <XAxis dataKey="gen" tick={{ fill: '#64748b', fontSize: 10 }} />
                         <YAxis yAxisId="left" tick={{ fill: '#818cf8', fontSize: 10 }} domain={['auto', 'auto']} />
-                        <YAxis yAxisId="right" orientation="right" tick={{ fill: '#f59e0b', fontSize: 10 }} domain={[0, 'auto']} />
+                        <YAxis yAxisId="right" orientation="right" tick={{ fill: '#06b6d4', fontSize: 10 }} domain={[0, 1]} />
                         <Tooltip 
                           contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', fontSize: '11px', borderRadius: '12px' }}
                           itemStyle={{ color: '#c7d2fe' }}
+                          formatter={(value: any, name: any) => {
+                            if (name === "Diversité Génétique" && typeof value === "number") {
+                              return [`${(value * 100).toFixed(1)}%`, name];
+                            }
+                            return [value, name];
+                          }}
                         />
                         <Legend wrapperStyle={{ fontSize: '10px' }} />
                         <Area 
                           yAxisId="left"
                           type="monotone" 
-                          name="Fitness (%)"
+                          name="Fitness (meilleur génome)"
                           dataKey="bestFitness" 
                           stroke="#818cf8" 
                           strokeWidth={2}
                           fillOpacity={1} 
                           fill="url(#fitGrad)" 
                         />
+                        <Line
+                          yAxisId="left"
+                          type="monotone"
+                          name="Fitness (moyenne population)"
+                          dataKey="avgFitness"
+                          stroke="#c084fc"
+                          strokeWidth={1.5}
+                          strokeDasharray="4 3"
+                          dot={false}
+                          connectNulls
+                        />
                         <Area 
                           yAxisId="right"
                           type="monotone" 
-                          name="Perte Logarithmique"
-                          dataKey="loss" 
-                          stroke="#f59e0b" 
+                          name="Diversité Génétique"
+                          dataKey="diversity" 
+                          stroke="#06b6d4" 
                           strokeWidth={1.5}
                           fillOpacity={1} 
-                          fill="url(#lossGrad)" 
+                          fill="url(#divGrad)" 
                         />
-                      </AreaChart>
+                      </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 text-xs font-bold uppercase tracking-widest gap-2">
@@ -1006,30 +1093,48 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       Matrice Hors-Échantillon (OOS Walk-Forward)
                     </h4>
                     <p className="text-[10px] text-slate-400">
-                      Validation de non-surapprentissage sur 5 plis temporels distincts
+                      Tranches temporelles contiguës du backtest — chaque prédiction n'utilise que les tirages antérieurs
                     </p>
                   </div>
-                  <span className="text-xs font-mono font-bold text-emerald-400">
-                    Stabilité : {finalReport ? `${finalReport.stabilityScore.toFixed(1)}%` : "94.2% (Calibré)"}
+                  <span
+                    className="text-xs font-mono font-bold text-emerald-400"
+                    title="Indice de stabilité dérivé de la variance des performances par fenêtre glissante (1/(1+σ), borné à (0,1]) — ce n'est pas un pourcentage"
+                  >
+                    Stabilité : {finalReport ? `${finalReport.stabilityScore.toFixed(3)} (indice 0-1)` : "n/d"}
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  {Array.from({ length: 5 }, (_, idx) => {
-                    const foldNum = idx + 1;
-                    const baseAcc = finalReport ? (finalReport.successRate * 100) : 81;
-                    const foldAcc = Math.max(50, Math.min(99, baseAcc + (Math.sin(foldNum * 1.7) * 3.8)));
-                    return (
-                      <div key={foldNum} className="bg-slate-950/80 rounded-2xl p-3.5 border border-slate-800 flex flex-col justify-between gap-2">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Fold {foldNum} (OOS)</span>
-                        <span className="text-base font-black text-white font-mono">{foldAcc.toFixed(1)}%</span>
-                        <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${foldAcc}%` }} />
+                {oosFolds.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                      {oosFolds.map((fold) => (
+                        <div key={fold.index} className="bg-slate-950/80 rounded-2xl p-3.5 border border-slate-800 flex flex-col justify-between gap-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Fold {fold.index} (OOS)</span>
+                            <span className="text-[9px] font-mono text-slate-500">{fold.drawCount} tirages</span>
+                          </div>
+                          <span className="text-base font-black text-white font-mono">{fold.hitRatePct.toFixed(1)}%</span>
+                          <span className="text-[9px] font-mono text-slate-500">{fold.meanHits.toFixed(2)}/5 numéros captés en moyenne</span>
+                          <div className="relative w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${Math.min(100, fold.hitRatePct)}%` }} />
+                            <div
+                              className="absolute top-0 h-full w-0.5 bg-emerald-400"
+                              style={{ left: `${randomBaselineHitRatePct}%` }}
+                              title={`Référence uniforme (hasard pur) : ${randomBaselineHitRatePct.toFixed(2)}%`}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-mono">
+                      Trait vert = référence uniforme (hasard pur) : {randomBaselineHitRatePct.toFixed(2)}% (5 numéros joués sur 90).
+                    </p>
+                  </>
+                ) : (
+                  <div className="text-center py-6 text-slate-500 text-xs font-bold uppercase tracking-widest">
+                    n/d — aucun backtest mesuré pour l'instant. Lancez une évolution pour générer la matrice.
+                  </div>
+                )}
               </div>
 
             </div>
@@ -1043,9 +1148,10 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           drawName={drawName}
           history={cleanHistory}
           currentWeights={liveWeights}
-          onApplyWeights={async (newWeights) => {
-            await updateGlobalWeights(newWeights, drawName);
-            await refreshData(drawName, true);
+          onApplyWeights={(newWeights) => {
+            // La persistance + l'archivage ADN sont assurés par la passerelle
+            // d'optimisation unifiée (applyOptimizedWeights) dans le panneau.
+            // Ce callback ne fait que resynchroniser l'état local parent.
             setLiveWeights(newWeights);
             setOriginalWeights(newWeights);
             setFineTuningWeights(newWeights);

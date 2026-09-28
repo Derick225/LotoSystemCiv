@@ -48,6 +48,18 @@ const toEpochMs = (value: unknown): number | null => {
   return null;
 };
 
+/**
+ * Conversion d'une mesure réelle en nombre fini. Toute valeur absente, vide,
+ * non numérique ou non finie retourne null : aucune mesure n'est inventée
+ * (un 0 de remplissage serait un chiffre fabriqué, pas une observation).
+ */
+const toFiniteNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
 export const TrainingEvolutionDrawer: React.FC<{
   isOpen: boolean;
   onClose: () => void;
@@ -73,13 +85,14 @@ export const TrainingEvolutionDrawer: React.FC<{
           lineage.history.forEach((rec) => {
             const ts = toEpochMs(rec.timestamp);
             if (ts === null) return;
-            const fit = Number(rec.performance?.score) || 0;
+            const fit = toFiniteNumber(rec.performance?.score);
             entries.push({
               created_at: rec.timestamp,
               timestamp: ts,
-              score: fit,
-              fitness: fit,
-              relativeGain: rec.performance?.relativeGain || 0,
+              score: fit ?? undefined,
+              fitness: fit ?? undefined,
+              relativeGain:
+                toFiniteNumber(rec.performance?.relativeGain) ?? undefined,
               weights: rec.weights || {},
               applied_weights: rec.weights || {},
               source:
@@ -109,16 +122,20 @@ export const TrainingEvolutionDrawer: React.FC<{
               const ts = toEpochMs(item.created_at);
               if (ts === null) return;
               const weights = item.applied_weights || {};
-              const fit = Number(item.new_fitness) || 0;
-              const prevFit = Number(item.previous_fitness) || 0;
-              const gain = prevFit > 0 ? ((fit - prevFit) / prevFit) * 100 : 0;
+              const fit = toFiniteNumber(item.new_fitness);
+              const prevFit = toFiniteNumber(item.previous_fitness);
+              // Gain relatif calculé uniquement si les deux bornes sont réellement mesurées.
+              const gain =
+                fit !== null && prevFit !== null && prevFit > 0
+                  ? ((fit - prevFit) / prevFit) * 100
+                  : null;
 
               entries.push({
                 created_at: item.created_at,
                 timestamp: ts,
-                score: fit,
-                fitness: fit,
-                relativeGain: gain,
+                score: fit ?? undefined,
+                fitness: fit ?? undefined,
+                relativeGain: gain ?? undefined,
                 improvement_delta: item.improvement_delta,
                 weights: weights,
                 source: "supabase",
@@ -138,12 +155,14 @@ export const TrainingEvolutionDrawer: React.FC<{
               if (!sData.bestGenome) return;
               const ts = toEpochMs(s.timestamp) ?? toEpochMs(s.created_at);
               if (ts === null) return;
+              const sessionScore =
+                toFiniteNumber(sData.bestFitness) ?? toFiniteNumber(sData.score);
               entries.push({
                 created_at: s.created_at,
                 timestamp: ts,
-                score: sData.bestFitness || sData.score || 0,
-                fitness: sData.bestFitness || sData.score || 0,
-                relativeGain: sData.improvement || 0,
+                score: sessionScore ?? undefined,
+                fitness: sessionScore ?? undefined,
+                relativeGain: toFiniteNumber(sData.improvement) ?? undefined,
                 weights: sData.bestGenome,
                 source: "supabase",
               });
@@ -168,11 +187,13 @@ export const TrainingEvolutionDrawer: React.FC<{
               parsed.forEach((h: any) => {
                 const ts = toEpochMs(h.timestamp);
                 if (ts === null) return;
+                const localScore =
+                  toFiniteNumber(h.score) ?? toFiniteNumber(h.fitness);
                 entries.push({
                   timestamp: ts,
-                  score: Number(h.score) || Number(h.fitness) || 0,
-                  fitness: Number(h.fitness) || Number(h.score) || 0,
-                  relativeGain: Number(h.relativeGain) || 0,
+                  score: localScore ?? undefined,
+                  fitness: localScore ?? undefined,
+                  relativeGain: toFiniteNumber(h.relativeGain) ?? undefined,
                   weights: h.weights || h.applied_weights || {},
                   source: "local",
                 });
@@ -196,7 +217,10 @@ export const TrainingEvolutionDrawer: React.FC<{
       const seen = new Set<string>();
 
       entries.forEach((e) => {
-        const key = `${Math.floor(Number(e.timestamp || 0) / 1000)}_${(e.score || 0).toFixed(2)}`;
+        // Un score absent participe à la clé en tant qu'absence ("n"),
+        // jamais en tant que "0.00" fabriqué.
+        const scoreKey = e.score != null ? e.score.toFixed(2) : "n";
+        const key = `${Math.floor(Number(e.timestamp || 0) / 1000)}_${scoreKey}`;
         if (!seen.has(key)) {
           seen.add(key);
           deduped.push(e);
@@ -218,10 +242,15 @@ export const TrainingEvolutionDrawer: React.FC<{
 
   // Transform dataset for Recharts
   const chartData = history.map((h, i) => {
+    // Une mesure absente laisse la clé à undefined : Recharts dessine alors un
+    // trou dans la courbe plutôt qu'un faux zéro.
+    const measuredScore = toFiniteNumber(h.score) ?? toFiniteNumber(h.fitness);
+    const measuredGain = toFiniteNumber(h.relativeGain);
     const base: Record<string, any> = {
       name: `v${i + 1}`,
-      score: Number((h.score || h.fitness || 0).toFixed(2)),
-      gain: Number((h.relativeGain || 0).toFixed(1)),
+      score:
+        measuredScore !== null ? Number(measuredScore.toFixed(2)) : undefined,
+      gain: measuredGain !== null ? Number(measuredGain.toFixed(1)) : undefined,
       source: h.source || "local",
     };
 
@@ -249,6 +278,19 @@ export const TrainingEvolutionDrawer: React.FC<{
     });
   });
   const availableAlgos = Array.from(allAlgoKeysSet);
+
+  // Dernier score réellement mesuré : on remonte l'historique jusqu'à la
+  // première mesure disponible ; "n/d" si aucune mesure n'existe.
+  let lastMeasuredScore: number | null = null;
+  for (let i = safeHistory.length - 1; i >= 0; i--) {
+    const s =
+      toFiniteNumber(safeHistory[i]?.score) ??
+      toFiniteNumber(safeHistory[i]?.fitness);
+    if (s !== null) {
+      lastMeasuredScore = s;
+      break;
+    }
+  }
 
   const colors = [
     "#6366f1",
@@ -287,8 +329,8 @@ export const TrainingEvolutionDrawer: React.FC<{
               </h2>
               <p className="text-slate-400 text-xs uppercase tracking-widest mt-2 font-medium flex items-center gap-2">
                 <Database size={12} className="text-indigo-400" />
-                Historique complet de calibration continue (RLHF &amp; Gradient
-                Descent)
+                Historique complet de calibration continue (Descente de
+                Gradient, Évolution Génétique &amp; Audits Forensiques)
               </p>
             </div>
             <button
@@ -433,11 +475,11 @@ export const TrainingEvolutionDrawer: React.FC<{
                   </ResponsiveContainer>
 
                   <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-[10px] text-emerald-300 font-mono flex justify-between items-center">
-                    <span>Dernier Score :</span>
+                    <span>Dernier Score Mesuré :</span>
                     <span className="font-black text-sm text-emerald-400">
-                      {history.length > 0
-                        ? (history[history.length - 1].score || 0).toFixed(2)
-                        : "--"}
+                      {lastMeasuredScore !== null
+                        ? lastMeasuredScore.toFixed(2)
+                        : "n/d"}
                     </span>
                   </div>
                 </div>

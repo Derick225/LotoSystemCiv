@@ -9,6 +9,7 @@ import {
   getStrategyName,
 } from "../../services/predictionEngine";
 import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
+import { computeDrawCriticalThreshold } from "../../services/prediction/dnaAuditService";
 import { runBayesianOptimization } from "../../services/bayesianOptimizer";
 import { runSimulatedAnnealingOptimization } from "../../services/simulatedAnnealingOptimizer";
 import type { AlgoWeights, AdaptiveRules } from "../../types";
@@ -184,6 +185,36 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     showToast("Tensor Flow équilibré (Σ = 1.0).", "info");
   };
 
+  // Mélange continu (aucune porte binaire) : w = base + α·(cible − base), α ∈ [0,1].
+  const blendWeightMatrices = (
+    base: AlgoWeights,
+    target: AlgoWeights,
+    alpha: number,
+  ): AlgoWeights => {
+    const keys = new Set([...Object.keys(base), ...Object.keys(target)]);
+    const merged: Record<string, number> = {};
+    keys.forEach((k) => {
+      const b = Number((base as Record<string, number>)[k]) || 0;
+      const t = Number((target as Record<string, number>)[k]) || 0;
+      merged[k] = b + alpha * (t - b);
+    });
+    return normalizeWeights(merged as AlgoWeights);
+  };
+
+  // α = tanh(ΔE / |E_référence|) : dérive du gain d'énergie réellement mesuré par
+  // l'optimiseur (0 → aucun déplacement, gain faible → ajustement partiel proportionnel).
+  const computeTrustAlpha = (finalScore: number, improvement: number): number => {
+    const baselineEnergy =
+      improvement > 0 ? finalScore - improvement : finalScore;
+    if (
+      !Number.isFinite(baselineEnergy) ||
+      Math.abs(baselineEnergy) < Number.EPSILON
+    ) {
+      return 0;
+    }
+    return Math.max(0, Math.tanh(improvement / Math.abs(baselineEnergy)));
+  };
+
   const handleBayesianOptimization = async () => {
     audioEngine.play("scan");
     if (history.length < 25) {
@@ -211,21 +242,30 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
         },
       );
 
-      if (result.improvement > 0) {
+      // Confiance continue dérivée du gain d'énergie réellement mesuré : la matrice
+      // appliquée est un mélange proportionnel au gain (aucun seuil binaire arbitraire).
+      const alpha = computeTrustAlpha(result.finalScore, result.improvement);
+
+      if (alpha > 0) {
+        const appliedTarget = blendWeightMatrices(
+          normalizeWeights(originalWeights),
+          result.bestWeights,
+          alpha,
+        );
         const optResult = await applyOptimizedWeights({
           drawName: selectedDrawName,
-          weights: result.bestWeights,
+          weights: appliedTarget,
           origin: "HYPERPARAM_TUNER",
-          performance: {
-            score: Math.min(100, Math.max(0, 50 + result.improvement)),
-            relativeGain: result.improvement,
-          },
+          // L'objectif TPE est une énergie cumulée interne non bornée : ce n'est pas
+          // une performance prédictive mesurée. Aucun champ de performance n'est
+          // archivé (n/d) ; le gain réel reste consigné dans l'audit causal.
           causalAuditTrail: [
             `Tuning Expert - Optimisation Bayésienne (TPE)`,
-            `Amélioration mesurée: +${result.improvement.toFixed(1)} Pts`,
+            `Gain d'énergie objective mesuré: ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)} (indice interne cumulé, non prédictif)`,
+            `Confiance proportionnelle appliquée: α=${(alpha * 100).toFixed(1)}% (mélange continu base/optimisée)`,
             `Tirage cible: ${selectedDrawName}`,
           ],
-          reason: `Optimisation Bayésienne TPE (+${result.improvement.toFixed(1)} pts)`,
+          reason: `Optimisation Bayésienne TPE (ΔÉnergie ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)}, α=${(alpha * 100).toFixed(1)}%)`,
           history,
         });
 
@@ -239,14 +279,17 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
         audioEngine.play("success");
         showToast(
           optResult.wasDamped
-            ? `⚠️ Optimisation Bayésienne validée avec amortissement de sécurité (Δ=${(optResult.driftDelta * 100).toFixed(1)}%).`
-            : `✅ Optimisation Bayésienne validée (+${result.improvement.toFixed(1)} Pts).`,
+            ? `⚠️ Optimisation Bayésienne validée avec amortissement de sécurité (Δ=${(optResult.driftDelta * 100).toFixed(1)}%, α=${(alpha * 100).toFixed(1)}%).`
+            : `✅ Optimisation Bayésienne appliquée (α=${(alpha * 100).toFixed(1)}%, ΔÉnergie +${result.improvement.toFixed(2)}).`,
           optResult.wasDamped ? "warning" : "success",
         );
         setIsDirty(false);
       } else {
         audioEngine.play("error");
-        showToast("Aucune amélioration trouvée par le modèle TPE.", "info");
+        showToast(
+          "Aucun gain d'énergie mesuré par le modèle TPE : matrice inchangée.",
+          "info",
+        );
       }
     } catch (e: unknown) {
       audioEngine.play("error");
@@ -287,21 +330,30 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
         },
       );
 
-      if (result.improvement > 0) {
+      // Confiance continue dérivée du gain d'énergie réellement mesuré : la matrice
+      // appliquée est un mélange proportionnel au gain (aucun seuil binaire arbitraire).
+      const alpha = computeTrustAlpha(result.finalScore, result.improvement);
+
+      if (alpha > 0) {
+        const appliedTarget = blendWeightMatrices(
+          normalizeWeights(localWeights),
+          result.bestWeights,
+          alpha,
+        );
         const optResult = await applyOptimizedWeights({
           drawName: selectedDrawName,
-          weights: result.bestWeights,
+          weights: appliedTarget,
           origin: "HYPERPARAM_TUNER",
-          performance: {
-            score: Math.min(100, Math.max(0, 50 + result.improvement)),
-            relativeGain: result.improvement,
-          },
+          // L'objectif du recuit est une énergie cumulée interne non bornée : ce n'est
+          // pas une performance prédictive mesurée. Aucun champ de performance n'est
+          // archivé (n/d) ; le gain réel reste consigné dans l'audit causal.
           causalAuditTrail: [
             `Tuning Expert - Recuit Simulé déterministe`,
-            `Amélioration mesurée: +${result.improvement.toFixed(1)} Pts`,
+            `Gain d'énergie objective mesuré: ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)} (indice interne cumulé, non prédictif)`,
+            `Confiance proportionnelle appliquée: α=${(alpha * 100).toFixed(1)}% (mélange continu base/optimisée)`,
             `Tirage cible: ${selectedDrawName}`,
           ],
-          reason: `Recuit Simulé (+${result.improvement.toFixed(1)} pts)`,
+          reason: `Recuit Simulé (ΔÉnergie ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)}, α=${(alpha * 100).toFixed(1)}%)`,
           history,
         });
 
@@ -315,14 +367,17 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
         audioEngine.play("success");
         showToast(
           optResult.wasDamped
-            ? `⚠️ Recuit Simulé validé avec amortissement (Δ=${(optResult.driftDelta * 100).toFixed(1)}%).`
-            : `✅ Recuit Simulé validé (+${result.improvement.toFixed(1)} Pts d'ajustement).`,
+            ? `⚠️ Recuit Simulé validé avec amortissement (Δ=${(optResult.driftDelta * 100).toFixed(1)}%, α=${(alpha * 100).toFixed(1)}%).`
+            : `✅ Recuit Simulé appliqué (α=${(alpha * 100).toFixed(1)}%, ΔÉnergie +${result.improvement.toFixed(2)}).`,
           optResult.wasDamped ? "warning" : "success",
         );
         setIsDirty(false);
       } else {
         audioEngine.play("error");
-        showToast("Aucune meilleure configuration trouvée par le recuit simulé.", "info");
+        showToast(
+          "Aucun gain d'énergie mesuré par le recuit : matrice inchangée.",
+          "info",
+        );
       }
     } catch (e: unknown) {
       audioEngine.play("error");
@@ -367,33 +422,54 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     );
   };
 
-  const [showShiftConfirm, setShowShiftConfirm] = useState(false);
-  const [pendingShift, setPendingShift] = useState<number>(0);
+  const [pendingDrift, setPendingDrift] = useState<{
+    total: number;
+    max: number;
+    threshold: number;
+  } | null>(null);
+
+  // Seuil de dérive critique déterministe : même métrique que le contrôleur d'optimisation
+  // (entropie + variance réelles du tirage, zéro constante arbitraire).
+  const criticalShift = useMemo(
+    () =>
+      computeDrawCriticalThreshold(history, Object.values(AlgoKey).length)
+        .criticalThreshold,
+    [history],
+  );
 
   const handleSave = async () => {
     audioEngine.play("click");
-    let weightsToSave = { ...localWeights };
+    const weightsToSave = { ...localWeights };
 
-    // 1. Check Regulatory Safeguards (Human Validation for drastic changes)
+    // 1. Garde-fou réglementaire : la dérive est mesurée par l'écart maximal
+    // par algorithme (métrique Z-drift du moteur) et comparée au seuil critique
+    // déterministe dérivé des statistiques réelles du tirage.
     let totalShift = 0;
+    let maxShift = 0;
     (Object.keys(weightsToSave) as Array<AlgoKey>).forEach((k) => {
-      totalShift += Math.abs(
-        (weightsToSave[k] || 0) - (originalWeights[k] || 0),
-      );
+      const delta = Math.abs((weightsToSave[k] || 0) - (originalWeights[k] || 0));
+      totalShift += delta;
+      if (delta > maxShift) maxShift = delta;
     });
 
-    if (totalShift > 0.25) {
-      // 25% global shift is a "drastic" re-calibration
-      setPendingShift(totalShift);
-      setShowShiftConfirm(true);
+    if (maxShift > criticalShift) {
+      setPendingDrift({
+        total: totalShift,
+        max: maxShift,
+        threshold: criticalShift,
+      });
       return;
     }
 
-    await executeSave(weightsToSave, totalShift);
+    await executeSave(weightsToSave, totalShift, false);
   };
 
-  const executeSave = async (weightsToSave: AlgoWeights, totalShift: number) => {
-    setShowShiftConfirm(false);
+  const executeSave = async (
+    weightsToSave: AlgoWeights,
+    totalShift: number,
+    allowCriticalDrift: boolean,
+  ) => {
+    setPendingDrift(null);
     // Auto-correction was removed here to prevent "instant reverts" when the user clicks save.
     // The engine normalizes weights on the fly during predictions anyway.
 
@@ -420,10 +496,10 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
       origin: "MANUAL_CALIBRATION",
       causalAuditTrail: [
         `Tuning Expert Manuel - Ajustement par curseurs`,
-        `Dérive globale par rapport à l'état précédent: ${(totalShift * 100).toFixed(1)}%`,
+        `Dérive globale (L1) par rapport à l'état précédent: ${(totalShift * 100).toFixed(1)}%`,
       ],
       reason: `Calibrage Expert Manuel (${selectedDrawName})`,
-      allowCriticalDrift: totalShift > 0.25, // Dérive validée manuellement par l'opérateur
+      allowCriticalDrift, // Dérive critique explicitement validée par l'opérateur
       history,
     });
 
@@ -484,7 +560,13 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
     ];
   }, []);
 
-  const isBalanced = Math.abs(totalWeight - 1.0) < 0.02;
+  // Stabilité continue : écart de la masse tensorielle à l'idéal Σ=1, sans seuil
+  // binaire (1 = masse exacte, 0 = déviation totale). Teinte interpolée linéairement.
+  const stabilityIndex = Math.max(0, 1 - Math.abs(totalWeight - 1));
+  const stabilityHue = Math.round(150 * stabilityIndex);
+  const stabilityColor = `hsl(${stabilityHue}, 85%, 55%)`;
+  // Partage uniforme = poids neutre (1/N algorithmes) : référence sans constante arbitraire.
+  const uniformShare = 1 / Math.max(1, Object.keys(localWeights).length);
 
   return (
     <div className="animate-fade-in w-full">
@@ -580,7 +662,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
               <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-teal-400 mb-2">
                 <span>Optimisation Bayésienne TPE</span>
                 <span>
-                  Meilleur Score: {bayesProgress.score.toFixed(1)} Pts
+                  Énergie interne: {bayesProgress.score.toFixed(1)}
                 </span>
               </div>
               <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -597,7 +679,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
               <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-amber-400 mb-2">
                 <span>Recuit Simulé Déterministe</span>
                 <span>
-                  Temp: {annealingProgress.temperature.toFixed(4)} | Score: {annealingProgress.bestScore.toFixed(1)} Pts
+                  Temp: {annealingProgress.temperature.toFixed(4)} | Énergie: {annealingProgress.bestScore.toFixed(1)}
                 </span>
               </div>
               <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
@@ -679,11 +761,16 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                 <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] flex items-center gap-2">
                   <Gauge size={14} /> Radar Harmonique
                 </h4>
-                {!isBalanced && (
-                  <span className="text-xs font-black text-rose-500 bg-rose-500/10 px-2 py-1 rounded animate-pulse flex items-center gap-1">
-                    <AlertTriangle size={10} /> Instable
-                  </span>
-                )}
+                <span
+                  className="text-[10px] font-black px-2 py-1 rounded"
+                  style={{
+                    color: stabilityColor,
+                    backgroundColor: `hsla(${stabilityHue}, 85%, 55%, 0.12)`,
+                  }}
+                  title="Écart continu de la masse tensorielle à Σ = 1"
+                >
+                  Stabilité {(stabilityIndex * 100).toFixed(1)}%
+                </span>
               </div>
               <div className="w-full space-y-4 px-2 mt-4">
                 {Object.entries(localWeights)
@@ -715,15 +802,19 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                   Masse Tensorielle
                 </span>
                 <span
-                  className={`text-3xl font-black ${isBalanced ? "text-emerald-400" : "text-rose-400"}`}
+                  className="text-3xl font-black"
+                  style={{ color: stabilityColor }}
                 >
                   {totalWeight.toFixed(3)}
                 </span>
               </div>
               <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden mb-1">
                 <div
-                  className={`h-full transition-all duration-300 ease-out ${isBalanced ? "bg-emerald-500 shadow-[0_0_10px_#10b981]" : "bg-rose-500 shadow-[0_0_10px_#f43f5e]"}`}
-                  style={{ width: `${Math.min(100, totalWeight * 100)}%` }}
+                  className="h-full transition-all duration-300 ease-out"
+                  style={{
+                    width: `${Math.min(100, totalWeight * 100)}%`,
+                    backgroundColor: stabilityColor,
+                  }}
                 ></div>
               </div>
               <p className="text-xs text-slate-600 text-right font-mono">
@@ -762,7 +853,7 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                     {cat.keys.map((key) => {
                       const val = (localWeights[key] as number) ?? 0;
                       const percent = (val * 100).toFixed(1);
-                      const isActive = val > 0.05;
+                      const isActive = val > uniformShare;
 
                       return (
                         <div key={String(key)} className="group">
@@ -840,8 +931,8 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
         </div>
       </div>
 
-      {showShiftConfirm && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setShowShiftConfirm(false)}>
+      {pendingDrift && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in" onClick={() => setPendingDrift(null)}>
           <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 max-w-lg w-full shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <span className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400">
@@ -850,12 +941,12 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
               <h3 className="text-sm font-black text-white uppercase tracking-wider">[Garde-fous Réglementaire] Changement Structurel Massif</h3>
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              Changement structurel massif détecté (Dérive: {(pendingShift * 100).toFixed(1)}%). Voulez-vous vraiment écraser la matrice originelle ? Un audit de cette mutation sera enregistré.
+              Dérive critique détectée : écart maximal par algorithme {(pendingDrift.max * 100).toFixed(2)}% &gt; seuil déterministe {(pendingDrift.threshold * 100).toFixed(2)}% (dérive L1 totale : {(pendingDrift.total * 100).toFixed(1)}%). Voulez-vous vraiment écraser la matrice originelle ? Un audit de cette mutation sera enregistré.
             </p>
             <div className="flex items-center gap-3 justify-end pt-2">
               <button
                 onClick={() => {
-                  setShowShiftConfirm(false);
+                  setPendingDrift(null);
                   showToast("Mutation annulée par l'opérateur.", "info");
                 }}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
@@ -863,7 +954,9 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                 Annuler
               </button>
               <button
-                onClick={() => executeSave({ ...localWeights }, pendingShift)}
+                onClick={() =>
+                  executeSave({ ...localWeights }, pendingDrift.total, true)
+                }
                 className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-amber-600/30 cursor-pointer active:scale-95"
               >
                 Confirmer Mutation

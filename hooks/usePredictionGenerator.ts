@@ -104,11 +104,11 @@ export const usePredictionGenerator = (drawName: string) => {
 
     const resolvedNoiseLevel = useMemo(() => {
         const volScore = activeVolatility.score;
-        return Math.max(0.1, Math.min(3.0, (volScore / 50.0) * (currentEntropy || 0.5) * 1.5 + 0.2));
+        return Math.max(0.1, Math.min(3.0, (volScore / 50.0) * currentEntropy * 1.5 + 0.2));
     }, [currentEntropy, activeVolatility]);
 
     const resolvedMcIterations = useMemo(() => {
-        return Math.max(10, Math.min(100, Math.round(20 + 80 * (currentEntropy || 0.5))));
+        return Math.max(10, Math.min(100, Math.round(20 + 80 * currentEntropy)));
     }, [currentEntropy]);
 
     // Régime de jeu : mesure analytics si disponible, sinon mesure locale déterministe (Hurst,
@@ -186,11 +186,16 @@ export const usePredictionGenerator = (drawName: string) => {
     // Synchronisation automatique de la calibration empirique temporelle du tirage actif
     useEffect(() => {
         if (activeHistory && activeHistory.length >= 5) {
-            const hurst = (fractal && fractal.length > 0)
-                ? fractal.reduce((acc, f) => acc + (typeof f.hurst === 'number' ? f.hurst : 0.5), 0) / fractal.length
-                : 0.5;
-            const entropyRatio = currentEntropy ?? 0.95;
-            const calibration = generateEmpiricalCalibration(activeHistory, hurst, entropyRatio);
+            const hurstValues = fractal
+                .map((f) => f.hurst)
+                .filter((h) => Number.isFinite(h));
+            // Hurst moyen des seules mesures valides ; absent ⇒ la fonction applique
+            // son défaut documenté (0.5, marche aléatoire sans mémoire) au lieu d'injecter
+            // ici une pseudo-mesure par entrée manquante.
+            const hurst = hurstValues.length > 0
+                ? hurstValues.reduce((acc, h) => acc + h, 0) / hurstValues.length
+                : undefined;
+            const calibration = generateEmpiricalCalibration(activeHistory, hurst, currentEntropy);
             setEmpiricalCalibration(calibration);
         }
     }, [activeHistory, fractal, currentEntropy, setEmpiricalCalibration]);

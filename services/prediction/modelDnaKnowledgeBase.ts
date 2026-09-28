@@ -28,7 +28,9 @@ export interface ModelDnaRecord {
   weights: AlgoWeights;
   dnaFingerprint: string;
   performance: {
-    score: number;
+    // Absent lorsqu'aucune mesure de performance réelle n'existe pour cette version :
+    // une sauvegarde de poids manuelle n'est pas une performance mesurée.
+    score?: number;
     relativeGain?: number;
     brierScore?: number;
     rmse?: number;
@@ -52,12 +54,17 @@ export interface ModelEvolutionLineage {
   lastUpdatedAt: string;
   overallScoreProgression: {
     timestamp: string;
-    score: number;
+    // score/relativeGain absents (trou dans la courbe, "n/d") quand la version
+    // n'a jamais été mesurée par un backtest.
+    score?: number;
     relativeGain?: number;
     origin: ModelDnaOrigin;
   }[];
-  overallGainPct: number;
-  stabilityIndex: number; // 0-100%, calculé de façon continue via la variance des poids dans le temps
+  // Gain global mesuré uniquement entre versions réellement scorées ; null (n/d) sinon.
+  overallGainPct: number | null;
+  // 0-100%, calculé de façon continue via la variance des poids dans le temps.
+  // null lorsqu'aucune génération n'est archivée : aucune mesure de stabilité n'existe.
+  stabilityIndex: number | null;
   dominantAlgorithmsOverTime: {
     algoKey: string;
     averageWeight: number;
@@ -209,8 +216,8 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
       firstRecordedAt: new Date().toISOString(),
       lastUpdatedAt: new Date().toISOString(),
       overallScoreProgression: [],
-      overallGainPct: 0,
-      stabilityIndex: 100,
+      overallGainPct: null,
+      stabilityIndex: null,
       dominantAlgorithmsOverTime: [],
       history: [],
     };
@@ -226,9 +233,15 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
     origin: r.origin,
   }));
 
-  const initialScore = oldest.performance.score;
-  const currentScore = latest.performance.score;
-  const overallGainPct = initialScore > 0 ? ((currentScore - initialScore) / initialScore) * 100 : 0;
+  // Gain global : mesuré uniquement entre versions réellement scorées (n/d sinon).
+  // Les versions sans score (sauvegardes manuelles, imports) sont exclues du calcul.
+  const scoredHistory = history.filter((r) => typeof r.performance.score === 'number');
+  const oldestScored = scoredHistory[scoredHistory.length - 1];
+  const newestScored = scoredHistory[0];
+  const overallGainPct =
+    oldestScored && newestScored && Math.abs(oldestScored.performance.score!) > Number.EPSILON
+      ? ((newestScored.performance.score! - oldestScored.performance.score!) / Math.abs(oldestScored.performance.score!)) * 100
+      : null;
 
   // Calcul continu de la stabilité temporelle par dispersion des poids (Zéro nombre magique)
   const algoWeightHistory: Record<string, number[]> = {};
@@ -278,7 +291,7 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
     firstRecordedAt: oldest.timestamp,
     lastUpdatedAt: latest.timestamp,
     overallScoreProgression: progression,
-    overallGainPct: parseFloat(overallGainPct.toFixed(2)),
+    overallGainPct: overallGainPct != null ? parseFloat(overallGainPct.toFixed(2)) : null,
     stabilityIndex,
     dominantAlgorithmsOverTime: dominantList.slice(0, 10),
     history,

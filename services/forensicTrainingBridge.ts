@@ -120,9 +120,10 @@ export const applyForensicAdjustments = async (
     return currentWeights;
   }
 
-  // Facteur de mélange sigmoïde continu (plus il y a d'algorithmes ajustés, plus l'influence est ferme)
-  const complexityRatio = learningSession.adjustments.length / 10.0;
-  const alpha = 1.0 / (1.0 + Math.exp(-4.0 * (complexityRatio - 0.5)));
+  // Facteur de mélange continu : proportion de la matrice réellement couverte par la session
+  // (0 = aucun algorithme ajusté, 1 = matrice entièrement ajustée). Aucune constante arbitraire.
+  const algoCount = Math.max(1, Object.keys(currentWeights).length);
+  const alpha = Math.min(1, learningSession.adjustments.length / algoCount);
 
   learningSession.adjustments.forEach((adj) => {
     const algo = adj.algo as AlgoKey;
@@ -145,12 +146,11 @@ export const applyForensicAdjustments = async (
       drawName,
       weights: finalNormalized,
       origin: 'FORENSIC_AUTOPSY',
-      performance: {
-        score: 75.0,
-        relativeGain: alpha * 10.0,
-      },
+      // Aucune performance prédictive n'est mesurée lors de l'application d'une session :
+      // le mélange proportionnel (α) est consigné dans l'audit causal, jamais archivé comme score.
       causalAuditTrail: [
         `Session Forensic appliquée (Session ID: ${learningSession.id})`,
+        `Mélange proportionnel appliqué: α=${(alpha * 100).toFixed(1)}% (${learningSession.adjustments.length}/${algoCount} algorithmes ajustés)`,
         ...auditTrail.slice(0, 5),
       ],
       reason: `Forensic Training Bridge - Session ${learningSession.id}`,

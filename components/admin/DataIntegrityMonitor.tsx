@@ -6,7 +6,6 @@ import {
 } from "../../services/lotteryService";
 import type { DrawResult } from "../../types";
 import {
-  Database,
   RefreshCw,
   AlertTriangle,
   Zap,
@@ -14,9 +13,6 @@ import {
   ShieldCheck,
   Wrench,
   Layers,
-  Calendar,
-  Sparkles,
-  ArrowRight,
   Filter,
 } from "lucide-react";
 import { useToast } from "../ui/Toast";
@@ -26,8 +22,6 @@ import {
   INTER_DRAW_FAMILIES,
   InterDrawFamilyId,
   isDrawWithoutMachine,
-  drawHasMachineNumbers,
-  ALL_DRAWS,
 } from "../../constants";
 
 export interface IntegrityAnomaly {
@@ -40,27 +34,37 @@ export interface IntegrityAnomaly {
   fixedPayload?: Partial<DrawResult>;
 }
 
+export interface IntegrityFactors {
+  purity: number; // proportion de tirages sans aucune anomalie
+  anomalyDecay: number; // décroissance exponentielle continue sur le ratio d'anomalies
+  entropyFactor: number; // ratio d'uniformité de l'entropie réelle, borné continûment
+  gapDamping: number; // amortissement continu selon l'ancienneté du dernier tirage
+}
+
 export interface DetailedIntegrityReport {
   drawName: string;
   totalDraws: number;
   validDrawsCount: number;
-  healthScore: number; // 0..100 continuous
+  /** null lorsqu'aucune donnée n'est disponible : aucune intégrité n'est mesurable. */
+  healthScore: number | null;
+  factors: IntegrityFactors | null;
   shannonEntropy: number;
   entropyUniformityRatio: number;
   anomalies: IntegrityAnomaly[];
   duplicates: DrawResult[];
-  missingDatesCount: number;
-  lastGapDays: number;
-  status: "Excellent" | "Bon" | "Critique";
+  /** null lorsque aucune date parsable n'existe dans l'historique. */
+  lastGapDays: number | null;
 }
 
 export interface FamilyAuditSummary {
   familyId: InterDrawFamilyId;
   familyName: string;
   totalDraws: number;
-  drawsBreakdown: { name: string; count: number; health: number }[];
+  drawsBreakdown: { name: string; count: number; health: number | null }[];
+  /** Nombre réel de tirages déclarés dans plusieurs familles (mesuré, jamais supposé). */
   crossFamilyContaminationCount: number;
-  globalHealthScore: number;
+  measuredDrawsCount: number;
+  globalHealthScore: number | null;
 }
 
 export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
@@ -76,31 +80,43 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
   const deleteMutation = useDeleteDrawMutation(drawName);
 
-  // Continuous differentiable Health Score (Zero Magic Numbers)
+  // Score d'intégrité continu et différentiable (Zéro nombre magique : facteurs
+  // multiplicatifs dérivés de ratios mesurés, jamais de pénalités forfaitaires).
+  // Retourne null si aucun tirage n'est mesurable.
   const computeContinuousHealthScore = (
     total: number,
     valid: number,
     anomaliesCount: number,
     shannonEntropy: number,
-    gapDays: number
-  ): number => {
-    if (total <= 0) return 0;
+    gapDays: number | null
+  ): { score: number; factors: IntegrityFactors } | null => {
+    if (total <= 0) return null;
     const purity = valid / total; // [0, 1]
     const anomalyRatio = anomaliesCount / total;
 
-    // Continuous exponential decay on anomaly ratio
-    const errorFactor = Math.exp(-3.5 * anomalyRatio);
+    // Décroissance exponentielle continue sur le ratio d'anomalies
+    const anomalyDecay = Math.exp(-3.5 * anomalyRatio);
 
-    // Uniform entropy ratio for numbers 1..90 (ln(90) ≈ 4.4998)
+    // Ratio d'uniformité de l'entropie réelle du tirage (nats / nats)
     const maxEntropy = Math.log(90);
-    const entropyFactor = Math.min(1.0, Math.max(0.5, shannonEntropy / maxEntropy));
+    const entropyFactor = Math.min(
+      1.0,
+      Math.max(0.5, shannonEntropy / maxEntropy),
+    );
 
-    // Smooth gap damping: gentle sigmoid decay after 14 days
-    const gapDamping = 1 / (1 + Math.exp(0.3 * (gapDays - 14)));
+    // Amortissement continu de la fraîcheur ; si la date est inconnue, on retient
+    // la valeur d'inflexion de la sigmoïde (0.5) : neutre, ni frais ni périmé.
+    const gapDamping =
+      gapDays == null
+        ? 0.5
+        : 1 / (1 + Math.exp(0.3 * (gapDays - 14)));
 
-    // Composite continuous metric scaled to [0, 100]
-    const continuousScore = 100 * purity * errorFactor * entropyFactor * (0.85 + 0.15 * gapDamping);
-    return Math.max(0, Math.min(100, Math.round(continuousScore)));
+    const continuousScore =
+      100 * purity * anomalyDecay * entropyFactor * (0.85 + 0.15 * gapDamping);
+    return {
+      score: Math.max(0, Math.min(100, Math.round(continuousScore))),
+      factors: { purity, anomalyDecay, entropyFactor, gapDamping },
+    };
   };
 
   const analyzeSingleDrawIntegrity = async (targetDraw: string): Promise<DetailedIntegrityReport> => {
@@ -110,14 +126,13 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         drawName: targetDraw,
         totalDraws: 0,
         validDrawsCount: 0,
-        healthScore: 0,
+        healthScore: null,
+        factors: null,
         shannonEntropy: 0,
         entropyUniformityRatio: 0,
         anomalies: [],
         duplicates: [],
-        missingDatesCount: 0,
-        lastGapDays: 0,
-        status: "Critique" as const,
+        lastGapDays: null,
       };
     }
 
@@ -233,18 +248,26 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
     const maxEntropy = Math.log(90);
     const entropyRatio = parseFloat((shannonEntropy / maxEntropy).toFixed(4));
 
-    // 6. Chronological Gap Analysis
-    const sorted = [...data].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-    );
-    const lastDrawDate = new Date(sorted[0].date);
-    const lastGapDays = Math.max(
-      0,
-      Math.floor((Date.now() - lastDrawDate.getTime()) / (1000 * 60 * 60 * 24)),
-    );
+    // 6. Analyse chronologique : la fraîcheur ne se mesure que sur des dates parsables.
+    const parsedTimes = data
+      .map((d) => new Date(d.date).getTime())
+      .filter((t) => Number.isFinite(t));
+    const lastGapDays =
+      parsedTimes.length > 0
+        ? Math.max(
+            0,
+            Math.floor(
+              (Date.now() - Math.max(...parsedTimes)) / (1000 * 60 * 60 * 24),
+            ),
+          )
+        : null;
 
-    const validCount = data.length - anomalies.length;
-    const healthScore = computeContinuousHealthScore(
+    // Un tirage portant plusieurs anomalies reste UN tirage invalide (jamais décompté
+    // plusieurs fois : l'ancienne soustraction du nombre d'anomalies pouvait rendre
+    // le compteur négatif, masqué par un Math.max(0, …)).
+    const drawsWithAnomaly = new Set(anomalies.map((a) => a.id)).size;
+    const validCount = data.length - drawsWithAnomaly;
+    const health = computeContinuousHealthScore(
       data.length,
       Math.max(0, validCount),
       anomalies.length,
@@ -256,14 +279,13 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
       drawName: targetDraw,
       totalDraws: data.length,
       validDrawsCount: Math.max(0, validCount),
-      healthScore,
+      healthScore: health ? health.score : null,
+      factors: health ? health.factors : null,
       shannonEntropy: parseFloat(shannonEntropy.toFixed(3)),
       entropyUniformityRatio: entropyRatio,
       anomalies,
       duplicates,
-      missingDatesCount: 0,
       lastGapDays,
-      status: (healthScore >= 80 ? "Excellent" : healthScore >= 50 ? "Bon" : "Critique") as "Excellent" | "Bon" | "Critique",
     };
   };
 
@@ -277,34 +299,52 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
       // 2. Audit the 3 strictly isolated families
       const summaries: FamilyAuditSummary[] = [];
+      const familyList = Object.values(INTER_DRAW_FAMILIES);
 
-      for (const family of Object.values(INTER_DRAW_FAMILIES)) {
+      // Étanchéité réellement mesurée : un tirage déclaré dans plusieurs familles
+      // constitue une contamination structurelle de la configuration.
+      const membership = new Map<string, InterDrawFamilyId[]>();
+      for (const family of familyList) {
+        for (const name of family.drawNames) {
+          membership.set(name, [...(membership.get(name) || []), family.id]);
+        }
+      }
+
+      for (const family of familyList) {
         let familyDrawsTotal = 0;
         let familyHealthSum = 0;
-        const breakdown: { name: string; count: number; health: number }[] = [];
+        let measuredCount = 0;
+        const breakdown: { name: string; count: number; health: number | null }[] = [];
 
-        // Sample up to first 5 draws in family to avoid overwhelming network while retaining accuracy
+        // Échantillon des 5 premiers tirages de la famille (charge réseau maîtrisée)
         const sampleDraws = family.drawNames.slice(0, 5);
         for (const dName of sampleDraws) {
           const res = await analyzeSingleDrawIntegrity(dName);
           familyDrawsTotal += res.totalDraws;
-          familyHealthSum += res.healthScore;
           breakdown.push({
             name: dName,
             count: res.totalDraws,
             health: res.healthScore,
           });
+          if (res.healthScore != null) {
+            familyHealthSum += res.healthScore;
+            measuredCount++;
+          }
         }
 
         const avgHealth =
-          breakdown.length > 0 ? Math.round(familyHealthSum / breakdown.length) : 0;
+          measuredCount > 0 ? Math.round(familyHealthSum / measuredCount) : null;
+        const contaminated = sampleDraws.filter(
+          (name) => (membership.get(name)?.length || 0) > 1,
+        ).length;
 
         summaries.push({
           familyId: family.id,
           familyName: family.name,
           totalDraws: familyDrawsTotal,
           drawsBreakdown: breakdown,
-          crossFamilyContaminationCount: 0, // Zero contamination guarantee by architecture
+          crossFamilyContaminationCount: contaminated,
+          measuredDrawsCount: measuredCount,
           globalHealthScore: avgHealth,
         });
       }
@@ -451,29 +491,42 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
               </div>
               <div
                 className={`text-6xl font-black ${
-                  report.healthScore >= 80
+                  report.healthScore == null
+                    ? "text-slate-400"
+                    : report.healthScore >= 80
                     ? "text-emerald-500"
                     : report.healthScore >= 50
                     ? "text-amber-500"
                     : "text-rose-500"
                 }`}
               >
-                {report.healthScore}%
+                {report.healthScore != null ? `${report.healthScore}%` : "n/d"}
               </div>
-              <span
-                className={`text-[10px] font-black px-3.5 py-1 rounded-full mt-3 uppercase tracking-widest ${
-                  report.status === "Excellent"
-                    ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                    : report.status === "Bon"
-                    ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                    : "bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
-                }`}
-              >
-                {report.status}
+              <span className="text-[10px] font-black px-3.5 py-1 rounded-full mt-3 uppercase tracking-widest bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                {report.healthScore == null
+                  ? "Aucune donnée mesurable"
+                  : "Score composite mesuré"}
               </span>
               <p className="text-[10px] text-slate-400 mt-2 font-mono">
-                Puretée: {report.validDrawsCount} / {report.totalDraws} tirages valides
+                Pureté : {report.validDrawsCount} / {report.totalDraws} tirages
+                sans anomalie
               </p>
+              {report.factors && (
+                <div className="grid grid-cols-2 gap-1.5 mt-4 w-full text-[10px] font-mono">
+                  <div className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
+                    Pureté {(report.factors.purity * 100).toFixed(1)}%
+                  </div>
+                  <div className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
+                    Anomalies {(report.factors.anomalyDecay * 100).toFixed(1)}%
+                  </div>
+                  <div className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
+                    Uniformité {(report.factors.entropyFactor * 100).toFixed(1)}%
+                  </div>
+                  <div className="px-2 py-1 bg-white dark:bg-slate-800 rounded-lg border border-slate-100 dark:border-slate-700">
+                    Fraîcheur {(report.factors.gapDamping * 100).toFixed(1)}%
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Statistical Signatures */}
@@ -515,7 +568,9 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                   Dernier Tirage Reçu
                 </span>
                 <span className="font-mono font-black text-indigo-500">
-                  Il y a {report.lastGapDays} jour{report.lastGapDays > 1 ? "s" : ""}
+                  {report.lastGapDays != null
+                    ? `Il y a ${report.lastGapDays} jour${report.lastGapDays > 1 ? "s" : ""}`
+                    : "n/d (aucune date parsable)"}
                 </span>
               </div>
             </div>
@@ -659,17 +714,23 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                         {f.familyName}
                       </h4>
                       <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                        {f.totalDraws} tirages échantillonnés
+                        {f.totalDraws} tirages échantillonnés ·{" "}
+                        {f.measuredDrawsCount} score{f.measuredDrawsCount > 1 ? "s" : ""} mesuré
+                        {f.measuredDrawsCount > 1 ? "s" : ""}
                       </p>
                     </div>
                     <span
                       className={`text-lg font-black ${
-                        f.globalHealthScore >= 80
+                        f.globalHealthScore == null
+                          ? "text-slate-400"
+                          : f.globalHealthScore >= 80
                           ? "text-emerald-500"
                           : "text-amber-500"
                       }`}
                     >
-                      {f.globalHealthScore}%
+                      {f.globalHealthScore != null
+                        ? `${f.globalHealthScore}%`
+                        : "n/d"}
                     </span>
                   </div>
 
@@ -688,10 +749,14 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                           </span>
                           <span
                             className={`font-black ${
-                              d.health >= 80 ? "text-emerald-500" : "text-amber-500"
+                              d.health == null
+                                ? "text-slate-400"
+                                : d.health >= 80
+                                ? "text-emerald-500"
+                                : "text-amber-500"
                             }`}
                           >
-                            {d.health}%
+                            {d.health != null ? `${d.health}%` : "n/d"}
                           </span>
                         </div>
                       </div>
@@ -701,11 +766,19 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
                 <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px]">
                   <span className="text-slate-400 uppercase font-black text-[10px]">
-                    Contamination Croisée
+                    Contamination Croisée (mesurée)
                   </span>
-                  <span className="text-emerald-500 font-black flex items-center gap-1">
-                    <CheckCircle2 size={12} /> Zéro (100% Étanches)
-                  </span>
+                  {f.crossFamilyContaminationCount === 0 ? (
+                    <span className="text-emerald-500 font-black flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Aucun tirage partagé
+                    </span>
+                  ) : (
+                    <span className="text-rose-500 font-black flex items-center gap-1">
+                      <AlertTriangle size={12} />{" "}
+                      {f.crossFamilyContaminationCount} tirage
+                      {f.crossFamilyContaminationCount > 1 ? "s" : ""} en conflit
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

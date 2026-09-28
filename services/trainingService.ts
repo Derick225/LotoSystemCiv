@@ -97,9 +97,10 @@ export const evolveNeuralDNACore = async (
 ): Promise<{
   bestWeights: AlgoWeights;
   improvement: number;
+  relativeGainPct: number | null;
   report: TrainingReport;
   isGeneralizable?: boolean | "unverifiable";
-  overfittingRatio?: number;
+  overfittingRatio?: number | null;
   firstPredictionDNASnapshot?: any;
 }> => {
   const optType = options.optimizerType || "pso";
@@ -294,7 +295,7 @@ export const evolveNeuralDNACore = async (
   // Vérification de généralisation stricte (disjointe, sans fuite de données)
   let rejectionProbability = 0;
   let finalWeights = finalWeightsBeforeVerification;
-  let overfittingRatio = 1;
+  let overfittingRatio: number | null = null;
   let isGeneralizable: boolean | "unverifiable" = "unverifiable";
 
   if (isHoldoutVerifiable) {
@@ -313,7 +314,11 @@ export const evolveNeuralDNACore = async (
       finalWeightsBeforeVerification
     );
 
-    overfittingRatio = trainReport.score / (holdoutReport.score || 1);
+    // Ratio de surapprentissage : mesuré uniquement si le score holdout est non nul
+    // (division par un score nul = mesure inexistante, pas un ratio de 1).
+    overfittingRatio = holdoutReport.score > Number.EPSILON
+      ? trainReport.score / holdoutReport.score
+      : null;
 
     const trainErrors = trainReport.history.map((h) => 5.0 - h.hitCount);
     const holdoutErrors = holdoutReport.history.map((h) => 5.0 - h.hitCount);
@@ -347,13 +352,19 @@ export const evolveNeuralDNACore = async (
 
   const rawImprovement = newReport.score - oldReport.score;
   const continuousImprovement = parseFloat((rawImprovement * (1 - rejectionProbability)).toFixed(2));
+  // Gain relatif mesuré entre les deux backtests réels (n/d si le score initial est nul).
+  const relativeGainPct =
+    Math.abs(oldReport.score) > Number.EPSILON
+      ? parseFloat(((rawImprovement / Math.abs(oldReport.score)) * 100).toFixed(2))
+      : null;
 
   return {
     bestWeights: safeFinalWeights,
     improvement: continuousImprovement,
+    relativeGainPct,
     report: newReport,
     isGeneralizable,
-    overfittingRatio: parseFloat(overfittingRatio.toFixed(3)),
+    overfittingRatio: overfittingRatio != null ? parseFloat(overfittingRatio.toFixed(3)) : null,
     firstPredictionDNASnapshot,
   };
 };
@@ -370,13 +381,22 @@ export const evolveNeuralDNA = async (
     optimizerType?: "genetic" | "pso" | "bayesian" | "meta" | "gradient";
     history?: DrawResult[];
   } = { generations: 20, sampleSize: 30, optimizerType: "pso" },
-  onTelemetry?: (data: { gen: number; bestFitness: number; avgFitness: number; diversity: number; bestGenome: any; source?: string }) => void
+  onTelemetry?: (data: {
+    gen?: number;
+    bestFitness?: number;
+    avgFitness?: number;
+    diversity?: number;
+    bestGenome?: any;
+    source?: string;
+    message?: string;
+  }) => void
 ): Promise<{
   bestWeights: any;
   improvement: number;
+  relativeGainPct: number | null;
   report: TrainingReport;
   isGeneralizable?: boolean | "unverifiable";
-  overfittingRatio?: number;
+  overfittingRatio?: number | null;
   firstPredictionDNASnapshot?: any;
 }> => {
   const optType = options.optimizerType || "pso";
@@ -395,19 +415,13 @@ export const evolveNeuralDNA = async (
   const cachedResult = await globalCache.get<any>(cacheKey, drawName);
   if (cachedResult) {
     logger.info(`[Tensor Processing] ADN Neural récupéré du cache pour ${drawName}.`);
+    // Aucune génération n'a été exécutée : aucune courbe de convergence n'est
+    // rejouée. Un message d'information est émis à la place (n/d pour la télémétrie).
     if (onTelemetry) {
-      const stepsCount = 5;
-      for (let i = 1; i <= stepsCount; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        onTelemetry({
-          gen: Math.round((options.generations / stepsCount) * i),
-          bestFitness: cachedResult.report?.score || 0,
-          avgFitness: (cachedResult.report?.score || 0) * 0.9,
-          diversity: 0.8 - 0.2 * (i / stepsCount),
-          bestGenome: cachedResult.bestWeights,
-          source: `${optType}-cached`,
-        });
-      }
+      onTelemetry({
+        source: `${optType}-cached`,
+        message: `ADN Neural récupéré du cache pour ${drawName} : aucune génération d'optimisation n'a été exécutée (résultat identique à la session précédente).`,
+      });
     }
     return cachedResult;
   }

@@ -271,8 +271,9 @@ export async function reinjectScenarioIntoState(
       weights: scenario.appliedWeights,
       origin: 'FORENSIC_AUTOPSY',
       performance: {
+        // Métriques réellement mesurées et archivées avec le scénario exporté.
+        // Le taux de succès n'est pas un gain relatif : ce champ reste vide (n/d).
         score: scenario.summary.accuracyScore,
-        relativeGain: scenario.summary.hitRate,
         brierScore: scenario.mathMetadata.brierScore,
         topologicalLoss: scenario.mathMetadata.topologicalLoss,
         hitRate: scenario.summary.hitRate / 100,

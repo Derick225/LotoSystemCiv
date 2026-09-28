@@ -86,31 +86,32 @@ export const NeuralAutoOptimizationPanel: React.FC<NeuralAutoOptimizationPanelPr
   const handleApply = async () => {
     if (!result) return;
     audioEngine.play('click');
-    if (onApplyWeights) {
-      onApplyWeights(result.optimizedWeights);
-    } else {
-      try {
-        const { applyOptimizedWeights } = await import('../../services/prediction/optimizationController');
-        await applyOptimizedWeights({
-          drawName,
-          weights: result.optimizedWeights,
-          origin: 'SGD_CYBERNETIC',
-          performance: {
-            score: result.finalAccuracy,
-            relativeGain: result.accuracyGain,
-            rmse: result.finalLoss,
-          },
-          causalAuditTrail: [
-            `Rétropropagation neurale exécutée sur ${drawName} (${result.epochsCompleted} époques)`,
-            `Réduction de perte: ${result.lossReductionPct.toFixed(1)}%, Gain de précision: +${result.accuracyGain.toFixed(1)}%`,
-          ],
-          reason: `Auto-optimisation Cybernétique SGD (${result.epochsCompleted} époques)`,
-          history,
-        });
-        await refreshData(drawName, true);
-      } catch (err) {
-        console.warn('[NeuralAutoOptimizationPanel] Erreur application ADN :', err);
-      }
+
+    // Toute modification de poids passe par la passerelle unifiée (normalisation,
+    // régulation de dérive, archivage ADN, mise à jour du store) — y compris
+    // lorsque le panneau est embarqué avec un callback onApplyWeights.
+    try {
+      const { applyOptimizedWeights } = await import('../../services/prediction/optimizationController');
+      await applyOptimizedWeights({
+        drawName,
+        weights: result.optimizedWeights,
+        origin: 'SGD_CYBERNETIC',
+        performance: {
+          // Mesures réelles de l'entraînement in-sample (précision Top-5, en %)
+          score: result.finalAccuracy,
+          relativeGain: result.accuracyGain,
+        },
+        causalAuditTrail: [
+          `Rétropropagation neurale exécutée sur ${drawName} (${result.epochsCompleted} époques)`,
+          `Réduction de perte: ${result.lossReductionPct.toFixed(1)}%, Gain de précision (in-sample): +${result.accuracyGain.toFixed(1)}%`,
+        ],
+        reason: `Auto-optimisation Cybernétique SGD (${result.epochsCompleted} époques)`,
+        history,
+      });
+      await refreshData(drawName, true);
+      onApplyWeights?.(result.optimizedWeights);
+    } catch (err) {
+      console.warn('[NeuralAutoOptimizationPanel] Erreur application ADN :', err);
     }
 
     setApplied(true);

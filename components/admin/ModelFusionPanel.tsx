@@ -49,8 +49,8 @@ import { applyOptimizedWeights } from "../../services/prediction/optimizationCon
 import {
   runSystematicDnaAudit,
   DnaAuditReport,
-  computeDeterministicCriticalThreshold,
 } from "../../services/prediction/dnaAuditService";
+import { computeSubAlgorithmDivergenceCorrelations } from "../../services/prediction/algorithmDivergenceCorrelationService";
 import { calculateFusion } from "../../services/fusionService";
 import { DnaPerformanceDriftPanel } from "./DnaPerformanceDriftPanel";
 
@@ -121,7 +121,6 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   // Nexus Store
   const activeDrawName = useNexusStore((state) => state.drawName);
   const globalWeights = useNexusStore((state) => state.globalWeights);
-  const updateGlobalWeights = useNexusStore((state) => state.updateGlobalWeights);
   const refreshData = useNexusStore((state) => state.refreshData);
   const history = useNexusStore((state) => state.history);
   const spectral = useNexusStore((state) => state.spectral);
@@ -139,6 +138,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   const [lockedKeys, setLockedKeys] = useState<Set<AlgoKey>>(new Set());
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isOrthogonalizing, setIsOrthogonalizing] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
 
   // Search & Filter for Weights
@@ -219,13 +219,11 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     return vals.reduce((acc, v) => acc + (Number(v) || 0), 0);
   }, [weights]);
 
-  // Compute critical drift metric
-  const criticalThreshold = useMemo(() => {
-    const validCount = Object.keys(weights).length;
-    const entropy = auditReport?.statisticalSignature?.shannonEntropy || 3.8;
-    const variance = auditReport?.statisticalSignature?.variance || 675;
-    return computeDeterministicCriticalThreshold(validCount, entropy, variance);
-  }, [weights, auditReport]);
+  // Seuil de dérive critique — source unique de vérité : le rapport d'audit ADN
+  // (dérivé de l'entropie et de la variance réelles du tirage). null si audit indisponible.
+  const criticalThreshold = useMemo<number | null>(() => {
+    return auditReport?.criticalDriftThreshold ?? null;
+  }, [auditReport]);
 
   // Handle Weight Slider change
   const handleWeightChange = (key: AlgoKey, newWeight: number) => {
@@ -270,34 +268,68 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     showToast("ADN restauré aux poids canoniques par défaut", "info");
   };
 
-  // Anti-redundancy orthogonalization
-  const handleAntiRedundancyAlignment = () => {
+  // Anti-redundancy orthogonalization — amortissement dérivé des corrélations
+  // d'erreur mesurées entre sous-algorithmes (aucun coefficient arbitraire).
+  const handleAntiRedundancyAlignment = async () => {
     audioEngine.play("scan");
-    // Déflation continue des paires à forte corrélation
-    const adjusted = { ...weights };
-    const dampFactor = 0.92;
+    setIsOrthogonalizing(true);
+    try {
+      const heatmap = await computeSubAlgorithmDivergenceCorrelations(
+        selectedDrawName,
+        history,
+        weights
+      );
 
-    // Si Spectral et Fractal sont tous deux élevés, lisser
-    if (
-      (adjusted[AlgoKey.SPECTRAL] || 0) > 0.05 &&
-      (adjusted[AlgoKey.FRACTAL] || 0) > 0.05
-    ) {
-      adjusted[AlgoKey.SPECTRAL] = (adjusted[AlgoKey.SPECTRAL] || 0) * dampFactor;
-      adjusted[AlgoKey.FRACTAL] = (adjusted[AlgoKey.FRACTAL] || 0) * dampFactor;
-    }
-    // Si Markov et Bayes sont tous deux colinéaires
-    if (
-      (adjusted[AlgoKey.MARKOV] || 0) > 0.05 &&
-      (adjusted[AlgoKey.BAYES] || 0) > 0.05
-    ) {
-      adjusted[AlgoKey.MARKOV] = (adjusted[AlgoKey.MARKOV] || 0) * dampFactor;
-      adjusted[AlgoKey.BAYES] = (adjusted[AlgoKey.BAYES] || 0) * dampFactor;
-    }
+      // Corrélation positive moyenne ρ⁺_k de chaque algorithme avec tous les autres,
+      // calculée sur les coefficients de Pearson réels des profils d'erreur.
+      const positiveSum = new Map<AlgoKey, number>();
+      const pairCount = new Map<AlgoKey, number>();
+      for (const cross of heatmap.crossCorrelations) {
+        const r = Number.isFinite(cross.crossErrorCorrelation)
+          ? cross.crossErrorCorrelation
+          : 0;
+        for (const key of [cross.algoA, cross.algoB]) {
+          positiveSum.set(key, (positiveSum.get(key) || 0) + Math.max(0, r));
+          pairCount.set(key, (pairCount.get(key) || 0) + 1);
+        }
+      }
 
-    const reNormalized = normalizeWeights(adjusted);
-    setWeights(reNormalized);
-    setIsDirty(true);
-    showToast("Orthogonalisation anti-redondance appliquée", "success");
+      const adjusted: AlgoWeights = { ...weights };
+      let totalDamping = 0;
+      let maxCoDrift = 0;
+      positiveSum.forEach((sum, key) => {
+        const pairs = pairCount.get(key) || 0;
+        if (pairs === 0) return;
+        const rhoPlus = sum / pairs;
+        if (rhoPlus > maxCoDrift) maxCoDrift = rhoPlus;
+        // Facteur continu : poids × (1 − ρ⁺). Neutre si décorrélé (ρ⁺ = 0), nul si colinéaire parfait (ρ⁺ = 1).
+        const current = Number(adjusted[key]) || 0;
+        const next = current * (1 - rhoPlus);
+        totalDamping += current - next;
+        adjusted[key] = next;
+      });
+
+      if (totalDamping <= 1e-9) {
+        showToast(
+          "Aucune co-dérive mesurable entre sous-algorithmes — poids inchangés.",
+          "info"
+        );
+        return;
+      }
+
+      const reNormalized = normalizeWeights(adjusted);
+      setWeights(reNormalized);
+      setIsDirty(true);
+      showToast(
+        `Orthogonalisation appliquée — co-dérive maximale mesurée : ${(maxCoDrift * 100).toFixed(1)}%`,
+        "success"
+      );
+    } catch (e) {
+      console.error("[ModelFusionPanel] Erreur orthogonalisation anti-redondance:", e);
+      showToast("Erreur lors de l'analyse de co-dérive", "error");
+    } finally {
+      setIsOrthogonalizing(false);
+    }
   };
 
   // Save changes to IndexedDB & sync to Store
@@ -310,8 +342,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
         weights,
         origin: "MANUAL_CALIBRATION",
         performance: {
-          score: auditReport?.coherenceScore || 85,
-          relativeGain: 0,
+          // Score = cohérence ADN réellement mesurée ; toute mesure absente
+          // reste absente (n/d) — le contrôleur n'invente aucun repli.
+          score: auditReport?.coherenceScore,
         },
         causalAuditTrail: [
           `Calibration manuelle depuis le panneau de Fusion de Modèles Admin.`,
@@ -348,6 +381,13 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
       showToast("Veuillez saisir un libellé pour l'instantané ADN", "info");
       return;
     }
+    if (!auditReport) {
+      showToast(
+        "Audit ADN indisponible — impossible d'enregistrer un score de précision mesuré.",
+        "info"
+      );
+      return;
+    }
     audioEngine.play("click");
     setIsTakingSnapshot(true);
     try {
@@ -358,8 +398,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
         version: snapshotTag.trim(),
         weights: normalized,
         performance: {
-          score: auditReport?.coherenceScore || 90,
-          relativeGain: 0,
+          score: auditReport.coherenceScore,
         },
         causalAuditTrail: [
           `Instantané ADN [${snapshotTag.trim()}] enregistré manuellement.`,
@@ -456,7 +495,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
         const canonW = Number(canonicalWeights[key]) || 0;
         const delta = Math.abs(activeW - canonW);
         const isLocked = lockedKeys.has(key);
-        const isDrifted = delta > criticalThreshold;
+        const isDrifted = criticalThreshold != null && delta > criticalThreshold;
         return {
           key,
           label: LABELS_MAP[key] || key,
@@ -523,7 +562,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                   Cohérence ADN
                 </span>
                 <span className="text-xs font-black text-emerald-400 font-mono">
-                  {auditReport?.coherenceScore ?? 94}%
+                  {auditReport?.coherenceScore != null
+                    ? `${auditReport.coherenceScore}%`
+                    : "n/d"}
                 </span>
               </div>
             </div>
@@ -575,11 +616,15 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
             </button>
             <button
               onClick={handleAntiRedundancyAlignment}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all flex items-center gap-1.5 cursor-pointer border border-slate-700"
-              title="Applique un amortissement différentiable aux modèles colinéaires"
+              disabled={isOrthogonalizing}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50 disabled:cursor-wait"
+              title="Amortit les poids selon la corrélation d'erreur mesurée entre sous-algorithmes"
             >
-              <Sparkles size={13} className="text-purple-400" />
-              Dé-Redondance
+              <Sparkles
+                size={13}
+                className={`text-purple-400 ${isOrthogonalizing ? "animate-spin" : ""}`}
+              />
+              {isOrthogonalizing ? "Analyse..." : "Dé-Redondance"}
             </button>
             <button
               onClick={handleResetToCanonical}
@@ -613,7 +658,8 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
             />
             <button
               onClick={handleCreateSnapshot}
-              disabled={isTakingSnapshot || !snapshotTag.trim()}
+              disabled={isTakingSnapshot || !snapshotTag.trim() || !auditReport}
+              title={!auditReport ? "Audit ADN requis pour mesurer le score de précision" : undefined}
               className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer shadow-md"
             >
               <Dna size={13} />
@@ -874,7 +920,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                 Indice de Stabilité
               </span>
               <p className="text-2xl font-black text-emerald-400 mt-1">
-                {lineage?.stabilityIndex || 95}%
+                {lineage?.stabilityIndex != null ? `${lineage.stabilityIndex}%` : "n/d"}
               </p>
               <span className="text-[11px] text-slate-400">
                 Variance continue des poids dans le temps
@@ -886,7 +932,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                 Seuil de Dérive Critique
               </span>
               <p className="text-2xl font-black text-purple-400 mt-1">
-                {(criticalThreshold * 100).toFixed(2)}%
+                {criticalThreshold != null
+                  ? `${(criticalThreshold * 100).toFixed(2)}%`
+                  : "n/d"}
               </p>
               <span className="text-[11px] text-slate-400">
                 Dérivé de l'entropie et de la variance du tirage
@@ -898,10 +946,16 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                 Algorithmes Dominants
               </span>
               <p className="text-2xl font-black text-indigo-400 mt-1">
-                {specializations[0]?.algoKey || "FREQUENCY"}
+                {specializations.length > 0
+                  ? LABELS_MAP[specializations[0].algoKey as AlgoKey] ||
+                    specializations[0].algoKey
+                  : "n/d"}
               </p>
               <span className="text-[11px] text-slate-400">
-                Impact score: {specializations[0]?.impactScore || "0.04"}
+                Impact score:{" "}
+                {specializations.length > 0
+                  ? specializations[0].impactScore
+                  : "n/d"}
               </span>
             </div>
           </div>
@@ -985,7 +1039,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                           Score Précision
                         </span>
                         <span className="text-xs font-black text-emerald-400 font-mono">
-                          {record.performance?.score || 90}%
+                          {record.performance?.score != null
+                            ? `${record.performance.score}%`
+                            : "n/d"}
                         </span>
                       </div>
 
@@ -1245,7 +1301,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                       Information de Fisher
                     </span>
                     <span className="text-xs font-black text-purple-400 font-mono">
-                      {fusionSimulation.crossCovariance?.fisherGain ?? "0.00"}
+                      {Number.isFinite(fusionSimulation.crossCovariance.fisherGain)
+                        ? fusionSimulation.crossCovariance.fisherGain.toFixed(3)
+                        : "n/d"}
                     </span>
                   </div>
 
@@ -1276,9 +1334,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                           Logique
                         </span>
                         <span className="text-xs font-mono font-bold text-emerald-400">
-                          {fusionSimulation.kalmanGains?.logic != null
+                          {Number.isFinite(fusionSimulation.kalmanGains.logic)
                             ? fusionSimulation.kalmanGains.logic.toFixed(3)
-                            : "0.333"}
+                            : "n/d"}
                         </span>
                       </div>
                       <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
@@ -1286,9 +1344,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                           Physique
                         </span>
                         <span className="text-xs font-mono font-bold text-purple-400">
-                          {fusionSimulation.kalmanGains?.physics != null
+                          {Number.isFinite(fusionSimulation.kalmanGains.physics)
                             ? fusionSimulation.kalmanGains.physics.toFixed(3)
-                            : "0.333"}
+                            : "n/d"}
                         </span>
                       </div>
                       <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
@@ -1296,9 +1354,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                           Intuition
                         </span>
                         <span className="text-xs font-mono font-bold text-indigo-400">
-                          {fusionSimulation.kalmanGains?.intuition != null
+                          {Number.isFinite(fusionSimulation.kalmanGains.intuition)
                             ? fusionSimulation.kalmanGains.intuition.toFixed(3)
-                            : "0.333"}
+                            : "n/d"}
                         </span>
                       </div>
                     </div>

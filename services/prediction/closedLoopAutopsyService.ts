@@ -537,7 +537,6 @@ export interface ClosedLoopAutoAdjustmentResult {
   dnaRecord: ModelDnaRecord;
   causalAuditTrail: string[];
   learningRate: number;
-  accuracyGainEstimated: number;
   appliedDirectly: boolean;
 }
 
@@ -666,11 +665,13 @@ export const executeClosedLoopAutoAdjustment = async (
       weights: optimizedNormalized,
       origin: 'FORENSIC_AUTOPSY',
       performance: {
+        // Mesures rétrospectives réelles du tirage : calibration (dérivée du Brier),
+        // Brier, hits Top 5 et perte topologique géodésique mesurée sur top5 vs gagnants.
+        // Aucun gain relatif version-à-version n'est mesuré ici : ce champ reste vide (n/d).
         score: autopsyReport.calibrationAccuracy,
         brierScore: autopsyReport.brierScore,
         hitRate: autopsyReport.directHitsTop5.length / 5.0,
-        topologicalLoss: autopsyReport.klDivergence,
-        relativeGain: ((autopsyReport.calibrationAccuracy - 50) / 50) * 100,
+        topologicalLoss: autopsyReport.mathProofMetadata?.topologicalLoss,
       },
       regimeContext: {
         regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
@@ -695,11 +696,13 @@ export const executeClosedLoopAutoAdjustment = async (
       origin: 'FORENSIC_AUTOPSY',
       weights: optimizedNormalized,
       performance: {
+        // Mesures rétrospectives réelles du tirage : calibration (dérivée du Brier),
+        // Brier, hits Top 5 et perte topologique géodésique mesurée sur top5 vs gagnants.
+        // Aucun gain relatif version-à-version n'est mesuré ici : ce champ reste vide (n/d).
         score: autopsyReport.calibrationAccuracy,
         brierScore: autopsyReport.brierScore,
         hitRate: autopsyReport.directHitsTop5.length / 5.0,
-        topologicalLoss: autopsyReport.klDivergence,
-        relativeGain: ((autopsyReport.calibrationAccuracy - 50) / 50) * 100,
+        topologicalLoss: autopsyReport.mathProofMetadata?.topologicalLoss,
       },
       regimeContext: {
         regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
@@ -710,10 +713,6 @@ export const executeClosedLoopAutoAdjustment = async (
     });
   }
 
-  const accuracyGainEstimated = parseFloat(
-    (autopsyReport.calibrationAccuracy - 50).toFixed(2)
-  );
-
   return {
     drawName,
     targetDrawDate: targetDraw.date,
@@ -723,7 +722,6 @@ export const executeClosedLoopAutoAdjustment = async (
     dnaRecord,
     causalAuditTrail,
     learningRate: effectiveLearningRate,
-    accuracyGainEstimated,
     appliedDirectly,
   };
 };

@@ -1038,19 +1038,19 @@ export interface FusionResult {
   finalTicket: number[];
   confidence: number;
   entropy: number;
-  biasWeightsUsed?: { logic: number; physics: number; intuition: number };
-  kalmanGains?: { logic: number; physics: number; intuition: number };
-  variances?: { logic: number; physics: number; intuition: number };
-  crossCovariance?: {
+  biasWeightsUsed: { logic: number; physics: number; intuition: number };
+  kalmanGains: { logic: number; physics: number; intuition: number };
+  variances: { logic: number; physics: number; intuition: number };
+  crossCovariance: {
     covLP: number;
     covLI: number;
     covPI: number;
     fisherGain: number;
   };
-  coherenceIndex?: number;
-  redundancyPenalty?: { logicPhysics: number; logicIntuition: number; physicsIntuition: number };
-  orthogonalizationApplied?: boolean;
-  method?: string;
+  coherenceIndex: number;
+  redundancyPenalty: { logicPhysics: number; logicIntuition: number; physicsIntuition: number };
+  orthogonalizationApplied: boolean;
+  method: string;
 }
 
 export interface NexusContextType {
