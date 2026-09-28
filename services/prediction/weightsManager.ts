@@ -4,7 +4,7 @@ import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
-import { drawHasMachineNumbers } from '../../constants';
+import { drawHasMachineNumbers, getMirrorNumber, getComplement90 } from '../../constants';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 
 export const getDefaultWeights = (): AlgoWeights => ({ ...DEFAULT_ALGO_WEIGHTS });
@@ -607,13 +607,11 @@ export const evaluateAlgoEmpiricalProof = (
         if (n >= 1 && n <= 90) {
           interDrawScores[n] += 1.8; // Carry-over direct continu
           // Miroir décimal
-          const d1 = Math.floor(n / 10);
-          const d2 = n % 10;
-          const mir = d2 * 10 + d1;
-          if (mir >= 1 && mir <= 90 && mir !== n) interDrawScores[mir] += 1.1;
+          const mir = getMirrorNumber(n);
+          if (mir !== n && mir >= 1 && mir <= 90) interDrawScores[mir] += 1.1;
           // Complément 91
-          const comp = 91 - n;
-          if (comp >= 1 && comp <= 90 && comp !== n) interDrawScores[comp] += 1.0;
+          const comp = getComplement90(n);
+          if (comp !== n && comp >= 1 && comp <= 90) interDrawScores[comp] += 1.0;
         }
       });
     }

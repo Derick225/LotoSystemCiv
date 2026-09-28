@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { keys as idbKeys, clear as idbClear, delMany as idbDelMany, getMany as idbGetMany, setMany as idbSetMany } from "idb-keyval";
+import { ConfirmModal } from "../ui/ConfirmModal";
 
 // Les jetons de session (Supabase Auth `sb-*-auth-token`, clés NEXUS) sont
 // exclus des snapshots exportés et jamais écrasés lors d'une importation.
@@ -58,6 +59,14 @@ export const DatabaseControl: React.FC = () => {
   // Modals state
   const [showFactoryResetModal, setShowFactoryResetModal] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const [purgeConfirmConfig, setPurgeConfirmConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    variant?: "danger" | "warning" | "info";
+    onConfirm: () => void;
+  } | null>(null);
 
   useEffect(() => {
     refreshMetrics();
@@ -192,68 +201,110 @@ export const DatabaseControl: React.FC = () => {
   };
 
   // Selective Cache Purging (Preserving Auth and Themes)
-  const handlePurgeInferenceCache = async () => {
+  const handlePurgeInferenceCache = () => {
     audioEngine.play("click");
-    try {
-      const allKeys = await idbKeys();
-      const inferenceKeys = allKeys.filter((k) => {
-        const s = String(k);
-        return (
-          s.includes("prediction") ||
-          s.includes("tensor") ||
-          s.includes("matrix") ||
-          s.includes("cache_") ||
-          s.includes("spectral") ||
-          s.includes("weights_")
-        );
-      });
-      if (inferenceKeys.length > 0) {
-        await idbDelMany(inferenceKeys);
-      }
+    setPurgeConfirmConfig({
+      isOpen: true,
+      title: "Purger le Cache IA",
+      message:
+        "Voulez-vous vraiment vider le cache d'inférence (matrices, tenseurs et prédictions intermédiaires) ? Vos tirages et comptes utilisateurs restent intacts.",
+      confirmLabel: "Vider le cache IA",
+      variant: "warning",
+      onConfirm: async () => {
+        setPurgeConfirmConfig(null);
+        try {
+          const allKeys = await idbKeys();
+          const inferenceKeys = allKeys.filter((k) => {
+            const s = String(k);
+            return (
+              s.includes("prediction") ||
+              s.includes("tensor") ||
+              s.includes("matrix") ||
+              s.includes("cache_") ||
+              s.includes("spectral") ||
+              s.includes("weights_")
+            );
+          });
+          if (inferenceKeys.length > 0) {
+            await idbDelMany(inferenceKeys);
+          }
 
-      // Also clean inference keys in localStorage
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith("nexus_pred") || key.startsWith("nexus_cache") || key.startsWith("weights_"))) {
-          localStorage.removeItem(key);
+          // Also clean inference keys in localStorage
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (
+              key &&
+              (key.startsWith("nexus_pred") ||
+                key.startsWith("nexus_cache") ||
+                key.startsWith("weights_"))
+            ) {
+              localStorage.removeItem(key);
+            }
+          }
+
+          audioEngine.play("success");
+          showToast(
+            `Cache IA purgé (${inferenceKeys.length} entrées supprimées)`,
+            "success",
+          );
+          refreshMetrics();
+        } catch (err) {
+          audioEngine.play("error");
+          showToast("Erreur lors de la purge du cache IA", "error");
         }
-      }
-
-      audioEngine.play("success");
-      showToast(`Cache IA purgé (${inferenceKeys.length} entrées supprimées)`, "success");
-      refreshMetrics();
-    } catch (err) {
-      audioEngine.play("error");
-      showToast("Erreur lors de la purge du cache IA", "error");
-    }
+      },
+    });
   };
 
-  const handlePurgeForensics = async () => {
+  const handlePurgeForensics = () => {
     audioEngine.play("click");
-    try {
-      const allKeys = await idbKeys();
-      const forensicKeys = allKeys.filter((k) => {
-        const s = String(k);
-        return s.includes("forensic") || s.includes("autopsy") || s.includes("audit") || s.includes("telemetry");
-      });
-      if (forensicKeys.length > 0) {
-        await idbDelMany(forensicKeys);
-      }
+    setPurgeConfirmConfig({
+      isOpen: true,
+      title: "Purger les Logs Forensics",
+      message:
+        "Voulez-vous supprimer l'historique des autopsies, logs de dérive ADN et métriques de monitoring passées ?",
+      confirmLabel: "Purger les forensics",
+      variant: "warning",
+      onConfirm: async () => {
+        setPurgeConfirmConfig(null);
+        try {
+          const allKeys = await idbKeys();
+          const forensicKeys = allKeys.filter((k) => {
+            const s = String(k);
+            return (
+              s.includes("forensic") ||
+              s.includes("autopsy") ||
+              s.includes("audit") ||
+              s.includes("telemetry")
+            );
+          });
+          if (forensicKeys.length > 0) {
+            await idbDelMany(forensicKeys);
+          }
 
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const key = localStorage.key(i);
-        if (key && (key.startsWith("nexus_forensic") || key.startsWith("nexus_drift"))) {
-          localStorage.removeItem(key);
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (
+              key &&
+              (key.startsWith("nexus_forensic") ||
+                key.startsWith("nexus_drift"))
+            ) {
+              localStorage.removeItem(key);
+            }
+          }
+
+          audioEngine.play("success");
+          showToast(
+            `Logs et Forensics purgés (${forensicKeys.length} clés)`,
+            "success",
+          );
+          refreshMetrics();
+        } catch {
+          audioEngine.play("error");
+          showToast("Erreur lors du nettoyage forensics", "error");
         }
-      }
-
-      audioEngine.play("success");
-      showToast(`Logs et Forensics purgés (${forensicKeys.length} clés)`, "success");
-      refreshMetrics();
-    } catch {
-      audioEngine.play("error");
-      showToast("Erreur lors du nettoyage forensics", "error");
-    }
+      },
+    });
   };
 
   const handleFactoryReset = async () => {
@@ -708,6 +759,17 @@ export const DatabaseControl: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal pour Purges Sélectives */}
+      <ConfirmModal
+        isOpen={Boolean(purgeConfirmConfig?.isOpen)}
+        title={purgeConfirmConfig?.title || ""}
+        message={purgeConfirmConfig?.message || ""}
+        confirmLabel={purgeConfirmConfig?.confirmLabel}
+        variant={purgeConfirmConfig?.variant || "warning"}
+        onConfirm={() => purgeConfirmConfig?.onConfirm()}
+        onCancel={() => setPurgeConfirmConfig(null)}
+      />
     </div>
   );
 };

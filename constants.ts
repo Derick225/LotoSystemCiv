@@ -243,6 +243,31 @@ export const normalizeDrawName = (drawName?: string | null): string => {
 };
 
 /**
+ * Calcul déterministe du miroir décimal d'un numéro 1-90
+ */
+export const getMirrorNumber = (n: number): number => {
+  if (n < 1 || n > 90) return n;
+  if (n < 10) {
+    const mirror = n * 10;
+    return mirror <= 90 ? mirror : n;
+  }
+  if (n % 10 === 0) {
+    return Math.floor(n / 10);
+  }
+  const str = String(n);
+  const reversed = parseInt(str.split('').reverse().join(''), 10);
+  return reversed >= 1 && reversed <= 90 ? reversed : n;
+};
+
+/**
+ * Calcul déterministe du complémentaire à 90 (somme = 91, involution bijective sur [1, 90])
+ */
+export const getComplement90 = (n: number): number => {
+  if (n < 1 || n > 90) return n;
+  return 91 - n;
+};
+
+/**
  * Retourne la liste des familles inter-tirages auxquelles appartient un tirage donné.
  * Exemple : 'Espoir' appartient à la fois à FAMILY_10H_16H_SUN19H55 et FAMILY_19H55.
  */

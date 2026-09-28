@@ -53,6 +53,7 @@ import {
 import { computeSubAlgorithmDivergenceCorrelations } from "../../services/prediction/algorithmDivergenceCorrelationService";
 import { calculateFusion } from "../../services/fusionService";
 import { DnaPerformanceDriftPanel } from "./DnaPerformanceDriftPanel";
+import { ConfirmModal } from "../ui/ConfirmModal";
 
 export type ActiveViewTab = "weights" | "dna_lineage" | "tripartite_fusion" | "dna_drift";
 
@@ -151,6 +152,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   const [auditReport, setAuditReport] = useState<DnaAuditReport | null>(null);
   const [snapshotTag, setSnapshotTag] = useState("");
   const [isTakingSnapshot, setIsTakingSnapshot] = useState(false);
+  const [recordToRollback, setRecordToRollback] = useState<ModelDnaRecord | null>(null);
 
   // Tripartite Fusion Interactive State
   const [fusionBiases, setFusionBiases] = useState({
@@ -416,8 +418,14 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     }
   };
 
-  // Rollback to specific DNA version
-  const handleRollbackVersion = async (record: ModelDnaRecord) => {
+  // Rollback to specific DNA version with confirmation
+  const handleRollbackVersion = (record: ModelDnaRecord) => {
+    audioEngine.play("click");
+    setRecordToRollback(record);
+  };
+
+  const executeRollback = async (record: ModelDnaRecord) => {
+    setRecordToRollback(null);
     audioEngine.play("scan");
     try {
       const optResult = await applyOptimizedWeights({
@@ -1380,6 +1388,24 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
           }}
         />
       )}
+
+      {/* Confirmation Modal pour Restauration Version ADN */}
+      <ConfirmModal
+        isOpen={recordToRollback !== null}
+        title="Restauration Version ADN"
+        message={
+          recordToRollback
+            ? `Voulez-vous restaurer la version ADN « ${recordToRollback.version} » (${recordToRollback.timestamp}) ? Les poids actifs de [${selectedDrawName}] seront écrasés par cette version.`
+            : ""
+        }
+        confirmLabel="Restaurer cet instantané"
+        cancelLabel="Annuler"
+        variant="warning"
+        onConfirm={() => {
+          if (recordToRollback) executeRollback(recordToRollback);
+        }}
+        onCancel={() => setRecordToRollback(null)}
+      />
     </div>
   );
 };

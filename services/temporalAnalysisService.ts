@@ -580,7 +580,7 @@ export const calculateDnaSieveWeights = (
         const sBayes = (sFreq * 0.6 + sMarkov * 0.4);
         const sSpatial = 1.0 / (1.0 + Math.exp(-Math.abs(n - 45.5) / 15.0));
         const sFractal = 0.5 + 0.5 * Math.tanh((sFreq - 0.5) * 2.0);
-        const sInterDraw = interDrawVec[n] || 0.0555;
+        const sInterDraw = interDrawVec[n] || (5 / 90);
         const sMonthly = (sSpectral * 0.5 + sHawkes * 0.5);
 
         let geneSum = 0;

@@ -39,6 +39,7 @@ import { DataIntegrityMonitor } from "./DataIntegrityMonitor";
 import { audioEngine } from "../../utils/audioEngine";
 import { useNexusStore } from "../../store/useNexusStore";
 import { isDrawWithoutMachine } from "../../constants";
+import { ConfirmModal } from "../ui/ConfirmModal";
 
 interface DrawManagementProps {
   drawName: string;
@@ -111,6 +112,15 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
   const [deleteEndDate, setDeleteEndDate] = useState("");
   const [purgeConfirmed, setPurgeConfirmed] = useState(false);
   const [isPurging, setIsPurging] = useState(false);
+  const [confirmModalConfig, setConfirmModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    variant?: "danger" | "info" | "warning";
+    onConfirm: () => void;
+  } | null>(null);
 
   // Manual Form State
   const [isEditing, setIsEditing] = useState(false);
@@ -252,18 +262,30 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     }
   };
 
-  const handleDeleteSingle = async (id: string) => {
+  const handleDeleteSingle = (id: string) => {
     audioEngine.play("click");
-    if (!confirm("Voulez-vous vraiment supprimer ce tirage du registre ?")) return;
-    try {
-      await deleteResult(drawName, id);
-      audioEngine.play("success");
-      showToast("Tirage supprimé du registre.", "success");
-      loadData();
-    } catch (e) {
-      audioEngine.play("error");
-      showToast(`Échec suppression : ${e instanceof Error ? e.message : String(e)}`, "error");
-    }
+    setConfirmModalConfig({
+      isOpen: true,
+      title: "Supprimer du registre",
+      message: "Voulez-vous vraiment supprimer ce tirage du registre ?",
+      confirmLabel: "Supprimer",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmModalConfig(null);
+        try {
+          await deleteResult(drawName, id);
+          audioEngine.play("success");
+          showToast("Tirage supprimé du registre.", "success");
+          loadData();
+        } catch (e) {
+          audioEngine.play("error");
+          showToast(
+            `Échec suppression : ${e instanceof Error ? e.message : String(e)}`,
+            "error",
+          );
+        }
+      },
+    });
   };
 
   const handleQuickFill = (text: string, target: "win" | "mac") => {
@@ -663,38 +685,41 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     }
   };
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = () => {
     if (selectedIds.size === 0) return;
-    if (
-      !confirm(
-        `Supprimer définitivement les ${selectedIds.size} tirages sélectionnés ?`,
-      )
-    )
-      return;
-
-    setIsPurging(true);
-    audioEngine.play("click");
-    try {
-      await bulkDeleteResults(drawName, Array.from(selectedIds));
-      audioEngine.play("success");
-      showToast(
-        `${selectedIds.size} tirages supprimés avec succès.`,
-        "success",
-      );
-      setSelectedIds(new Set());
-      loadData();
-    } catch (e) {
-      audioEngine.play("error");
-      showToast(
-        `Échec de la suppression : ${e instanceof Error ? e.message : String(e)}`,
-        "error",
-      );
-    } finally {
-      setIsPurging(false);
-    }
+    setConfirmModalConfig({
+      isOpen: true,
+      title: "Suppression multiple",
+      message: `Supprimer définitivement les ${selectedIds.size} tirages sélectionnés ?`,
+      confirmLabel: "Supprimer la sélection",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmModalConfig(null);
+        setIsPurging(true);
+        audioEngine.play("click");
+        try {
+          await bulkDeleteResults(drawName, Array.from(selectedIds));
+          audioEngine.play("success");
+          showToast(
+            `${selectedIds.size} tirages supprimés avec succès.`,
+            "success",
+          );
+          setSelectedIds(new Set());
+          loadData();
+        } catch (e) {
+          audioEngine.play("error");
+          showToast(
+            `Échec de la suppression : ${e instanceof Error ? e.message : String(e)}`,
+            "error",
+          );
+        } finally {
+          setIsPurging(false);
+        }
+      },
+    });
   };
 
-  const handleDeleteDateRange = async () => {
+  const handleDeleteDateRange = () => {
     if (!deleteStartDate || !deleteEndDate) return;
 
     const idsToDelete = filterResultsInDateRange(
@@ -705,71 +730,71 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
 
     if (idsToDelete.length === 0) return;
 
-    if (
-      !confirm(
-        `Supprimer définitivement les ${idsToDelete.length} tirages de cette période ?`,
-      )
-    )
-      return;
-
-    setIsPurging(true);
-    audioEngine.play("click");
-    try {
-      await bulkDeleteResults(drawName, idsToDelete);
-      audioEngine.play("success");
-      showToast(
-        `${idsToDelete.length} tirages supprimés pour la période indiquée.`,
-        "success",
-      );
-      setDeleteStartDate("");
-      setDeleteEndDate("");
-      loadData();
-    } catch (e) {
-      audioEngine.play("error");
-      showToast(
-        `Échec de la suppression : ${e instanceof Error ? e.message : String(e)}`,
-        "error",
-      );
-    } finally {
-      setIsPurging(false);
-    }
+    setConfirmModalConfig({
+      isOpen: true,
+      title: "Suppression par plage de dates",
+      message: `Supprimer définitivement les ${idsToDelete.length} tirages de cette période (${deleteStartDate} au ${deleteEndDate}) ?`,
+      confirmLabel: "Supprimer la période",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmModalConfig(null);
+        setIsPurging(true);
+        audioEngine.play("click");
+        try {
+          await bulkDeleteResults(drawName, idsToDelete);
+          audioEngine.play("success");
+          showToast(
+            `${idsToDelete.length} tirages supprimés pour la période indiquée.`,
+            "success",
+          );
+          setDeleteStartDate("");
+          setDeleteEndDate("");
+          loadData();
+        } catch (e) {
+          audioEngine.play("error");
+          showToast(
+            `Échec de la suppression : ${e instanceof Error ? e.message : String(e)}`,
+            "error",
+          );
+        } finally {
+          setIsPurging(false);
+        }
+      },
+    });
   };
 
-  const handlePurgeAll = async () => {
+  const handlePurgeAll = () => {
     if (!purgeConfirmed) return;
-    if (
-      !confirm(
-        `ATTENTION DANGER : Voulez-vous vraiment purger TOUT l'historique de ${drawName} ? Cette action supprimera TOUT en local et sur le cloud.`,
-      )
-    )
-      return;
-    if (
-      !confirm(
-        `Confirmation finale : Tapez OK pour détruire définitivement les ${results.length} enregistrements de ${drawName}.`,
-      )
-    )
-      return;
-
-    setIsPurging(true);
-    audioEngine.play("click");
-    try {
-      await purgeAllResults(drawName);
-      audioEngine.play("success");
-      showToast(
-        `L'historique de ${drawName} a été entièrement vidé.`,
-        "success",
-      );
-      setPurgeConfirmed(false);
-      loadData();
-    } catch (e) {
-      audioEngine.play("error");
-      showToast(
-        `Échec de la purge : ${e instanceof Error ? e.message : String(e)}`,
-        "error",
-      );
-    } finally {
-      setIsPurging(false);
-    }
+    setConfirmModalConfig({
+      isOpen: true,
+      title: "DANGER : Purge totale du registre",
+      message: `ATTENTION : Voulez-vous vraiment détruire TOUT l'historique de ${drawName} (${results.length} enregistrements) ? Cette opération est irréversible en local et sur le cloud.`,
+      confirmLabel: "Détruire tout l'historique",
+      variant: "danger",
+      onConfirm: async () => {
+        setConfirmModalConfig(null);
+        setIsPurging(true);
+        audioEngine.play("click");
+        try {
+          await purgeAllResults(drawName);
+          audioEngine.play("success");
+          showToast(
+            `L'historique de ${drawName} a été entièrement vidé.`,
+            "success",
+          );
+          setPurgeConfirmed(false);
+          loadData();
+        } catch (e) {
+          audioEngine.play("error");
+          showToast(
+            `Échec de la purge : ${e instanceof Error ? e.message : String(e)}`,
+            "error",
+          );
+        } finally {
+          setIsPurging(false);
+        }
+      },
+    });
   };
 
   const validCount = useMemo(
@@ -1619,6 +1644,18 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
           <DataIntegrityMonitor drawName={drawName} />
         </div>
       )}
+
+      {/* Confirmation Modal interne pour toutes les actions destructives */}
+      <ConfirmModal
+        isOpen={Boolean(confirmModalConfig?.isOpen)}
+        title={confirmModalConfig?.title || ""}
+        message={confirmModalConfig?.message || ""}
+        confirmLabel={confirmModalConfig?.confirmLabel}
+        cancelLabel={confirmModalConfig?.cancelLabel}
+        variant={confirmModalConfig?.variant || "danger"}
+        onConfirm={() => confirmModalConfig?.onConfirm()}
+        onCancel={() => setConfirmModalConfig(null)}
+      />
     </div>
   );
 };

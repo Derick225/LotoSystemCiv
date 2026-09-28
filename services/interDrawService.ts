@@ -7,7 +7,9 @@ import {
   getInterDrawFamiliesForDraw,
   getPrimaryInterDrawFamily,
   isDrawInInterDrawFamily,
-  normalizeDrawName
+  normalizeDrawName,
+  getMirrorNumber,
+  getComplement90,
 } from '../constants';
 import { DrawResult } from '../types';
 import {
@@ -153,30 +155,7 @@ export interface InterDrawReport {
   generationTimestamp: number;
 }
 
-/**
- * Calcul déterministe du miroir décimal d'un numéro 1-90
- */
-export const getMirrorNumber = (n: number): number => {
-  if (n < 1 || n > 90) return n;
-  if (n < 10) {
-    const mirror = n * 10;
-    return mirror <= 90 ? mirror : n;
-  }
-  if (n % 10 === 0) {
-    return Math.floor(n / 10);
-  }
-  const str = String(n);
-  const reversed = parseInt(str.split('').reverse().join(''), 10);
-  return reversed >= 1 && reversed <= 90 ? reversed : n;
-};
-
-/**
- * Calcul déterministe du complémentaire à 90 (somme = 91, involution bijective sur [1, 90])
- */
-export const getComplement90 = (n: number): number => {
-  if (n < 1 || n > 90) return n;
-  return 91 - n;
-};
+export { getMirrorNumber, getComplement90 };
 
 /**
  * Fonction logistique continue pour projeter des scores normalisés sur [0, 100]
