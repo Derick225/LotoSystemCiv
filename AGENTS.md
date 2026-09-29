@@ -13,7 +13,7 @@
   Les relations inter-tirages (transitions stochastiques Markov, reports direct carry-over, résonances harmoniques) sont autorisées et modélisées STRICTEMENT au sein de 3 familles fermées et étanches :
   1. **Famille Nationale LONACI** : Tirages de 10H, 16H et exclusivement le tirage de 19H55 du dimanche (Espoir).
   2. **Famille Zénith (13H)** : Ensemble des tirages de 13H exclusivement.
-  3. **Famille Nocturne (19H55)** : Ensemble des tirages de 19H55 exclusivement.
+  3. **Famille Nocturne (19H55)** : Ensemble des tirages de 19H55 excepté le tirage de 19H55 du dimanche (Espoir)..
 - **ZÉRO POLLUTION INTER-FAMILLES** : Il est strictement interdit d'entraîner, de calculer des corrélations ou de croiser des données entre deux familles distinctes (ex: 13H et 19H55 ne se croisent jamais).
 - **ISOLATION DU CACHING** : Les clés de cache de toutes les matrices d'inférence et d'analyse inter-tirages doivent inclure explicitement et de manière unique l'identifiant de la famille et les noms des tirages (`nexus_interdraw_${familyId}_${drawName}`).
 - **ZÉRO NOMBRES MAGIQUES & DÉTERMINISME** : Les calculs inter-tirages reposent sur des fonctions différentiables et des fréquences réelles lissées (Laplace continu dérivé de la variance). Aucun appel aléatoire non déterministe.
