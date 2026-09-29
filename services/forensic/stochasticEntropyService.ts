@@ -231,24 +231,48 @@ export const calculateStochasticEntropyForensics = (
   const meanKLDivergence = timeline.reduce((s, p) => s + p.klDivergence, 0) / count;
   const meanLyapunovExponent = timeline.reduce((s, p) => s + p.lyapunovExponent, 0) / count;
 
-  const currentPoint = timeline[0] || {
-    unpredictabilityScore: 50,
-    regime: 'TRANSITIONAL_STOCHASTIC' as UnpredictabilityRegime,
-  };
+  const n = timeline.length;
+  const currentPoint = timeline[0];
 
   const highCount = timeline.filter((p) => p.regime === 'HIGH_ENTROPY_DIFFUSION').length;
   const lowCount = timeline.filter((p) => p.regime === 'LOW_ENTROPY_ATTRACTOR').length;
 
-  // Recommandation stratégique
+  // Recommandation stratégique (texte qualitatif piloté par le régime courant)
   let recommendedStrategy = 'Équilibrage adaptatif standard avec conservation des sous-algorithmes prouvés.';
-  let confidence = 75;
+  const currentRegime: UnpredictabilityRegime = currentPoint?.regime ?? 'TRANSITIONAL_STOCHASTIC';
 
-  if (currentPoint.regime === 'LOW_ENTROPY_ATTRACTOR') {
+  if (currentRegime === 'LOW_ENTROPY_ATTRACTOR') {
     recommendedStrategy = 'Basse entropie détectée : Activer les modèles d\'attracteurs périodiques et renforcer les poids des cycles Markoviens et fréquences chaudes.';
-    confidence = 88;
-  } else if (currentPoint.regime === 'HIGH_ENTROPY_DIFFUSION') {
+  } else if (currentRegime === 'HIGH_ENTROPY_DIFFUSION') {
     recommendedStrategy = 'Haute entropie et divergence KL élevée : Réduire l\'agressivité des scores de tête, prioriser l\'Inertie/Volatilité et injecter un lissage de dispersion.';
-    confidence = 82;
+  }
+
+  // Indice de Cohérence : confiance CONTINUE et MESURÉE dans la classification du régime
+  // courant — plus une constante inventée (75/88/82). Produit de deux facteurs réels bornés
+  // sur [0,1] (AGENTS.md #1 zéro nombre magique, #3 continuité, doctrine d'honnêteté) :
+  //  - séparation : distance de la coordonnée de régime au TERTILE le plus proche, réduite
+  //    par la demi-largeur de bande (50/3, issue de la géométrie des tertiles). Nulle sur une
+  //    frontière (classement ambigu), saturée à 1 au cœur d'une bande (classement net).
+  //  - fiabilité d'échantillonnage : 1 - 1/√n (marge d'erreur standard qui se réduit avec le
+  //    nombre de tirages analysés). Aucune donnée ⇒ NaN, rendu "n/d" côté panneau.
+  let currentUnpredictabilityScore = NaN;
+  let confidence = NaN;
+  if (n > 0 && currentPoint) {
+    currentUnpredictabilityScore = currentPoint.unpredictabilityScore;
+
+    const lowTertile = 100.0 / 3.0;
+    const highTertile = 200.0 / 3.0;
+    const bandHalfWidth = 50.0 / 3.0;
+    // Coordonnée de régime du point courant, recalculée à l'identique de la boucle.
+    const dklContribution = Math.min(100.0, currentPoint.klDivergence * 15.0);
+    const regimeCoordinate = (currentPoint.unpredictabilityScore + dklContribution) / 2.0;
+    const boundaryDistance = Math.min(
+      Math.abs(regimeCoordinate - lowTertile),
+      Math.abs(regimeCoordinate - highTertile)
+    );
+    const separation = Math.min(1.0, boundaryDistance / bandHalfWidth);
+    const reliability = 1.0 - 1.0 / Math.sqrt(n);
+    confidence = Math.round(Math.max(0, Math.min(100, 100 * separation * reliability)));
   }
 
   return {
@@ -257,8 +281,8 @@ export const calculateStochasticEntropyForensics = (
     meanPredictionEntropy: parseFloat(meanPredictionEntropy.toFixed(4)),
     meanKLDivergence: parseFloat(meanKLDivergence.toFixed(4)),
     meanLyapunovExponent: parseFloat(meanLyapunovExponent.toFixed(4)),
-    currentUnpredictabilityScore: currentPoint.unpredictabilityScore,
-    currentRegime: currentPoint.regime,
+    currentUnpredictabilityScore,
+    currentRegime,
     highUnpredictabilityPeriodsCount: highCount,
     lowUnpredictabilityPeriodsCount: lowCount,
     timeline,

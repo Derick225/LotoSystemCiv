@@ -1,6 +1,7 @@
 import { AlgoWeights, DrawResult } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { calculateShannonEntropy, computeRobustHurst } from '../mathCore';
+import { calculateWeylDiscrepancy, calculateGrassbergerProcaccia } from '../mathService';
 import { calculateHawkesIntensity } from '../temporalAnalysisService';
 import { computeModelDnaFingerprint } from '../prediction/modelDnaKnowledgeBase';
 import { normalizeWeights, getDefaultWeights } from '../prediction/weightsManager';
@@ -130,9 +131,24 @@ export function extractMathProofMetadata(params: {
     }
   }
 
-  // 5. Métriques stochastiques complémentaires
-  const weylDiscrepancy = parseFloat((0.08 + Math.abs(hurstExponent - 0.5) * 0.2).toFixed(4));
-  const chaosDimension = parseFloat((1.0 + (1.0 - Math.min(1.0, shannonEntropy)) * 0.8).toFixed(3));
+  // 5. Métriques stochastiques complémentaires — MESURÉES sur l'historique réel.
+  // Discrépance de Weyl (équirépartition quasi-Monte-Carlo de la suite de Kronecker au
+  // nombre d'or) et dimension de corrélation de Grassberger-Procaccia (reconstruction
+  // d'espace des phases, emb=3) : les mêmes estimateurs rigoureux que detectGameRegime.
+  // Jamais déduites d'un mapping linéaire arbitraire d'une autre métrique (AGENTS.md #1,
+  // doctrine d'honnêteté). En dessous du seuil d'échantillonnage des estimateurs, on
+  // conserve leurs neutres documentés (0.5 = équirépartition maximale, 1.5 = dimension
+  // médiane), qui sont des valeurs "données insuffisantes" et non une précision inventée.
+  let weylDiscrepancy = 0.5;
+  let chaosDimension = 1.5;
+  if (history.length > 0) {
+    try {
+      weylDiscrepancy = parseFloat(calculateWeylDiscrepancy(history).toFixed(4));
+      chaosDimension = parseFloat(calculateGrassbergerProcaccia(history).toFixed(3));
+    } catch {
+      // historique inexploitable ⇒ neutres documentés conservés
+    }
+  }
 
   // Score de Brier
   let brierScore = customBrier ?? 0.15;

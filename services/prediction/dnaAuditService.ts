@@ -190,6 +190,15 @@ export const runSystematicDnaAudit = async (
   const driftSummary: string[] = [];
   let alignedCount = 0;
 
+  // Seuil critique déterministe UNIQUE — exactement celui appliqué par le contrôleur
+  // d'optimisation (mêmes unités, même historique isolé). Source unique de vérité pour le
+  // statut de dérive ET la liste des algorithmes critiques : plus de porte magique 0.005
+  // divergente du seuil réellement utilisé par le moteur (AGENTS.md #1, #3).
+  const criticalDriftThreshold = computeDrawCriticalThreshold(
+    pureHistory,
+    validKeys.length
+  ).criticalThreshold;
+
   validKeys.forEach(key => {
     const plugin = registryMap.get(key);
     const activeW = Number(currentWeights[key]) || 0;
@@ -210,10 +219,11 @@ export const runSystematicDnaAudit = async (
     let driftStatus: AlgorithmDriftStatus = 'ALIGNED';
     let diagnostics = 'ADN de référence aligné et conforme.';
 
-    // Vérification de dérive de poids (> 0.005 d'écart avec la distribution canonique normalisée)
-    if (delta > 0.005) {
+    // Vérification de dérive de poids : écart ≥ au seuil critique déterministe du tirage
+    // (source unique de vérité, identique à criticalDriftAlgorithms et au moteur).
+    if (delta >= criticalDriftThreshold) {
       driftStatus = 'WEIGHT_DRIFT';
-      diagnostics = `Dérive de poids détectée : ${activeW.toFixed(4)} vs canonical ${canonW.toFixed(4)} (Δ = ${(delta * 100).toFixed(2)}%).`;
+      diagnostics = `Dérive de poids détectée : ${activeW.toFixed(4)} vs canonical ${canonW.toFixed(4)} (Δ = ${(delta * 100).toFixed(2)}% ≥ seuil ${(criticalDriftThreshold * 100).toFixed(2)}%).`;
     }
 
     if (!plugin) {
@@ -249,13 +259,6 @@ export const runSystematicDnaAudit = async (
   const totalAlgos = validKeys.length;
   const driftedCount = totalAlgos - alignedCount;
   const coherenceScore = Math.round((alignedCount / totalAlgos) * 100);
-
-  // Seuil critique : exactement celui appliqué par le contrôleur d'optimisation
-  // (mêmes unités, même historique isolé) — le seuil affiché n'est jamais divergent.
-  const criticalDriftThreshold = computeDrawCriticalThreshold(
-    pureHistory,
-    totalAlgos
-  ).criticalThreshold;
 
   const maxWeightDriftDelta = algorithmAuditList.length > 0
     ? Math.max(...algorithmAuditList.map(a => a.weightDriftDelta))

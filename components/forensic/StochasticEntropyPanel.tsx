@@ -195,17 +195,21 @@ export const StochasticEntropyPanel: React.FC<StochasticEntropyPanelProps> = ({
           <div className="p-4 bg-slate-950/60 rounded-2xl border border-white/5 flex flex-col justify-between">
             <span className="text-[10px] font-black uppercase text-slate-400">Indice d'Imprévisibilité</span>
             <div className="flex items-baseline gap-1.5 mt-1">
-              <span
-                className={`text-2xl font-black font-mono ${
-                  entropyData.currentUnpredictabilityScore > 60
-                    ? "text-rose-400"
-                    : entropyData.currentUnpredictabilityScore < 40
-                      ? "text-emerald-400"
-                      : "text-amber-400"
-                }`}
-              >
-                {entropyData.currentUnpredictabilityScore.toFixed(1)}/100
-              </span>
+              {Number.isFinite(entropyData.currentUnpredictabilityScore) ? (
+                <span
+                  className={`text-2xl font-black font-mono ${
+                    entropyData.currentUnpredictabilityScore > 60
+                      ? "text-rose-400"
+                      : entropyData.currentUnpredictabilityScore < 40
+                        ? "text-emerald-400"
+                        : "text-amber-400"
+                  }`}
+                >
+                  {entropyData.currentUnpredictabilityScore.toFixed(1)}/100
+                </span>
+              ) : (
+                <span className="text-2xl font-black font-mono text-slate-500" title="Historique insuffisant : indice non mesurable">n/d</span>
+              )}
             </div>
           </div>
         </div>
@@ -393,7 +397,9 @@ export const StochasticEntropyPanel: React.FC<StochasticEntropyPanelProps> = ({
           <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
             <span className="text-[10px] font-black uppercase text-slate-400">Indice de Cohérence</span>
             <span className="text-xs font-mono font-bold text-indigo-400">
-              {entropyData.predictabilityResonanceWindow.confidence}%
+              {Number.isFinite(entropyData.predictabilityResonanceWindow.confidence)
+                ? `${entropyData.predictabilityResonanceWindow.confidence}%`
+                : "n/d"}
             </span>
           </div>
         </div>
