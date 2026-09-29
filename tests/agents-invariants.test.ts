@@ -5,80 +5,91 @@ import { fileURLToPath } from 'node:url';
 
 import { globalCache } from '../services/cache/CacheService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { INTER_DRAW_FAMILIES, normalizeDrawName } from '../constants';
-import type { InterDrawFamilyId } from '../constants';
+import { INTER_DRAW_NETWORKS, normalizeDrawName } from '../constants';
+import type { InterDrawNetworkId } from '../constants';
 
 /**
- * TESTS-GARDIENS DES INVARIANTS AGENTS.md (recommandation #2)
- * Verrouillent les propriétés structurelles que les correctifs précédents établissent,
- * pour empêcher toute récidive : isolation des clés de cache (#5), étanchéité des
- * 3 familles inter-tirages (#4) et zéro hasard dans le moteur (#2).
+ * TESTS-GARDIENS DES INVARIANTS AGENTS.md
+ * Verrouillent les propriétés structurelles requises par AGENTS.md :
+ * - Invariant #5 : Format canonique des clés de cache nexus_interdraw_${networkId}_${drawName}
+ * - Invariant #4 : Étanchéité absolue des 2 réseaux fermés (hebdomadaire 6, quotidien 22, zéro croisement National/Espoir)
+ * - Invariant #2 : Zéro hasard dans le moteur d'inférence (100% déterministe)
  */
 
 const SERVICES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'services');
 
-describe('Invariant #5 — Isolation des clés de cache inter-tirages', () => {
-  it('encode familyId ET drawName dans un format canonique', () => {
-    const key = globalCache.getInterDrawKey('FAMILY_13H', 'Fortune');
-    expect(key).toBe('nexus_interdraw_FAMILY_13H_fortune');
+describe('Invariant #5 — Isolation des clés de cache inter-tirages (AGENTS.md)', () => {
+  it('encode networkId ET drawName dans le format canonique nexus_interdraw_${networkId}_${drawName}', () => {
+    const key = globalCache.getInterDrawKey('quotidien', 'Fortune');
+    expect(key).toBe('nexus_interdraw_quotidien_fortune');
     expect(key.startsWith('nexus_interdraw_')).toBe(true);
-    expect(key).toContain('FAMILY_13H');
+    expect(key).toContain('quotidien');
     expect(key).toContain('fortune');
   });
 
   it('normalise le nom du tirage (minuscules, espaces/tirets → underscore)', () => {
-    const key = globalCache.getInterDrawKey('FAMILY_19H55', '  Fortune Thursday ');
-    expect(key).toBe('nexus_interdraw_FAMILY_19H55_fortune_thursday');
+    const key = globalCache.getInterDrawKey('hebdomadaire', '  Fortune Thursday ');
+    expect(key).toBe('nexus_interdraw_hebdomadaire_fortune_thursday');
   });
 
-  it('produit des clés distinctes pour des familles ou des tirages distincts', () => {
-    const a = globalCache.getInterDrawKey('FAMILY_13H', 'Fortune');
-    const b = globalCache.getInterDrawKey('FAMILY_19H55', 'Fortune');
-    const c = globalCache.getInterDrawKey('FAMILY_13H', 'Fortune Thursday');
+  it('produit des clés distinctes pour des réseaux ou des tirages distincts', () => {
+    const a = globalCache.getInterDrawKey('quotidien', 'Fortune');
+    const b = globalCache.getInterDrawKey('hebdomadaire', 'Fortune');
+    const c = globalCache.getInterDrawKey('hebdomadaire', 'Fortune Thursday');
     expect(new Set([a, b, c]).size).toBe(3);
   });
 
-  it('préserve le sous-secteur optionnel sans casser l\'isolation famille/tirage', () => {
-    const key = globalCache.getInterDrawKey('FAMILY_13H', 'Fortune', 'matrix');
-    expect(key).toBe('nexus_interdraw_FAMILY_13H_fortune_matrix');
-    expect(key).toContain('FAMILY_13H');
+  it('préserve le sous-secteur optionnel sans casser l\'isolation réseau/tirage', () => {
+    const key = globalCache.getInterDrawKey('quotidien', 'Fortune', 'matrix');
+    expect(key).toBe('nexus_interdraw_quotidien_fortune_matrix');
+    expect(key).toContain('quotidien');
     expect(key).toContain('fortune');
   });
 
   it('aligne la normalisation du nom sur normalizeDrawName (cohérence inter-modules)', () => {
-    // La clé doit refléter le même nom normalisé que celui utilisé ailleurs dans le moteur.
     const drawName = 'Fortune Thursday';
-    const key = globalCache.getInterDrawKey('FAMILY_19H55', normalizeDrawName(drawName));
+    const key = globalCache.getInterDrawKey('hebdomadaire', normalizeDrawName(drawName));
     expect(key).toContain(normalizeDrawName(drawName).toLowerCase().replace(/[\s-]+/g, '_'));
   });
 });
 
-describe('Invariant #4 — Étanchéité des 3 familles inter-tirages', () => {
-  const familyIds = Object.keys(INTER_DRAW_FAMILIES) as InterDrawFamilyId[];
+describe('Invariant #4 — Étanchéité des 2 réseaux fermés (AGENTS.md)', () => {
+  const networkIds = Object.keys(INTER_DRAW_NETWORKS) as InterDrawNetworkId[];
 
-  const namesOf = (id: InterDrawFamilyId): string[] =>
-    INTER_DRAW_FAMILIES[id].sequence.map(s => s.name);
+  const namesOf = (id: InterDrawNetworkId): string[] =>
+    INTER_DRAW_NETWORKS[id].sequence.map(s => s.name);
 
-  it('compte exactement 3 familles', () => {
-    expect(familyIds.length).toBe(3);
+  it('compte exactement 2 réseaux fermés', () => {
+    expect(networkIds.length).toBe(2);
+    expect(networkIds).toContain('hebdomadaire');
+    expect(networkIds).toContain('quotidien');
   });
 
-  it('chaque tirage (hors Espoir, partagé par design) n\'appartient qu\'à une seule famille', () => {
-    const ownership = new Map<string, InterDrawFamilyId[]>();
-    familyIds.forEach(id => {
-      namesOf(id).forEach(name => {
-        ownership.set(name, [...(ownership.get(name) || []), id]);
-      });
-    });
+  it('le Réseau Hebdomadaire compte exactement 6 tirages et le Réseau Quotidien 22 tirages', () => {
+    expect(INTER_DRAW_NETWORKS.hebdomadaire.drawNames.length).toBe(6);
+    expect(INTER_DRAW_NETWORKS.quotidien.drawNames.length).toBe(22);
+    const allNames = [
+      ...INTER_DRAW_NETWORKS.hebdomadaire.drawNames,
+      ...INTER_DRAW_NETWORKS.quotidien.drawNames
+    ];
+    expect(new Set(allNames.map(normalizeDrawName)).size).toBe(28);
+  });
 
-    ownership.forEach((families, name) => {
-      if (name === 'Espoir') {
-        // Exception documentée : Espoir (Dimanche 19H55) relie la famille Nationale et la Nocturne.
-        expect(families.length).toBe(2);
-      } else {
-        expect(families.length, `« ${name} » ne doit appartenir qu'à une seule famille`).toBe(1);
-      }
-    });
+  it('chaque tirage n\'appartient qu\'à un seul réseau (zéro pollution inter-réseaux)', () => {
+    const hebdoNames = new Set(INTER_DRAW_NETWORKS.hebdomadaire.drawNames.map(normalizeDrawName));
+    const quotNames = new Set(INTER_DRAW_NETWORKS.quotidien.drawNames.map(normalizeDrawName));
+
+    // Intersection strictement vide : aucun tirage partagé
+    const intersection = [...hebdoNames].filter(name => quotNames.has(name));
+    expect(intersection).toHaveLength(0);
+
+    // National appartient exclusivement à l'hebdomadaire
+    expect(hebdoNames.has(normalizeDrawName('National'))).toBe(true);
+    expect(quotNames.has(normalizeDrawName('National'))).toBe(false);
+
+    // Espoir appartient exclusivement au quotidien
+    expect(quotNames.has(normalizeDrawName('Espoir'))).toBe(true);
+    expect(hebdoNames.has(normalizeDrawName('Espoir'))).toBe(false);
   });
 
   it('purifyHistoryForDraw isole strictement deux tirages aux noms proches', () => {

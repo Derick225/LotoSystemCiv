@@ -25,6 +25,7 @@ import { useToast } from "../ui/Toast";
 import { useHpcEngineStatus } from "../../hooks/useHpcEngineStatus";
 import { InterDrawCooccurrenceView } from "../interdraw/InterDrawCooccurrenceView";
 import { InterDrawPatternView } from "../interdraw/InterDrawPatternView";
+import { InterDrawNetworkMatrixView } from "../interdraw/InterDrawNetworkMatrixView";
 import {
   GitBranch,
   ArrowRight,
@@ -68,22 +69,22 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   const { showToast } = useToast();
   const hpcStatus = useHpcEngineStatus();
 
-  // État de la famille sélectionnée (par défaut la famille du tirage, ou 10H/16H/Dim19H55)
+  // État du réseau fermé sélectionné (par défaut le réseau du tirage, ou quotidien)
   const [selectedFamilyId, setSelectedFamilyId] = useState<InterDrawFamilyId>(() => {
     if (availableFamilies.length > 0) return availableFamilies[0].id;
-    return 'FAMILY_10H_16H_SUN19H55';
+    return 'quotidien';
   });
 
-  // Si le tirage change et a une famille différente, mettre à jour la sélection
+  // Si le tirage change et a un réseau différent, mettre à jour la sélection
   useEffect(() => {
     if (availableFamilies.length > 0 && !availableFamilies.some(f => f.id === selectedFamilyId)) {
       setSelectedFamilyId(availableFamilies[0].id);
     }
   }, [drawName, availableFamilies, selectedFamilyId]);
 
-  const activeFamily = INTER_DRAW_FAMILIES[selectedFamilyId];
+  const activeFamily = INTER_DRAW_FAMILIES[selectedFamilyId] || INTER_DRAW_FAMILIES['quotidien'];
 
-  // Tirage actuellement ciblé dans la famille (si le tirage actif n'est pas dans la famille, prendre le 1er)
+  // Tirage actuellement ciblé dans le réseau (si le tirage actif n'est pas dans le réseau, prendre le 1er)
   const effectiveTargetDraw = useMemo(() => {
     if (!activeFamily?.sequence || activeFamily.sequence.length === 0) {
       return drawName || '';
@@ -103,7 +104,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   const [report, setReport] = useState<InterDrawReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [subView, setSubView] = useState<'OVERVIEW' | 'COOCCURRENCES' | 'PATTERNS' | 'SIMULATOR'>('OVERVIEW');
+  const [subView, setSubView] = useState<'OVERVIEW' | 'NETWORK_MATRIX' | 'COOCCURRENCES' | 'PATTERNS' | 'SIMULATOR'>('OVERVIEW');
 
   const loadReport = useCallback(async (forcedTarget: string, famId: InterDrawFamilyId, forceRefresh: boolean = false) => {
     setLoading(true);
@@ -215,7 +216,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
 
   return (
     <div className="w-full space-y-6 pb-12 animate-fade-in font-sans text-slate-800 dark:text-slate-100">
-      {/* 1. SÉLECTEUR DES 3 FAMILLES ÉTANCHES */}
+      {/* 1. SÉLECTEUR DES 2 RÉSEAUX ÉTANCHES */}
       <div className="bg-white/80 dark:bg-slate-900/80 p-5 md:p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
@@ -224,10 +225,10 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               Topologie Stochastique Inter-Tirages
             </div>
             <h2 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 dark:text-white mt-1">
-              Cadre des Relations Inter-Tirages
+              Cadre des Relations Inter-Tirages (2 Réseaux Fermés Étanches)
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Modélisation des transmissions markoviennes, reports directs (carry-over) et résonances harmoniques par famille fermée.
+              Interconnexion complète par réseau fermé (graphe complet all-to-all), transmissions markoviennes et résonances harmoniques sans pollution inter-réseaux.
             </p>
           </div>
 
@@ -241,8 +242,8 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
           </button>
         </div>
 
-        {/* ONGLETS DES 3 FAMILLES */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2">
+        {/* ONGLETS DES 2 RÉSEAUX ÉTANCHES */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
           {Object.values(INTER_DRAW_FAMILIES).map((fam) => {
             const isSelected = selectedFamilyId === fam.id;
             const isDrawInFam = fam.drawNames.some(d => normalizeDrawName(d) === normalizeDrawName(drawName));
@@ -394,6 +395,26 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
         <button
           onClick={() => {
             audioEngine.play("click");
+            setSubView('NETWORK_MATRIX');
+          }}
+          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'NETWORK_MATRIX'
+              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
+              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+          }`}
+        >
+          <Network size={14} className={subView === 'NETWORK_MATRIX' ? 'animate-pulse' : 'text-indigo-400'} />
+          <span>Matrice Réseau (Graphe Complet)</span>
+          {report?.networkMatrix && (
+            <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-[9px] font-mono font-bold">
+              {report.networkMatrix.drawNames.length}x{report.networkMatrix.drawNames.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            audioEngine.play("click");
             setSubView('COOCCURRENCES');
           }}
           className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
@@ -454,7 +475,9 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
         </div>
       ) : report ? (
         <>
-          {/* 3. FLUX TRIPTYQUE : PRÉDÉCESSEUR -> CIBLE -> SUCCESSEUR */}
+          {subView === 'OVERVIEW' && (
+            <>
+              {/* 3. FLUX TRIPTYQUE : PRÉDÉCESSEUR -> CIBLE -> SUCCESSEUR */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* CARTE PRÉDÉCESSEUR */}
             <div className="p-5 bg-white/80 dark:bg-slate-900/80 rounded-3xl border border-amber-500/30 dark:border-amber-500/20 shadow-lg relative overflow-hidden flex flex-col justify-between">
@@ -1290,6 +1313,18 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               </div>
             )}
           </div>
+            </>
+          )}
+
+          {/* VUE DÉDIÉE MATRICE DU RÉSEAU (GRAPHE COMPLET ALL-TO-ALL) */}
+          {subView === 'NETWORK_MATRIX' && (
+            <InterDrawNetworkMatrixView
+              networkMatrix={report.networkMatrix}
+              networkId={report.networkId || (activeFamily.id as any)}
+              targetDraw={report.targetDraw}
+              onSelectDraw={onSelectDraw}
+            />
+          )}
         </>
       ) : null}
 

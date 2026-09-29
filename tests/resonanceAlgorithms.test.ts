@@ -103,7 +103,7 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
         expect(res.confidence).toBeGreaterThanOrEqual(0);
         expect(res.confidence).toBeLessThanOrEqual(1);
         expect(res.metadata).toBeDefined();
-        expect(res.metadata.familyId).toBe('FAMILY_13H');
+        expect(res.metadata.familyId).toBe('quotidien');
       }
     });
 

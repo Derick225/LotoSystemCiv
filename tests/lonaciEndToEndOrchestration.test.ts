@@ -59,25 +59,25 @@ describe('Validation de Bout en Bout LONACI (10H, 13H, 16H, 19H55) & Recuit Simu
     {
       slot: '10:00 (10H)',
       drawName: 'Reveil',
-      expectedFamily: INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id,
+      expectedFamily: 'quotidien',
       seed: 101,
     },
     {
       slot: '13:00 (13H)',
       drawName: 'Etoile',
-      expectedFamily: INTER_DRAW_FAMILIES.FAMILY_13H.id,
+      expectedFamily: 'quotidien',
       seed: 131,
     },
     {
       slot: '16:00 (16H)',
       drawName: 'Akwaba',
-      expectedFamily: INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id,
+      expectedFamily: 'quotidien',
       seed: 161,
     },
     {
       slot: '19:55 (19H55)',
       drawName: 'Monday Special',
-      expectedFamily: INTER_DRAW_FAMILIES.FAMILY_19H55.id,
+      expectedFamily: 'hebdomadaire',
       seed: 195,
     },
   ];
@@ -137,41 +137,40 @@ describe('Validation de Bout en Bout LONACI (10H, 13H, 16H, 19H55) & Recuit Simu
     });
   });
 
-  describe('3. Étanchéité Stricte des 3 Familles Inter-Tirages', () => {
+  describe('3. Étanchéité Stricte des 2 Réseaux Inter-Tirages (AGENTS.md)', () => {
     it('doit garantir que les clés de cache et relations respectent les cloisons hermétiques', () => {
       const keyNational10H = globalCache.getInterDrawKey(
-        INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id,
+        'quotidien',
         'Reveil',
         'hawkes'
       );
       const keyNational16H = globalCache.getInterDrawKey(
-        INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id,
+        'quotidien',
         'Akwaba',
         'hawkes'
       );
       const keyZenith = globalCache.getInterDrawKey(
-        INTER_DRAW_FAMILIES.FAMILY_13H.id,
+        'quotidien',
         'Etoile',
         'hawkes'
       );
       const keyNocturne = globalCache.getInterDrawKey(
-        INTER_DRAW_FAMILIES.FAMILY_19H55.id,
+        'hebdomadaire',
         'Monday Special',
         'hawkes'
       );
 
-      // National regroupe 10H et 16H dans la même famille
-      expect(keyNational10H).toContain(INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id);
-      expect(keyNational16H).toContain(INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id);
+      // Quotidien regroupe 10H, 13H et 16H
+      expect(keyNational10H).toContain('quotidien');
+      expect(keyNational16H).toContain('quotidien');
+      expect(keyZenith).toContain('quotidien');
 
-      // Zénith et Nocturne sont dans des familles distinctes
-      expect(keyZenith).toContain(INTER_DRAW_FAMILIES.FAMILY_13H.id);
-      expect(keyNocturne).toContain(INTER_DRAW_FAMILIES.FAMILY_19H55.id);
+      // Hebdomadaire est dans un réseau étanche distinct
+      expect(keyNocturne).toContain('hebdomadaire');
 
       // Zéro collision
-      expect(keyNational10H).not.toEqual(keyZenith);
-      expect(keyZenith).not.toEqual(keyNocturne);
       expect(keyNational10H).not.toEqual(keyNocturne);
+      expect(keyZenith).not.toEqual(keyNocturne);
     });
   });
 });

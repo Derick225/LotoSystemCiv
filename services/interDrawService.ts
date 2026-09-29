@@ -1,12 +1,16 @@
 import {
   INTER_DRAW_FAMILIES,
+  INTER_DRAW_NETWORKS,
   InterDrawFamilyConfig,
   InterDrawFamilyId,
+  InterDrawNetworkId,
   InterDrawSequenceItem,
   getFamilyPredecessorAndSuccessor,
   getInterDrawFamiliesForDraw,
   getPrimaryInterDrawFamily,
   isDrawInInterDrawFamily,
+  getDrawNetworkId,
+  areDrawsInSameNetwork,
   normalizeDrawName,
   getMirrorNumber,
   getComplement90,
@@ -124,9 +128,29 @@ export interface HarmonicResonanceMetrics {
   harmonicPairs: HarmonicPairDetail[];
 }
 
+export interface InterDrawNodeCoupling {
+  sourceName: string;
+  targetName: string;
+  correlation: number; // Pearson r [-1, 1]
+  weight: number; // [0, 1] continue
+  carryOverRate: number; // %
+  samplePairs: number;
+}
+
+export interface InterDrawNetworkMatrix {
+  networkId: InterDrawNetworkId;
+  drawNames: string[];
+  weights: Record<string, Record<string, number>>; // W[target][source]
+  couplings: InterDrawNodeCoupling[];
+  meanNetworkCoupling: number;
+}
+
 export interface InterDrawReport {
   targetDraw: string;
   family: InterDrawFamilyConfig;
+  networkId: InterDrawNetworkId;
+  networkMatrix?: InterDrawNetworkMatrix;
+  networkCouplings?: InterDrawNodeCoupling[];
   predecessor: InterDrawSequenceItem;
   successor: InterDrawSequenceItem;
   currentIndex: number;
@@ -707,19 +731,187 @@ export const deriveRetrospectiveOptimalAlpha = (
 };
 
 /**
- * Calcule l'analyse complète des relations inter-tirages pour un tirage et une famille donnés.
- * Respecte rigoureusement le principe de ZÉRO POLLUTION INTER-FAMILLES (AGENTS.md).
+ * Calcule la corrélation de Pearson entre deux vecteurs de fréquences [1..90].
+ * ZÉRO HASARD, 100% DÉTERMINISTE.
+ */
+export const computeFrequencyPearsonCorrelation = (
+  freqA: number[] | Float64Array | Float32Array,
+  freqB: number[] | Float64Array | Float32Array
+): number => {
+  let sumA = 0;
+  let sumB = 0;
+  for (let i = 1; i <= 90; i++) {
+    sumA += freqA[i] || 0;
+    sumB += freqB[i] || 0;
+  }
+  const meanA = sumA / 90;
+  const meanB = sumB / 90;
+
+  let num = 0;
+  let denA = 0;
+  let denB = 0;
+  for (let i = 1; i <= 90; i++) {
+    const da = (freqA[i] || 0) - meanA;
+    const db = (freqB[i] || 0) - meanB;
+    num += da * db;
+    denA += da * da;
+    denB += db * db;
+  }
+  const den = Math.sqrt(denA * denB);
+  if (den <= 1e-12) return 0;
+  return Math.max(-1.0, Math.min(1.0, num / den));
+};
+
+/**
+ * Calcule l'intensité continue de couplage entre deux tirages d'un même réseau fermé.
+ * ZÉRO NOMBRE MAGIQUE & ZÉRO SEUIL BINAIRE (AGENTS.md).
+ * W(A, B) ∈ ]0, 1] calculé par sigmoïde logistique continue :
+ * W(A, B) = 1 / (1 + exp(-(r + tanh(L - 1.0))))
+ * où r est la corrélation de Pearson des fréquences et L est le lift empirique de report.
+ */
+export const computeContinuousInterDrawCoupling = (
+  historySource: DrawResult[],
+  historyTarget: DrawResult[]
+): { correlation: number; weight: number; carryOverRate: number; samplePairs: number } => {
+  if (!historySource || historySource.length === 0 || !historyTarget || historyTarget.length === 0) {
+    return { correlation: 0, weight: 0.5, carryOverRate: 25.41, samplePairs: 0 };
+  }
+
+  // 1. Vecteurs de fréquences marginales sur 90 numéros
+  const freqSource = new Float64Array(91);
+  const freqTarget = new Float64Array(91);
+  historySource.forEach(d => {
+    (d.gagnants || []).forEach(n => {
+      if (n >= 1 && n <= 90) freqSource[n]++;
+    });
+  });
+  historyTarget.forEach(d => {
+    (d.gagnants || []).forEach(n => {
+      if (n >= 1 && n <= 90) freqTarget[n]++;
+    });
+  });
+
+  const correlation = computeFrequencyPearsonCorrelation(freqSource, freqTarget);
+
+  // 2. Alignement chronologique des tirages consécutifs source -> cible
+  const paired = alignConsecutiveDrawHistories(historyTarget, historySource);
+  let carryOverCount = 0;
+  if (paired.length > 0) {
+    paired.forEach(p => {
+      const pSet = new Set(p.predWinners);
+      const hasShared = p.targetWinners.some(n => pSet.has(n));
+      if (hasShared) carryOverCount++;
+    });
+  }
+
+  // Espérance théorique nulle du carry-over (format 5/90) : 1 - C(85,5)/C(90,5) ≈ 25.41%
+  const expectedCarryOver = 100.0 * (1.0 - (85 * 84 * 83 * 82 * 81) / (90 * 89 * 88 * 87 * 86));
+  const empiricalRate = paired.length > 0 ? (carryOverCount / paired.length) * 100.0 : expectedCarryOver;
+  const lift = expectedCarryOver > 0 ? empiricalRate / expectedCarryOver : 1.0;
+
+  // 3. Poids de couplage continu différentiable (Sigmoïde sans rupture)
+  // W(A, B) ∈ ]0, 1]. Si r = 0 et L = 1, W = 0.5.
+  const z = correlation + Math.tanh(lift - 1.0);
+  const weight = 1.0 / (1.0 + Math.exp(-z));
+
+  return {
+    correlation: Math.round(correlation * 1000) / 1000,
+    weight: Math.round(weight * 1000) / 1000,
+    carryOverRate: Math.round(empiricalRate * 10) / 10,
+    samplePairs: paired.length
+  };
+};
+
+/**
+ * Génère la matrice d'interconnexion continue (graphe complet) au sein d'un réseau fermé.
+ * ZÉRO POLLUTION INTER-RÉSEAUX (AGENTS.md).
+ */
+export const generateNetworkInterconnectionMatrix = async (
+  networkId: InterDrawNetworkId,
+  cachedHistories?: Map<string, DrawResult[]>
+): Promise<InterDrawNetworkMatrix> => {
+  const net = INTER_DRAW_NETWORKS[networkId] || INTER_DRAW_FAMILIES[networkId];
+  const drawNames = net?.drawNames || [];
+
+  const matrixCacheKey = globalCache.getInterDrawKey(networkId, 'network', 'matrix');
+  const cached = globalCache.getSync<InterDrawNetworkMatrix>(matrixCacheKey);
+  if (cached && cached.drawNames && cached.drawNames.length === drawNames.length) {
+    return cached;
+  }
+
+  const histories = new Map<string, DrawResult[]>();
+  await Promise.all(
+    drawNames.map(async (name) => {
+      if (cachedHistories && cachedHistories.has(name)) {
+        histories.set(name, cachedHistories.get(name)!);
+      } else {
+        const hist = await lotteryService.fetchHistory(name);
+        histories.set(name, purifyHistoryForDraw(name, hist));
+      }
+    })
+  );
+
+  const weights: Record<string, Record<string, number>> = {};
+  const couplings: InterDrawNodeCoupling[] = [];
+  let totalWeight = 0;
+  let pairCount = 0;
+
+  for (const target of drawNames) {
+    weights[target] = {};
+    const histTarget = histories.get(target) || [];
+
+    for (const source of drawNames) {
+      if (source === target) {
+        weights[target][source] = 1.0;
+        continue;
+      }
+      const histSource = histories.get(source) || [];
+      const res = computeContinuousInterDrawCoupling(histSource, histTarget);
+      weights[target][source] = res.weight;
+      couplings.push({
+        sourceName: source,
+        targetName: target,
+        correlation: res.correlation,
+        weight: res.weight,
+        carryOverRate: res.carryOverRate,
+        samplePairs: res.samplePairs
+      });
+      totalWeight += res.weight;
+      pairCount++;
+    }
+  }
+
+  const matrix: InterDrawNetworkMatrix = {
+    networkId,
+    drawNames,
+    weights,
+    couplings,
+    meanNetworkCoupling: pairCount > 0 ? Math.round((totalWeight / pairCount) * 1000) / 1000 : 0.5
+  };
+
+  const adaptiveTtl = globalCache.getAdaptiveInterDrawTTL(50);
+  await globalCache.set(matrixCacheKey, matrix, adaptiveTtl);
+
+  return matrix;
+};
+
+/**
+ * Calcule l'analyse complète des relations inter-tirages pour un tirage et une famille/réseau donnés.
+ * Respecte rigoureusement le principe de ZÉRO POLLUTION INTER-RÉSEAUX (AGENTS.md).
  */
 export const generateInterDrawReport = async (
   targetDrawName: string,
   forcedFamilyId?: InterDrawFamilyId,
   forceRefresh: boolean = false
 ): Promise<InterDrawReport | null> => {
-  const families = getInterDrawFamiliesForDraw(targetDrawName);
-  const activeFamily = forcedFamilyId
-    ? INTER_DRAW_FAMILIES[forcedFamilyId]
-    : (families.length > 0 ? families[0] : getPrimaryInterDrawFamily(targetDrawName));
+  const networkId: InterDrawNetworkId =
+    (forcedFamilyId === 'hebdomadaire' || forcedFamilyId === 'FAMILY_19H55')
+      ? 'hebdomadaire'
+      : (forcedFamilyId === 'quotidien' || forcedFamilyId === 'FAMILY_10H_16H_SUN19H55' || forcedFamilyId === 'FAMILY_13H')
+      ? 'quotidien'
+      : (getDrawNetworkId(targetDrawName) || 'quotidien');
 
+  const activeFamily = INTER_DRAW_NETWORKS[networkId] || INTER_DRAW_FAMILIES[networkId];
   if (!activeFamily) {
     return null;
   }
@@ -730,7 +922,7 @@ export const generateInterDrawReport = async (
   }
 
   const cacheKey = globalCache.getInterDrawKey(
-    activeFamily.id,
+    networkId,
     normalizeDrawName(targetDrawName)
   );
 
@@ -747,10 +939,11 @@ export const generateInterDrawReport = async (
     }
   }
 
-  // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans la famille
-  const [targetHistory, predHistory] = await Promise.all([
+  // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans le réseau
+  const [targetHistory, predHistory, networkMatrix] = await Promise.all([
     lotteryService.fetchHistory(targetDrawName, forceRefresh),
-    lotteryService.fetchHistory(relation.predecessor.name, forceRefresh)
+    lotteryService.fetchHistory(relation.predecessor.name, forceRefresh),
+    generateNetworkInterconnectionMatrix(networkId)
   ]);
 
   const targetLatestResult = targetHistory.length > 0 ? targetHistory[0] : null;
@@ -922,6 +1115,9 @@ export const generateInterDrawReport = async (
   const report: InterDrawReport = {
     targetDraw: targetDrawName,
     family: activeFamily,
+    networkId,
+    networkMatrix,
+    networkCouplings: networkMatrix?.couplings,
     predecessor: relation.predecessor,
     successor: relation.successor,
     currentIndex: relation.currentIndex,

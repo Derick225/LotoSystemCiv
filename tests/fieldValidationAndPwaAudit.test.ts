@@ -44,23 +44,21 @@ describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
       expect(retrieved![7 * 91 + 77]).toBeCloseTo(0.85, 2);
     });
 
-    it('doit respecter strictement létanchéité des 3 familles LONACI dans les clés de cache', () => {
-      const fam1 = INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55.id;
-      const fam2 = INTER_DRAW_FAMILIES.FAMILY_13H.id;
-      const fam3 = INTER_DRAW_FAMILIES.FAMILY_19H55.id;
+    it('doit respecter strictement l\'étanchéité des 2 réseaux LONACI dans les clés de cache (AGENTS.md)', () => {
+      const fam1 = 'quotidien';
+      const fam2 = 'hebdomadaire';
 
       const key1 = globalCache.getInterDrawKey(fam1, 'Reveil', 'markov');
-      const key2 = globalCache.getInterDrawKey(fam2, 'Etoile', 'markov');
-      const key3 = globalCache.getInterDrawKey(fam3, 'Monday Special', 'markov');
+      const key2 = globalCache.getInterDrawKey(fam1, 'Etoile', 'markov');
+      const key3 = globalCache.getInterDrawKey(fam2, 'Monday Special', 'markov');
 
-      expect(key1).toContain('FAMILY_10H_16H_SUN19H55');
-      expect(key2).toContain('FAMILY_13H');
-      expect(key3).toContain('FAMILY_19H55');
+      expect(key1).toContain('quotidien');
+      expect(key2).toContain('quotidien');
+      expect(key3).toContain('hebdomadaire');
 
-      // Aucune collision ou croisement entre les 3 familles fermées
-      expect(key1).not.toEqual(key2);
-      expect(key2).not.toEqual(key3);
+      // Aucune collision ou croisement entre les réseaux fermés
       expect(key1).not.toEqual(key3);
+      expect(key2).not.toEqual(key3);
     });
   });
 

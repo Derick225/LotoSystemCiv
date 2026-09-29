@@ -114,12 +114,18 @@ export const ALL_DRAWS = Object.entries(DRAW_SCHEDULE).flatMap(([day, times]) =>
 );
 
 /**
- * CADRE ARCHITECTURAL DES RELATIONS INTER-TIRAGES (3 FAMILLES STRICTEMENT ÉTANCHES)
- * 1. Famille Nationale LONACI : Tirages de 10H, 16H et uniquement le Tirage de 19H55 du dimanche (Espoir).
- * 2. Famille Zénith : Tirages de 13H exclusivement.
- * 3. Famille Nocturne : Tirages de 19H55 exclusivement.
+ * CADRE ARCHITECTURAL DES RELATIONS INTER-TIRAGES (2 RÉSEAUX FERMÉS & ÉTANCHES — AGENTS.md)
+ * 1. Réseau Hebdomadaire (6 tirages) : MONDAY SPECIAL, LUCKY TUESDAY, MIDWEEK, FORTUNE THURSDAY, FRIDAY BONANZA, NATIONAL.
+ * 2. Réseau Quotidien (22 tirages) : REVEIL, ETOILE, AKWABA, LA MATINALE, EMERGENCE, SIKA, PREMIERE HEURE,
+ *    FORTUNE, BARAKA, KADO, PRIVILEGE, MONNI, CASH, SOLUTION, WARI, SOUTRA, DIAMANT, MOAYE, BENEDICTION,
+ *    PRESTIGE, AWALE, ESPOIR.
+ *
+ * Graphe Complet : Au sein de chaque réseau, TOUS les tirages sont interconnectés entre eux
+ * avec une matrice d'intensité continue issue de mesures statistiques réelles.
+ * ZÉRO POLLUTION INTER-RÉSEAUX.
  */
-export type InterDrawFamilyId = 'FAMILY_10H_16H_SUN19H55' | 'FAMILY_13H' | 'FAMILY_19H55';
+export type InterDrawNetworkId = 'hebdomadaire' | 'quotidien';
+export type InterDrawFamilyId = InterDrawNetworkId | 'FAMILY_10H_16H_SUN19H55' | 'FAMILY_13H' | 'FAMILY_19H55';
 
 export interface InterDrawSequenceItem {
   day: string;
@@ -142,76 +148,18 @@ export interface InterDrawFamilyConfig {
   drawNames: string[];
 }
 
-export const INTER_DRAW_FAMILIES: Record<InterDrawFamilyId, InterDrawFamilyConfig> = {
-  FAMILY_10H_16H_SUN19H55: {
-    id: 'FAMILY_10H_16H_SUN19H55',
-    name: 'Famille Nationale LONACI (10H, 16H & Dimanche 19H55)',
-    shortName: '10H / 16H / Dim 19H55',
-    label: 'Nationale (10H - 16H - Dim 19H55)',
-    description: 'Relations inter-tirages pour les tirages de 10H, 16H et seulement le Tirage de 19H55 du dimanche (Espoir).',
-    color: 'text-amber-400',
-    badgeBg: 'bg-amber-500/10 dark:bg-amber-950/40',
-    badgeBorder: 'border-amber-500/30 dark:border-amber-500/40',
-    icon: '🌅',
-    slotsSummary: '10:00 (7) + 16:00 (7) + Dimanche 19:55 (Espoir) — 15 tirages',
-    sequence: [
-      { day: 'Lundi', time: '10:00', name: 'Reveil' },
-      { day: 'Lundi', time: '16:00', name: 'Akwaba' },
-      { day: 'Mardi', time: '10:00', name: 'La Matinale' },
-      { day: 'Mardi', time: '16:00', name: 'Sika' },
-      { day: 'Mercredi', time: '10:00', name: 'Premiere Heure' },
-      { day: 'Mercredi', time: '16:00', name: 'Baraka' },
-      { day: 'Jeudi', time: '10:00', name: 'Kado' },
-      { day: 'Jeudi', time: '16:00', name: 'Monni' },
-      { day: 'Vendredi', time: '10:00', name: 'Cash' },
-      { day: 'Vendredi', time: '16:00', name: 'Wari' },
-      { day: 'Samedi', time: '10:00', name: 'Soutra' },
-      { day: 'Samedi', time: '16:00', name: 'Moaye' },
-      { day: 'Dimanche', time: '10:00', name: 'Benediction' },
-      { day: 'Dimanche', time: '16:00', name: 'Awale' },
-      { day: 'Dimanche', time: '19:55', name: 'Espoir' },
-    ],
-    drawNames: [
-      'Reveil', 'La Matinale', 'Premiere Heure', 'Kado', 'Cash', 'Soutra', 'Benediction',
-      'Akwaba', 'Sika', 'Baraka', 'Monni', 'Wari', 'Moaye', 'Awale',
-      'Espoir'
-    ]
-  },
-  FAMILY_13H: {
-    id: 'FAMILY_13H',
-    name: 'Famille Zénith (13H Méridien)',
-    shortName: 'Tirages 13H',
-    label: 'Zénith (13H Quotidien)',
-    description: 'Relations inter-tirages exclusives pour l\'ensemble des tirages de 13H.',
-    color: 'text-sky-400',
-    badgeBg: 'bg-sky-500/10 dark:bg-sky-950/40',
-    badgeBorder: 'border-sky-500/30 dark:border-sky-500/40',
-    icon: '☀️',
-    slotsSummary: '13:00 (7 tirages quotidiens du midi)',
-    sequence: [
-      { day: 'Lundi', time: '13:00', name: 'Etoile' },
-      { day: 'Mardi', time: '13:00', name: 'Emergence' },
-      { day: 'Mercredi', time: '13:00', name: 'Fortune' },
-      { day: 'Jeudi', time: '13:00', name: 'Privilege' },
-      { day: 'Vendredi', time: '13:00', name: 'Solution' },
-      { day: 'Samedi', time: '13:00', name: 'Diamant' },
-      { day: 'Dimanche', time: '13:00', name: 'Prestige' },
-    ],
-    drawNames: [
-      'Etoile', 'Emergence', 'Fortune', 'Privilege', 'Solution', 'Diamant', 'Prestige'
-    ]
-  },
-  FAMILY_19H55: {
-    id: 'FAMILY_19H55',
-    name: 'Famille Nocturne (19H55 Soirée)',
-    shortName: 'Tirages 19H55',
-    label: 'Nocturne (19H55 Soir)',
-    description: 'Relations inter-tirages exclusives pour l\'ensemble des Tirages de 19H55.',
+export const INTER_DRAW_NETWORKS: Record<InterDrawNetworkId, InterDrawFamilyConfig> = {
+  hebdomadaire: {
+    id: 'hebdomadaire',
+    name: 'Réseau Hebdomadaire (6 tirages)',
+    shortName: 'Hebdomadaire',
+    label: 'Réseau Hebdomadaire (6 tirages)',
+    description: 'Relations inter-tirages et graphe complet des 6 tirages hebdomadaires LONACI de 19H55 (du lundi au samedi).',
     color: 'text-indigo-400',
     badgeBg: 'bg-indigo-500/10 dark:bg-indigo-950/40',
     badgeBorder: 'border-indigo-500/30 dark:border-indigo-500/40',
     icon: '🌙',
-    slotsSummary: '19:55 (7 tirages du soir)',
+    slotsSummary: '19:55 Lun-Sam (6 tirages)',
     sequence: [
       { day: 'Lundi', time: '19:55', name: 'Monday Special' },
       { day: 'Mardi', time: '19:55', name: 'Lucky Tuesday' },
@@ -219,13 +167,77 @@ export const INTER_DRAW_FAMILIES: Record<InterDrawFamilyId, InterDrawFamilyConfi
       { day: 'Jeudi', time: '19:55', name: 'Fortune Thursday' },
       { day: 'Vendredi', time: '19:55', name: 'Friday Bonanza' },
       { day: 'Samedi', time: '19:55', name: 'National' },
+    ],
+    drawNames: [
+      'Monday Special', 'Lucky Tuesday', 'Midweek', 'Fortune Thursday', 'Friday Bonanza', 'National'
+    ]
+  },
+  quotidien: {
+    id: 'quotidien',
+    name: 'Réseau Quotidien (22 tirages)',
+    shortName: 'Quotidien',
+    label: 'Réseau Quotidien (22 tirages)',
+    description: 'Relations inter-tirages et graphe complet des 22 tirages quotidiens LONACI (10H, 13H, 16H du lundi au dimanche + Espoir Dimanche 19H55).',
+    color: 'text-amber-400',
+    badgeBg: 'bg-amber-500/10 dark:bg-amber-950/40',
+    badgeBorder: 'border-amber-500/30 dark:border-amber-500/40',
+    icon: '☀️',
+    slotsSummary: '10:00 (7) + 13:00 (7) + 16:00 (7) + Dim 19:55 (1) — 22 tirages',
+    sequence: [
+      { day: 'Lundi', time: '10:00', name: 'Reveil' },
+      { day: 'Lundi', time: '13:00', name: 'Etoile' },
+      { day: 'Lundi', time: '16:00', name: 'Akwaba' },
+      { day: 'Mardi', time: '10:00', name: 'La Matinale' },
+      { day: 'Mardi', time: '13:00', name: 'Emergence' },
+      { day: 'Mardi', time: '16:00', name: 'Sika' },
+      { day: 'Mercredi', time: '10:00', name: 'Premiere Heure' },
+      { day: 'Mercredi', time: '13:00', name: 'Fortune' },
+      { day: 'Mercredi', time: '16:00', name: 'Baraka' },
+      { day: 'Jeudi', time: '10:00', name: 'Kado' },
+      { day: 'Jeudi', time: '13:00', name: 'Privilege' },
+      { day: 'Jeudi', time: '16:00', name: 'Monni' },
+      { day: 'Vendredi', time: '10:00', name: 'Cash' },
+      { day: 'Vendredi', time: '13:00', name: 'Solution' },
+      { day: 'Vendredi', time: '16:00', name: 'Wari' },
+      { day: 'Samedi', time: '10:00', name: 'Soutra' },
+      { day: 'Samedi', time: '13:00', name: 'Diamant' },
+      { day: 'Samedi', time: '16:00', name: 'Moaye' },
+      { day: 'Dimanche', time: '10:00', name: 'Benediction' },
+      { day: 'Dimanche', time: '13:00', name: 'Prestige' },
+      { day: 'Dimanche', time: '16:00', name: 'Awale' },
       { day: 'Dimanche', time: '19:55', name: 'Espoir' },
     ],
     drawNames: [
-      'Monday Special', 'Lucky Tuesday', 'Midweek', 'Fortune Thursday', 'Friday Bonanza', 'National', 'Espoir'
+      'Reveil', 'Etoile', 'Akwaba',
+      'La Matinale', 'Emergence', 'Sika',
+      'Premiere Heure', 'Fortune', 'Baraka',
+      'Kado', 'Privilege', 'Monni',
+      'Cash', 'Solution', 'Wari',
+      'Soutra', 'Diamant', 'Moaye',
+      'Benediction', 'Prestige', 'Awale',
+      'Espoir'
     ]
   }
 };
+
+export const INTER_DRAW_FAMILIES: Record<string, InterDrawFamilyConfig> = {
+  hebdomadaire: INTER_DRAW_NETWORKS.hebdomadaire,
+  quotidien: INTER_DRAW_NETWORKS.quotidien,
+};
+
+// Aliases de compatibilité ascendante non-énumérables
+Object.defineProperty(INTER_DRAW_FAMILIES, 'FAMILY_19H55', {
+  get: () => INTER_DRAW_NETWORKS.hebdomadaire,
+  enumerable: false,
+});
+Object.defineProperty(INTER_DRAW_FAMILIES, 'FAMILY_10H_16H_SUN19H55', {
+  get: () => INTER_DRAW_NETWORKS.quotidien,
+  enumerable: false,
+});
+Object.defineProperty(INTER_DRAW_FAMILIES, 'FAMILY_13H', {
+  get: () => INTER_DRAW_NETWORKS.quotidien,
+  enumerable: false,
+});
 
 /**
  * Normalise un nom de tirage pour matching robuste (accents, casse, préfixes)
@@ -295,6 +307,24 @@ export const isDrawInInterDrawFamily = (drawName: string, familyId: InterDrawFam
   if (!fam) return false;
   const norm = normalizeDrawName(drawName);
   return fam.drawNames.some(d => normalizeDrawName(d) === norm);
+};
+
+/**
+ * Retourne l'identifiant du réseau fermé auquel appartient un tirage ('hebdomadaire' | 'quotidien')
+ */
+export const getDrawNetworkId = (drawName?: string | null): InterDrawNetworkId | null => {
+  if (!drawName) return null;
+  const fam = getPrimaryInterDrawFamily(drawName);
+  return (fam?.id === 'hebdomadaire' || fam?.id === 'quotidien') ? fam.id : null;
+};
+
+/**
+ * Vérifie si deux tirages appartiennent au même réseau fermé (étanchéité stricte)
+ */
+export const areDrawsInSameNetwork = (drawA?: string | null, drawB?: string | null): boolean => {
+  const netA = getDrawNetworkId(drawA);
+  const netB = getDrawNetworkId(drawB);
+  return !!netA && !!netB && netA === netB;
 };
 
 /**

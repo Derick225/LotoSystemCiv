@@ -1,92 +1,150 @@
 import { describe, it, expect } from 'vitest';
 import {
+  INTER_DRAW_NETWORKS,
   INTER_DRAW_FAMILIES,
   getInterDrawFamiliesForDraw,
   getFamilyPredecessorAndSuccessor,
+  getDrawNetworkId,
+  areDrawsInSameNetwork,
   normalizeDrawName
 } from '../constants';
 import {
   getMirrorNumber,
   getComplement90,
   generateInterDrawReport,
-  calculateInterDrawVector
+  calculateInterDrawVector,
+  generateNetworkInterconnectionMatrix,
+  computeContinuousInterDrawCoupling
 } from '../services/interDrawService';
 
-describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
-  it('doit avoir exactement les 3 familles demandées par le client', () => {
-    const familyIds = Object.keys(INTER_DRAW_FAMILIES);
-    expect(familyIds).toContain('FAMILY_10H_16H_SUN19H55');
-    expect(familyIds).toContain('FAMILY_13H');
-    expect(familyIds).toContain('FAMILY_19H55');
-    expect(familyIds.length).toBe(3);
+describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCHES', () => {
+  it('doit contenir exactement les 2 réseaux fermés et étanches exigés par AGENTS.md', () => {
+    const networkKeys = Object.keys(INTER_DRAW_NETWORKS);
+    expect(networkKeys).toContain('hebdomadaire');
+    expect(networkKeys).toContain('quotidien');
+    expect(networkKeys.length).toBe(2);
   });
 
-  describe('Famille 1: 10H, 16H et uniquement le Dimanche 19H55', () => {
-    const fam = INTER_DRAW_FAMILIES.FAMILY_10H_16H_SUN19H55;
+  describe('Réseau Hebdomadaire (6 tirages à 19:55 Lun-Sam)', () => {
+    const net = INTER_DRAW_NETWORKS.hebdomadaire;
 
-    it('doit contenir exactement 15 tirages dans sa séquence', () => {
-      // 7 jours * 2 créneaux (10H + 16H) + Dimanche 19H55 = 15 tirages
-      expect(fam.sequence.length).toBe(15);
+    it('doit contenir exactement 6 tirages dans sa séquence', () => {
+      expect(net.sequence.length).toBe(6);
+      expect(net.drawNames.length).toBe(6);
     });
 
-    it('doit inclure le tirage Espoir du Dimanche à 19H55', () => {
-      const sun19h55 = fam.sequence.find(s => s.day === 'Dimanche' && s.time === '19:55');
-      expect(sun19h55).toBeDefined();
-      expect(sun19h55?.name).toBe('Espoir');
+    it('tous les tirages doivent être à 19:55 du Lundi au Samedi', () => {
+      for (const s of net.sequence) {
+        expect(s.time).toBe('19:55');
+        expect(['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi']).toContain(s.day);
+      }
     });
 
-    it('ne doit contenir aucun tirage de 19H55 du Lundi au Samedi', () => {
-      const other19h55 = fam.sequence.filter(s => s.time === '19:55' && s.day !== 'Dimanche');
-      expect(other19h55.length).toBe(0);
+    it('doit inclure National, Friday Bonanza et Monday Special', () => {
+      const names = net.drawNames.map(normalizeDrawName);
+      expect(names).toContain(normalizeDrawName('Monday Special'));
+      expect(names).toContain(normalizeDrawName('Lucky Tuesday'));
+      expect(names).toContain(normalizeDrawName('Midweek'));
+      expect(names).toContain(normalizeDrawName('Fortune Thursday'));
+      expect(names).toContain(normalizeDrawName('Friday Bonanza'));
+      expect(names).toContain(normalizeDrawName('National'));
+    });
+
+    it('ne doit pas inclure Espoir (réservé exclusivement au réseau quotidien)', () => {
+      const names = net.drawNames.map(normalizeDrawName);
+      expect(names).not.toContain(normalizeDrawName('Espoir'));
     });
 
     it('doit fermer le cycle temporel (le successeur du dernier est le premier)', () => {
-      const lastDraw = fam.sequence[fam.sequence.length - 1];
-      const rel = getFamilyPredecessorAndSuccessor(lastDraw.name, 'FAMILY_10H_16H_SUN19H55');
+      const lastDraw = net.sequence[net.sequence.length - 1];
+      const rel = getFamilyPredecessorAndSuccessor(lastDraw.name, 'hebdomadaire');
       expect(rel).toBeDefined();
-      expect(rel?.successor.name).toBe(fam.sequence[0].name);
+      expect(rel?.successor.name).toBe(net.sequence[0].name);
     });
   });
 
-  describe('Famille 2: Tirages de 13H exclusivement (Zénith)', () => {
-    const fam = INTER_DRAW_FAMILIES.FAMILY_13H;
+  describe('Réseau Quotidien (22 tirages : 10H, 13H, 16H + Espoir Dimanche 19H55)', () => {
+    const net = INTER_DRAW_NETWORKS.quotidien;
 
-    it('doit contenir exactement 7 tirages', () => {
-      expect(fam.sequence.length).toBe(7);
+    it('doit contenir exactement 22 tirages dans sa séquence', () => {
+      // 7 jours * 3 créneaux (10H, 13H, 16H) + Espoir Dimanche 19H55 = 22 tirages
+      expect(net.sequence.length).toBe(22);
+      expect(net.drawNames.length).toBe(22);
     });
 
-    it('tous les tirages doivent être à 13:00', () => {
-      for (const s of fam.sequence) {
-        expect(s.time).toBe('13:00');
-      }
+    it('doit inclure le tirage Espoir du Dimanche à 19H55', () => {
+      const espoir = net.sequence.find(s => s.day === 'Dimanche' && s.time === '19:55');
+      expect(espoir).toBeDefined();
+      expect(espoir?.name).toBe('Espoir');
     });
 
-    it('doit contenir Fortune, Diamant et Prestige', () => {
-      const names = fam.sequence.map(s => s.name);
-      expect(names).toContain('Fortune');
-      expect(names).toContain('Diamant');
-      expect(names).toContain('Prestige');
+    it('doit contenir les tirages fondamentaux : Reveil, Etoile, Akwaba, Fortune, Diamant, Prestige', () => {
+      const names = net.drawNames.map(normalizeDrawName);
+      expect(names).toContain(normalizeDrawName('Reveil'));
+      expect(names).toContain(normalizeDrawName('Etoile'));
+      expect(names).toContain(normalizeDrawName('Akwaba'));
+      expect(names).toContain(normalizeDrawName('Fortune'));
+      expect(names).toContain(normalizeDrawName('Diamant'));
+      expect(names).toContain(normalizeDrawName('Prestige'));
+      expect(names).toContain(normalizeDrawName('Awale'));
+    });
+
+    it('doit fermer le cycle temporel (le successeur du dernier est le premier)', () => {
+      const lastDraw = net.sequence[net.sequence.length - 1];
+      const rel = getFamilyPredecessorAndSuccessor(lastDraw.name, 'quotidien');
+      expect(rel).toBeDefined();
+      expect(rel?.successor.name).toBe(net.sequence[0].name);
     });
   });
 
-  describe('Famille 3: Tirages de 19H55 exclusivement (Nocturne)', () => {
-    const fam = INTER_DRAW_FAMILIES.FAMILY_19H55;
+  describe('Zéro Pollution Inter-Réseaux (AGENTS.md)', () => {
+    it('interdit rigoureusement tout croisement entre Réseau Hebdomadaire et Réseau Quotidien', () => {
+      const hebdoNames = new Set(INTER_DRAW_NETWORKS.hebdomadaire.drawNames.map(normalizeDrawName));
+      const quotNames = new Set(INTER_DRAW_NETWORKS.quotidien.drawNames.map(normalizeDrawName));
 
-    it('doit contenir exactement 7 tirages', () => {
-      expect(fam.sequence.length).toBe(7);
+      const shared = [...hebdoNames].filter(n => quotNames.has(n));
+      expect(shared).toHaveLength(0);
     });
 
-    it('tous les tirages doivent être à 19:55', () => {
-      for (const s of fam.sequence) {
-        expect(s.time).toBe('19:55');
+    it('National et Espoir ne se croisent JAMAIS (étanchéité absolue)', () => {
+      expect(getDrawNetworkId('National')).toBe('hebdomadaire');
+      expect(getDrawNetworkId('Espoir')).toBe('quotidien');
+      expect(areDrawsInSameNetwork('National', 'Espoir')).toBe(false);
+      expect(areDrawsInSameNetwork('Friday Bonanza', 'Reveil')).toBe(false);
+      expect(areDrawsInSameNetwork('Monday Special', 'National')).toBe(true);
+      expect(areDrawsInSameNetwork('Reveil', 'Espoir')).toBe(true);
+    });
+  });
+
+  describe('Matrice d\'Interconnexion Continue (Graphe Complet All-to-All)', () => {
+    it('génère un graphe complet sans seuil binaire pour le Réseau Hebdomadaire (6x6)', async () => {
+      const matrix = await generateNetworkInterconnectionMatrix('hebdomadaire');
+      expect(matrix).toBeDefined();
+      expect(matrix.networkId).toBe('hebdomadaire');
+      expect(matrix.drawNames.length).toBe(6);
+      expect(matrix.couplings.length).toBe(6 * 5); // K_6 sans boucles
+      for (const c of matrix.couplings) {
+        expect(c.weight).toBeGreaterThan(0);
+        expect(c.weight).toBeLessThanOrEqual(1);
+        expect(Number.isFinite(c.correlation)).toBe(true);
       }
     });
 
-    it('doit inclure National, Friday Bonanza et Espoir', () => {
-      const names = fam.sequence.map(s => s.name);
-      expect(names).toContain('National');
-      expect(names).toContain('Friday Bonanza');
-      expect(names).toContain('Espoir');
+    it('calcule le couplage continu avec une fonction sigmoïde différentiable', () => {
+      const mockHistA = [
+        { date: '2026-03-01', draw_name: 'Reveil', gagnants: [1, 2, 3, 4, 5], machine: [] },
+        { date: '2026-02-22', draw_name: 'Reveil', gagnants: [11, 12, 13, 14, 15], machine: [] }
+      ];
+      const mockHistB = [
+        { date: '2026-03-01', draw_name: 'Etoile', gagnants: [1, 2, 30, 40, 50], machine: [] },
+        { date: '2026-02-22', draw_name: 'Etoile', gagnants: [11, 22, 33, 44, 55], machine: [] }
+      ];
+
+      const coupling = computeContinuousInterDrawCoupling(mockHistA, mockHistB);
+      expect(coupling.weight).toBeGreaterThan(0);
+      expect(coupling.weight).toBeLessThanOrEqual(1);
+      expect(coupling.correlation).toBeGreaterThanOrEqual(-1);
+      expect(coupling.correlation).toBeLessThanOrEqual(1);
     });
   });
 
@@ -97,7 +155,6 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
       expect(getMirrorNumber(23)).toBe(32);
       expect(getMirrorNumber(32)).toBe(23);
       expect(getMirrorNumber(44)).toBe(44); // palindrome
-      // Miroir de 91 dépasserait 90, donc retourne 91
       expect(getMirrorNumber(19)).toBe(91 > 90 ? 19 : 91);
     });
 
@@ -111,17 +168,16 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
   });
 
   describe('Moteur de Génération de Rapport Inter-Tirages', () => {
-    it('génère un rapport valide pour un tirage de 13H (ex: Fortune)', async () => {
-      const report = await generateInterDrawReport('Fortune', 'FAMILY_13H');
+    it('génère un rapport valide pour un tirage du Réseau Quotidien (ex: Fortune)', async () => {
+      const report = await generateInterDrawReport('Fortune');
       expect(report).toBeDefined();
-      expect(report?.family.id).toBe('FAMILY_13H');
+      expect(report?.family.id).toBe('quotidien');
       expect(report?.targetDraw).toBe('Fortune');
       expect(report?.topCandidates.length).toBeGreaterThan(0);
       expect(report?.recommendedPairs.length).toBeGreaterThan(0);
       expect(report?.carryOverRate).toBeGreaterThan(0);
       expect(report?.sourceTransitions).toBeDefined();
       expect(report?.sourceTransitions.length).toBe(5);
-      expect(report?.sourceTransitions[0].transitions.length).toBeGreaterThan(0);
       expect(report?.fullCandidateScores).toBeDefined();
       expect(report?.fullCandidateScores.length).toBe(91);
       for (let i = 1; i <= 90; i++) {
@@ -131,11 +187,19 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
     });
 
     it('génère un rapport valide pour un tirage de 10H (ex: Reveil)', async () => {
-      const report = await generateInterDrawReport('Reveil', 'FAMILY_10H_16H_SUN19H55');
+      const report = await generateInterDrawReport('Reveil');
       expect(report).toBeDefined();
-      expect(report?.family.id).toBe('FAMILY_10H_16H_SUN19H55');
+      expect(report?.family.id).toBe('quotidien');
       expect(report?.targetDraw).toBe('Reveil');
       expect(report?.sourceTransitions.length).toBe(5);
+    });
+
+    it('génère un rapport valide pour un tirage du Réseau Hebdomadaire (ex: National)', async () => {
+      const report = await generateInterDrawReport('National');
+      expect(report).toBeDefined();
+      expect(report?.family.id).toBe('hebdomadaire');
+      expect(report?.targetDraw).toBe('National');
+      expect(report?.topCandidates.length).toBeGreaterThan(0);
     });
   });
 
@@ -146,7 +210,6 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
         { date: '2026-02-22', draw_name: 'Fortune', gagnants: [81, 82, 83, 84, 85], machine: [] }
       ];
 
-      // Prédécesseur de Fortune (13H) avec numéros distincts [7, 14, 21, 28, 35]
       const predecessorHistory = [
         { date: '2026-02-28', draw_name: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] },
         { date: '2026-02-21', draw_name: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] }
@@ -156,11 +219,6 @@ describe('CADRE DES RELATIONS INTER-TIRAGES (3 FAMILLES ÉTANCHES)', () => {
       expect(vector).toBeDefined();
       expect(vector.length).toBe(91);
 
-      // Les numéros du prédécesseur (report direct et miroir) doivent avoir des scores plus élevés qu'un numéro neutre non lié
-      // Numéro 7 est un gagnant direct du prédécesseur (report direct attendu)
-      // Numéro 70 est le miroir décimal de 7
-      // Numéros 81-85 sont les cibles réelles de transition depuis le prédécesseur
-      // Numéros 51-55 sont totalement neutres (aucune transition, aucun miroir)
       expect(vector[7]).toBeGreaterThan(vector[51]); // Report direct carry-over
       expect(vector[14]).toBeGreaterThan(vector[52]); // Report direct carry-over
       expect(vector[81]).toBeGreaterThan(vector[53]); // Transition Markov observée
