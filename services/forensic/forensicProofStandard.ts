@@ -70,18 +70,23 @@ export function extractMathProofMetadata(params: {
     topologicalLoss: customTopo,
   } = params;
 
-  // 1. Entropie de Shannon
-  let shannonEntropy = 0.85;
+  // 1. Entropie de Shannon — MESURÉE sur l'historique réel. NaN si données insuffisantes
+  // ou inexploitables : le rendu affiche alors "n/d" plutôt qu'une précision inventée
+  // (doctrine d'honnêteté, AGENTS.md #1 zéro nombre magique).
+  let shannonEntropy = NaN;
   if (history.length > 0) {
     try {
       const entropyRes = calculateShannonEntropy(history);
-      shannonEntropy = entropyRes?.normalized ?? 0.85;
+      shannonEntropy = entropyRes?.normalized ?? NaN;
     } catch {
-      shannonEntropy = 0.85;
+      shannonEntropy = NaN;
     }
   }
 
-  // 2. Exposant de Hurst
+  // 2. Exposant de Hurst — MESURÉ sur le flux réel des numéros. En l'absence de données,
+  // on conserve 0.50 : c'est la valeur NULLE théorique d'une marche aléatoire brownienne
+  // (aucune persistance ni anti-persistance) — une référence statistique documentée, pas
+  // une mesure inventée.
   let hurstExponent = 0.50;
   if (history.length > 0) {
     try {
@@ -112,8 +117,9 @@ export function extractMathProofMetadata(params: {
     }
   }
 
-  // 4. Intensité de Hawkes Auto-Excitatrice
-  let hawkesIntensity = 0.12;
+  // 4. Intensité de Hawkes Auto-Excitatrice — MOYENNE MESURÉE sur l'historique réel.
+  // NaN si données insuffisantes/inexploitables (rendu "n/d"), jamais 0.12 inventé.
+  let hawkesIntensity = NaN;
   if (history.length > 0) {
     try {
       const hawkesArray = calculateHawkesIntensity(history);
@@ -125,9 +131,9 @@ export function extractMathProofMetadata(params: {
           count++;
         }
       }
-      hawkesIntensity = count > 0 ? parseFloat((sum / count).toFixed(4)) : 0.12;
+      hawkesIntensity = count > 0 ? parseFloat((sum / count).toFixed(4)) : NaN;
     } catch {
-      hawkesIntensity = 0.12;
+      hawkesIntensity = NaN;
     }
   }
 
@@ -150,8 +156,9 @@ export function extractMathProofMetadata(params: {
     }
   }
 
-  // Score de Brier
-  let brierScore = customBrier ?? 0.15;
+  // Score de Brier — fourni par l'appelant (customBrier) ou CALCULÉ à partir des coups
+  // réels (suggested vs actual). Sinon NaN : aucun 0.15 inventé (doctrine d'honnêteté).
+  let brierScore = customBrier ?? NaN;
   if (customBrier === undefined && suggestedNumbers.length > 0 && actualWinners.length > 0) {
     const hits = suggestedNumbers.filter((n) => actualWinners.includes(n)).length;
     const hitProb = hits / Math.max(1, suggestedNumbers.length);

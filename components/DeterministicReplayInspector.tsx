@@ -570,7 +570,9 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
                 <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
                   <span className="text-[8px] uppercase text-slate-500 block">Entropie Shannon</span>
                   <span className="text-xs font-black text-indigo-300">
-                    {activeStep.mathProofMetadata.shannonEntropy.toFixed(4)}
+                    {Number.isFinite(activeStep.mathProofMetadata.shannonEntropy)
+                      ? activeStep.mathProofMetadata.shannonEntropy.toFixed(4)
+                      : "n/d"}
                   </span>
                 </div>
                 <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
@@ -582,7 +584,9 @@ export const DeterministicReplayInspector: React.FC<{ drawName: string }> = ({
                 <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">
                   <span className="text-[8px] uppercase text-slate-500 block">Intensité Hawkes λ</span>
                   <span className="text-xs font-black text-cyan-300">
-                    {activeStep.mathProofMetadata.hawkesIntensity.toFixed(4)}
+                    {Number.isFinite(activeStep.mathProofMetadata.hawkesIntensity)
+                      ? activeStep.mathProofMetadata.hawkesIntensity.toFixed(4)
+                      : "n/d"}
                   </span>
                 </div>
                 <div className="p-2.5 bg-slate-950/60 rounded-xl border border-white/5 space-y-0.5">

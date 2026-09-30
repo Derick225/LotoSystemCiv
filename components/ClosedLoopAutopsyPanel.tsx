@@ -552,10 +552,14 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
                 <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 space-y-1">
                   <span className="text-[9px] font-bold text-slate-500 uppercase block">Entropie de Shannon</span>
                   <span className="text-sm font-black text-indigo-300 block">
-                    {report.mathProofMetadata.shannonEntropy.toFixed(4)}
+                    {Number.isFinite(report.mathProofMetadata.shannonEntropy)
+                      ? report.mathProofMetadata.shannonEntropy.toFixed(4)
+                      : "n/d"}
                   </span>
                   <span className="text-[8px] text-slate-500">
-                    {report.mathProofMetadata.shannonEntropy > 0.8 ? "Haute dispersion" : "Structure concentrée"}
+                    {!Number.isFinite(report.mathProofMetadata.shannonEntropy)
+                      ? "Historique insuffisant"
+                      : report.mathProofMetadata.shannonEntropy > 0.8 ? "Haute dispersion" : "Structure concentrée"}
                   </span>
                 </div>
 
@@ -572,7 +576,9 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
                 <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 space-y-1">
                   <span className="text-[9px] font-bold text-slate-500 uppercase block">Intensité Hawkes λ(t)</span>
                   <span className="text-sm font-black text-cyan-300 block">
-                    {report.mathProofMetadata.hawkesIntensity.toFixed(4)}
+                    {Number.isFinite(report.mathProofMetadata.hawkesIntensity)
+                      ? report.mathProofMetadata.hawkesIntensity.toFixed(4)
+                      : "n/d"}
                   </span>
                   <span className="text-[8px] text-slate-500">Auto-excitation temporelle</span>
                 </div>

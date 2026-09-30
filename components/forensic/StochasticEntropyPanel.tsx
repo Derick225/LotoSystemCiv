@@ -420,7 +420,9 @@ export const StochasticEntropyPanel: React.FC<StochasticEntropyPanelProps> = ({
           <div className="mt-4 pt-3 border-t border-white/5 flex items-center justify-between">
             <span className="text-[10px] font-black uppercase text-slate-400">Exposant Lyapunov Global</span>
             <span className="text-xs font-mono font-bold text-teal-300">
-              λ = {entropyData.meanLyapunovExponent.toFixed(4)}
+              λ = {Number.isFinite(entropyData.meanLyapunovExponent)
+                ? entropyData.meanLyapunovExponent.toFixed(4)
+                : "n/d"}
             </span>
           </div>
         </div>
