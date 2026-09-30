@@ -13,7 +13,6 @@ pub mod markov;
 pub mod annealing;
 pub mod topological;
 pub mod cooccurrence;
-pub mod interdraw_dynamics;
 
 use wasm_bindgen::prelude::*;
 
