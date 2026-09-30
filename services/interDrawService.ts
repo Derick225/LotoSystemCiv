@@ -42,6 +42,10 @@ import {
   InterDrawCentroidPattern,
   InterDrawRetentionPattern
 } from './interDrawPatternService';
+import {
+  computeInterDrawComplexDynamics,
+  InterDrawComplexDynamicsReport
+} from './interDrawDynamicsService';
 
 // Probabilité marginale théorique exacte d'un numéro : 5/90.
 const THEORETICAL_SINGLE_PROB =
@@ -64,7 +68,8 @@ export type {
   InterDrawCascadePattern,
   InterDrawCascadeNeighbour,
   InterDrawCentroidPattern,
-  InterDrawRetentionPattern
+  InterDrawRetentionPattern,
+  InterDrawComplexDynamicsReport
 };
 
 export interface InterDrawCandidateScore {
@@ -176,6 +181,7 @@ export interface InterDrawReport {
   };
   cooccurrenceMetrics?: InterDrawCooccurrenceReport;
   patternMetrics?: InterDrawPatternReport;
+  complexDynamics?: InterDrawComplexDynamicsReport;
   generationTimestamp: number;
 }
 
@@ -1112,6 +1118,20 @@ export const generateInterDrawReport = async (
     laplaceAlpha
   );
 
+  // 9. Modélisation des dynamiques complexes : Domino, Papillon, Cascade (Heat Kernel) et Réaction en Chaîne
+  let complexDynamics: InterDrawComplexDynamicsReport | undefined;
+  try {
+    complexDynamics = await computeInterDrawComplexDynamics(
+      targetDrawName,
+      networkId,
+      targetHistory,
+      predHistory,
+      networkMatrix
+    );
+  } catch (err) {
+    console.warn('[InterDrawService] Échec du calcul des dynamiques complexes :', err);
+  }
+
   const report: InterDrawReport = {
     targetDraw: targetDrawName,
     family: activeFamily,
@@ -1152,6 +1172,7 @@ export const generateInterDrawReport = async (
     } : undefined,
     cooccurrenceMetrics,
     patternMetrics,
+    complexDynamics,
     generationTimestamp: Date.now()
   };
 

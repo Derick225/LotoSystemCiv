@@ -453,3 +453,374 @@ export function computeCooccurrenceTensorHpc(
   };
 }
 
+export interface WasmHeatKernelBridgeResult {
+  diffusionMatrix: Float64Array;
+  harmonicCentralities: Float64Array;
+  traceEnergy: number;
+}
+
+export interface WasmDominoBridgeResult {
+  dominoEnergies: Float64Array;
+  leadTriggerNumbers: number[];
+  kineticDissipationRate: number;
+}
+
+export interface WasmButterflyBridgeResult {
+  lyapunovExponent: number;
+  sensitivityRegime: number;
+  phaseAttractorX: number;
+  phaseAttractorY: number;
+  phaseAttractorZ: number;
+  isChaotic: boolean;
+}
+
+export interface WasmChainReactionBridgeResult {
+  resonanceSpectrum: Float64Array;
+  avalancheCriticalNumbers: number[];
+  maxConstructiveAmplitude: number;
+  percolationDensity: number;
+}
+
+/**
+ * 1. Diffusion Thermique sur Graphe (Graph Heat Kernel exp(-tL)) - HPC Rust WASM ou Fallback
+ */
+export function computeGraphHeatKernelHpc(
+  weightsFlat: Float64Array | number[],
+  n: number,
+  diffusionTimeT: number = 0.5
+): WasmHeatKernelBridgeResult {
+  const w = weightsFlat instanceof Float64Array ? weightsFlat : new Float64Array(weightsFlat);
+
+  if (isWasmLoaded && wasmModuleInstance?.compute_graph_heat_kernel_wasm) {
+    try {
+      const res = wasmModuleInstance.compute_graph_heat_kernel_wasm(w, n, diffusionTimeT);
+      return {
+        diffusionMatrix: new Float64Array(res.diffusion_matrix),
+        harmonicCentralities: new Float64Array(res.harmonic_centralities),
+        traceEnergy: res.trace_energy,
+      };
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM Heat Kernel, passage au fallback :', e);
+    }
+  }
+
+  // Fallback mathématique continu déterministe
+  if (n <= 0 || w.length < n * n) {
+    return {
+      diffusionMatrix: new Float64Array(0),
+      harmonicCentralities: new Float64Array(0),
+      traceEnergy: 0,
+    };
+  }
+
+  const degrees = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let d = 0;
+    for (let j = 0; j < n; j++) {
+      d += Math.max(0, w[i * n + j]);
+    }
+    degrees[i] = Math.max(1e-9, d);
+  }
+
+  const laplacian = new Float64Array(n * n);
+  for (let i = 0; i < n; i++) {
+    const invSqrtDi = 1 / Math.sqrt(degrees[i]);
+    for (let j = 0; j < n; j++) {
+      const invSqrtDj = 1 / Math.sqrt(degrees[j]);
+      const weight = Math.max(0, w[i * n + j]);
+      const normW = invSqrtDi * weight * invSqrtDj;
+      laplacian[i * n + j] = i === j ? 1 - normW : -normW;
+    }
+  }
+
+  const t = Math.max(0.01, Math.min(5.0, diffusionTimeT));
+  let currentTerm = new Float64Array(n * n);
+  const expMatrix = new Float64Array(n * n);
+
+  for (let i = 0; i < n; i++) {
+    expMatrix[i * n + i] = 1.0;
+    currentTerm[i * n + i] = 1.0;
+  }
+
+  for (let k = 1; k <= 12; k++) {
+    const nextTerm = new Float64Array(n * n);
+    const factor = -t / k;
+
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let p = 0; p < n; p++) {
+          sum += currentTerm[i * n + p] * laplacian[p * n + j];
+        }
+        nextTerm[i * n + j] = sum * factor;
+      }
+    }
+
+    let maxDiff = 0;
+    for (let idx = 0; idx < n * n; idx++) {
+      expMatrix[idx] += nextTerm[idx];
+      const absVal = Math.abs(nextTerm[idx]);
+      if (absVal > maxDiff) maxDiff = absVal;
+    }
+
+    currentTerm = nextTerm;
+    if (maxDiff < 1e-8) break;
+  }
+
+  const normalizedDiffusion = new Float64Array(n * n);
+  const harmonicCentralities = new Float64Array(n);
+  let traceEnergy = 0;
+
+  for (let i = 0; i < n; i++) {
+    traceEnergy += expMatrix[i * n + i];
+    let rowSum = 0;
+    for (let j = 0; j < n; j++) {
+      rowSum += Math.max(0, expMatrix[i * n + j]);
+    }
+    const denom = Math.max(1e-9, rowSum);
+    for (let j = 0; j < n; j++) {
+      const val = Math.max(0, expMatrix[i * n + j]) / denom;
+      normalizedDiffusion[i * n + j] = val;
+      harmonicCentralities[j] += val;
+    }
+  }
+
+  for (let j = 0; j < n; j++) {
+    harmonicCentralities[j] /= n;
+  }
+
+  return {
+    diffusionMatrix: normalizedDiffusion,
+    harmonicCentralities,
+    traceEnergy,
+  };
+}
+
+/**
+ * 2. Effet Domino : Advection Cinétique Déterministe et Ondes de Réverbération
+ */
+export function computeDominoAdvectionHpc(
+  historyFlat: Int32Array | number[],
+  drawsCount: number,
+  dampingGamma: number = 0.45
+): WasmDominoBridgeResult {
+  const hist = historyFlat instanceof Int32Array ? historyFlat : new Int32Array(historyFlat);
+
+  if (isWasmLoaded && wasmModuleInstance?.compute_domino_advection_wasm) {
+    try {
+      const res = wasmModuleInstance.compute_domino_advection_wasm(hist, drawsCount, dampingGamma);
+      return {
+        dominoEnergies: new Float64Array(res.domino_energies),
+        leadTriggerNumbers: Array.from(res.lead_trigger_numbers),
+        kineticDissipationRate: res.kinetic_dissipation_rate,
+      };
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM Domino, passage au fallback :', e);
+    }
+  }
+
+  const dominoEnergies = new Float64Array(91);
+  const winCols = 5;
+  const gamma = Math.max(0.05, Math.min(2.0, dampingGamma));
+  const maxDraws = Math.min(drawsCount, Math.floor(hist.length / winCols));
+
+  if (maxDraws === 0) {
+    return {
+      dominoEnergies,
+      leadTriggerNumbers: [],
+      kineticDissipationRate: gamma,
+    };
+  }
+
+  for (let d = 0; d < maxDraws; d++) {
+    const lag = d + 1;
+    const lagAttenuation = Math.exp(-gamma * lag * 0.25);
+
+    for (let col = 0; col < winCols; col++) {
+      const num = hist[d * winCols + col];
+      if (num >= 1 && num <= 90) {
+        dominoEnergies[num] += 10.0 * lagAttenuation;
+
+        // Miroir
+        let mir = num;
+        if (num >= 10 && num <= 90) {
+          const tens = Math.floor(num / 10);
+          const units = num % 10;
+          const inv = units * 10 + tens;
+          if (inv >= 1 && inv <= 90) mir = inv;
+        }
+        if (mir !== num && mir >= 1 && mir <= 90) {
+          dominoEnergies[mir] += 4.5 * lagAttenuation;
+        }
+
+        // Complémentaire 91
+        const comp = 91 - num;
+        if (comp !== num && comp >= 1 && comp <= 90) {
+          dominoEnergies[comp] += 4.0 * lagAttenuation;
+        }
+      }
+    }
+  }
+
+  const indexed: { n: number; val: number }[] = [];
+  for (let n = 1; n <= 90; n++) {
+    const raw = dominoEnergies[n];
+    const sig = 100 / (1 + Math.exp(-0.15 * (raw - 8.0)));
+    dominoEnergies[n] = Math.round(sig * 100) / 100;
+    indexed.push({ n, val: dominoEnergies[n] });
+  }
+
+  indexed.sort((a, b) => b.val - a.val);
+  const leadTriggerNumbers = indexed.slice(0, 5).map(x => x.n);
+
+  return {
+    dominoEnergies,
+    leadTriggerNumbers,
+    kineticDissipationRate: gamma,
+  };
+}
+
+/**
+ * 3. Effet Papillon : Exposant de Lyapunov Local et Trajectoire d'Attracteur
+ */
+export function computeButterflyLyapunovHpc(
+  lagSeries: Float64Array | number[],
+  hurstExponent: number = 0.5
+): WasmButterflyBridgeResult {
+  const series = lagSeries instanceof Float64Array ? lagSeries : new Float64Array(lagSeries);
+
+  if (isWasmLoaded && wasmModuleInstance?.compute_butterfly_lyapunov_wasm) {
+    try {
+      const res = wasmModuleInstance.compute_butterfly_lyapunov_wasm(series, hurstExponent);
+      return {
+        lyapunovExponent: res.lyapunov_exponent,
+        sensitivityRegime: res.sensitivity_regime,
+        phaseAttractorX: res.phase_attractor_x,
+        phaseAttractorY: res.phase_attractor_y,
+        phaseAttractorZ: res.phase_attractor_z,
+        isChaotic: res.is_chaotic,
+      };
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM Butterfly, passage au fallback :', e);
+    }
+  }
+
+  const n = series.length;
+  if (n < 4) {
+    return {
+      lyapunovExponent: 0.0,
+      sensitivityRegime: 0.5,
+      phaseAttractorX: 0.0,
+      phaseAttractorY: 0.0,
+      phaseAttractorZ: hurstExponent,
+      isChaotic: false,
+    };
+  }
+
+  let sumLn = 0;
+  let count = 0;
+  const eps = 1e-7;
+
+  for (let k = 1; k < n - 1; k++) {
+    const diffNext = Math.abs(series[k + 1] - series[k]) + eps;
+    const diffCurr = Math.abs(series[k] - series[k - 1]) + eps;
+    sumLn += Math.log(diffNext / diffCurr);
+    count++;
+  }
+
+  const lyap = count > 0 ? sumLn / count : 0;
+  const sens = 1 / (1 + Math.exp(-2.5 * lyap));
+  const isChaotic = lyap > 0.02;
+
+  const vx = series[n - 1] - series[n - 2];
+  const ax = n >= 3 ? series[n - 1] - 2 * series[n - 2] + series[n - 3] : 0;
+
+  return {
+    lyapunovExponent: Math.round(lyap * 10000) / 10000,
+    sensitivityRegime: Math.round(sens * 10000) / 10000,
+    phaseAttractorX: Math.round(vx * 1000) / 1000,
+    phaseAttractorY: Math.round(ax * 1000) / 1000,
+    phaseAttractorZ: hurstExponent,
+    isChaotic,
+  };
+}
+
+/**
+ * 4. Réaction en Chaîne : Résonance d'Interférence Constructive et Potentiel d'Avalanche
+ */
+export function computeChainReactionResonanceHpc(
+  recentDrawsFlat: Int32Array | number[],
+  drawsCount: number,
+  sourceCouplings: Float64Array | number[],
+  numSources: number
+): WasmChainReactionBridgeResult {
+  const recent = recentDrawsFlat instanceof Int32Array ? recentDrawsFlat : new Int32Array(recentDrawsFlat);
+  const couplings = sourceCouplings instanceof Float64Array ? sourceCouplings : new Float64Array(sourceCouplings);
+
+  if (isWasmLoaded && wasmModuleInstance?.compute_chain_reaction_resonance_wasm) {
+    try {
+      const res = wasmModuleInstance.compute_chain_reaction_resonance_wasm(recent, drawsCount, couplings, numSources);
+      return {
+        resonanceSpectrum: new Float64Array(res.resonance_spectrum),
+        avalancheCriticalNumbers: Array.from(res.avalanche_critical_numbers),
+        maxConstructiveAmplitude: res.max_constructive_amplitude,
+        percolationDensity: res.percolation_density,
+      };
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM Chain Reaction, passage au fallback :', e);
+    }
+  }
+
+  const spectrum = new Float64Array(91);
+  const winCols = 5;
+  const actualDraws = Math.min(drawsCount, Math.floor(recent.length / winCols));
+  const sources = Math.max(1, Math.min(numSources, couplings.length));
+
+  for (let s = 0; s < sources; s++) {
+    const weight = Math.max(0.01, couplings[s]);
+    const freq = 1.0 + s * 0.47;
+    const phase = (s + 1) * 0.6180339887;
+
+    for (let n = 1; n <= 90; n++) {
+      const theta = (2.0 * Math.PI * freq * n) / 90.0 + phase;
+      spectrum[n] += Math.cos(theta) * weight;
+    }
+  }
+
+  const avalanchePotentials = new Float64Array(91);
+  for (let d = 0; d < actualDraws; d++) {
+    const recencyWeight = 1.0 / (1.0 + d * 0.2);
+    for (let col = 0; col < winCols; col++) {
+      const num = recent[d * winCols + col];
+      if (num >= 1 && num <= 90) {
+        avalanchePotentials[num] += recencyWeight;
+      }
+    }
+  }
+
+  const criticalIndexed: { n: number; score: number }[] = [];
+  let maxAmp = 0;
+  let totalCritDensity = 0;
+
+  for (let n = 1; n <= 90; n++) {
+    const combined = spectrum[n] + avalanchePotentials[n] * 1.5;
+    const score = 100 / (1 + Math.exp(-0.8 * combined));
+    const rounded = Math.round(score * 10) / 10;
+    spectrum[n] = rounded;
+
+    if (rounded > maxAmp) maxAmp = rounded;
+    totalCritDensity += rounded;
+    criticalIndexed.push({ n, score: rounded });
+  }
+
+  criticalIndexed.sort((a, b) => b.score - a.score);
+  const avalancheCriticalNumbers = criticalIndexed.slice(0, 5).map(x => x.n);
+
+  return {
+    resonanceSpectrum: spectrum,
+    avalancheCriticalNumbers,
+    maxConstructiveAmplitude: maxAmp,
+    percolationDensity: Math.round((totalCritDensity / 90.0) * 100) / 100,
+  };
+}
+
