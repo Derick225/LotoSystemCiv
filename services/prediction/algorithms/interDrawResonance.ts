@@ -13,6 +13,7 @@ import {
   getComplement90,
   getMirrorNumber
 } from '../../interDrawService';
+import { Z95_GAUSS } from '../../interDrawPatternService';
 import {
   LOTTERY_CONSTANTS,
   generateDeterministicFallbackHistory
@@ -520,10 +521,11 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         if (coOcc > 0) {
           const expectedPairRate = (K / N) * (K / N);
           const cohortLift = (coOcc + laplaceAlpha * p0) / (sampleSize * expectedPairRate + laplaceAlpha);
-          if (cohortLift > 1.0) {
-            evidenceCohort += Math.log(cohortLift) * 0.5;
-            if (!flags.includes('RESONANCE_COHORTE')) flags.push('RESONANCE_COHORTE');
-          }
+          // AGENTS.md #3 : évidence signée continue (log-lift). Une sous-représentation
+          // (cohortLift < 1) pénalise désormais le canal au lieu d'être ignorée par une
+          // porte binaire ; le drapeau reste une étiquette catégorielle (positif uniquement).
+          evidenceCohort += Math.log(cohortLift) * 0.5;
+          if (cohortLift > 1.0 && !flags.includes('RESONANCE_COHORTE')) flags.push('RESONANCE_COHORTE');
         }
       }
       rawCohort[c] = evidenceCohort;
@@ -574,11 +576,14 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       channelDetails[c].hawkesScore = clamp(100.0 / (1.0 + Math.exp(-slope * zHawkes)), 1.0, 99.0);
       channelDetails[c].hawkesExcitation = Number(hawkesRes.netExcitations[c].toFixed(4));
 
-      if (zTrans > 1.25 && !channelDetails[c].flags.includes('HAUTE_TRANSITION')) {
+      // AGENTS.md #1 : seuil de significativité ancré à la constante gaussienne documentée
+      // Z95_GAUSS (≈1.96, 95 % bilatéral), déjà utilisée comme barre de significativité dans
+      // tout le module inter-tirages — remplace le gain arbitraire 1.25.
+      if (zTrans > Z95_GAUSS && !channelDetails[c].flags.includes('HAUTE_TRANSITION')) {
         channelDetails[c].flags.push('HAUTE_TRANSITION');
       }
 
-      if (zHawkes > 1.25 && !channelDetails[c].flags.includes('HAWKES_EXCITATION')) {
+      if (zHawkes > Z95_GAUSS && !channelDetails[c].flags.includes('HAWKES_EXCITATION')) {
         channelDetails[c].flags.push('HAWKES_EXCITATION');
       }
 

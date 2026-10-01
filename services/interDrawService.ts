@@ -190,6 +190,32 @@ const continuousSigmoid = (z: number): number => {
 };
 
 /**
+ * Score de significativité d'une paire harmonique (0-100), dérivé de l'erreur-type
+ * binomiale sous l'hypothèse nulle (AGENTS.md #1 : zéro nombre magique).
+ *
+ * Remplace le gain arbitraire `continuousSigmoid((lift - 1) * 2.0)`. Au lieu d'une pente
+ * fixe, l'excès observé est standardisé par son erreur-type binomiale réelle : pour
+ * `count` apparitions du partenaire sur `total` tentatives, sous H0 (tirage équitable,
+ * probabilité marginale p0 = K/N), l'écart réduit vaut
+ *   z = (count/total - p0) / sqrt(p0·(1 - p0)/total),
+ * et le score = sigmoïde(z) ∈ (0, 100), centré à 50 lorsque la paire ne dévie pas du
+ * hasard. Le gain effectif devient sqrt(total·p0/(1 - p0)) : il croît avec le nombre de
+ * tentatives, donc une même amplitude de lift est mieux notée lorsqu'elle repose sur
+ * davantage de données — calibration statistique honnête, jamais une constante figée.
+ *
+ * Corrige au passage un biais d'honnêteté : l'ancienne formule attribuait ~100 à une paire
+ * sans AUCUNE observation (taux lissé → 50 %, lift ≈ 9). Ici total ≤ 0 ⇒ 50 neutre.
+ */
+const harmonicPairSignificanceScore = (count: number, total: number): number => {
+  if (total <= 0) return 50;
+  const p0 = THEORETICAL_SINGLE_PROB; // K/N = 5/90
+  const observed = count / total;
+  const stdErr = Math.sqrt((p0 * (1 - p0)) / total);
+  const z = (observed - p0) / stdErr;
+  return Math.round(continuousSigmoid(z) * 10) / 10;
+};
+
+/**
  * Aligne chronologiquement de manière stricte les historiques du tirage cible et de son prédécesseur direct.
  * Élimine tout décalage temporel d'un cran d'indice (look-ahead leak ou déphasage de cycle).
  */
@@ -398,12 +424,36 @@ export const runBayesianResonanceEngine = (
 
   const stride = N + 1;
   const crossCouplingMatrix = new Float64Array(stride * stride);
-  const logCarryMax = Math.log(Math.max(1.05, carryOverLift));
-  const logHarmMax = Math.log(Math.max(1.05, Math.max(mirrorLift, complementLift)));
-  const totalCouplingWeight = 1.0 + logCarryMax + logHarmMax;
-  const wTrans = 0.45 / totalCouplingWeight;
-  const wCarry = (0.35 * logCarryMax) / totalCouplingWeight;
-  const wHarm = (0.20 * logHarmMax) / totalCouplingWeight;
+
+  // Poids des canaux de couplage DÉRIVÉS DES DONNÉES (AGENTS.md #1 : zéro nombre magique).
+  // Auparavant figés à 0.45 / 0.35 / 0.20, ces poids répartissaient arbitrairement
+  // l'influence entre transition markovienne, report direct (carry-over) et résonance
+  // harmonique. Chaque canal est désormais pondéré par l'information log-lift qu'il porte
+  // réellement, mesurée sur les paires appariées, puis normalisée pour sommer à 1 : un
+  // canal sans signal observé (log-lift nul) reçoit un poids nul, un canal fortement
+  // informatif domine — répartition continue et objective, sans constante arbitraire.
+  const carryEvidence = Math.log(Math.max(1.05, carryOverLift));
+  const harmEvidence = Math.log(Math.max(1.05, Math.max(mirrorLift, complementLift)));
+
+  // Évidence de transition : log-lift markovien moyen observé sur la matrice j→i.
+  let transEvidenceSum = 0;
+  let transEvidenceCount = 0;
+  for (let j = 1; j <= N; j++) {
+    const denom = fromTotals[j] + laplaceAlpha;
+    if (denom <= 0) continue;
+    for (let i = 1; i <= N; i++) {
+      const pTrans = (transitionsCount[j][i] + laplaceAlpha * p0) / denom;
+      transEvidenceSum += Math.log(Math.max(1.0, pTrans / p0));
+      transEvidenceCount++;
+    }
+  }
+  const transEvidence = transEvidenceCount > 0 ? transEvidenceSum / transEvidenceCount : 0;
+
+  const totalEvidence = transEvidence + carryEvidence + harmEvidence;
+  // Repli uniforme (1/3 par canal) si aucun signal : neutre, non arbitraire.
+  const wTrans = totalEvidence > 0 ? transEvidence / totalEvidence : 1 / 3;
+  const wCarry = totalEvidence > 0 ? carryEvidence / totalEvidence : 1 / 3;
+  const wHarm = totalEvidence > 0 ? harmEvidence / totalEvidence : 1 / 3;
 
   for (let j = 1; j <= N; j++) {
     const rowOffset = j * stride;
@@ -999,7 +1049,7 @@ export const generateInterDrawReport = async (
         empiricalRate: Math.round(rate * 10) / 10,
         lift: Math.round(pLift * 100) / 100,
         isActiveInCurrentDraw: true,
-        score: Math.round(continuousSigmoid((pLift - 1.0) * 2.0) * 10) / 10
+        score: harmonicPairSignificanceScore(occ, fromTotals[pw])
       });
     }
     const comp = getComplement90(pw);
@@ -1015,7 +1065,7 @@ export const generateInterDrawReport = async (
         empiricalRate: Math.round(rate * 10) / 10,
         lift: Math.round(pLift * 100) / 100,
         isActiveInCurrentDraw: true,
-        score: Math.round(continuousSigmoid((pLift - 1.0) * 2.0) * 10) / 10
+        score: harmonicPairSignificanceScore(occ, fromTotals[pw])
       });
     }
   }
@@ -1586,7 +1636,7 @@ export const calculateHarmonicResonanceMap = (
       empiricalRate: Math.round(rate * 10) / 10,
       lift: Math.round(lift * 100) / 100,
       isActiveInCurrentDraw: isActive,
-      score: Math.round(continuousSigmoid((lift - 1.0) * 2.0) * 10) / 10
+      score: harmonicPairSignificanceScore(item.count, item.total)
     };
   });
 
