@@ -20,6 +20,8 @@ import { useDeleteDrawMutation } from "../../hooks/useLottery";
 import { audioEngine } from "../../utils/audioEngine";
 import {
   INTER_DRAW_FAMILIES,
+  INTER_DRAW_NETWORKS,
+  InterDrawFamilyConfig,
   InterDrawFamilyId,
   isDrawWithoutMachine,
 } from "../../constants";
@@ -299,7 +301,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
       // 2. Audit the 2 strictly isolated closed networks (AGENTS.md)
       const summaries: FamilyAuditSummary[] = [];
-      const familyList = Object.values(INTER_DRAW_NETWORKS);
+      const familyList: InterDrawFamilyConfig[] = Object.values(INTER_DRAW_NETWORKS);
 
       // Étanchéité réellement mesurée : un tirage déclaré dans plusieurs réseaux
       // constitue une contamination structurelle de la configuration.
@@ -335,7 +337,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         const avgHealth =
           measuredCount > 0 ? Math.round(familyHealthSum / measuredCount) : null;
         const contaminated = sampleDraws.filter(
-          (name) => (membership.get(name)?.length || 0) > 1,
+          (name: string) => (membership.get(name)?.length || 0) > 1,
         ).length;
 
         summaries.push({

@@ -4,9 +4,11 @@ import {
   INTER_DRAW_FAMILIES,
   INTER_DRAW_NETWORKS,
   InterDrawFamilyId,
+  InterDrawNetworkId,
   getFamilyPredecessorAndSuccessor,
   getInterDrawFamiliesForDraw,
   getPrimaryInterDrawFamily,
+  getDrawNetworkId,
   normalizeDrawName,
   THEORETICAL_CARRYOVER_RATE_PERCENT,
   THEORETICAL_CARRYOVER_PROB
@@ -456,7 +458,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     // 3d. Intégration continue du graphe complet all-to-all du réseau fermé (AGENTS.md)
     // Tous les tirages du même réseau étanche alimentent continûment la prédiction via leurs poids de couplage
     const evidenceNetwork = new Float64Array(N + 1);
-    const networkDrawNames = INTER_DRAW_NETWORKS[family.id]?.drawNames || [];
+    const targetNetId = (family.id === 'hebdomadaire' || family.id === 'quotidien')
+      ? family.id
+      : (getDrawNetworkId(drawName) || 'quotidien');
+    const networkDrawNames = INTER_DRAW_NETWORKS[targetNetId]?.drawNames || [];
     for (const otherDrawName of networkDrawNames) {
       if (normalizeDrawName(otherDrawName) === normalizeDrawName(drawName)) continue;
       if (normalizeDrawName(otherDrawName) === normalizeDrawName(predName)) continue;

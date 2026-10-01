@@ -154,6 +154,8 @@ export const auditInterDrawPatternsPostMortem = (
   // Le tirage du prédécesseur associé est celui au même cycle ou le plus proche antérieur.
   // NB : comparaison par horodatage réel — une comparaison lexicographique de dates
   // « jj/mm/aaaa » serait chronologiquement fausse (le jour dominerait le tri).
+  const targetDrawName = drawName;
+  const predName = relation.predecessor.name;
   const targetTs = getDrawTimestamp(targetDraw.date || '', targetDraw.drawName || targetDraw.draw_name || targetDrawName);
   let predDrawIndex = -1;
 

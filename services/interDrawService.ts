@@ -30,6 +30,10 @@ import { wasmMatrixEngine } from './wasm/wasmMatrixCore';
 import { computeCrossHawkesKernelHpc, computeRobustHurstHpc } from './wasm/lotoEngineBridge';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import {
+  computeInterDrawComplexDynamics,
+  InterDrawComplexDynamicsReport
+} from './interDrawDynamicsService';
+import {
   analyzeInterDrawCooccurrences,
   analyzeInterDrawPatterns,
   InterDrawCooccurrenceReport,
@@ -179,6 +183,7 @@ export interface InterDrawReport {
   };
   cooccurrenceMetrics?: InterDrawCooccurrenceReport;
   patternMetrics?: InterDrawPatternReport;
+  complexDynamics?: InterDrawComplexDynamicsReport;
   generationTimestamp: number;
 }
 
@@ -531,7 +536,10 @@ export const runBayesianResonanceEngine = (
   const evidenceNetwork = new Float64Array(N + 1);
   const targetFamily = targetDrawName ? getPrimaryInterDrawFamily(targetDrawName) : null;
   if (targetFamily) {
-    const networkDrawNames = INTER_DRAW_NETWORKS[targetFamily.id]?.drawNames || [];
+    const targetNetId = (targetFamily.id === 'hebdomadaire' || targetFamily.id === 'quotidien')
+      ? targetFamily.id
+      : (getDrawNetworkId(targetDrawName) || 'quotidien');
+    const networkDrawNames = INTER_DRAW_NETWORKS[targetNetId]?.drawNames || [];
     const syntheticTargetHistory = pairedPairs.map(p => ({ date: '', gagnants: p.targetWinners }));
     for (const otherDrawName of networkDrawNames) {
       if (targetDrawName && normalizeDrawName(otherDrawName) === normalizeDrawName(targetDrawName)) continue;
@@ -1208,6 +1216,19 @@ export const generateInterDrawReport = async (
     laplaceAlpha
   );
 
+  let complexDynamics: InterDrawComplexDynamicsReport | undefined = undefined;
+  try {
+    complexDynamics = await computeInterDrawComplexDynamics(
+      targetDrawName,
+      networkId,
+      targetHistory,
+      predHistory,
+      networkMatrix
+    );
+  } catch (e) {
+    console.error('[INTER-DRAW] Erreur calcul complexDynamics :', e);
+  }
+
   const report: InterDrawReport = {
     targetDraw: targetDrawName,
     family: activeFamily,
@@ -1248,6 +1269,7 @@ export const generateInterDrawReport = async (
     } : undefined,
     cooccurrenceMetrics,
     patternMetrics,
+    complexDynamics,
     generationTimestamp: Date.now()
   };
 
