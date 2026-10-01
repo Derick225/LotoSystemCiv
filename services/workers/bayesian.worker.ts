@@ -377,7 +377,8 @@ ctx.onmessage = async (e) => {
                 let bestCandidate: AlgoWeights | null = null;
                 let maxRatio = -Infinity;
                 
-                for (let c = 0; c < 20; c++) {
+                const numCandidates = Math.max(keys.length, Math.ceil(Math.sqrt(observations.length) * 4));
+                for (let c = 0; c < numCandidates; c++) {
                     const cand = goodKDE.sample(prng) as AlgoWeights;
                     
                     const l_x = goodKDE.evaluate(cand as any);

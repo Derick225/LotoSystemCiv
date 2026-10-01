@@ -61,7 +61,7 @@ export interface FamilyAuditSummary {
   familyName: string;
   totalDraws: number;
   drawsBreakdown: { name: string; count: number; health: number | null }[];
-  /** Nombre réel de tirages déclarés dans plusieurs familles (mesuré, jamais supposé). */
+  /** Nombre réel de tirages déclarés dans plusieurs réseaux (mesuré, jamais supposé). */
   crossFamilyContaminationCount: number;
   measuredDrawsCount: number;
   globalHealthScore: number | null;
@@ -297,11 +297,11 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
       const singleReport = await analyzeSingleDrawIntegrity(drawName);
       setReport(singleReport);
 
-      // 2. Audit the 3 strictly isolated families
+      // 2. Audit the 2 strictly isolated closed networks (AGENTS.md)
       const summaries: FamilyAuditSummary[] = [];
-      const familyList = Object.values(INTER_DRAW_FAMILIES);
+      const familyList = Object.values(INTER_DRAW_NETWORKS);
 
-      // Étanchéité réellement mesurée : un tirage déclaré dans plusieurs familles
+      // Étanchéité réellement mesurée : un tirage déclaré dans plusieurs réseaux
       // constitue une contamination structurelle de la configuration.
       const membership = new Map<string, InterDrawFamilyId[]>();
       for (const family of familyList) {
@@ -316,7 +316,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         let measuredCount = 0;
         const breakdown: { name: string; count: number; health: number | null }[] = [];
 
-        // Échantillon des 5 premiers tirages de la famille (charge réseau maîtrisée)
+        // Échantillon des 5 premiers tirages du réseau (charge réseau maîtrisée)
         const sampleDraws = family.drawNames.slice(0, 5);
         for (const dName of sampleDraws) {
           const res = await analyzeSingleDrawIntegrity(dName);
@@ -438,7 +438,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
             <ShieldCheck className="w-6 h-6 text-indigo-600" /> Moniteur d'Intégrité Mathématique HPC
           </h3>
           <p className="text-slate-400 text-xs font-medium mt-1">
-            Validation continue, métriques sans nombres magiques et respect des 3 familles étanches
+            Validation continue, métriques sans nombres magiques et respect des 2 réseaux fermés étanches
           </p>
         </div>
 
@@ -462,7 +462,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                   : "text-slate-400 hover:text-slate-600"
               }`}
             >
-              3 Familles Étanches
+              2 Réseaux Étanches
             </button>
           </div>
 
@@ -689,7 +689,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         </div>
       )}
 
-      {/* TAB 2: AUDIT DES 3 FAMILLES ÉTANCHES */}
+      {/* TAB 2: AUDIT DES 2 RÉSEAUX ÉTANCHES */}
       {activeTab === "families" && (
         <div className="space-y-6 animate-fade-in">
           <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-2xl border border-indigo-100 dark:border-indigo-800 text-xs text-indigo-800 dark:text-indigo-300">
@@ -697,11 +697,11 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
               <Layers size={14} /> Règle Architecturale d'Étanchéité (AGENTS.md)
             </h5>
             <p className="leading-relaxed text-[11px] opacity-90">
-              Conformément à la spécification, les 3 familles (Nationale LONACI, Zénith 13H et Nocturne 19H55) sont strictement isolées. Aucune corrélation ni interférence de données ne franchit la frontière d'une famille.
+              Conformément à AGENTS.md, les 2 réseaux fermés (Réseau Hebdomadaire 6 tirages et Réseau Quotidien 22 tirages) sont strictement isolés. Aucune corrélation ni interférence de données ne franchit la frontière d'un réseau.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 gap-6">
             {familySummaries.map((f) => (
               <div
                 key={f.familyId}

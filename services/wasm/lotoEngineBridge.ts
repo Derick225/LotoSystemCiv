@@ -438,7 +438,7 @@ export function computeCooccurrenceTensorHpc(
         const pIdx = m * 90 - (m * (m + 1)) / 2 + (maxT - minT - 1);
         if (pIdx >= 0 && pIdx < pairsCount) {
           targetPairHits[pIdx]++;
-          if (activeOverlap > 0) conditionedPairHits[pIdx] += activeOverlap;
+          if (activeOverlap > 0) conditionedPairHits[pIdx]++;
           totalPairsEvaluated++;
         }
       }

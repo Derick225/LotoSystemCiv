@@ -36,16 +36,16 @@ export const runBayesianOptimization = async (
     const numFeatures = Object.keys(currentWeights).length;
     const entropy = calculateShannonEntropy(fullHistory.slice(0, 100)).normalized;
 
-    // CORRECTION : Paramètres dérivés continûment
+    // Paramètres continus dérivés de la dimensionnalité et de l'entropie de Shannon
     const dynamicConfig: BayesianConfig = {
-        // Initial samples = 2 * dimensionality of search space
-        initialSamples: Math.max(10, numFeatures * 2),
+        // Initial samples proportionnels à l'espace des descripteurs
+        initialSamples: Math.max(numFeatures, Math.ceil(numFeatures * (1.0 + entropy))),
         // Iterations scale with sqrt of history depth
         bayesianIterations: Math.ceil(Math.sqrt(fullHistory.length) * 2),
         // Gamma (exploration scale) increases with entropy
         gamma: 1.0 + (2.0 * entropy),
-        // Safe historical depth calculated via signal persistence
-        historyDepth: Math.max(20, Math.floor(fullHistory.length * (1.0 - Math.abs(h - 0.5))))
+        // Safe historical depth calculated via signal persistence and state space scale
+        historyDepth: Math.max(numFeatures, Math.floor(fullHistory.length * (1.0 - Math.abs(h - 0.5))))
     };
 
     const config = { ...dynamicConfig, ...options };

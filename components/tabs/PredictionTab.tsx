@@ -69,14 +69,14 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const [isAuditDashboardOpen, setIsAuditDashboardOpen] = useState(false);
   const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
 
-  // Famille Inter-Tirages Déterministe.
-  // Un tirage qui n'appartient à aucune des 3 familles étanches doit être affiché comme
-  // isolé, et NON rattaché arbitrairement à la Famille Nationale (source de confusion).
+  // Réseau Inter-Tirages Déterministe (2 Réseaux Étanches AGENTS.md).
+  // Un tirage qui n'appartient à aucun des 2 réseaux étanches doit être affiché comme
+  // isolé, et NON rattaché arbitrairement à un autre réseau.
   const interDrawFamily = useMemo(() => {
     return (
       getPrimaryInterDrawFamily(drawName) || {
         id: "ISOLATED",
-        name: "Hors-Famille (Tirage Isolé)",
+        name: "Hors-Réseau (Tirage Isolé)",
         shortName: "Isolé",
       }
     );
@@ -348,7 +348,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                 {interDrawFamily.name}
               </span>
               <span className="text-[10px] text-slate-500 dark:text-slate-400 block">
-                Isolation stricte des 3 familles étanches (AGENTS.md)
+                Isolation stricte des 2 réseaux étanches (AGENTS.md)
               </span>
             </div>
           </div>
@@ -420,7 +420,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              Oracle Base • Confiance: {activePrediction ? `${activePrediction.confidence}%` : "n/d (calcul en cours)"} • Famille : {interDrawFamily.name}
+              Oracle Base • Confiance: {activePrediction ? `${activePrediction.confidence}%` : "n/d (calcul en cours)"} • Réseau : {interDrawFamily.name}
             </p>
           </div>
         </div>

@@ -31,8 +31,8 @@ describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
       affinityMatrix[7 * 91 + 77] = 0.85;
       affinityMatrix[77 * 91 + 7] = 0.85;
 
-      const cacheKey = globalCache.getInterDrawKey('lonaci_national', 'Reveil', 'affinity_tensor');
-      expect(cacheKey).toBe('nexus_interdraw_lonaci_national_reveil_affinity_tensor');
+      const cacheKey = globalCache.getInterDrawKey('quotidien', 'Reveil', 'affinity_tensor');
+      expect(cacheKey).toBe('nexus_interdraw_quotidien_reveil_affinity_tensor');
 
       // Persistance dans le cache
       await globalCache.set(cacheKey, Array.from(affinityMatrix), CACHE_CONFIG.HISTORY_TTL);

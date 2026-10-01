@@ -66,7 +66,7 @@ export const RETIRED_REDUNDANT_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
  * bruit d'échantillonnage (sur-apprentissage), et leur présence dans l'ensemble donnait une
  * crédibilité indue à une prédiction qui n'en a pas. Ce canal n'est PAS l'une des trois
  * relations inter-tirages sanctionnées par AGENTS.md (Markov, report direct carry-over,
- * résonances harmoniques au sein des familles étanches) — il est donc retiré sans violer
+ * résonances harmoniques au sein des 2 réseaux étanches) — il est donc retiré sans violer
  * l'invariant architectural.
  *
  * Comme pour les canaux redondants, la clé est mise à zéro plutôt que supprimée : le plugin
@@ -75,7 +75,7 @@ export const RETIRED_REDUNDANT_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
  *
  * NOTE : INTER_DRAW_RESONANCE (miroirs décimaux / compléments 91) n'est PAS retirée ici car
  * AGENTS.md autorise explicitement les « résonances harmoniques » inter-tirages au sein des
- * familles étanches ; la supprimer violerait un invariant non négociable du projet.
+ * 2 réseaux étanches (Réseau Hebdomadaire et Réseau Quotidien) ; la supprimer violerait un invariant non négociable du projet.
  */
 export const RETIRED_PSEUDOSCIENCE_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
     AlgoKey.INTER_MONTHLY_RESONANCE,

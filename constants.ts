@@ -225,6 +225,86 @@ export const INTER_DRAW_FAMILIES: Record<string, InterDrawFamilyConfig> = {
   quotidien: INTER_DRAW_NETWORKS.quotidien,
 };
 
+/**
+ * Probabilité théorique exacte a priori de report direct (carry-over d'au moins 1 numéro sur 5/90) :
+ * P(X >= 1) = 1 - C(85, 5) / C(90, 5) = 1 - (85*84*83*82*81)/(90*89*88*87*86) = 0.25365268... (~25.37%)
+ */
+export const THEORETICAL_CARRYOVER_PROB = 1.0 - (85 * 84 * 83 * 82 * 81) / (90 * 89 * 88 * 87 * 86);
+export const THEORETICAL_CARRYOVER_RATE_PERCENT = Number((THEORETICAL_CARRYOVER_PROB * 100).toFixed(2)); // 25.37%
+
+/**
+ * Récupère l'heure programmée officielle du tirage (ex: '10:00', '13:00', '16:00', '19:55')
+ */
+export const getDrawScheduledTime = (drawName?: string | null): string => {
+  if (!drawName) return '13:00';
+  const norm = normalizeDrawName(drawName);
+  for (const net of Object.values(INTER_DRAW_NETWORKS)) {
+    const found = net.sequence.find(s => normalizeDrawName(s.name) === norm);
+    if (found) return found.time;
+  }
+  return '13:00';
+};
+
+/**
+ * Calcule un timestamp précis (millisecondes) combinant la date ET l'heure du créneau horaire officiel du tirage.
+ * Garantit un ordre chronologique strict et déterministe entre tirages du même jour (10H < 13H < 16H < 19H55).
+ */
+export const getDrawFullTimestamp = (
+  dateStr?: string | null,
+  drawName?: string | null,
+  explicitTime?: string | null
+): number => {
+  if (!dateStr) return 0;
+
+  // Détection d'heure embarquée dans la chaîne (ex: '2026-09-01T16:00:00' ou '01/09/2026 16:00')
+  let embeddedTime: string | null = null;
+  const timeMatch = dateStr.match(/[T\s](\d{1,2}):(\d{2})/);
+  if (timeMatch) {
+    embeddedTime = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`;
+  }
+
+  const time = explicitTime || (drawName ? getDrawScheduledTime(drawName) : (embeddedTime || '13:00'));
+  const [hours, minutes] = time.split(':').map(Number);
+  const safeHours = Number.isFinite(hours) ? hours : 13;
+  const safeMinutes = Number.isFinite(minutes) ? minutes : 0;
+
+  if (dateStr.includes('/')) {
+    const datePart = dateStr.split(/[T\s]/)[0];
+    const parts = datePart.split('/');
+    if (parts.length === 3) {
+      const d = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const y = parseInt(parts[2], 10);
+      return new Date(y, m, d, safeHours, safeMinutes, 0, 0).getTime();
+    }
+  } else if (dateStr.includes('-')) {
+    const datePart = dateStr.split(/[T\s]/)[0];
+    const parts = datePart.split('-');
+    if (parts.length === 3) {
+      let y = 1970, m = 0, d = 1;
+      if (parts[0].length === 4) {
+        y = parseInt(parts[0], 10);
+        m = parseInt(parts[1], 10) - 1;
+        d = parseInt(parts[2], 10);
+      } else {
+        d = parseInt(parts[0], 10);
+        m = parseInt(parts[1], 10) - 1;
+        y = parseInt(parts[2], 10);
+      }
+      return new Date(y, m, d, safeHours, safeMinutes, 0, 0).getTime();
+    }
+  }
+
+  const parsed = new Date(dateStr);
+  if (!isNaN(parsed.getTime())) {
+    if (explicitTime || drawName) {
+      parsed.setHours(safeHours, safeMinutes, 0, 0);
+    }
+    return parsed.getTime();
+  }
+  return 0;
+};
+
 // Aliases de compatibilité ascendante non-énumérables
 Object.defineProperty(INTER_DRAW_FAMILIES, 'FAMILY_19H55', {
   get: () => INTER_DRAW_NETWORKS.hebdomadaire,

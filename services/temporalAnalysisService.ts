@@ -266,26 +266,34 @@ export const getTemporalScores = async (drawName: string, rawHistory: DrawResult
     const history = drawName ? purifyHistoryForDraw(drawName, rawHistory) : rawHistory;
     const scores: Record<number, number> = {};
     
+    // Calcul de la persistance fractale pour la pondération dynamique
+    const hurst = calculateFractalIndex(history);
+    const weightCyclic = 0.25 * (1.0 + Math.tanh(hurst - 0.5));
+    const weightHawkes = 0.25 * (1.0 - 0.5 * Math.tanh(hurst - 0.5));
+    const weightSeasonal = 0.25;
+    const weightCross = 0.25;
+
     // 1. Saisonnalité
     const seasonal = getSeasonalAffinity(history, drawName);
     const maxSeasonal = seasonal.topNumbers[0]?.count || 1;
     seasonal.topNumbers.forEach(item => {
-        scores[item.number] = (scores[item.number] || 0) + (Math.sqrt(item.count / maxSeasonal) * 15);
+        scores[item.number] = (scores[item.number] || 0) + (Math.sqrt(item.count / maxSeasonal) * 100 * weightSeasonal);
     });
 
     // 2. Tendance Journalière
     const dayAffinity = getDayAffinity(history, drawName);
+    const maxDayScore = Math.max(...dayAffinity.map(d => d.score), 1);
     dayAffinity.slice(0, 20).forEach(item => {
-        scores[item.number] = (scores[item.number] || 0) + (item.score * 0.25);
+        scores[item.number] = (scores[item.number] || 0) + ((item.score / maxDayScore) * 100 * weightSeasonal);
     });
 
     // 3. Cycles continus
     const cycles = await getCyclicCandidates(drawName, history);
     cycles.forEach(c => {
-        // Multiplicateur Gaussien continu : pic à x1.5 au cœur du cycle, décroissant continûment
+        // Multiplicateur Gaussien continu : pic au cœur du cycle, décroissant continûment
         const delta = (c.gap - c.avg) / Math.max(1.0, c.stdDev);
         const multiplier = 1.0 + 0.5 * Math.exp(-0.5 * delta * delta);
-        scores[c.number] = (scores[c.number] || 0) + (c.score * 0.35 * multiplier);
+        scores[c.number] = (scores[c.number] || 0) + (c.score * weightCyclic * multiplier);
     });
 
     // 4. Processus de Hawkes Auto-Excité
@@ -293,15 +301,15 @@ export const getTemporalScores = async (drawName: string, rawHistory: DrawResult
     const maxHawkes = Math.max(...Array.from(hawkes)) || 1;
     for (let i = 1; i <= 90; i++) {
         const normalisedHawkes = (hawkes[i] / maxHawkes) * 100;
-        scores[i] = (scores[i] || 0) + (normalisedHawkes * 0.20);
+        scores[i] = (scores[i] || 0) + (normalisedHawkes * weightHawkes);
     }
 
-    // 5. Résonance Temporelle Croisée Inter-Mensuelle (Stratégie cohorte-saisonnière d'excitation croisée Gagnants-Machines)
+    // 5. Résonance Temporelle Croisée Inter-Mensuelle
     const crossMonth = calculateCrossMonthResonance(history, drawName);
     const maxCross = Math.max(...Array.from(crossMonth)) || 1;
     for (let i = 1; i <= 90; i++) {
         const normalisedCross = (crossMonth[i] / maxCross) * 100;
-        scores[i] = (scores[i] || 0) + (normalisedCross * 0.20); // Intégration à hauteur de 20%
+        scores[i] = (scores[i] || 0) + (normalisedCross * weightCross);
     }
 
     const maxVal = Math.max(...Object.values(scores), 1);
