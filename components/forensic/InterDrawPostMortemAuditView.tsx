@@ -62,7 +62,7 @@ export const InterDrawPostMortemAuditView: React.FC<InterDrawPostMortemAuditView
         </h4>
         <p className="text-xs text-slate-400 max-w-lg mx-auto">
           {families.length === 0
-            ? `Le tirage "${drawName}" ne fait partie d'aucune des 3 familles étanches autorisées (Famille Nationale LONACI, Famille Zénith 13H, Famille Nocturne 19H55). Aucune corrélation inter-tirages n'est calculée pour préserver l'isolation stricte.`
+            ? `Le tirage "${drawName}" ne fait partie d'aucun des 2 réseaux fermés autorisés (Réseau Hebdomadaire 6 tirages, Réseau Quotidien 22 tirages). Aucune corrélation inter-tirages n'est calculée pour préserver l'isolation stricte.`
             : `Historique insuffisant pour confronter les projections antérieures (${cleanHistory.length} tirages trouvés, minimum 2 requis).`}
         </p>
       </div>

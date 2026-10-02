@@ -2,7 +2,7 @@ import { DrawResult, Prediction, AlgoWeights } from "../../types";
 import { AlgoKey, EmpiricalCalibration, FALLBACK_CALIBRATION } from "../../shared/prediction.types";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
-import { getPrimaryInterDrawFamily, drawHasMachineNumbers } from "../../constants";
+import { getPrimaryInterDrawFamily, drawHasMachineNumbers, THEORETICAL_CARRYOVER_PROB } from "../../constants";
 import { getAlgoWeights, getDefaultWeights, normalizeWeights, validateAlgoWeightsByProof, AlgoWeightsProofReport } from "./weightsManager";
 import { useNexusStore } from "../../store/useNexusStore";
 import { calculateShannonEntropy, calculateFractalIndex } from "../mathService";
@@ -193,7 +193,7 @@ export const extractDrawAlgorithmicParameters = async (
   }
   activeWeights = normalizeWeights(activeWeights);
 
-  // 3. Famille inter-tirages étanche
+  // 3. Réseau inter-tirages étanche (AGENTS.md : Hebdomadaire 6 tirages ou Quotidien 22 tirages)
   const primaryFam = getPrimaryInterDrawFamily(drawName);
   const family = primaryFam
     ? { id: primaryFam.id, name: primaryFam.name, shortName: primaryFam.shortName }
@@ -581,7 +581,7 @@ export const runStrictDrawValidation = async (
   const alphaGain = theoreticalBaselineHits > 0 ? avgDirectHits / theoreticalBaselineHits : 1.0;
 
   // Calcul du Z-score par rapport à la distribution binomiale aléatoire
-  const pRandomResonance = 1.0 - (85 / 90) * (84 / 89) * (83 / 88) * (82 / 87) * (81 / 86); // ~25.43%
+  const pRandomResonance = THEORETICAL_CARRYOVER_PROB; // 25.37% exact (1 - C(85,5)/C(90,5))
   const expectedResonance = safeDepth * pRandomResonance;
   const stdResonance = Math.sqrt(safeDepth * pRandomResonance * (1.0 - pRandomResonance));
   const zScore = stdResonance > 0 ? (drawsWithAtLeastOneHit - expectedResonance) / stdResonance : 0;
@@ -625,11 +625,11 @@ export const runStrictDrawValidation = async (
     },
     {
       id: "rule_families",
-      principle: "Famille Inter-Tirages Étanche",
+      principle: "Réseau Inter-Tirages Étanche (2 Réseaux AGENTS.md)",
       status: parameters.family ? "CONFORME" : "ATTENTION",
       description: parameters.family
-        ? `Rattaché à la ${parameters.family.name} (${parameters.family.shortName}). Zéro couplage inter-famille.`
-        : "Tirage autonome ou hors classification standard des 3 familles.",
+        ? `Rattaché au ${parameters.family.name} (${parameters.family.shortName}). Zéro couplage inter-réseau.`
+        : "Tirage autonome ou hors classification standard des 2 réseaux étanches.",
     },
     {
       id: "rule_deterministic",

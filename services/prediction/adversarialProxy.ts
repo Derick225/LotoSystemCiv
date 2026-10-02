@@ -101,7 +101,8 @@ export const evaluateAdversarialSurvival = (
     }
     const spacingSurvival = 1.0 - Math.exp(-0.8 * Math.max(1, minDiff));
 
-    const topoSurvival = (sumSurvival * 0.45) + (paritySurvival * 0.35) + (spacingSurvival * 0.20);
+    // Agrégation informationnelle continue des composantes orthogonales (moyenne géométrique)
+    const topoSurvival = Math.cbrt(sumSurvival * paritySurvival * spacingSurvival);
     if (sumSurvival < 0.25 || paritySurvival < 0.25) {
         risks.push("Anomalie topologique : distribution de somme ou de parité en queue de Gaussienne théorique");
     }
@@ -132,17 +133,12 @@ export const evaluateAdversarialSurvival = (
         });
     }
     const meanHurst = hurstValidCount > 0 ? (hurstSum / hurstValidCount) : 0.5;
-    // La persistance modérée (0.50 à 0.65) est robuste ; l'hyper-anti-persistance (<0.35) ou hyper-persistance (>0.85) est instable sous bruit
+    // La persistance modérée (0.50 à 0.65) est robuste ; l'hyper-anti-persistance ou hyper-persistance est instable sous bruit
     const zHurst = (meanHurst - 0.55) / 0.15;
     const hurstSurvival = Math.exp(-0.5 * zHurst * zHurst);
 
     // 5. Agrégation Continue du Score de Survie Adversariale
-    const rawSurvival = (
-        (diversitySurvival * 0.35) +
-        (topoSurvival * 0.35) +
-        (driftSurvival * 0.15) +
-        (hurstSurvival * 0.15)
-    );
+    const rawSurvival = Math.sqrt(diversitySurvival * topoSurvival) * Math.sqrt(driftSurvival * hurstSurvival);
 
     const survivalScore = Math.round(
         Math.max(10, Math.min(99, rawSurvival * 100))

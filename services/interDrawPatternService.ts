@@ -11,8 +11,8 @@
  *    - Aucun générateur non seedé (reproductibilité absolue).
  * 3. CONTINUITÉ DES TRANSITIONS ET DÉCISIONS :
  *    - Fonctions différentiables continues, sans bifurcations de seuils binaires arbitraires.
- * 4. ISOLATION DES 3 FAMILLES ÉTANCHES :
- *    - Traitement exclusif sur les historiques appariés au sein de la même famille fermée.
+ * 4. ISOLATION DES 2 RÉSEAUX ÉTANCHES :
+ *    - Traitement exclusif sur les historiques appariés au sein du même réseau fermé.
  */
 
 import { LOTTERY_CONSTANTS } from './lotteryService';
@@ -405,35 +405,40 @@ export const analyzeInterDrawCooccurrences = (
     }
   }
 
-  // A. Construction des Paires Cibles Conditionnées (Top Paires)
+  // Dénombrement exact des tirages réellement conditionnés par la présence du prédécesseur actif
+  let conditionedDrawsCount = 0;
+  for (const pair of pairedPairs) {
+    if (pair.predWinners.some(n => activePredSet.has(n))) {
+      conditionedDrawsCount++;
+    }
+  }
+  const effectiveConditionedSample = Math.max(1, conditionedDrawsCount);
+  // Seuil universel de Donoho-Johnstone pour tests multiples (M = 4005 paires) : sqrt(2 * ln(4005)) ≈ 4.072
+  const zCritPairs = Math.sqrt(2.0 * Math.log(4005));
   const conditionedPairsList: InterDrawTargetPairCooccurrence[] = [];
-  const totalActivePredWeight = Array.from(activePredSet).reduce(
-    (acc, p) => acc + (predNumberCounts[p] || 0),
-    0
-  );
-  const activePredWeightNorm = Math.max(1, totalActivePredWeight);
 
   for (const [pairKey, occ] of targetPairCounts.entries()) {
     const t1 = Math.floor(pairKey / 100);
     const t2 = pairKey % 100;
     const condHits = activeConditionedPairHits.get(pairKey) || 0;
 
-    // Probabilité conditionnée lissée de Laplace
+    // Probabilité conditionnée lissée de Laplace sur l'échantillon réellement conditionné
     const jointConditionedProb = (condHits + laplaceAlpha * THEORETICAL_PAIR_PROB) /
-      (activePredWeightNorm + laplaceAlpha);
+      (effectiveConditionedSample + laplaceAlpha);
 
     const lift = jointConditionedProb / THEORETICAL_PAIR_PROB;
     const pmi = Math.log(Math.max(1e-4, lift));
 
-    // Z-score binomial standardisé
-    const variance = (THEORETICAL_PAIR_PROB * (1.0 - THEORETICAL_PAIR_PROB)) / (sampleSize + 1);
-    const zScore = (jointConditionedProb - THEORETICAL_PAIR_PROB) / Math.max(1e-6, Math.sqrt(variance));
+    // Variance binomiale exacte sur l'échantillon réellement conditionné (AGENTS.md)
+    const variance = (THEORETICAL_PAIR_PROB * (1.0 - THEORETICAL_PAIR_PROB)) / effectiveConditionedSample;
+    const zRaw = (jointConditionedProb - THEORETICAL_PAIR_PROB) / Math.max(1e-6, Math.sqrt(variance));
 
-    // Confiance continue ancrée sur la significativité statistique réelle du z-score :
-    // logistic(z − z95) vaut exactement 0.5 au seuil gaussien 95%, et encode
-    // simultanément l'amplitude de l'écart et la taille d'échantillon (via la variance).
-    const confidence = Math.round((1.0 / (1.0 + Math.exp(-(zScore - Z95_GAUSS)))) * 100) / 100;
+    // Rétrécissement bayésien continu (soft thresholding) contre les faux positifs sur 4005 tests simultanés
+    const excessZ = Math.max(0, Math.abs(zRaw) - zCritPairs);
+    const zScore = Math.sign(zRaw) * excessZ;
 
+    // Confiance continue ancrée sur la significativité statistique corrigée
+    const confidence = Math.round((1.0 / (1.0 + Math.exp(-excessZ))) * 100) / 100;
     const score = Math.round(continuousSigmoid(zScore) * 10) / 10;
 
     // Détection des numéros déclencheurs parmi le prédécesseur actif
@@ -511,14 +516,23 @@ export const analyzeInterDrawCooccurrences = (
 
     const isActive = activePredSet.has(p1) && activePredSet.has(p2);
 
+    // Seuil universel pour tests multiples bivariés (M = 10 paires * 90 numéros = 900)
+    const zCritBivar = Math.sqrt(2.0 * Math.log(900));
+    // Poids de support continu basé sur l'échelle combinatoire 1/p0 = 18 tirages requis pour 1 espérance
+    const supportWeight = pairOcc / (pairOcc + 18.0);
+
     for (let t = 1; t <= 90; t++) {
       const occ = targetArr[t];
       if (occ === 0) continue;
 
       const prob = (occ + laplaceAlpha * THEORETICAL_SINGLE_PROB) / (pairOcc + laplaceAlpha);
       const lift = prob / THEORETICAL_SINGLE_PROB;
-      const zScore = (prob - THEORETICAL_SINGLE_PROB) /
-        Math.max(1e-6, Math.sqrt((THEORETICAL_SINGLE_PROB * (1.0 - THEORETICAL_SINGLE_PROB)) / (pairOcc + 1)));
+      const variance = (THEORETICAL_SINGLE_PROB * (1.0 - THEORETICAL_SINGLE_PROB)) / (pairOcc + 1);
+      const zRaw = (prob - THEORETICAL_SINGLE_PROB) / Math.max(1e-6, Math.sqrt(variance));
+
+      // Rétrécissement bayésien continu : élimine les faux positifs sur 1 ou 2 observations isolées
+      const excessZ = Math.max(0, Math.abs(zRaw) - zCritBivar) * supportWeight;
+      const zScore = Math.sign(zRaw) * excessZ;
       const score = Math.round(continuousSigmoid(zScore) * 10) / 10;
 
       bivariateTriggersList.push({
@@ -694,12 +708,16 @@ export const analyzeInterDrawPatterns = (
 
   for (let d1 = 0; d1 < 9; d1++) {
     const sTot = decadeSourceTotals[d1];
+    // Chaque numéro source génère NUMBERS_PER_DRAW (5) transitions vers les numéros cibles
+    const sTotTargetEvents = sTot * NUMBERS_PER_DRAW;
     for (let d2 = 0; d2 < 9; d2++) {
       const occ = decadeTransitionCounts[d1][d2];
       const cap = getDecadeTheoreticalCapacity(d2);
-      const prob = sTot > 0 ? (occ + laplaceAlpha * cap) / (sTot + laplaceAlpha) : cap;
+      // Probabilité conditionnelle normalisée par boule cible : sum_{d2} prob = 1.0
+      const prob = sTotTargetEvents > 0 ? (occ + laplaceAlpha * cap) / (sTotTargetEvents + laplaceAlpha) : cap;
       decadeFluxMatrix[d1][d2] = Number(prob.toFixed(4));
 
+      // Lift normalisé : prob / cap = 1.0 sous H0
       const lift = prob / cap;
       if (occ > 0 && activeDecades.includes(d1)) {
         topDecadeFluxes.push({
@@ -718,6 +736,7 @@ export const analyzeInterDrawPatterns = (
   topDecadeFluxes.sort((a, b) => b.lift - a.lift || b.occurrences - a.occurrences);
 
   // Excitation globale de chaque dizaine cible stimulée par les dizaines actives
+  const totalObservedTargetBalls = Math.max(1, pairedPairs.length * NUMBERS_PER_DRAW);
   const stimulatedDecades = Array.from({ length: 9 }, (_, dTarget) => {
     let weightedProbSum = 0;
     let totalWeight = 0;
@@ -731,10 +750,16 @@ export const analyzeInterDrawPatterns = (
     const capTarget = getDecadeTheoreticalCapacity(dTarget);
     const avgProb = totalWeight > 0 ? weightedProbSum / totalWeight : capTarget;
     const lift = avgProb / capTarget;
-    // Z-score binomial exact : écart à la capacité théorique normalisé par
-    // l'erreur standard du flux agrégé (√(cap(1−cap)/n)) — aucun multiplicateur arbitraire.
-    const fluxSe = Math.sqrt((capTarget * (1.0 - capTarget)) / Math.max(1, totalWeight));
-    const zScore = (avgProb - capTarget) / Math.max(1e-6, fluxSe);
+    // Variance conditionnelle exacte de l'estimateur pondéré sous H0
+    let sumCondVar = 0;
+    for (const dSource of activeDecades) {
+      const weight = predDecadeCounts[dSource];
+      const normW = totalWeight > 0 ? weight / totalWeight : 0;
+      const sEvents = Math.max(1, decadeSourceTotals[dSource] * NUMBERS_PER_DRAW);
+      sumCondVar += (normW * normW * (capTarget * (1.0 - capTarget))) / sEvents;
+    }
+    const fluxSe = Math.sqrt(Math.max(1e-12, sumCondVar));
+    const zScore = fluxSe > 0 ? (avgProb - capTarget) / fluxSe : 0;
     const excitationScore = Math.round(continuousSigmoid(zScore) * 10) / 10;
 
     // Numéros appartenant à cette dizaine
@@ -895,49 +920,69 @@ export const analyzeInterDrawPatterns = (
   const nPairs = deltas.length;
   let historicalDeltaMean = 0;
   let historicalDeltaStd = theoreticalStd;
-  let reversionCorrelation = -0.5; // Corrélation typique de retour à la moyenne
+  // Corrélation théorique de Pearson sous H0 d'indépendance des tirages : Corr(S_t, S_t - S_{t-1}) = -1/√2 ≈ -0.7071
+  let reversionCorrelation = -1.0 / Math.SQRT2;
   let predSumStd = theoreticalStd;
+  let optimalProjectedSum = Math.round(theoreticalMean);
+  let residualStd = theoreticalStd;
+  let predictedDelta = theoreticalMean - predSum;
+  let reversionTendency: 'HAUSSE_COMPENSATRICE' | 'BAISSE_COMPENSATRICE' | 'STABLE' = 'STABLE';
 
-  if (nPairs > 1) {
+  if (nPairs > 2) {
     historicalDeltaMean = deltas.reduce((a, b) => a + b, 0) / nPairs;
-    const varDelta = deltas.reduce((acc, d) => acc + Math.pow(d - historicalDeltaMean, 2), 0) / (nPairs - 1);
-    historicalDeltaStd = Math.max(1.0, Math.sqrt(varDelta));
-
-    // Corrélation de Pearson entre somme précédente et delta
     const meanSP = predSumsHist.reduce((a, b) => a + b, 0) / nPairs;
-    let cov = 0;
-    let varSP = 0;
+
+    let ssSP = 0;
+    let ssDelta = 0;
+    let sumProduct = 0;
+
     for (let i = 0; i < nPairs; i++) {
-      cov += (predSumsHist[i] - meanSP) * (deltas[i] - historicalDeltaMean);
-      varSP += Math.pow(predSumsHist[i] - meanSP, 2);
+      const dSP = predSumsHist[i] - meanSP;
+      const dDelta = deltas[i] - historicalDeltaMean;
+      ssSP += dSP * dSP;
+      ssDelta += dDelta * dDelta;
+      sumProduct += dSP * dDelta;
     }
-    predSumStd = Math.sqrt(varSP / nPairs);
-    if (varSP > 0 && varDelta > 0) {
-      reversionCorrelation = cov / Math.sqrt(varSP * varDelta);
+
+    // Corrélation de Pearson rigoureusement normalisée dans [-1, 1] (Cauchy-Schwarz)
+    const denom = Math.sqrt(ssSP * ssDelta);
+    if (denom > 1e-12) {
+      reversionCorrelation = Math.max(-1.0, Math.min(1.0, sumProduct / denom));
+    }
+
+    predSumStd = Math.sqrt(ssSP / (nPairs - 1));
+    historicalDeltaStd = Math.max(1.0, Math.sqrt(ssDelta / (nPairs - 1)));
+
+    // Pente de régression empirique : beta = sumProduct / ssSP
+    const empiricalSlope = ssSP > 1e-12 ? sumProduct / ssSP : -1.0;
+
+    // SOUS H0 (tirages consécutifs indépendants), delta = S_t - S_{t-1}.
+    // Cov(S_{t-1}, delta) = Cov(S_{t-1}, S_t) - Var(S_{t-1}) = -Var(S_{t-1}).
+    // La pente théorique sous H0 est EXACTEMENT beta_0 = -1.0.
+    // La "régression vers la moyenne" est donc automatique sous H0 et ne constitue pas un signal.
+    // Pour détecter un vrai signal (mémoire persistante ou surcompensation), on teste contre beta = -1.0.
+    const residualVar = Math.max(1e-6, (ssDelta - empiricalSlope * sumProduct) / Math.max(1, nPairs - 2));
+    const slopeStdError = Math.sqrt(residualVar / Math.max(1e-6, ssSP));
+    const tStatisticAgainstNull = (empiricalSlope - (-1.0)) / Math.max(1e-6, slopeStdError);
+
+    // Rétrécissement bayésien continu vers la pente nulle (-1.0) sous H0
+    const signalWeight = Math.tanh(Math.pow(tStatisticAgainstNull / 2.0, 2));
+    const regularizedSlope = -1.0 + signalWeight * (empiricalSlope - (-1.0));
+
+    predictedDelta = historicalDeltaMean + regularizedSlope * (predSum - theoreticalMean);
+    optimalProjectedSum = Math.max(15, Math.min(435, Math.round(predSum + predictedDelta)));
+    residualStd = Math.sqrt(residualVar);
+
+    // Mouvement compensateur significatif au-delà du retour automatique à la moyenne sous H0 (|t| > 1.96)
+    if (Math.abs(tStatisticAgainstNull) > 1.96) {
+      reversionTendency = predictedDelta > 0 ? 'HAUSSE_COMPENSATRICE' : 'BAISSE_COMPENSATRICE';
+    } else {
+      reversionTendency = 'STABLE';
     }
   }
 
-  // Projection optimale de la somme cible via régression linéaire continue
-  // Pente = r · (σ_delta / σ_sommesPrécédentes), les deux échelles étant empiriques.
-  const regressionSlope = reversionCorrelation * (historicalDeltaStd / Math.max(1e-6, predSumStd));
-  const predictedDelta = historicalDeltaMean + regressionSlope * (predSum - theoreticalMean);
-  // Bornes combinatoires exactes : somme minimale 1+2+3+4+5 = 15, maximale 86+87+88+89+90 = 435.
-  const optimalProjectedSum = Math.max(15, Math.min(435, Math.round(predSum + predictedDelta)));
-
-  // Incertitude résiduelle exacte de la régression : σ_delta · √(1 − r²)
-  const residualStd = historicalDeltaStd * Math.sqrt(Math.max(0, 1 - reversionCorrelation * reversionCorrelation));
   const projectedMin = Math.max(15, Math.round(optimalProjectedSum - residualStd));
   const projectedMax = Math.min(435, Math.round(optimalProjectedSum + residualStd));
-
-  // Mouvement compensateur significatif : |delta prédit| dépasse 1 erreur standard résiduelle
-  let reversionTendency: 'HAUSSE_COMPENSATRICE' | 'BAISSE_COMPENSATRICE' | 'STABLE';
-  if (predictedDelta > residualStd) {
-    reversionTendency = 'HAUSSE_COMPENSATRICE';
-  } else if (predictedDelta < -residualStd) {
-    reversionTendency = 'BAISSE_COMPENSATRICE';
-  } else {
-    reversionTendency = 'STABLE';
-  }
 
   const centroidPattern: InterDrawCentroidPattern = {
     predSum,

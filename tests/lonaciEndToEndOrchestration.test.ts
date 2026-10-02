@@ -139,38 +139,39 @@ describe('Validation de Bout en Bout LONACI (10H, 13H, 16H, 19H55) & Recuit Simu
 
   describe('3. Étanchéité Stricte des 2 Réseaux Inter-Tirages (AGENTS.md)', () => {
     it('doit garantir que les clés de cache et relations respectent les cloisons hermétiques', () => {
-      const keyNational10H = globalCache.getInterDrawKey(
+      const keyReveil10H = globalCache.getInterDrawKey(
         'quotidien',
         'Reveil',
         'hawkes'
       );
-      const keyNational16H = globalCache.getInterDrawKey(
+      const keyAkwaba16H = globalCache.getInterDrawKey(
         'quotidien',
         'Akwaba',
         'hawkes'
       );
-      const keyZenith = globalCache.getInterDrawKey(
+      const keyEtoile13H = globalCache.getInterDrawKey(
         'quotidien',
         'Etoile',
         'hawkes'
       );
-      const keyNocturne = globalCache.getInterDrawKey(
+      const keyNationalHebdo = globalCache.getInterDrawKey(
         'hebdomadaire',
-        'Monday Special',
+        'National',
         'hawkes'
       );
 
       // Quotidien regroupe 10H, 13H et 16H
-      expect(keyNational10H).toContain('quotidien');
-      expect(keyNational16H).toContain('quotidien');
-      expect(keyZenith).toContain('quotidien');
+      expect(keyReveil10H).toContain('quotidien');
+      expect(keyAkwaba16H).toContain('quotidien');
+      expect(keyEtoile13H).toContain('quotidien');
 
-      // Hebdomadaire est dans un réseau étanche distinct
-      expect(keyNocturne).toContain('hebdomadaire');
+      // National appartient exclusivement au réseau hebdomadaire
+      expect(keyNationalHebdo).toContain('hebdomadaire');
+      expect(keyNationalHebdo).toContain('national');
 
-      // Zéro collision
-      expect(keyNational10H).not.toEqual(keyNocturne);
-      expect(keyZenith).not.toEqual(keyNocturne);
+      // Zéro collision entre réseaux
+      expect(keyReveil10H).not.toEqual(keyNationalHebdo);
+      expect(keyEtoile13H).not.toEqual(keyNationalHebdo);
     });
   });
 });

@@ -2,16 +2,22 @@ import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
 import {
   INTER_DRAW_FAMILIES,
+  INTER_DRAW_NETWORKS,
   InterDrawFamilyId,
+  InterDrawNetworkId,
   getFamilyPredecessorAndSuccessor,
   getInterDrawFamiliesForDraw,
   getPrimaryInterDrawFamily,
-  normalizeDrawName
+  getDrawNetworkId,
+  normalizeDrawName,
+  THEORETICAL_CARRYOVER_RATE_PERCENT,
+  THEORETICAL_CARRYOVER_PROB
 } from '../../../constants';
 import {
   alignConsecutiveDrawHistories,
   getComplement90,
-  getMirrorNumber
+  getMirrorNumber,
+  computeContinuousInterDrawCoupling
 } from '../../interDrawService';
 import { Z95_GAUSS } from '../../interDrawPatternService';
 import {
@@ -275,8 +281,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       }
     }
 
-    // Lifts statistiques empiriques dérivés de la combinatoire réelle
-    const carryOverExpected = (1.0 - (85 * 84 * 83 * 82 * 81) / (90 * 89 * 88 * 87 * 86)) * 100; // ~ 25.41%
+    // Lifts statistiques empiriques dérivés de la combinatoire réelle (format 5/90)
+    const carryOverExpected = THEORETICAL_CARRYOVER_RATE_PERCENT; // 25.37% exact
     const carryOverRate = totalConsecutive > 0 ? (carryOverOccurrences / totalConsecutive) * 100 : carryOverExpected;
     const carryOverLift = Math.max(0.2, carryOverRate / carryOverExpected);
 
@@ -379,14 +385,18 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     const stride = N + 1;
     const crossCouplingMatrix = new Float64Array(stride * stride);
 
-    // Calcul des poids de couplage par canal basés sur les lifts empiriques réels
-    const logCarryMax = Math.log(Math.max(1.05, carryOverLift * carryHurstModulator));
-    const logHarmMax = Math.log(Math.max(1.05, Math.max(mirrorLift, complementLift) * harmonicHurstModulator));
-    const totalCouplingWeight = 1.0 + logCarryMax + logHarmMax;
-    const wTrans = 0.40 / totalCouplingWeight;
-    const wCarry = (0.30 * logCarryMax) / totalCouplingWeight;
-    const wHarm = (0.20 * logHarmMax) / totalCouplingWeight;
-    const wCohort = 0.10 / totalCouplingWeight;
+    // Calcul continu des poids de couplage par canal (softmax des évidences empiriques, zéro nombre magique)
+    const logCarry = Math.log(Math.max(1e-4, carryOverLift * carryHurstModulator));
+    const logHarm = Math.log(Math.max(1e-4, ((mirrorLift + complementLift) / 2.0) * harmonicHurstModulator));
+    const expTrans = 1.0;
+    const expCarry = Math.exp(Math.max(-2, Math.min(2, logCarry)));
+    const expHarm = Math.exp(Math.max(-2, Math.min(2, logHarm)));
+    const expCohort = 1.0;
+    const totalCouplingWeight = expTrans + expCarry + expHarm + expCohort;
+    const wTrans = expTrans / totalCouplingWeight;
+    const wCarry = expCarry / totalCouplingWeight;
+    const wHarm = expHarm / totalCouplingWeight;
+    const wCohort = expCohort / totalCouplingWeight;
 
     for (let j = 1; j <= N; j++) {
       const rowOffset = j * stride;
@@ -401,9 +411,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         // 2. Report direct carry-over
         let liftCarry = 1.0;
         if (i === j) {
-          const structCarry = Math.max(1.0, carryOverLift * carryHurstModulator);
-          const boostCarry = 1.0 + ((repeatCounts[j] || 0) / (laplaceAlpha * p0 + (fromTotals[j] || 0) * p0));
-          liftCarry = structCarry * boostCarry;
+          const structCarry = carryOverLift * carryHurstModulator;
+          const pDenom = (fromTotals[j] + laplaceAlpha) * p0;
+          const boostCarry = pDenom > 0 ? (repeatCounts[j] + laplaceAlpha * p0) / pDenom : 1.0;
+          liftCarry = Math.max(1e-4, structCarry * boostCarry);
         }
 
         // 3. Harmonique continu (distance modulaire sur le tore Z_90)
@@ -420,10 +431,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         const liftCohort = Math.max(1.0, (coOcc + laplaceAlpha * p0) / (sampleSize * expectedPairRate + laplaceAlpha));
 
         crossCouplingMatrix[rowOffset + i] =
-          wTrans * Math.log(Math.max(1.0, liftTrans)) +
-          wCarry * Math.log(Math.max(1.0, liftCarry)) +
-          wHarm * Math.log(Math.max(1.0, liftHarm)) +
-          wCohort * Math.log(Math.max(1.0, liftCohort));
+          wTrans * Math.log(Math.max(1e-4, liftTrans)) +
+          wCarry * Math.log(Math.max(1e-4, liftCarry)) +
+          wHarm * Math.log(Math.max(1e-4, liftHarm)) +
+          wCohort * Math.log(Math.max(1e-4, liftCohort));
       }
     }
 
@@ -445,8 +456,36 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       rawHawkes[c] = Math.log(Math.max(1e-4, hawkesRes.intensities[c] / mu));
     }
 
-    // Rétrécissement bayésien continu gamma basé sur la taille d'échantillon
-    const sampleScale = Math.sqrt(N); // racine de l'espace d'état
+    // 3d. Intégration continue du graphe complet all-to-all du réseau fermé (AGENTS.md)
+    // Tous les tirages du même réseau étanche alimentent continûment la prédiction via leurs poids de couplage
+    const evidenceNetwork = new Float64Array(N + 1);
+    const targetNetId = (family.id === 'hebdomadaire' || family.id === 'quotidien')
+      ? family.id
+      : (getDrawNetworkId(drawName) || 'quotidien');
+    const networkDrawNames = INTER_DRAW_NETWORKS[targetNetId]?.drawNames || [];
+    for (const otherDrawName of networkDrawNames) {
+      if (normalizeDrawName(otherDrawName) === normalizeDrawName(drawName)) continue;
+      if (normalizeDrawName(otherDrawName) === normalizeDrawName(predName)) continue;
+
+      const sHistKey = globalCache.generateKey('history', otherDrawName);
+      let sHist = globalCache.getSync<any[]>(sHistKey, otherDrawName);
+      if (!sHist || sHist.length === 0) {
+        sHist = generateDeterministicFallbackHistory(otherDrawName);
+      }
+
+      const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory);
+      if (coupling.weight > 0.001) {
+        const sWinners = (sHist[0]?.gagnants || []).filter((n: number) => n >= 1 && n <= N);
+        const netLift = coupling.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT;
+        const logCoupling = Math.log(Math.max(1e-4, netLift));
+        for (const sw of sWinners) {
+          evidenceNetwork[sw] += coupling.weight * logCoupling;
+        }
+      }
+    }
+
+    // Rétrécissement bayésien continu gamma basé sur la combinatoire de l'espace d'état (N/K = 18.0)
+    const sampleScale = N / K;
     const gamma = sampleSize / (sampleSize + sampleScale);
 
     // Log-cotes continues brutes pour chaque numéro [1..90]
@@ -465,30 +504,23 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       for (const p of activePredWinners) {
         if (isDirectCandidate && p === c) continue; // Le report direct est traité dans son canal propre
         const condProb = kdeTransitionMatrix[p][c];
-
-        if (isDirectCandidate) {
-          const transLift = Math.max(1.0, condProb / p0);
-          if (transLift > 1.0) {
-            evidenceTrans += Math.log(transLift);
-          }
-        } else {
-          const transLift = Math.max(1e-4, condProb / p0);
-          evidenceTrans += Math.log(transLift);
-        }
+        const transLift = Math.max(1e-4, condProb / p0);
+        evidenceTrans += Math.log(transLift);
       }
       rawTrans[c] = evidenceTrans;
 
-      // --- CANAL 2 : REPORT DIRECT CARRY-OVER (INERTIE STOCHASTIQUE) ---
+      // --- CANAL 2 : REPORT DIRECT CARRY-OVER (INERTIE STOCHASTIQUE SANS BIAIS +1) ---
       let evidenceRepeat = 0;
       if (isDirectCandidate) {
         flags.push('REPORT_DIRECT');
-        const structuralPriorLift = Math.max(1.0, carryOverLift * carryHurstModulator);
-        const empiricalBoost = 1.0 + ((repeatCounts[c] || 0) / (laplaceAlpha * p0 + (fromTotals[c] || 0) * p0));
-        evidenceRepeat = Math.log(structuralPriorLift * empiricalBoost);
+        const structuralPriorLift = carryOverLift * carryHurstModulator;
+        const pDenom = (fromTotals[c] + laplaceAlpha) * p0;
+        const empiricalLift = pDenom > 0 ? (repeatCounts[c] + laplaceAlpha * p0) / pDenom : 1.0;
+        evidenceRepeat = Math.log(Math.max(1e-4, structuralPriorLift * empiricalLift));
       }
       rawCarry[c] = evidenceRepeat;
 
-      // --- CANAL 3 : RÉSONANCE HARMONIQUE SYMÉTRIQUE (MIROIR & COMPLÉMENT 91) ---
+      // --- CANAL 3 : RÉSONANCE HARMONIQUE SYMÉTRIQUE (MIROIR & COMPLÉMENT 91 SANS BIAIS +1) ---
       let evidenceHarmonic = 0;
       for (const p of activePredWinners) {
         const mir = getMirrorNumber(p);
@@ -496,9 +528,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
           flags.push('MIROIR_DECIMAL');
           const hitKey = (p << 7) | c;
           const occ = mirrorPairHits.get(hitKey) || 0;
-          const structuralMirrorLift = Math.max(1.0, mirrorLift * harmonicHurstModulator);
-          const mirrorEmpiricalBoost = 1.0 + (occ / (laplaceAlpha * p0 + (fromTotals[p] || 0) * p0));
-          evidenceHarmonic += Math.log(structuralMirrorLift * mirrorEmpiricalBoost);
+          const structuralMirrorLift = mirrorLift * harmonicHurstModulator;
+          const pDenom = (fromTotals[p] + laplaceAlpha) * p0;
+          const mirrorEmpiricalLift = pDenom > 0 ? (occ + laplaceAlpha * p0) / pDenom : 1.0;
+          evidenceHarmonic += Math.log(Math.max(1e-4, structuralMirrorLift * mirrorEmpiricalLift));
         }
 
         const comp = getComplement90(p);
@@ -506,9 +539,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
           flags.push('COMPLEMENT_90');
           const hitKey = (p << 7) | c;
           const occ = compPairHits.get(hitKey) || 0;
-          const structuralCompLift = Math.max(1.0, complementLift * harmonicHurstModulator);
-          const compEmpiricalBoost = 1.0 + (occ / (laplaceAlpha * p0 + (fromTotals[p] || 0) * p0));
-          evidenceHarmonic += Math.log(structuralCompLift * compEmpiricalBoost);
+          const structuralCompLift = complementLift * harmonicHurstModulator;
+          const pDenom = (fromTotals[p] + laplaceAlpha) * p0;
+          const compEmpiricalLift = pDenom > 0 ? (occ + laplaceAlpha * p0) / pDenom : 1.0;
+          evidenceHarmonic += Math.log(Math.max(1e-4, structuralCompLift * compEmpiricalLift));
         }
       }
       rawHarm[c] = evidenceHarmonic;
@@ -530,8 +564,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       }
       rawCohort[c] = evidenceCohort;
 
-      // Fusion conjointe bayésienne des 4 canaux + Noyau de Hawkes Croisé sans coupure brusque
-      const logitCombined = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + evidenceCohort + 0.5 * rawHawkes[c]);
+      // Fusion conjointe bayésienne des 4 canaux + Graphe Complet Réseau + Noyau de Hawkes Croisé
+      const logitCombined = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + evidenceCohort + evidenceNetwork[c] + 0.5 * rawHawkes[c]);
       rawLogOdds[c] = logitCombined;
 
       channelDetails[c] = {
@@ -553,7 +587,13 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     const { median: medCohort, mad: madCohort } = computeRobustDistribution(rawCohort);
     const { median: medHawkes, mad: madHawkes } = computeRobustDistribution(rawHawkes);
 
-    const robustScale = Math.max(1e-6, 1.4826 * madLog);
+    const seChannel = Math.sqrt((p0 * (1.0 - p0)) / Math.max(1, sampleSize));
+    const robustScale = Math.max(seChannel, 1.4826 * madLog);
+    const transScale = Math.max(seChannel, 1.4826 * madTrans);
+    const carryScale = Math.max(seChannel, 1.4826 * madCarry);
+    const harmScale = Math.max(seChannel, 1.4826 * madHarm);
+    const cohortScale = Math.max(seChannel, 1.4826 * madCohort);
+    const hawkesScale = Math.max(seChannel, 1.4826 * madHawkes);
     const slope = 1.0 + 2.0 * hurst;
 
     for (let c = 1; c <= N; c++) {
@@ -563,11 +603,11 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       scores[c] = clamp(scoreVal, 0.5, 99.5);
 
       // Décomposition des canaux en scores continus [0, 100]
-      const zTrans = (rawTrans[c] - medTrans) / Math.max(1e-6, 1.4826 * madTrans);
-      const zCarry = (rawCarry[c] - medCarry) / Math.max(1e-6, 1.4826 * madCarry);
-      const zHarm = (rawHarm[c] - medHarm) / Math.max(1e-6, 1.4826 * madHarm);
-      const zCohort = (rawCohort[c] - medCohort) / Math.max(1e-6, 1.4826 * madCohort);
-      const zHawkes = (rawHawkes[c] - medHawkes) / Math.max(1e-6, 1.4826 * madHawkes);
+      const zTrans = (rawTrans[c] - medTrans) / transScale;
+      const zCarry = (rawCarry[c] - medCarry) / carryScale;
+      const zHarm = (rawHarm[c] - medHarm) / harmScale;
+      const zCohort = (rawCohort[c] - medCohort) / cohortScale;
+      const zHawkes = (rawHawkes[c] - medHawkes) / hawkesScale;
 
       channelDetails[c].transitionScore = clamp(100.0 / (1.0 + Math.exp(-slope * zTrans)), 1.0, 99.0);
       channelDetails[c].carryOverScore = clamp(100.0 / (1.0 + Math.exp(-slope * zCarry)), 1.0, 99.0);
@@ -576,6 +616,7 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       channelDetails[c].hawkesScore = clamp(100.0 / (1.0 + Math.exp(-slope * zHawkes)), 1.0, 99.0);
       channelDetails[c].hawkesExcitation = Number(hawkesRes.netExcitations[c].toFixed(4));
 
+<<<<<<< HEAD
       // AGENTS.md #1 : seuil de significativité ancré à la constante gaussienne documentée
       // Z95_GAUSS (≈1.96, 95 % bilatéral), déjà utilisée comme barre de significativité dans
       // tout le module inter-tirages — remplace le gain arbitraire 1.25.
@@ -584,17 +625,29 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       }
 
       if (zHawkes > Z95_GAUSS && !channelDetails[c].flags.includes('HAWKES_EXCITATION')) {
+=======
+      // Seuils statistiques dérivés des quantiles gaussiens (z90 = 1.28155, z75 = 0.67449)
+      const z90 = 1.28155;
+      const z75 = 0.67449;
+      const uniformLagEnergy = 1.0 / lagCount;
+
+      if (zTrans > z90 && !channelDetails[c].flags.includes('HAUTE_TRANSITION')) {
+        channelDetails[c].flags.push('HAUTE_TRANSITION');
+      }
+
+      if (zHawkes > z90 && !channelDetails[c].flags.includes('HAWKES_EXCITATION')) {
+>>>>>>> ac844c3a182f95a72d017c702d494e806bce502f
         channelDetails[c].flags.push('HAWKES_EXCITATION');
       }
 
-      if (lagCount > 1 && hawkesRes.lagExcitations.subarray(1).reduce((a, b) => a + b, 0) > 0.20 * Math.max(1e-6, hawkesRes.totalEnergy)) {
-        if (zHawkes > 0.75 && !channelDetails[c].flags.includes('HAWKES_REMANENCE')) {
+      if (lagCount > 1 && hawkesRes.lagExcitations.subarray(1).reduce((a, b) => a + b, 0) > uniformLagEnergy * Math.max(1e-6, hawkesRes.totalEnergy)) {
+        if (zHawkes > z75 && !channelDetails[c].flags.includes('HAWKES_REMANENCE')) {
           channelDetails[c].flags.push('HAWKES_REMANENCE');
         }
       }
 
       // Confiance continue basée sur la taille d'échantillon et le contraste de signal
-      const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + 15.0));
+      const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + sampleScale));
       const signalContrast = Math.tanh(Math.abs(zScore) / 2.0);
       confidences[c] = clamp(sampleConfidence * 0.65 + signalContrast * 0.35, 0.2, 0.98);
     }

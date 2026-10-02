@@ -154,12 +154,14 @@ export const auditInterDrawPatternsPostMortem = (
   // Le tirage du prédécesseur associé est celui au même cycle ou le plus proche antérieur.
   // NB : comparaison par horodatage réel — une comparaison lexicographique de dates
   // « jj/mm/aaaa » serait chronologiquement fausse (le jour dominerait le tri).
-  const targetTs = getDrawTimestamp(targetDraw.date || '');
+  const targetDrawName = drawName;
+  const predName = relation.predecessor.name;
+  const targetTs = getDrawTimestamp(targetDraw.date || '', targetDraw.drawName || targetDraw.draw_name || targetDrawName);
   let predDrawIndex = -1;
 
   for (let p = 0; p < predHistory.length; p++) {
-    const pTs = getDrawTimestamp(predHistory[p].date || '');
-    if (pTs > 0 && pTs <= targetTs) {
+    const pTs = getDrawTimestamp(predHistory[p].date || '', predHistory[p].drawName || predHistory[p].draw_name || predName);
+    if (pTs > 0 && pTs < targetTs) {
       predDrawIndex = p;
       break;
     }
@@ -179,7 +181,9 @@ export const auditInterDrawPatternsPostMortem = (
 
   const pairedPairs = alignConsecutiveDrawHistories(
     priorTargetHistory.length > 0 ? priorTargetHistory : purifiedTarget,
-    priorPredHistory.length > 0 ? priorPredHistory : predHistory
+    priorPredHistory.length > 0 ? priorPredHistory : predHistory,
+    targetDrawName,
+    predName
   );
 
   if (pairedPairs.length === 0) return null;

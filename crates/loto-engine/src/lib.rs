@@ -13,6 +13,11 @@ pub mod markov;
 pub mod annealing;
 pub mod topological;
 pub mod cooccurrence;
+pub mod interdraw_dynamics;
+pub mod simulation_core;
+pub mod spatial_service;
+pub mod strategy_whatif;
+pub mod temporal_service;
 
 use wasm_bindgen::prelude::*;
 

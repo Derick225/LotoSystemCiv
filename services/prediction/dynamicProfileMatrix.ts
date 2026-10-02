@@ -194,9 +194,8 @@ export const calculateCyclicPhaseProfileMatrix = (
   // 7. Modulateur de Confiance Continu :
   // En phase d'attracteur périodique, la prédictibilité de l'orbite est supérieure (boost continu)
   // En phase de haute dispersion, un facteur de régulation abaisse l'hyper-confiance pour éviter les faux espoirs
-  const confidenceModulator = parseFloat(
-    Math.max(0.75, Math.min(1.25, 1.0 + 0.20 * (attractorTension - stochasticDispersionIndex))).toFixed(3)
-  );
+  const dynamicModulation = Math.tanh(0.5 * (attractorTension - stochasticDispersionIndex)) * (1.0 - normalizedEntropy);
+  const confidenceModulator = parseFloat((1.0 + 0.25 * dynamicModulation).toFixed(3));
 
   // 8. Synthèse Narrative
   let narrativeInterpretation = '';

@@ -26,6 +26,7 @@ import { useHpcEngineStatus } from "../../hooks/useHpcEngineStatus";
 import { InterDrawCooccurrenceView } from "../interdraw/InterDrawCooccurrenceView";
 import { InterDrawPatternView } from "../interdraw/InterDrawPatternView";
 import { InterDrawNetworkMatrixView } from "../interdraw/InterDrawNetworkMatrixView";
+import { InterDrawDynamicsView } from "../interdraw/InterDrawDynamicsView";
 import {
   GitBranch,
   ArrowRight,
@@ -104,7 +105,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   const [report, setReport] = useState<InterDrawReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [subView, setSubView] = useState<'OVERVIEW' | 'NETWORK_MATRIX' | 'COOCCURRENCES' | 'PATTERNS' | 'SIMULATOR'>('OVERVIEW');
+  const [subView, setSubView] = useState<'OVERVIEW' | 'NETWORK_MATRIX' | 'DYNAMICS' | 'COOCCURRENCES' | 'PATTERNS' | 'SIMULATOR'>('OVERVIEW');
 
   const loadReport = useCallback(async (forcedTarget: string, famId: InterDrawFamilyId, forceRefresh: boolean = false) => {
     setLoading(true);
@@ -410,6 +411,24 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               {report.networkMatrix.drawNames.length}x{report.networkMatrix.drawNames.length}
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => {
+            audioEngine.play("click");
+            setSubView('DYNAMICS');
+          }}
+          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'DYNAMICS'
+              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
+              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+          }`}
+        >
+          <Activity size={14} className={subView === 'DYNAMICS' ? 'animate-pulse text-amber-400' : 'text-sky-400'} />
+          <span>Dynamiques Complexes (Domino & Cascade)</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 text-[9px] font-mono font-bold">
+            4 Phénomènes
+          </span>
         </button>
 
         <button
@@ -1322,6 +1341,17 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               networkMatrix={report.networkMatrix}
               networkId={report.networkId || (activeFamily.id as any)}
               targetDraw={report.targetDraw}
+              onSelectDraw={onSelectDraw}
+            />
+          )}
+
+          {/* VUE DÉDIÉE DYNAMIQUES COMPLEXES (DOMINO, PAPILLON, CASCADE & RÉACTION EN CHAÎNE) */}
+          {subView === 'DYNAMICS' && (
+            <InterDrawDynamicsView
+              dynamics={report.complexDynamics}
+              targetDraw={report.targetDraw}
+              predecessorName={report.predecessor?.name || 'Prédécesseur'}
+              networkId={report.networkId || (activeFamily.id as any)}
               onSelectDraw={onSelectDraw}
             />
           )}

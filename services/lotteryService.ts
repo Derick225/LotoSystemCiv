@@ -1,6 +1,6 @@
 
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, AlgoWeights } from '../types';
-import { DRAW_SCHEDULE, isDrawWithoutMachine } from '../constants';
+import { DRAW_SCHEDULE, isDrawWithoutMachine, getDrawFullTimestamp } from '../constants';
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
@@ -294,16 +294,8 @@ export const lotteryService = {
   }
 };
 
-export const getDrawTimestamp = (dateStr: string): number => {
-    if (!dateStr) return 0;
-    if (dateStr.includes('/')) {
-        const parts = dateStr.split('/');
-        if (parts.length === 3) {
-            return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
-        }
-    }
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? 0 : d.getTime();
+export const getDrawTimestamp = (dateStr: string, drawName?: string, explicitTime?: string): number => {
+    return getDrawFullTimestamp(dateStr, drawName, explicitTime);
 };
 
 export const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] => {
