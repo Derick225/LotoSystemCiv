@@ -40,7 +40,8 @@ import {
   InterDrawCascadePattern,
   InterDrawCascadeNeighbour,
   InterDrawCentroidPattern,
-  InterDrawRetentionPattern
+  InterDrawRetentionPattern,
+  Z95_GAUSS
 } from './interDrawPatternService';
 
 // Probabilité marginale théorique exacte d'un numéro : 5/90.
@@ -302,10 +303,13 @@ export const runBayesianResonanceEngine = (
   const logitP0 = Math.log(p0 / (1.0 - p0)); // ln(1/17) ~ -2.833213
 
   const sampleSize = pairedPairs.length;
-  // Paramètre de lissage de Laplace continu auto-calibré en boucle fermée via shrinkage de James-Stein
+  // Paramètre de lissage de Laplace continu auto-calibré en boucle fermée via shrinkage de James-Stein.
+  // Pseudo-compteur ancré sur la structure réelle du tirage : 4·K (4 × 5 gagnants par tirage),
+  // soit l'information a priori équivalente à quatre tirages complets.
   const priorAlpha = 1.0 / (1.0 + Math.log(1.0 + sampleSize));
+  const priorPseudoCount = 4 * K;
   const laplaceAlpha = (typeof optimalAlpha === 'number' && !isNaN(optimalAlpha) && optimalAlpha > 0)
-    ? (sampleSize / (sampleSize + 20.0)) * optimalAlpha + (20.0 / (sampleSize + 20.0)) * priorAlpha
+    ? (sampleSize / (sampleSize + priorPseudoCount)) * optimalAlpha + (priorPseudoCount / (sampleSize + priorPseudoCount)) * priorAlpha
     : priorAlpha;
 
   // Matrices de dénombrement des transitions et répétitions
@@ -426,34 +430,38 @@ export const runBayesianResonanceEngine = (
   const crossCouplingMatrix = new Float64Array(stride * stride);
 
   // Poids des canaux de couplage DÉRIVÉS DES DONNÉES (AGENTS.md #1 : zéro nombre magique).
-  // Auparavant figés à 0.45 / 0.35 / 0.20, ces poids répartissaient arbitrairement
-  // l'influence entre transition markovienne, report direct (carry-over) et résonance
-  // harmonique. Chaque canal est désormais pondéré par l'information log-lift qu'il porte
-  // réellement, mesurée sur les paires appariées, puis normalisée pour sommer à 1 : un
-  // canal sans signal observé (log-lift nul) reçoit un poids nul, un canal fortement
+  // Chaque canal est pondéré par l'information qu'il porte réellement, mesurée par le
+  // log-lift moyen en valeur absolue (dispersion informationnelle) sur les paires
+  // appariées, puis normalisée pour sommer à 1 : un canal sans signal observé
+  // (tous les lifts à 1, log-lift nul) reçoit un poids nul, un canal fortement
   // informatif domine — répartition continue et objective, sans constante arbitraire.
-  const carryEvidence = Math.log(Math.max(1.05, carryOverLift));
-  const harmEvidence = Math.log(Math.max(1.05, Math.max(mirrorLift, complementLift)));
+  // AGENTS.md #3 : les évidences sont désormais SIGNÉES (log-lift continu) — une
+  // sous-représentation (lift < 1) produit une évidence négative au lieu d'être
+  // écrasée à zéro par un plancher arbitraire.
+  const carryEvidence = Math.log(Math.max(1e-4, carryOverLift));
+  const harmEvidence = Math.log(Math.max(1e-4, Math.max(mirrorLift, complementLift)));
 
-  // Évidence de transition : log-lift markovien moyen observé sur la matrice j→i.
-  let transEvidenceSum = 0;
-  let transEvidenceCount = 0;
+  // Information de transition : log-lift markovien signé sur la matrice j→i ;
+  // le poids du canal dérive de la dispersion informationnelle (|log-lift| moyen).
+  let transInfoSum = 0;
+  let transInfoCount = 0;
   for (let j = 1; j <= N; j++) {
     const denom = fromTotals[j] + laplaceAlpha;
     if (denom <= 0) continue;
     for (let i = 1; i <= N; i++) {
       const pTrans = (transitionsCount[j][i] + laplaceAlpha * p0) / denom;
-      transEvidenceSum += Math.log(Math.max(1.0, pTrans / p0));
-      transEvidenceCount++;
+      transInfoSum += Math.abs(Math.log(Math.max(1e-4, pTrans / p0)));
+      transInfoCount++;
     }
   }
-  const transEvidence = transEvidenceCount > 0 ? transEvidenceSum / transEvidenceCount : 0;
+  const transInfo = transInfoCount > 0 ? transInfoSum / transInfoCount : 0;
 
-  const totalEvidence = transEvidence + carryEvidence + harmEvidence;
+  // Poids = part d'information absolue de chaque canal (toujours ≥ 0, somme à 1).
+  const totalInfo = transInfo + Math.abs(carryEvidence) + Math.abs(harmEvidence);
   // Repli uniforme (1/3 par canal) si aucun signal : neutre, non arbitraire.
-  const wTrans = totalEvidence > 0 ? transEvidence / totalEvidence : 1 / 3;
-  const wCarry = totalEvidence > 0 ? carryEvidence / totalEvidence : 1 / 3;
-  const wHarm = totalEvidence > 0 ? harmEvidence / totalEvidence : 1 / 3;
+  const wTrans = totalInfo > 0 ? transInfo / totalInfo : 1 / 3;
+  const wCarry = totalInfo > 0 ? Math.abs(carryEvidence) / totalInfo : 1 / 3;
+  const wHarm = totalInfo > 0 ? Math.abs(harmEvidence) / totalInfo : 1 / 3;
 
   for (let j = 1; j <= N; j++) {
     const rowOffset = j * stride;
@@ -463,24 +471,31 @@ export const runBayesianResonanceEngine = (
 
     for (let i = 1; i <= N; i++) {
       const pTrans = transDenom > 0 ? (transitionsCount[j][i] + laplaceAlpha * p0) / transDenom : p0;
-      const liftTrans = Math.max(1e-4, pTrans / p0);
+      const logLiftTrans = Math.log(Math.max(1e-4, pTrans / p0));
 
-      let liftCarry = 1.0;
+      let logLiftCarry = 0;
       if (i === j) {
         const boostCarry = 1.0 + ((repeatCounts[j] || 0) / (laplaceAlpha * p0 + (fromTotals[j] || 0) * p0));
-        liftCarry = Math.max(1.05, carryOverLift) * boostCarry;
+        logLiftCarry = Math.log(Math.max(1e-4, carryOverLift * boostCarry));
       }
 
+      // Résonance harmonique signée à pondération géométrique gaussienne : le log-lift
+      // de chaque résonance (miroir / complément) s'applique proportionnellement à sa
+      // proximité spectrale au point de résonance. Une résonance sous-représentée
+      // (lift < 1) réduit désormais le couplage au lieu de l'augmenter — l'ancienne
+      // forme additive (1 + k) gonflait le couplage de TOUTE la grille, y compris à
+      // distance maximale de la résonance.
       const dMir = Math.min(Math.abs(i - mirJ), 90 - Math.abs(i - mirJ));
       const dComp = Math.min(Math.abs(i - compJ), 90 - Math.abs(i - compJ));
-      const kMir = Math.exp(-(dMir * dMir) / 2.0) * mirrorLift;
-      const kComp = Math.exp(-(dComp * dComp) / 2.0) * complementLift;
-      const liftHarm = 1.0 + kMir + kComp;
+      const wMir = Math.exp(-(dMir * dMir) / 2.0);
+      const wComp = Math.exp(-(dComp * dComp) / 2.0);
+      const logLiftHarm = wMir * Math.log(Math.max(1e-4, mirrorLift)) +
+                          wComp * Math.log(Math.max(1e-4, complementLift));
 
       crossCouplingMatrix[rowOffset + i] =
-        wTrans * Math.log(Math.max(1.0, liftTrans)) +
-        wCarry * Math.log(Math.max(1.0, liftCarry)) +
-        wHarm * Math.log(Math.max(1.0, liftHarm));
+        wTrans * logLiftTrans +
+        wCarry * logLiftCarry +
+        wHarm * logLiftHarm;
     }
   }
 
@@ -494,9 +509,11 @@ export const runBayesianResonanceEngine = (
   }
 
   // H > 0.5 (persistance) -> demi-vie plus longue (décroissance plus lente)
-  // H < 0.5 (anti-persistance) -> amortissement rapide
+  // H < 0.5 (anti-persistance) -> amortissement rapide. Le plancher de dilatation est
+  // la borne du domaine physique H ∈ [0, 1] : 1 − 2·tanh(0,5) — ancrage structurel,
+  // pas un seuil arbitraire.
   const memoryDilation = 1.0 + 2.0 * Math.tanh(effectiveHurst - 0.5);
-  const betaDecay = HAWKES_NEUTRAL_BETA_DECAY / Math.max(0.2, memoryDilation);
+  const betaDecay = HAWKES_NEUTRAL_BETA_DECAY / Math.max(1.0 - 2.0 * Math.tanh(0.5), memoryDilation);
 
   const hawkesRes = computeCrossHawkesKernelHpc({
     predOccurrences: predLaggedOccurrences,
@@ -516,8 +533,10 @@ export const runBayesianResonanceEngine = (
   // Poids adaptatif continu du canal de Hawkes dérivé de l'énergie totale d'excitation et de la variance de l'échantillon
   const hawkesWeight = Math.tanh(hawkesRes.totalEnergy / Math.max(1.0, Math.sqrt(sampleSize)));
 
-  // Rétrécissement bayésien continu gamma basé sur la taille d'échantillon (sans constante arbitraire)
-  const gamma = sampleSize / (sampleSize + 10.0);
+  // Rétrécissement bayésien continu gamma basé sur la taille d'échantillon.
+  // Pseudo-compteur structurel 2·K : l'information a priori de deux tirages complets
+  // équilibre l'évidence observée (AGENTS.md #1 : ancrage structurel, pas arbitraire).
+  const gamma = sampleSize / (sampleSize + 2 * K);
 
   // Inférence bayésienne pour chaque numéro candidat c in [1..90]
   const candidateMetrics: {
@@ -543,16 +562,10 @@ export const runBayesianResonanceEngine = (
       const count = transitionsCount[p][c];
       const denom = fromTotals[p] + laplaceAlpha;
       const condProb = denom > 0 ? (count + laplaceAlpha * p0) / denom : p0;
-      if (isDirectCandidate) {
-        // Pour les gagnants actifs du prédécesseur, ne cumuler que les transitions positives effectives observées
-        const transLift = Math.max(1.0, condProb / p0);
-        if (transLift > 1.0) {
-          evidenceTrans += Math.log(transLift);
-        }
-      } else {
-        const transLift = Math.max(1e-4, condProb / p0);
-        evidenceTrans += Math.log(transLift);
-      }
+      // AGENTS.md #3 : évidence de transition SIGNÉE et continue pour tous les candidats
+      // — une transition sous-représentée (lift < 1) pénalise désormais le canal au lieu
+      // d'être ignorée par une porte binaire réservée aux candidats directs.
+      evidenceTrans += Math.log(Math.max(1e-4, condProb / p0));
     }
 
     const logitTrans = logitP0 + gamma * evidenceTrans;
@@ -563,11 +576,10 @@ export const runBayesianResonanceEngine = (
     let probRepeat = p0;
 
     if (isDirectCandidate) {
-      const pDenom = fromTotals[c] + laplaceAlpha;
-      const empRepeatProb = pDenom > 0 ? (repeatCounts[c] + laplaceAlpha * p0 * Math.max(1.0, carryOverLift)) / pDenom : p0;
-      const structuralPriorLift = Math.max(1.05, carryOverLift);
+      // AGENTS.md #3 : évidence de report SIGNÉE — un carry-over sous-représenté
+      // (lift < 1) produit une évidence négative, sans plancher arbitraire à 1.05.
       const empiricalBoost = 1.0 + ((repeatCounts[c] || 0) / (laplaceAlpha * p0 + (fromTotals[c] || 0) * p0));
-      evidenceRepeat = Math.log(structuralPriorLift * empiricalBoost);
+      evidenceRepeat = Math.log(Math.max(1e-4, carryOverLift * empiricalBoost));
       const logitRepeat = logitP0 + gamma * evidenceRepeat;
       probRepeat = 1.0 / (1.0 + Math.exp(-logitRepeat));
     }
@@ -584,18 +596,18 @@ export const runBayesianResonanceEngine = (
       const mir = getMirrorNumber(p);
       if (mir === c && mir !== p) {
         const occ = mirrorPairOccurrences[`${p}_${c}`] || 0;
-        const structuralMirrorLift = Math.max(1.05, mirrorLift);
+        // AGENTS.md #3 : évidence harmonique SIGNÉE — une résonance sous-représentée
+        // (lift < 1) pénalise le canal au lieu d'un plancher arbitraire à 1.05.
         const mirrorEmpiricalBoost = 1.0 + (occ / (laplaceAlpha * p0 + (fromTotals[p] || 0) * p0));
-        evidenceHarmonic += Math.log(structuralMirrorLift * mirrorEmpiricalBoost);
+        evidenceHarmonic += Math.log(Math.max(1e-4, mirrorLift * mirrorEmpiricalBoost));
         if (!flags.includes('MIROIR_DECIMAL')) flags.push('MIROIR_DECIMAL');
       }
 
       const comp = getComplement90(p);
       if (comp === c && comp !== p) {
         const occ = compPairOccurrences[`${p}_${c}`] || 0;
-        const structuralCompLift = Math.max(1.05, complementLift);
         const compEmpiricalBoost = 1.0 + (occ / (laplaceAlpha * p0 + (fromTotals[p] || 0) * p0));
-        evidenceHarmonic += Math.log(structuralCompLift * compEmpiricalBoost);
+        evidenceHarmonic += Math.log(Math.max(1e-4, complementLift * compEmpiricalBoost));
         if (!flags.includes('COMPLEMENT_90')) flags.push('COMPLEMENT_90');
       }
     }
@@ -641,6 +653,39 @@ export const runBayesianResonanceEngine = (
   const varHawkes = hawkesProbs.reduce((a, b) => a + Math.pow(b - meanHawkes, 2), 0) / hawkesProbs.length;
   const stdHawkes = Math.max(Math.sqrt(varHawkes), 1e-6);
 
+  // Standardisation des canaux carry-over et harmonique sur leur ensemble ACTIF
+  // (candidats directs / résonances détectées) : chaque canal est comparé à sa propre
+  // distribution, comme zTrans/zComp/zHawkes — l'ancienne division par stdComp
+  // mélangeait la dispersion du canal composite avec celle du canal évalué.
+  const meanStdOverActive = (values: number[]): { mean: number; std: number } => {
+    if (values.length === 0) return { mean: p0, std: 1e-6 };
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
+    return { mean, std: Math.max(Math.sqrt(variance), 1e-6) };
+  };
+  const repeatStats = meanStdOverActive(candidateMetrics.filter(m => m.probRepeat > 0).map(m => m.probRepeat));
+  const harmStats = meanStdOverActive(candidateMetrics.filter(m => m.probHarmonic > 0).map(m => m.probHarmonic));
+
+  // Part de l'énergie d'excitation retardée attendue sous le noyau géométrique
+  // ajusté : le noyau HPC pondère le lag l par e^(-beta·(l+1)) (dt = 1..lagCount),
+  // donc la part attendue des lags retardés (dt ≥ 2) vaut r(1-r^(L-1))/(1-r^L) avec
+  // r = e^(-beta) — comparaison observé vs modèle, sans constante arbitraire.
+  // HAWKES_REMANENCE signale une énergie retardée excédentaire par rapport au régime
+  // de mémoire ajusté via Hurst.
+  const decayRatio = Math.exp(-betaDecay);
+  const decayTail = Math.pow(decayRatio, lagCount);
+  const expectedLagTailShare = (decayRatio * (1 - Math.pow(decayRatio, lagCount - 1))) / (1 - decayTail);
+  // Énergies en valeur absolue : la matrice de couplage étant désormais signée, la
+  // part retardée doit rester bien définie même si des contributions se compensent.
+  let absTotalLagEnergy = 0;
+  let absTailLagEnergy = 0;
+  for (let l = 0; l < hawkesRes.lagExcitations.length; l++) {
+    const e = Math.abs(hawkesRes.lagExcitations[l]);
+    absTotalLagEnergy += e;
+    if (l >= 1) absTailLagEnergy += e;
+  }
+  const observedLagTailShare = absTotalLagEnergy > 0 ? absTailLagEnergy / absTotalLagEnergy : 0;
+
   const scoredCandidates: InterDrawCandidateScore[] = candidateMetrics.map(item => {
     const zComp = (item.probComposite - meanComp) / stdComp;
     const compositeScore = Math.round(continuousSigmoid(zComp) * 10) / 10;
@@ -650,36 +695,40 @@ export const runBayesianResonanceEngine = (
 
     let repeatScore = 0;
     if (item.probRepeat > 0) {
-      const zRepeat = (item.probRepeat - p0) / stdComp;
+      const zRepeat = (item.probRepeat - repeatStats.mean) / repeatStats.std;
       repeatScore = Math.round(continuousSigmoid(zRepeat) * 10) / 10;
     }
 
     let harmonicScore = 0;
     if (item.probHarmonic > 0) {
-      const zHarm = (item.probHarmonic - p0) / stdComp;
+      const zHarm = (item.probHarmonic - harmStats.mean) / harmStats.std;
       harmonicScore = Math.round(continuousSigmoid(zHarm) * 10) / 10;
     }
 
     const zHawkes = (item.probHawkes - meanHawkes) / stdHawkes;
     const hawkesScore = Math.round(continuousSigmoid(zHawkes) * 10) / 10;
 
-    // Confiance bayésienne continue : fonction de la certitude empirique (sampleSize) et de la séparation de signal
-    const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + 20.0));
+    // Confiance bayésienne continue : fonction de la certitude empirique (sampleSize,
+    // pseudo-compteur structurel 4·K) et de la séparation de signal
+    const sampleConfidence = Math.sqrt(sampleSize / (sampleSize + 4 * K));
     const signalContrast = Math.tanh(Math.abs(zComp) / 2.0);
     const confidence = Math.round((sampleConfidence * 0.7 + signalContrast * 0.3) * 100) / 100;
 
-    if (zTrans > 1.25 && !item.flags.includes('HAUTE_TRANSITION')) {
+    // AGENTS.md #1 : seuils de significativité ancrés à la constante gaussienne
+    // documentée Z95_GAUSS (≈1.96, 95 % bilatéral), barre de significativité
+    // module-wide — remplace les gains arbitraires 1.25 / 0.75 / 0.20.
+    if (zTrans > Z95_GAUSS && !item.flags.includes('HAUTE_TRANSITION')) {
       item.flags.push('HAUTE_TRANSITION');
     }
 
-    if (zHawkes > 1.25 && !item.flags.includes('HAWKES_EXCITATION')) {
+    if (zHawkes > Z95_GAUSS && !item.flags.includes('HAWKES_EXCITATION')) {
       item.flags.push('HAWKES_EXCITATION');
     }
 
-    if (lagCount > 1 && hawkesRes.lagExcitations.subarray(1).reduce((a: number, b: number) => a + b, 0) > 0.20 * Math.max(1e-6, hawkesRes.totalEnergy)) {
-      if (zHawkes > 0.75 && !item.flags.includes('HAWKES_REMANENCE')) {
-        item.flags.push('HAWKES_REMANENCE');
-      }
+    if (observedLagTailShare > expectedLagTailShare &&
+        zHawkes > Z95_GAUSS &&
+        !item.flags.includes('HAWKES_REMANENCE')) {
+      item.flags.push('HAWKES_REMANENCE');
     }
 
     return {
@@ -740,42 +789,59 @@ export const deriveRetrospectiveOptimalAlpha = (
   pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
   predLaggedHistory?: number[][]
 ): number | undefined => {
-  if (pairedPairs.length < 6) return undefined;
+  // Taille minimale d'entraînement ancrée sur la structure du tirage : K paires
+  // appariées (l'évidence d'un tirage complet). L'historique est ordonné du plus
+  // récent (indice 0) au plus ancien.
+  const MIN_TRAIN_PAIRS = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW;
+  if (pairedPairs.length < MIN_TRAIN_PAIRS + 1) return undefined;
 
-  const testPair = pairedPairs[0];
-  const trainPairs = pairedPairs.slice(1);
-  const testPredWinners = testPair.predWinners;
-  const testActualWinnersSet = new Set(testPair.targetWinners.filter(n => n >= 1 && n <= 90));
-
-  const retroEngine = runBayesianResonanceEngine(
-    trainPairs,
-    testPredWinners,
-    predLaggedHistory?.slice(1)
-  );
-
-  let totalScore = 0;
-  for (let n = 1; n <= 90; n++) {
-    totalScore += retroEngine.fullCandidateScores[n] || (5.0 / 90.0);
-  }
-
+  // Validation croisée à origine glissante STRICTEMENT CAUSALE : chaque paire k est
+  // notée par un moteur entraîné uniquement sur les paires plus anciennes (slice(k+1)).
+  // L'ancienne validation mono-fold (test = paire la plus récente uniquement) estimait
+  // le log-loss sur 5 positifs / 90 — variance extrême et calibration instable.
+  // Les lags du prédécesseur sont laissés au repli interne du moteur (paires
+  // d'entraînement), ce qui préserve la causalité de chaque fold.
   const eps = 1e-6;
-  let logLossSum = 0;
-  let varP = 0;
   const meanP = 5.0 / 90.0;
+  let logLossSum = 0;
+  let varPSum = 0;
+  let foldCount = 0;
 
-  for (let n = 1; n <= 90; n++) {
-    const rawP = ((retroEngine.fullCandidateScores[n] || meanP) / (totalScore || 1.0)) * 5.0;
-    const p = Math.min(1.0, Math.max(1.0 / 90.0, rawP));
-    const y = testActualWinnersSet.has(n) ? 1.0 : 0.0;
-    logLossSum += -(y * Math.log(p + eps) + (1.0 - y) * Math.log(1.0 - p + eps));
-    varP += Math.pow(p - meanP, 2);
+  for (let k = 0; k + MIN_TRAIN_PAIRS < pairedPairs.length; k++) {
+    const trainPairs = pairedPairs.slice(k + 1);
+    if (trainPairs.length < MIN_TRAIN_PAIRS) continue;
+    const testPair = pairedPairs[k];
+    const testActualWinnersSet = new Set(testPair.targetWinners.filter(n => n >= 1 && n <= 90));
+
+    const retroEngine = runBayesianResonanceEngine(trainPairs, testPair.predWinners);
+
+    let totalScore = 0;
+    for (let n = 1; n <= 90; n++) {
+      totalScore += retroEngine.fullCandidateScores[n] || meanP;
+    }
+
+    let foldLogLoss = 0;
+    let foldVarP = 0;
+    for (let n = 1; n <= 90; n++) {
+      const rawP = ((retroEngine.fullCandidateScores[n] || meanP) / (totalScore || 1.0)) * 5.0;
+      const p = Math.min(1.0, Math.max(1.0 / 90.0, rawP));
+      const y = testActualWinnersSet.has(n) ? 1.0 : 0.0;
+      foldLogLoss += -(y * Math.log(p + eps) + (1.0 - y) * Math.log(1.0 - p + eps));
+      foldVarP += Math.pow(p - meanP, 2);
+    }
+    logLossSum += foldLogLoss / 90.0;
+    varPSum += foldVarP / 90.0;
+    foldCount++;
   }
 
-  const logLoss = logLossSum / 90.0;
-  varP /= 90.0;
+  if (foldCount === 0) return undefined;
+
+  const logLoss = logLossSum / foldCount;
+  const varP = varPSum / foldCount;
+  const trainSize = Math.max(MIN_TRAIN_PAIRS, pairedPairs.length - 1);
 
   return Math.max(
-    1.0 / (1.0 + trainPairs.length),
+    1.0 / (1.0 + trainSize),
     Math.min(1.5, (1.0 + Math.sqrt(varP)) / (1.0 + logLoss))
   );
 };
@@ -1110,11 +1176,15 @@ export const generateInterDrawReport = async (
     for (let j = i + 1; j < topNumbersPool.length; j++) {
       const n1 = topNumbersPool[i];
       const n2 = topNumbersPool[j];
-      const s1 = scoredCandidates.find(c => c.number === n1)?.compositeScore || 50;
-      const s2 = scoredCandidates.find(c => c.number === n2)?.compositeScore || 50;
+      const entry1 = scoredCandidates.find(c => c.number === n1);
+      const entry2 = scoredCandidates.find(c => c.number === n2);
+      // Repli neutre UNIQUEMENT si l'entrée est absente — un score légitimement égal
+      // à 0 (repulsion extrême) ne doit plus être écrasé par un `||` falsy.
+      const s1 = entry1 ? entry1.compositeScore : 50;
+      const s2 = entry2 ? entry2.compositeScore : 50;
       const geomAffinity = Math.sqrt(s1 * s2);
-      const conf = ((scoredCandidates.find(c => c.number === n1)?.confidence || 0.5) +
-                    (scoredCandidates.find(c => c.number === n2)?.confidence || 0.5)) / 2;
+      const conf = ((entry1 ? entry1.confidence : 0.5) +
+                    (entry2 ? entry2.confidence : 0.5)) / 2;
 
       pairCandidates.push({
         numbers: [n1, n2],
@@ -1257,10 +1327,12 @@ export const simulateInterDrawTransmission = async (
   const recommendedPairs: InterDrawPairCombination[] = [];
   for (let i = 0; i < topNums.length; i++) {
     for (let j = i + 1; j < topNums.length; j++) {
-      const s1 = candidates.find(c => c.number === topNums[i])?.compositeScore || 50;
-      const s2 = candidates.find(c => c.number === topNums[j])?.compositeScore || 50;
-      const conf1 = candidates.find(c => c.number === topNums[i])?.confidence || 0.5;
-      const conf2 = candidates.find(c => c.number === topNums[j])?.confidence || 0.5;
+      const entry1 = candidates.find(c => c.number === topNums[i]);
+      const entry2 = candidates.find(c => c.number === topNums[j]);
+      const s1 = entry1 ? entry1.compositeScore : 50;
+      const s2 = entry2 ? entry2.compositeScore : 50;
+      const conf1 = entry1 ? entry1.confidence : 0.5;
+      const conf2 = entry2 ? entry2.confidence : 0.5;
       recommendedPairs.push({
         numbers: [topNums[i], topNums[j]],
         affinity: Math.round(Math.sqrt(s1 * s2) * 10) / 10,
