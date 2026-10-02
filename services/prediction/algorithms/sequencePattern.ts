@@ -19,15 +19,15 @@ export const sequencePatternPlugin: AlgorithmPlugin = {
     });
     
     ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache['SEQUENCE_PATTERN'] = { results };
+    ctx.pluginCache[AlgoKey.SEQUENCE_PATTERN] = { results };
   },
 
   evaluate(num: number, ctx: AlgorithmContext) {
-    if (!ctx.pluginCache?.['SEQUENCE_PATTERN']) {
+    if (!ctx.pluginCache?.[AlgoKey.SEQUENCE_PATTERN]) {
       this.precompute(ctx);
     }
     
-    const cache = ctx.pluginCache!['SEQUENCE_PATTERN'];
+    const cache = ctx.pluginCache![AlgoKey.SEQUENCE_PATTERN];
     const results = cache.results as any[];
     
     const stat = results.find(r => r.number === num);

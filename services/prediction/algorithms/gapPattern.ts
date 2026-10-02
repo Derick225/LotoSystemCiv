@@ -169,13 +169,16 @@ export const gapPatternPlugin: AlgorithmPlugin = {
     // Sigmoid function mapped to Z-score combined with KDE cumulative density
     const slope = 1.0 + (ctx.statisticalBounds?.hurstExponent || 0.5) * 5.0;
     const parametricScore = 100.0 / (1.0 + Math.exp(-slope * zScore));
-    const normalizedScore = 0.70 * parametricScore + 0.30 * (residualKde.cdf * 100.0);
-
     // La confiance croît avec le nombre d'écarts observés (fiabilité de l'autocorrélation)
     // et décroît lorsque l'erreur de prédiction SE est élevée par rapport à la moyenne.
     const sampleReliability = 1.0 - 1.0 / Math.sqrt(numGaps + 1);
     const predictionPrecision = 1.0 / (1.0 + SE / (meanGap + Number.EPSILON));
     const confidence = Math.max(0.3, Math.min(0.95, 0.3 + 0.65 * sampleReliability * predictionPrecision));
+
+    // Pondération continue de la prédiction AR(1) versus la densité non-paramétrique KDE
+    const parametricWeight = 0.4 + 0.4 * predictionPrecision;
+    const kdeWeight = 1.0 - parametricWeight;
+    const normalizedScore = parametricWeight * parametricScore + kdeWeight * (residualKde.cdf * 100.0);
 
     return {
       score: Math.max(0, Math.min(100, normalizedScore)),

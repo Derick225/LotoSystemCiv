@@ -192,7 +192,11 @@ export const gapTrendPlugin: AlgorithmPlugin = {
 
     // Score continu : plus l'écart courant dépasse la projection Holt, plus le numéro est "en retard"
     const parametricScore = 100.0 / (1.0 + Math.exp(-slope * (currentOpenGap - projectedNextGap) / scale));
-    const normalizedScore = 0.65 * parametricScore + 0.35 * (kdeRes.cdf * 100.0);
+    // Poids continu dérivé de la qualité d'ajustement (fitQuality ∈ [0, 1]) de Holt :
+    // Si l'ajustement est excellent, le modèle paramétrique domine ; sinon, le noyau KDE non-paramétrique compense.
+    const parametricWeight = 0.4 + 0.4 * Math.max(0.0, Math.min(1.0, fitQuality));
+    const kdeWeight = 1.0 - parametricWeight;
+    const normalizedScore = parametricWeight * parametricScore + kdeWeight * (kdeRes.cdf * 100.0);
 
     // La confiance combine deux facteurs continus : taille d'échantillon et qualité d'ajustement
     const sampleReliability = 1.0 - 1.0 / Math.sqrt(numGaps + 1);

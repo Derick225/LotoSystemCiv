@@ -111,8 +111,8 @@ export const machineTransferPlugin: AlgorithmPlugin = {
     }
 
     return {
-      score: Math.max(0.01, Math.min(0.99, continuousScore)),
-      confidence: Math.min(1.0, 0.5 + Math.abs(continuousScore - 0.5)),
+      score: Math.max(0.0, Math.min(100.0, continuousScore * 100.0)),
+      confidence: Math.min(1.0, Math.max(0.2, 0.4 + Math.abs(continuousScore - 0.5) * 1.2)),
     };
   },
 };

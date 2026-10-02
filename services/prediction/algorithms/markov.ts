@@ -159,9 +159,15 @@ export const markovPlugin: AlgorithmPlugin = {
     
     const rawAttraction = X[num] || 0.0;
     
+    // Intégration de la probabilité conditionnelle Markov issue du dernier tirage (ctx.features.markovMap)
+    const rawMarkovProb = Number(ctx.features.markovMap?.[num]) || 0.0;
+    const maxMarkov = ctx.maxMarkov || Math.max(0.001, ...Array.from(ctx.features.markovMap || []));
+    const normalizedMarkovTransition = maxMarkov > 0 ? (rawMarkovProb / maxMarkov) : 0.0;
+    const transitionModulator = 1.0 + Math.tanh(normalizedMarkovTransition * 1.5);
+
     // Intégration de la succession du leader (Chaîne de plus haut degré)
     const leaderBoost = (ctx.advancedMetrics?.leaderSuccession as Record<number, number>)?.[num] || 0.0;
-    const effectiveAttraction = rawAttraction * (1.0 + leaderBoost / 100.0);
+    const effectiveAttraction = rawAttraction * transitionModulator * (1.0 + leaderBoost / 100.0);
     
     // Normalisation robuste via la CDF Logistique continue
     const slope = 1.0 / iqr;

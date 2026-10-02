@@ -68,7 +68,8 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
     // Si l'historique est trop court, on skip
     if (!ctx.history || ctx.history.length < 10) return;
 
-    const activeDraw = useNexusStore.getState().drawName || "Reveil";
+    // Utiliser le nom du tirage issu du contexte en priorité pour respecter scrupuleusement la TIRAGE ISOLATION RULE
+    const activeDraw = ctx.drawName || (typeof useNexusStore !== 'undefined' ? useNexusStore.getState?.()?.drawName : undefined) || "Reveil";
 
     // 1. Dérivation dynamique du rayon spectral basée sur l'entropie de Shannon
     // Un régime hautement chaotique (entropie élevée) nécessite un rayon spectral plus faible (ex: 0.8)

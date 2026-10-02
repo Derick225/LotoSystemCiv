@@ -165,7 +165,8 @@ export const executeClosedLoopAutopsy = async (
       if (!validKeys.includes(plugin.key)) return;
       try {
         const res = plugin.evaluate(num, context);
-        const s = typeof res.score === 'number' && !isNaN(res.score) ? Math.max(0, Math.min(1, res.score)) : 0;
+        const rawS = typeof res.score === 'number' && !isNaN(res.score) ? Math.max(0, Math.min(100, res.score)) : 0;
+        const s = rawS / 100.0;
         algoScores[plugin.key][num] = s;
         combinedScore += s * (normalizedCurrent[plugin.key] || (1 / numAlgos));
       } catch {
@@ -204,38 +205,43 @@ export const executeClosedLoopAutopsy = async (
   actualWinners.forEach((w) => {
     if (top5Predicted.includes(w)) return; // Hit exact déjà comptabilisé
 
-    // Voisin +/- 1
-    if (top10Set.has(w - 1)) {
+    // Voisins +/- 1 et +/- 2 (sur tore circulaire [1, 90])
+    const minus1 = w > 1 ? w - 1 : 90;
+    const plus1 = w < 90 ? w + 1 : 1;
+    const minus2 = w > 2 ? w - 2 : (w === 2 ? 90 : 89);
+    const plus2 = w < 89 ? w + 2 : (w === 89 ? 1 : 2);
+
+    if (top10Set.has(minus1)) {
       nearMisses.push({
         actualWinner: w,
-        closestPredicted: w - 1,
+        closestPredicted: minus1,
         distance: 1,
         type: 'neighbor_1',
-        description: `Frôlement immédiat -1 : Gagnant ${w} vs Prédit ${w - 1}`,
+        description: `Frôlement immédiat -1 : Gagnant ${w} vs Prédit ${minus1}`,
       });
-    } else if (top10Set.has(w + 1)) {
+    } else if (top10Set.has(plus1)) {
       nearMisses.push({
         actualWinner: w,
-        closestPredicted: w + 1,
+        closestPredicted: plus1,
         distance: 1,
         type: 'neighbor_1',
-        description: `Frôlement immédiat +1 : Gagnant ${w} vs Prédit ${w + 1}`,
+        description: `Frôlement immédiat +1 : Gagnant ${w} vs Prédit ${plus1}`,
       });
-    } else if (top10Set.has(w - 2)) {
+    } else if (top10Set.has(minus2)) {
       nearMisses.push({
         actualWinner: w,
-        closestPredicted: w - 2,
+        closestPredicted: minus2,
         distance: 2,
         type: 'neighbor_2',
-        description: `Déviation spatiale -2 : Gagnant ${w} vs Prédit ${w - 2}`,
+        description: `Déviation spatiale -2 : Gagnant ${w} vs Prédit ${minus2}`,
       });
-    } else if (top10Set.has(w + 2)) {
+    } else if (top10Set.has(plus2)) {
       nearMisses.push({
         actualWinner: w,
-        closestPredicted: w + 2,
+        closestPredicted: plus2,
         distance: 2,
         type: 'neighbor_2',
-        description: `Déviation spatiale +2 : Gagnant ${w} vs Prédit ${w + 2}`,
+        description: `Déviation spatiale +2 : Gagnant ${w} vs Prédit ${plus2}`,
       });
     }
 
@@ -381,13 +387,13 @@ export const executeClosedLoopAutopsy = async (
     const num = i + 1;
     const breakdown: Record<string, number> = {};
     validKeys.forEach((k) => {
-      breakdown[k] = algoScores[k][num] || 0;
+      breakdown[k] = (algoScores[k][num] || 0) * 100.0;
     });
     return {
       num,
-      score: ensembleScores[num],
+      score: ensembleScores[num] * 100.0,
       prob: probEnsemble[num],
-      normalizedScore: ensembleScores[num],
+      normalizedScore: ensembleScores[num] * 100.0,
       rank: 0,
       breakdown,
     };

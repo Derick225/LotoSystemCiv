@@ -57,8 +57,13 @@ export const gapsPlugin: AlgorithmPlugin = {
     const kdeRes = evaluateKDE(currentGapsList, currentGap, cache.kdeBandwidth);
     const empiricalKdeCdf = kdeRes.cdf;
 
-    // Fused Continuous CDF: 60% theoretical geometric + 40% empirical continuous KDE
-    const fusedCdf = 0.60 * geomCdf + 0.40 * empiricalKdeCdf;
+    // Poids continu dérivé de la taille effective de l'échantillon d'écarts (Zéro Nombre Magique)
+    // Pour un historique court, la CDF théorique géométrique fait office de prior conjugué fort.
+    // Au fur et à mesure que les données s'accumulent, l'estimation non-paramétrique KDE gagne continûment en poids.
+    const nSamples = Math.max(1, currentGapsList.length);
+    const empiricalWeight = 0.5 * Math.tanh(Math.sqrt(nSamples) / Math.sqrt(90));
+    const theoreticalWeight = 1.0 - empiricalWeight;
+    const fusedCdf = theoreticalWeight * geomCdf + empiricalWeight * empiricalKdeCdf;
     
     // Intégration des harmoniques avancées (Velocity & Résistance)
     const gapVelocity = (ctx.advancedMetrics?.gapVelocity as Record<number, number>)?.[num] || 0.0;

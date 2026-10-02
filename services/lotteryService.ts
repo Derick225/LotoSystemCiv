@@ -730,11 +730,11 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
 };
 
 export const bulkAddResults = async (drawName: string, results: { date: string, draw_num?: string, numbers?: string[], gagnants: number[], machine?: number[], draw_name?: string }[]) => {
-  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
-  const mapped = results.map(r => {
+  const mapped = results.map((r, i) => {
     const targetName = r.draw_name || normalizeDrawName(drawName);
     const withoutMachine = isDrawWithoutMachine(targetName);
     return {
+      id: (r as any).id || `draw_import_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}`,
       draw_name: targetName,
       date: normalizeDate(r.date),
       gagnants: r.gagnants,
@@ -742,6 +742,42 @@ export const bulkAddResults = async (drawName: string, results: { date: string, 
       version: 1
     };
   });
+
+  if (!isSupabaseConfigured()) {
+    const byDraw = new Map<string, typeof mapped>();
+    for (const item of mapped) {
+      const list = byDraw.get(item.draw_name) || [];
+      list.push(item);
+      byDraw.set(item.draw_name, list);
+    }
+    for (const [dName, items] of byDraw.entries()) {
+      const cacheKey = globalCache.generateKey('history', dName);
+      const existing = (await globalCache.get<DrawResult[]>(cacheKey, dName)) || [];
+      const dateSet = new Set(existing.map(e => normalizeDate(e.date)));
+      const newItems: DrawResult[] = [];
+      for (const it of items) {
+        if (!dateSet.has(it.date)) {
+          dateSet.add(it.date);
+          newItems.push({
+            id: it.id,
+            drawName: it.draw_name,
+            date: formatDate(it.date),
+            gagnants: it.gagnants,
+            machine: it.machine,
+            version: 1,
+          });
+        }
+      }
+      const combined = [...newItems, ...existing].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      await globalCache.set(cacheKey, combined, CACHE_TTL.HISTORY, dName);
+      await globalCache.registerNewDraw(dName, combined.length);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: dName } }));
+      }
+    }
+    return mapped;
+  }
+
   const { data, error } = await supabase.from('draw_results').upsert(mapped, { onConflict: 'draw_name, date' }).select();
   if (error) throw error;
   
@@ -754,17 +790,41 @@ export const bulkAddResults = async (drawName: string, results: { date: string, 
           window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
       }
   }
+  return data;
 };
 
 export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>) => {
-  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
   const targetName = normalizeDrawName(drawName);
   const withoutMachine = isDrawWithoutMachine(targetName);
+  const normalizedDateStr = normalizeDate(result.date);
+  const sanitizedMachine = withoutMachine ? [] : (result.machine || []);
+
+  if (!isSupabaseConfigured()) {
+    const cacheKey = globalCache.generateKey('history', targetName);
+    const existing = (await globalCache.get<DrawResult[]>(cacheKey, targetName)) || [];
+    const newEntry: DrawResult = {
+      id: `draw_loc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      drawName: targetName,
+      date: formatDate(normalizedDateStr),
+      gagnants: result.gagnants,
+      machine: sanitizedMachine,
+      version: 1,
+    };
+    const combined = [newEntry, ...existing.filter(e => normalizeDate(e.date) !== normalizedDateStr)];
+    combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    await globalCache.set(cacheKey, combined, CACHE_TTL.HISTORY, targetName);
+    await globalCache.registerNewDraw(targetName, combined.length);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: targetName } }));
+    }
+    return newEntry;
+  }
+
   const { data, error } = await supabase.from('draw_results').insert({
     draw_name: targetName,
-    date: normalizeDate(result.date),
+    date: normalizedDateStr,
     gagnants: result.gagnants,
-    machine: withoutMachine ? [] : (result.machine || []),
+    machine: sanitizedMachine,
     version: 1
   }).select().single();
   if (error) throw error;
@@ -775,15 +835,37 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
           window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: data.draw_name } }));
       }
   }
+  return data;
 };
 
 export const updateResult = async (drawName: string, result: DrawResult) => {
-  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
   const withoutMachine = isDrawWithoutMachine(drawName);
+  const normalizedDateStr = normalizeDate(result.date);
+  const sanitizedMachine = withoutMachine ? [] : (result.machine || []);
+
+  if (!isSupabaseConfigured()) {
+    const cacheKey = globalCache.generateKey('history', drawName);
+    const history = await globalCache.get<DrawResult[]>(cacheKey, drawName);
+    if (history) {
+      const updatedHistory = history.map(item => item.id === result.id ? {
+        ...item,
+        date: formatDate(normalizedDateStr),
+        gagnants: result.gagnants,
+        machine: sanitizedMachine,
+        version: (item.version || 1) + 1,
+      } : item);
+      await globalCache.set(cacheKey, updatedHistory, CACHE_TTL.HISTORY, drawName);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
+      }
+    }
+    return;
+  }
+
   const { data, error } = await supabase.from('draw_results').update({
-    date: normalizeDate(result.date),
+    date: normalizedDateStr,
     gagnants: result.gagnants,
-    machine: withoutMachine ? [] : (result.machine || []),
+    machine: sanitizedMachine,
     version: result.version || 1
   }).eq('id', result.id).select().single();
   if (error) throw error;
@@ -797,9 +879,25 @@ export const updateResult = async (drawName: string, result: DrawResult) => {
 };
 
 export const deleteResult = async (drawName: string, id: string) => {
-  if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Suppression impossible.");
+  if (!isSupabaseConfigured()) {
+    const cacheKey = globalCache.generateKey('history', drawName);
+    const history = await globalCache.get<DrawResult[]>(cacheKey, drawName);
+    if (history) {
+      const updatedHistory = history.filter(item => item.id !== id);
+      await globalCache.set(cacheKey, updatedHistory, CACHE_TTL.HISTORY, drawName);
+      await globalCache.registerNewDraw(drawName, updatedHistory.length);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
+      }
+    }
+    return;
+  }
+
   const { error } = await supabase.from('draw_results').delete().eq('id', id);
   if (error) throw error;
+
+  const cacheKey = globalCache.generateKey('history', drawName);
+  await globalCache.delete(cacheKey);
 
   if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));

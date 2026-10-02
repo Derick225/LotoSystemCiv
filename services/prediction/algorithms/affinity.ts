@@ -46,17 +46,33 @@ export const affinityPlugin: AlgorithmPlugin = {
 
     let totalDrawsWithSpecial = 0;
 
+    // 1. Matrice de co-occurrence et affinité intra-gagnants (toujours disponible)
+    const winnerPairCount = Array(mainMax + 1).fill(0).map(() => new Float64Array(mainMax + 1));
+    const lastWinners = history[0]?.gagnants || [];
+    let totalDraws = 0;
+
     for (const draw of history) {
       const winners = draw.gagnants || [];
-      const specials = draw.machine || [];
-
-      if (winners.length > 0 && specials.length > 0) {
-        totalDrawsWithSpecial++;
-        for (const w of winners) {
-          if (w >= 1 && w <= mainMax) {
-            countMain[w]++;
+      if (winners.length > 0) {
+        totalDraws++;
+        for (let i = 0; i < winners.length; i++) {
+          const w1 = winners[i];
+          if (w1 >= 1 && w1 <= mainMax) {
+            countMain[w1]++;
+            for (let j = i + 1; j < winners.length; j++) {
+              const w2 = winners[j];
+              if (w2 >= 1 && w2 <= mainMax) {
+                winnerPairCount[w1][w2]++;
+                winnerPairCount[w2][w1]++;
+              }
+            }
           }
         }
+      }
+
+      const specials = draw.machine || [];
+      if (winners.length > 0 && specials.length > 0) {
+        totalDrawsWithSpecial++;
         for (const s of specials) {
           if (s >= 1 && s <= specialMax) {
             countSpecial[s]++;
@@ -72,95 +88,122 @@ export const affinityPlugin: AlgorithmPlugin = {
       }
     }
 
-    if (totalDrawsWithSpecial === 0) {
-      ctx.pluginCache = ctx.pluginCache || {};
-      ctx.pluginCache[AlgoKey.AFFINITY] = {
-        rawCopulaScores: new Float64Array(mainMax + 1),
-        median: 0,
-        iqr: 1.0,
-        mainMax
-      };
-      return;
-    }
-
-    // Assignation des marginales uniformes U et V par fractional ranking stable sur [0.01, 0.99]
-    const getUniformMarginals = (counts: Float64Array, maxVal: number): Float64Array => {
-      const marginals = new Float64Array(maxVal + 1);
-      const indexed = Array.from({ length: maxVal }, (_, i) => ({ val: counts[i + 1], index: i + 1 }));
-      indexed.sort((a, b) => a.val - b.val);
-      
-      for (let r = 0; r < maxVal; r++) {
-        const item = indexed[r];
-        marginals[item.index] = 0.01 + 0.98 * (r / (maxVal - 1 || 1));
-      }
-      return marginals;
-    };
-
-    const u = getUniformMarginals(countMain, mainMax);
-    const v = getUniformMarginals(countSpecial, specialMax);
-
-    // Estimation continue des coefficients d'association Gumbel et Clayton
-    let sumExcess = 0;
-    let countExcess = 0;
-    let sumDeficit = 0;
-    let countDeficit = 0;
-
-    for (let i = 1; i <= mainMax; i++) {
-      const pI = countMain[i] / totalDrawsWithSpecial;
-      if (pI === 0) continue;
-      for (let j = 1; j <= specialMax; j++) {
-        const pJ = countSpecial[j] / totalDrawsWithSpecial;
-        if (pJ === 0) continue;
-
-        const pJoint = jointCount[i][j] / totalDrawsWithSpecial;
-        const ratio = pJoint / (pI * pJ);
-
-        if (ratio > 1.0) {
-          sumExcess += (ratio - 1.0);
-          countExcess++;
-        } else if (ratio < 1.0) {
-          sumDeficit += (1.0 - ratio);
-          countDeficit++;
+    // Affinité intra-gagnants basée sur la co-occurrence avec le dernier tirage et la centralité de réseau
+    const intraWinnerScores = new Float64Array(mainMax + 1);
+    if (totalDraws > 0) {
+      for (let i = 1; i <= mainMax; i++) {
+        let coSumWithLast = 0;
+        let globalCoSum = 0;
+        const pI = countMain[i] / totalDraws;
+        
+        for (const lw of lastWinners) {
+          if (lw >= 1 && lw <= mainMax && lw !== i) {
+            const pairP = winnerPairCount[i][lw] / totalDraws;
+            const pLw = countMain[lw] / totalDraws;
+            const lift = pI > 0 && pLw > 0 ? pairP / (pI * pLw) : 1.0;
+            coSumWithLast += Math.log(Math.max(0.1, lift));
+          }
         }
+
+        for (let j = 1; j <= mainMax; j++) {
+          if (i !== j) {
+            globalCoSum += winnerPairCount[i][j];
+          }
+        }
+
+        const avgLiftLast = lastWinners.length > 0 ? coSumWithLast / lastWinners.length : 0;
+        const globalDensity = globalCoSum / (totalDraws * Math.max(1, lastWinners.length));
+        intraWinnerScores[i] = 1.0 / (1.0 + Math.exp(- (avgLiftLast * 1.5 + Math.log(Math.max(0.1, globalDensity)))));
       }
     }
-
-    const avgExcess = countExcess > 0 ? sumExcess / countExcess : 0.05;
-    const avgDeficit = countDeficit > 0 ? sumDeficit / countDeficit : 0.05;
-
-    const thetaGumbel = 1.0 + Math.log(1.0 + avgExcess);
-    const thetaClayton = Math.max(0.1, Math.log(1.0 + avgDeficit));
 
     const rawCopulaScores = new Float64Array(mainMax + 1);
 
-    for (let i = 1; i <= mainMax; i++) {
-      let copulaSum = 0;
-      let totalWeight = 0;
-      const uVal = u[i];
-
-      for (let j = 1; j <= specialMax; j++) {
-        const vVal = v[j];
-        const pI = countMain[i] / totalDrawsWithSpecial;
-        const pJ = countSpecial[j] / totalDrawsWithSpecial;
-        const pJoint = jointCount[i][j] / totalDrawsWithSpecial;
-
-        let cValue = 0;
-        if (pJoint > pI * pJ) {
-          // Gumbel copula (positive tail dependency)
-          const logU = -Math.log(uVal);
-          const logV = -Math.log(vVal);
-          cValue = Math.exp(-Math.pow(Math.pow(logU, thetaGumbel) + Math.pow(logV, thetaGumbel), 1.0 / thetaGumbel));
-        } else {
-          // Clayton copula (negative tail dependency)
-          cValue = Math.pow(Math.max(1e-15, Math.pow(uVal, -thetaClayton) + Math.pow(vVal, -thetaClayton) - 1.0), -1.0 / thetaClayton);
+    if (totalDrawsWithSpecial > 0) {
+      // Assignation des marginales uniformes U et V par fractional ranking stable sur [0.01, 0.99]
+      const getUniformMarginals = (counts: Float64Array, maxVal: number): Float64Array => {
+        const marginals = new Float64Array(maxVal + 1);
+        const indexed = Array.from({ length: maxVal }, (_, i) => ({ val: counts[i + 1], index: i + 1 }));
+        indexed.sort((a, b) => a.val - b.val);
+        
+        for (let r = 0; r < maxVal; r++) {
+          const item = indexed[r];
+          marginals[item.index] = 0.01 + 0.98 * (r / (maxVal - 1 || 1));
         }
+        return marginals;
+      };
 
-        // Pondération de la copule par l'importance de la boule spéciale
-        copulaSum += cValue * vVal;
-        totalWeight += vVal;
+      const u = getUniformMarginals(countMain, mainMax);
+      const v = getUniformMarginals(countSpecial, specialMax);
+
+      // Estimation continue des coefficients d'association Gumbel et Clayton
+      let sumExcess = 0;
+      let countExcess = 0;
+      let sumDeficit = 0;
+      let countDeficit = 0;
+
+      for (let i = 1; i <= mainMax; i++) {
+        const pI = countMain[i] / totalDrawsWithSpecial;
+        if (pI === 0) continue;
+        for (let j = 1; j <= specialMax; j++) {
+          const pJ = countSpecial[j] / totalDrawsWithSpecial;
+          if (pJ === 0) continue;
+
+          const pJoint = jointCount[i][j] / totalDrawsWithSpecial;
+          const ratio = pJoint / (pI * pJ);
+
+          if (ratio > 1.0) {
+            sumExcess += (ratio - 1.0);
+            countExcess++;
+          } else if (ratio < 1.0) {
+            sumDeficit += (1.0 - ratio);
+            countDeficit++;
+          }
+        }
       }
 
-      rawCopulaScores[i] = totalWeight > 0 ? copulaSum / totalWeight : 0;
+      const avgExcess = countExcess > 0 ? sumExcess / countExcess : 0.05;
+      const avgDeficit = countDeficit > 0 ? sumDeficit / countDeficit : 0.05;
+
+      const thetaGumbel = 1.0 + Math.log(1.0 + avgExcess);
+      const thetaClayton = Math.max(0.1, Math.log(1.0 + avgDeficit));
+
+      for (let i = 1; i <= mainMax; i++) {
+        let copulaSum = 0;
+        let totalWeight = 0;
+        const uVal = u[i];
+
+        for (let j = 1; j <= specialMax; j++) {
+          const vVal = v[j];
+          const pI = countMain[i] / totalDrawsWithSpecial;
+          const pJ = countSpecial[j] / totalDrawsWithSpecial;
+          const pJoint = jointCount[i][j] / totalDrawsWithSpecial;
+
+          let cValue = 0;
+          if (pJoint > pI * pJ) {
+            // Gumbel copula (positive tail dependency)
+            const logU = -Math.log(uVal);
+            const logV = -Math.log(vVal);
+            cValue = Math.exp(-Math.pow(Math.pow(logU, thetaGumbel) + Math.pow(logV, thetaGumbel), 1.0 / thetaGumbel));
+          } else {
+            // Clayton copula (negative tail dependency)
+            cValue = Math.pow(Math.max(1e-15, Math.pow(uVal, -thetaClayton) + Math.pow(vVal, -thetaClayton) - 1.0), -1.0 / thetaClayton);
+          }
+
+          // Pondération de la copule par l'importance de la boule spéciale
+          copulaSum += cValue * vVal;
+          totalWeight += vVal;
+        }
+
+        const specialCopulaVal = totalWeight > 0 ? copulaSum / totalWeight : 0;
+        // Fusion synergique continue : 60% intra-gagnants + 40% copule spéciale/machine
+        rawCopulaScores[i] = 0.60 * intraWinnerScores[i] + 0.40 * specialCopulaVal;
+      }
+    } else {
+      // Pas de données spéciales/machine : utilisation de l'affinité intra-gagnants pure
+      for (let i = 1; i <= mainMax; i++) {
+        rawCopulaScores[i] = intraWinnerScores[i];
+      }
     }
 
     // Statistiques de centrage robustes

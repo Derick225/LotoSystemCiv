@@ -207,12 +207,16 @@ export const calculateCombinationEnergyDetailed = (
   let baseScoreSum = 0.0;
   let affinitySum = 0.0;
   
+  const P0_PAIR = DRAW_SIZE / DOMAIN_SIZE;
   for (let i = 0; i < len; i++) {
     const n1 = combo[i];
     baseScoreSum += scoresMap.get(n1) || 0.0;
     for (let j = i + 1; j < len; j++) {
       const n2 = combo[j];
-      affinitySum += affinityMap[n1]?.[n2] || 0.0;
+      const rawAff = affinityMap[n1]?.[n2] || 0.0;
+      // Synergie continue de co-occurrence pairwise par rapport au seuil indépendant P0
+      const lift = Math.max(0.1, rawAff / P0_PAIR);
+      affinitySum += Math.log(lift) * 12.0;
     }
   }
 
@@ -726,13 +730,16 @@ export const generateCombination = async (
       if (key >= 1 && key <= 90) scores91[key] = val;
     });
 
+    const P0_PAIR = 5.0 / 90.0;
     const flatAffinity = new Float64Array(91 * 91);
     for (let i = 1; i <= 90; i++) {
       const row = affinityMap[i];
       if (row) {
         const offset = i * 91;
         for (let j = 1; j <= 90; j++) {
-          flatAffinity[offset + j] = row[j] || 0;
+          const rawAff = row[j] || 0;
+          const lift = Math.max(0.1, rawAff / P0_PAIR);
+          flatAffinity[offset + j] = Math.max(0.0, Math.log(lift) * 10.0);
         }
       }
     }
