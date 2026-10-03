@@ -1289,23 +1289,37 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
     const nSamples = data.length;
     const nFeatures = data[0].length;
     
-    // 1. Scale data (Standardization)
+    // 1. Scale data (Standardization) & track inactive/constant columns
     const means = new Float64Array(nFeatures);
     const stdDevs = new Float64Array(nFeatures);
+    const isConstantFeature = new Uint8Array(nFeatures);
+    const colMins = new Float64Array(nFeatures).fill(100);
+    const colMaxs = new Float64Array(nFeatures).fill(0);
     
-    for(let i=0; i<nSamples; i++) {
-        for(let j=0; j<nFeatures; j++) means[j] += data[i][j];
+    for (let i = 0; i < nSamples; i++) {
+        for (let j = 0; j < nFeatures; j++) {
+            const val = data[i][j];
+            means[j] += val;
+            if (val < colMins[j]) colMins[j] = val;
+            if (val > colMaxs[j]) colMaxs[j] = val;
+        }
     }
-    for(let j=0; j<nFeatures; j++) means[j] /= nSamples;
+    for (let j = 0; j < nFeatures; j++) means[j] /= nSamples;
     
-    for(let i=0; i<nSamples; i++) {
-        for(let j=0; j<nFeatures; j++) stdDevs[j] += Math.pow(data[i][j] - means[j], 2);
+    for (let i = 0; i < nSamples; i++) {
+        for (let j = 0; j < nFeatures; j++) stdDevs[j] += Math.pow(data[i][j] - means[j], 2);
     }
-    for(let j=0; j<nFeatures; j++) {
-        stdDevs[j] = Math.sqrt(stdDevs[j] / Math.max(1, nSamples - 1)) || 1;
+    for (let j = 0; j < nFeatures; j++) {
+        const rawStd = Math.sqrt(stdDevs[j] / Math.max(1, nSamples - 1));
+        if (rawStd < 1e-9) {
+            isConstantFeature[j] = 1;
+            stdDevs[j] = 1;
+        } else {
+            stdDevs[j] = rawStd;
+        }
     }
     
-    const scaledData = data.map(row => row.map((val, j) => (val - means[j]) / stdDevs[j]));
+    const scaledData = data.map(row => row.map((val, j) => isConstantFeature[j] ? 0 : (val - means[j]) / stdDevs[j]));
 
     // 2. Build RBF Kernel Matrix K of size N x N
     // Calculate mean of pairwise squared distances to eliminate magic gamma
@@ -1356,7 +1370,7 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
         }
     }
 
-    // 4. Eigen decomposition on centered Kernel Matrix
+    // 4. Eigen decomposition on centered Kernel Matrix & Continuous Spectral Shrinkage
     const { values, vectors } = computeEigenDecomposition(K_centered);
     const totalVariance = values.reduce((sum, v) => sum + Math.abs(v), 0);
     const dynamicThreshold = varianceThreshold ?? (1.0 - (1.0 / Math.sqrt(nFeatures)));
@@ -1372,6 +1386,20 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
     }
     k = Math.max(1, Math.min(k, nSamples, nFeatures));
 
+    // Pondération spectrale continue (Wiener-Sigmoid) sur les composantes retenues
+    const meanEigen = totalVariance / Math.max(1, nSamples);
+    let varRelEigen = 0;
+    for (let col = 0; col < k; col++) {
+        const rel = Math.abs(values[col]) / (meanEigen + 1e-9);
+        varRelEigen += Math.pow(rel - 1.0, 2);
+    }
+    const stdRelEigen = Math.sqrt(varRelEigen / Math.max(1, k)) || 1.0;
+    const spectralWeights = new Float64Array(k);
+    for (let col = 0; col < k; col++) {
+        const rel = Math.abs(values[col]) / (meanEigen + 1e-9);
+        spectralWeights[col] = 1.0 / (1.0 + Math.exp(-(rel - 1.0) / stdRelEigen));
+    }
+
     // 5. Projected representation in non-linear manifold (N x k)
     const Y = Array(nSamples).fill(0).map(() => Array(k).fill(0));
     for (let i = 0; i < nSamples; i++) {
@@ -1380,13 +1408,14 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
             for (let j = 0; j < nSamples; j++) {
                 sum += K_centered[i][j] * vectors[j][col];
             }
-            Y[i][col] = sum;
+            Y[i][col] = sum * spectralWeights[col];
         }
     }
 
-    // 6. Pre-image Reconstruction via Ridge Regression
+    // 6. Pre-image Reconstruction via Tikhonov-Adaptive Ridge Regression
     // Compute YTY (k x k)
     const YTY = Array(k).fill(0).map(() => Array(k).fill(0));
+    let traceYTY = 0;
     for (let i = 0; i < k; i++) {
         for (let j = 0; j < k; j++) {
             let sum = 0;
@@ -1395,8 +1424,11 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
             }
             YTY[i][j] = sum;
         }
+        traceYTY += YTY[i][i];
     }
-    const ridgeLambda = 1e-4;
+    // Régularisation de Tikhonov continue dérivée de l'énergie spectrale moyenne et de sqrt(N)
+    const meanDiagYTY = traceYTY / Math.max(1, k);
+    const ridgeLambda = (meanDiagYTY / (nSamples * Math.sqrt(nSamples))) + 1e-8;
     for (let i = 0; i < k; i++) {
         YTY[i][i] += ridgeLambda;
     }
@@ -1439,19 +1471,22 @@ export function denoiseFeaturesKernelPCA(data: number[][], gamma?: number, varia
         }
     }
 
-    // Inverse Scale Transform with continuous, bounded pre-image manifold constraint (monotonic differentiable smoothing)
-    const smoothClip = (x: number): number => {
-        if (x >= 5 && x <= 95) return x;
-        if (x < 5) {
-            return 5 * Math.exp((x - 5) / 5);
+    // Inverse Scale Transform with exact preservation of constant features and C^1 boundary saturation on [0, 100]
+    const smoothBound100 = (x: number, fIdx: number): number => {
+        if (isConstantFeature[fIdx]) return means[fIdx];
+        if (x >= 0 && x <= 100) return x;
+        const scale = stdDevs[fIdx] || 1.0;
+        if (x < 0) {
+            return Math.max(0, colMins[fIdx] * Math.exp(x / scale));
         }
-        return 100 - 5 * Math.exp((95 - x) / 5);
+        return 100 - (100 - Math.min(100, colMaxs[fIdx])) * Math.exp((100 - x) / scale);
     };
 
     const reconstructed = reconstructedScaled.map((row) =>
         row.map((val, j) => {
+            if (isConstantFeature[j]) return means[j];
             const rawVal = (val * stdDevs[j]) + means[j];
-            return smoothClip(rawVal);
+            return smoothBound100(rawVal, j);
         })
     );
 

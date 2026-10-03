@@ -12,6 +12,15 @@ import { generateCombination } from '../services/prediction/combinationGenerator
 import { ScoredNumber } from '../services/prediction/scoringEngine';
 import { EmpiricalCalibration } from '../types';
 import { INTER_DRAW_FAMILIES } from '../constants';
+import {
+  buildSpatialDistanceMatrix,
+  computeWassersteinSoftLoss,
+  computeDynamicLearningRate,
+  predictMultiHeadModel,
+  computeIntegratedGradients
+} from '../services/training/multiHeadNeuralCore';
+import { offlineQueueService } from '../services/offlineQueueService';
+import { AlgoKey } from '../shared/prediction.types';
 
 describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
   beforeAll(async () => {
@@ -178,4 +187,79 @@ describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
       expect(run1.best_energy).toBeCloseTo(run2.best_energy, 6);
     });
   });
+
+  describe('3. Noyau Neuronal Multi-Têtes Continu (GELU, Wasserstein-EMD Torique & Integrated Gradients)', () => {
+    it('construit une matrice de distance spatiale normalisée D_ij ∈ [0, 1] respectant le tore circulaire Z_90', () => {
+      const distMatrix = buildSpatialDistanceMatrix();
+      expect(distMatrix).toHaveLength(90);
+      expect(distMatrix[0]).toHaveLength(90);
+      expect(distMatrix[0][0]).toBe(0);
+
+      for (let i = 0; i < 90; i++) {
+        for (let j = 0; j < 90; j++) {
+          expect(distMatrix[i][j]).toBeGreaterThanOrEqual(0);
+          expect(distMatrix[i][j]).toBeLessThanOrEqual(1.0);
+        }
+      }
+
+      // La perte de Wasserstein-CE récompense une distribution concentrée sur les gagnants vs une distribution décalée
+      const winners = [10, 20, 30, 40, 50];
+      const alignedProbs = Array.from({ length: 90 }, (_, idx) => (winners.includes(idx + 1) ? 0.16 : 0.20 / 85));
+      const misalignedProbs = Array.from({ length: 90 }, (_, idx) => ([1, 2, 3, 4, 5].includes(idx + 1) ? 0.16 : 0.20 / 85));
+
+      const lossAligned = computeWassersteinSoftLoss(alignedProbs, winners);
+      const lossMisaligned = computeWassersteinSoftLoss(misalignedProbs, winners);
+      expect(lossAligned).toBeLessThan(lossMisaligned);
+    });
+
+    it('exécute predictMultiHeadModel (C^∞ GELU) et computeIntegratedGradients (Riemann Softplus) de façon continue', () => {
+      const weights = {
+        [AlgoKey.FREQUENCY]: 0.35,
+        [AlgoKey.SPECTRAL]: 0.25,
+        [AlgoKey.MARKOV]: 0.20,
+        [AlgoKey.GAPS]: 0.20,
+      } as any;
+
+      const scores20D = {
+        [AlgoKey.FREQUENCY]: 92,
+        [AlgoKey.SPECTRAL]: 64,
+        [AlgoKey.MARKOV]: 48,
+        [AlgoKey.GAPS]: 30,
+      } as any;
+
+      const { prediction, activations } = predictMultiHeadModel(scores20D, weights, 0.72);
+      expect(prediction.gridProbabilities).toHaveLength(90);
+      const sumProbs = prediction.gridProbabilities.reduce((a, b) => a + b, 0);
+      expect(sumProbs).toBeCloseTo(1.0, 5);
+      expect(prediction.dispersion.expectedSum).toBeGreaterThanOrEqual(15);
+      expect(prediction.dispersion.expectedSum).toBeLessThanOrEqual(440);
+      expect(prediction.regime.predictedRegime).toBe('STABLE_MONOSTABLE');
+      expect(activations[1].name).toContain('GELU');
+
+      const ig = computeIntegratedGradients(scores20D, weights);
+      const sumIG = Object.values(ig.featureAttributions).reduce((a, b) => a + b, 0);
+      expect(sumIG).toBeCloseTo(1.0, 2);
+      expect(ig.topDriver).toBe(AlgoKey.FREQUENCY);
+
+      const lr = computeDynamicLearningRate(0.015, 10, 0.70);
+      expect(lr).toBeGreaterThan(0);
+      expect(lr).toBeLessThanOrEqual(1.0);
+    });
+  });
+
+  describe('4. Audit de la File d’Attente Hors-Ligne (offlineQueueService) & Résilience PWA', () => {
+    it('enregistre et inspecte de manière déterministe les snapshots hors-ligne sans erreur réseau', async () => {
+      await offlineQueueService.enqueue('learning_log', 'Fortune Thursday', {
+        id: 'audit_offline_test_1',
+        brierScore: 0.42,
+        note: 'Validation PWA Offline',
+      });
+
+      const stats = await offlineQueueService.getQueueStats();
+      expect(stats).toBeDefined();
+      expect(typeof stats.pendingCount).toBe('number');
+      expect(Array.isArray(stats.items)).toBe(true);
+    });
+  });
 });
+

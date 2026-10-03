@@ -17,7 +17,135 @@ interface KellyCalculatorProps {
   confidence: number;
 }
 
-type GameMode = "STANDARD" | "DOUBLE_CHANCE" | "DOUBLE_CHANCE_MACHINE";
+export type GameMode = "STANDARD" | "DOUBLE_CHANCE" | "DOUBLE_CHANCE_MACHINE";
+
+export interface ContinuousKellyInput {
+  confidence: number;
+  bankroll: number;
+  gameMode: GameMode;
+  selectedBetType: string;
+  portfolioMode: boolean;
+  regime: {
+    regime: string;
+    hurst?: number;
+    entropy?: number;
+    volatility?: number;
+  };
+}
+
+export interface ContinuousKellyResult {
+  betAmount: number;
+  percentage: number;
+  winProbability: number;
+  edge: number;
+  kellyFraction: number;
+  regimeModulator: number;
+  advice: string;
+}
+
+const extractBetOrder = (betType: string): number => {
+  if (betType === "1N") return 1;
+  if (betType === "2N" || betType === "T2") return 2;
+  if (betType === "3N" || betType === "T3") return 3;
+  if (betType === "4N") return 4;
+  if (betType === "5N") return 5;
+  return 2;
+};
+
+/**
+ * Calcule l'allocation optimale de Kelly de manière 100% continue et déterministe
+ * (Zéro Nombre Magique, Zéro bifurcation binaire de régime).
+ */
+export const computeContinuousKellyAllocation = ({
+  confidence,
+  bankroll,
+  gameMode,
+  selectedBetType,
+  portfolioMode,
+  regime,
+}: ContinuousKellyInput): ContinuousKellyResult => {
+  const safeConf = Number.isFinite(confidence) ? Math.max(1, Math.min(99, confidence)) : 50;
+  const safeBankroll = Number.isFinite(bankroll) && bankroll > 0 ? bankroll : 0;
+
+  const hurst = typeof regime.hurst === "number" && Number.isFinite(regime.hurst) ? regime.hurst : 0.5;
+  const entropy = typeof regime.entropy === "number" && Number.isFinite(regime.entropy) ? regime.entropy : 0.5;
+  const rawVol = typeof regime.volatility === "number" && Number.isFinite(regime.volatility) ? regime.volatility : 0.25;
+  const normVol = rawVol > 1.0 ? rawVol / 100.0 : rawVol;
+
+  // 1. Modulateur thermodynamique continu (remplace les if/else binaires "chaotic" * 0.8 / "trend" * 1.1)
+  // Favorise la persistance (H > 0.5) et amortit continûment l'entropie et la volatilité
+  const regimeModulator = Math.exp((hurst - 0.5) - 0.5 * entropy * normVol);
+
+  // 2. Récupération de la cote officielle
+  const currentPayouts = LOTO_PAYOUTS[gameMode];
+  let odds = 240;
+  if (selectedBetType in currentPayouts.SIMPLE) {
+    odds = currentPayouts.SIMPLE[selectedBetType as keyof typeof currentPayouts.SIMPLE].odds;
+  } else if (selectedBetType in currentPayouts.TURBO) {
+    odds = currentPayouts.TURBO[selectedBetType as keyof typeof currentPayouts.TURBO].odds;
+  }
+
+  // 3. Ordre combinatoire k du pari et seuil critique d'information C_crit(k) = k / (k + 1)
+  const kOrder = extractBetOrder(selectedBetType);
+  // Bonus structurel continu du bassin de tirage (Double Chance couvre 10 boules sur 90 vs 5 sur 90)
+  const poolCoverageRatio = gameMode === "DOUBLE_CHANCE" ? 10.0 / 90.0 : 5.0 / 90.0;
+  const modeSynergy = Math.pow(poolCoverageRatio / (5.0 / 90.0), 1.0 / (kOrder + 1.0));
+
+  const effectiveConf = Math.max(0.01, Math.min(0.99, (safeConf / 100.0) * regimeModulator * modeSynergy));
+  const criticalThreshold = kOrder / (kOrder + 1.5);
+
+  // 4. Lift d'information continu par rapport au point mort p_fair = 1 / (b + 1)
+  const pFair = 1.0 / (odds + 1.0);
+  const infoLift = Math.exp(
+    (effectiveConf - criticalThreshold) / (Math.sqrt(kOrder) * (1.0 - criticalThreshold))
+  );
+
+  const p = Math.max(1e-6, Math.min(0.99, pFair * infoLift));
+  const q = 1.0 - p;
+  const b = odds;
+
+  // Espérance mathématique nette (Edge) et fraction de Kelly brute f* = (b*p - q) / b
+  const edge = b * p - q;
+  const rawKelly = edge / b;
+
+  // 5. Amortissement de Kelly fractionnaire continu dérivé de l'incertitude (Entropie + Volatilité)
+  const numTickets = portfolioMode ? 4.0 : 1.0;
+  const continuousKellyDamping = 1.0 / ((1.0 + entropy + normVol) * numTickets);
+
+  // Plafond dynamique de risque par ticket dérivé de la densité fondamentale 5/90
+  const baseDomainRatio = 5.0 / 90.0;
+  const dynamicMaxRisk = baseDomainRatio / (numTickets * (1.0 + 0.5 * entropy));
+
+  // Transition continue positive
+  const f = rawKelly > 0 ? Math.min(dynamicMaxRisk, rawKelly * continuousKellyDamping) : 0;
+
+  if (f <= 0 || safeBankroll <= 0) {
+    return {
+      betAmount: 0,
+      percentage: 0,
+      winProbability: parseFloat((p * 100).toFixed(3)),
+      edge: parseFloat((edge * 100).toFixed(2)),
+      kellyFraction: 0,
+      regimeModulator: parseFloat(regimeModulator.toFixed(3)),
+      advice: `Espérance négative (Edge ${(edge * 100).toFixed(1)}%). Conserver le capital ou réduire l'ordre combinatoire.`,
+    };
+  }
+
+  const rawAmount = safeBankroll * f;
+  const roundedAmount = Math.floor(rawAmount / 100) * 100;
+
+  return {
+    betAmount: Math.max(0, roundedAmount),
+    percentage: parseFloat((f * 100).toFixed(2)),
+    winProbability: parseFloat((p * 100).toFixed(3)),
+    edge: parseFloat((edge * 100).toFixed(2)),
+    kellyFraction: parseFloat(continuousKellyDamping.toFixed(3)),
+    regimeModulator: parseFloat(regimeModulator.toFixed(3)),
+    advice: portfolioMode
+      ? `Portefeuille 4 tickets • Edge +${(edge * 100).toFixed(1)}% (Kelly fractionnaire γ=${(continuousKellyDamping * 100).toFixed(0)}%)`
+      : `Allocation Kelly continue • Edge +${(edge * 100).toFixed(1)}% (Amortissement γ=${(continuousKellyDamping * 100).toFixed(0)}%)`,
+  };
+};
 
 export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
   confidence,
@@ -26,11 +154,7 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
   const [bankroll, setBankroll] = useState<number>(5000);
   const [gameMode, setGameMode] = useState<GameMode>("STANDARD");
   const [selectedBetType, setSelectedBetType] = useState<string>("2N");
-  const [bet, setBet] = useState<{
-    betAmount: number;
-    percentage: number;
-    advice: string;
-  } | null>(null);
+  const [bet, setBet] = useState<ContinuousKellyResult | null>(null);
   const [portfolioMode, setPortfolioMode] = useState(false);
 
   // Extraction dynamique des types de paris selon le mode
@@ -59,73 +183,19 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
 
   const regime = useMemo(() => {
     if (!history || history.length < 10)
-      return { regime: "stable", volatility: 0.1 };
+      return { regime: "stable", hurst: 0.5, entropy: 0.5, volatility: 0.1 };
     return detectGameRegime(history);
   }, [history]);
 
   useEffect(() => {
-    let safeConf = isNaN(confidence) ? 50 : confidence;
-
-    // Ajustement selon le régime
-    if (regime.regime === "chaotic") {
-      safeConf *= 0.8; // Réduction de confiance en régime chaotique
-    } else if (regime.regime === "trend") {
-      safeConf *= 1.1;
-    }
-
-    let odds = 240;
-    const currentPayouts = LOTO_PAYOUTS[gameMode];
-
-    if (selectedBetType in currentPayouts.SIMPLE)
-      odds =
-        currentPayouts.SIMPLE[
-          selectedBetType as keyof typeof currentPayouts.SIMPLE
-        ].odds;
-    else if (selectedBetType in currentPayouts.TURBO)
-      odds =
-        currentPayouts.TURBO[
-          selectedBetType as keyof typeof currentPayouts.TURBO
-        ].odds;
-
-    // Probabilité ajustée selon le mode
-    // DC Machine (odds plus faibles = probabilité perçue plus haute)
-    let baseWinProb = 0.15;
-    if (gameMode === "DOUBLE_CHANCE") baseWinProb = 0.22;
-    if (gameMode === "DOUBLE_CHANCE_MACHINE") baseWinProb = 0.25;
-
-    const b = odds;
-    const p = (safeConf / 100) * baseWinProb;
-    const q = 1 - p;
-
-    let f = (b * p - q) / b;
-
-    // Diversification Constraint (Portfolio optimization)
-    // If portfolio mode is active, Kelly is divided by 4 tickets and capped at 2.5% max per ticket.
-    const maxRisk = portfolioMode ? 0.025 : 0.05;
-    const multiplier = portfolioMode ? 0.25 : 0.5; // Quart de Kelly ou Demi-Kelly
-
-    f = f * multiplier;
-    f = Math.min(f, maxRisk);
-
-    let result;
-    if (f <= 0) {
-      result = {
-        betAmount: 0,
-        percentage: 0,
-        advice: "Espérance négative. Ne pas parier sur ce type.",
-      };
-    } else {
-      const amount = Math.floor(bankroll * f);
-      const roundedAmount = Math.floor(amount / 100) * 100;
-      result = {
-        betAmount: Math.max(0, roundedAmount),
-        percentage: parseFloat((f * 100).toFixed(2)),
-        advice: portfolioMode
-          ? `Mise par ticket (Portefeuille diversifié de 4 tickets)`
-          : `Mise Optimale (Demi-Kelly)`,
-      };
-    }
-
+    const result = computeContinuousKellyAllocation({
+      confidence,
+      bankroll,
+      gameMode,
+      selectedBetType,
+      portfolioMode,
+      regime,
+    });
     setBet(result);
   }, [confidence, bankroll, selectedBetType, gameMode, portfolioMode, regime]);
 

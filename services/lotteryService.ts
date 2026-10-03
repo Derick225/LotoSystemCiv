@@ -733,10 +733,11 @@ export const bulkAddResults = async (drawName: string, results: { date: string, 
   const mapped = results.map((r, i) => {
     const targetName = r.draw_name || normalizeDrawName(drawName);
     const withoutMachine = isDrawWithoutMachine(targetName);
+    const normDate = normalizeDate(r.date);
     return {
-      id: (r as any).id || `draw_import_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}`,
+      id: (r as any).id || `draw_import_${targetName.replace(/\s+/g, '_')}_${normDate}_${i}`,
       draw_name: targetName,
-      date: normalizeDate(r.date),
+      date: normDate,
       gagnants: r.gagnants,
       machine: withoutMachine ? [] : (r.machine || []),
       version: 1
@@ -803,7 +804,7 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
     const cacheKey = globalCache.generateKey('history', targetName);
     const existing = (await globalCache.get<DrawResult[]>(cacheKey, targetName)) || [];
     const newEntry: DrawResult = {
-      id: `draw_loc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: `draw_loc_${targetName.replace(/\s+/g, '_')}_${normalizedDateStr}_${result.gagnants.join('_')}`,
       drawName: targetName,
       date: formatDate(normalizedDateStr),
       gagnants: result.gagnants,

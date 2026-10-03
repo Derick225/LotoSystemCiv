@@ -240,18 +240,31 @@ export const calculateScores = (
     });
   }
 
-  // Étape 5 : Normalisation Finale Robuste (Percentiles Dynamiques)
+  // Étape 5 : Normalisation Finale Robuste (Percentiles Dynamiques avec préservation stricte de l'ordre de la queue supérieure)
   const allScores = masterScores.map(m => m.score).sort((a, b) => a - b);
-  const alpha = 1.0 - confidenceLevel;
+  const alpha = Math.max(0.01, Math.min(0.5, 1.0 - confidenceLevel));
   const pLowIndex = Math.floor(allScores.length * (alpha / 2.0));
   const pHighIndex = Math.floor(allScores.length * (1.0 - (alpha / 2.0)));
   
-  const minS = allScores[pLowIndex] !== undefined ? allScores[pLowIndex] : allScores[0];
-  const maxS = allScores[pHighIndex] !== undefined ? allScores[pHighIndex] : allScores[allScores.length - 1];
+  const absMin = allScores[0] ?? 0;
+  const absMax = allScores[allScores.length - 1] ?? 1;
+  const minS = allScores[pLowIndex] !== undefined ? allScores[pLowIndex] : absMin;
+  const maxS = allScores[pHighIndex] !== undefined ? allScores[pHighIndex] : absMax;
   const range = Math.max(Number.EPSILON, maxS - minS);
+  const tailBand = (alpha / 2.0) * 100.0;
+  const bulkSpan = 100.0 - 2.0 * tailBand;
 
   masterScores.forEach((m) => {
-    const normalized = ((m.score - minS) / range) * 100;
+    let normalized: number;
+    if (m.score <= minS) {
+      const lowRange = Math.max(Number.EPSILON, minS - absMin);
+      normalized = minS > absMin ? tailBand * ((m.score - absMin) / lowRange) : tailBand;
+    } else if (m.score <= maxS) {
+      normalized = tailBand + ((m.score - minS) / range) * bulkSpan;
+    } else {
+      const highRange = Math.max(Number.EPSILON, absMax - maxS);
+      normalized = (100.0 - tailBand) + tailBand * ((m.score - maxS) / highRange);
+    }
     m.score = Math.max(0, Math.min(100, normalized));
     
     // Normalize SHAP values to represent percentage of the final score contribution (0-100 sum roughly)
@@ -300,12 +313,42 @@ export const applyPCADenoising = async (
       const dimensionalityFactor = featureKeys.length;
       const pcaConfidence = Math.exp(-relativeMSE * Math.max(1, dimensionalityFactor));
 
+      // Pré-calcul des médianes et MAD robustes par feature avant dénoising pour préserver les signaux rares (outsiders)
+      const preDenoiseStats = featureKeys.map((_, fIdx) => {
+        const colVals = featureMatrix.map(row => row[fIdx]);
+        const med = getMedian(colVals);
+        const mad = getMAD(colVals, med);
+        return { median: med, mad };
+      });
+
+      // Quantile critique continu dérivé analytiquement de confidenceLevel via l'inverse de la CDF logistique-normale
+      const safeAlpha = Math.max(1e-4, Math.min(0.5, 1.0 - confidenceLevel));
+      const zCrit = Math.max(1.0, -Math.log((safeAlpha / 2.0) / (1.0 - safeAlpha / 2.0)) / LOGISTIC_APPROX_FACTOR);
+
       masterScores.forEach((item, idx) => {
+        // Calcul de l'isolation multivariée de l'échantillon dans l'espace du noyau RBF :
+        // Un outsider fort sur une dimension s'isole dans le noyau RBF isotrope, ce qui nécessite de protéger ses autres composantes contre un rappel vers la moyenne globale.
+        let maxSampleZSq = 0;
+        for (let f = 0; f < featureKeys.length; f++) {
+          const { median: medF, mad: madF } = preDenoiseStats[f];
+          const zF = madF > 1e-6 ? getModifiedZScore(featureMatrix[idx][f], medF, madF) : 0;
+          if (zF * zF > maxSampleZSq) maxSampleZSq = zF * zF;
+        }
+
         featureKeys.forEach((key, fIdx) => {
           const rawVal = featureMatrix[idx][fIdx];
           const dval = Number(denoisedMatrix[idx]?.[fIdx]);
           const cleanDVal = isNaN(dval) ? rawVal : dval;
-          const blended = rawVal + pcaConfidence * (cleanDVal - rawVal);
+
+          // Porte de préservation continue de Huber-Wiener :
+          // Combine la déviation locale de la feature et l'isolation multivariée dans le noyau RBF.
+          const { median: colMed, mad: colMad } = preDenoiseStats[fIdx];
+          const zLocal = colMad > 1e-6 ? getModifiedZScore(rawVal, colMed, colMad) : 0;
+          const effectiveZSq = 0.5 * (zLocal * zLocal + maxSampleZSq);
+          const noiseGate = Math.exp(-effectiveZSq / (2.0 * zCrit * zCrit));
+          const effectiveBlend = pcaConfidence * noiseGate;
+
+          const blended = rawVal + effectiveBlend * (cleanDVal - rawVal);
           // La reconstruction PCA (régression linéaire dans un sous-espace réduit) peut
           // dépasser l'intervalle [0, 100] que chaque algorithme garantit pourtant en sortie
           // (confirmé empiriquement : gap_sequence et derived_neighbor ressortaient parfois
@@ -353,18 +396,32 @@ export const applyPCADenoising = async (
     logger.warn({ err: e }, "PCA Denoising échoué, conservation des scores bruts.");
   }
 
-  // Normalisation finale robuste avec le même niveau de confiance
+  // Normalisation finale robuste avec le même niveau de confiance et préservation stricte de l'ordre de la queue supérieure
   const allScoresPCA = masterScores.map(m => m.score).sort((a, b) => a - b);
-  const alpha = 1.0 - confidenceLevel;
+  const alpha = Math.max(0.01, Math.min(0.5, 1.0 - confidenceLevel));
   const pLowIndex = Math.floor(allScoresPCA.length * (alpha / 2.0));  
   const pHighIndex = Math.floor(allScoresPCA.length * (1.0 - (alpha / 2.0)));
   
-  const minS = allScoresPCA[pLowIndex] !== undefined ? allScoresPCA[pLowIndex] : allScoresPCA[0];
-  const maxS = allScoresPCA[pHighIndex] !== undefined ? allScoresPCA[pHighIndex] : allScoresPCA[allScoresPCA.length - 1];
+  const absMinPCA = allScoresPCA[0] ?? 0;
+  const absMaxPCA = allScoresPCA[allScoresPCA.length - 1] ?? 1;
+  const minS = allScoresPCA[pLowIndex] !== undefined ? allScoresPCA[pLowIndex] : absMinPCA;
+  const maxS = allScoresPCA[pHighIndex] !== undefined ? allScoresPCA[pHighIndex] : absMaxPCA;
   const range = Math.max(Number.EPSILON, maxS - minS);
+  const tailBand = (alpha / 2.0) * 100.0;
+  const bulkSpan = 100.0 - 2.0 * tailBand;
 
   masterScores.forEach((m) => {
-    m.score = Math.max(0, Math.min(100, ((m.score - minS) / range) * 100));
+    let normalized: number;
+    if (m.score <= minS) {
+      const lowRange = Math.max(Number.EPSILON, minS - absMinPCA);
+      normalized = minS > absMinPCA ? tailBand * ((m.score - absMinPCA) / lowRange) : tailBand;
+    } else if (m.score <= maxS) {
+      normalized = tailBand + ((m.score - minS) / range) * bulkSpan;
+    } else {
+      const highRange = Math.max(Number.EPSILON, absMaxPCA - maxS);
+      normalized = (100.0 - tailBand) + tailBand * ((m.score - maxS) / highRange);
+    }
+    m.score = Math.max(0, Math.min(100, normalized));
     
     // Normalize SHAP values to represent percentage of the final score contribution
     const totalShap = Object.values(m.explainability?.shapValues || {}).reduce((a, b) => a + b, 0);

@@ -19,6 +19,70 @@ const OFFLINE_QUEUE_PREFIX = 'nexus_offline_queue_';
 class OfflineQueueService {
   private isProcessing = false;
   private listenerInitialized = false;
+  private memoryFallbackStore = new Map<string, string>();
+
+  private hasIndexedDB(): boolean {
+    return typeof indexedDB !== 'undefined';
+  }
+
+  private async writeStorageItem(key: string, value: string): Promise<void> {
+    if (this.hasIndexedDB()) {
+      await set(key, value);
+    } else {
+      this.memoryFallbackStore.set(key, value);
+    }
+  }
+
+  private async readAllQueueEntries(): Promise<Array<[string, unknown]>> {
+    if (this.hasIndexedDB()) {
+      const allKeys = await keys();
+      const queueKeys = allKeys.filter(
+        (k): k is string => typeof k === 'string' && k.startsWith(OFFLINE_QUEUE_PREFIX)
+      );
+      if (queueKeys.length === 0) return [];
+      const { getMany } = await import('idb-keyval');
+      const rawValues = await getMany(queueKeys);
+      return queueKeys.map((k, idx) => [k, rawValues[idx]]);
+    }
+    const entries: Array<[string, unknown]> = [];
+    for (const [k, v] of this.memoryFallbackStore.entries()) {
+      if (k.startsWith(OFFLINE_QUEUE_PREFIX)) {
+        entries.push([k, v]);
+      }
+    }
+    return entries;
+  }
+
+  private async deleteStorageKeys(keysToDelete: string[]): Promise<void> {
+    if (keysToDelete.length === 0) return;
+    if (this.hasIndexedDB()) {
+      const { delMany } = await import('idb-keyval');
+      await delMany(keysToDelete);
+    } else {
+      for (const k of keysToDelete) {
+        this.memoryFallbackStore.delete(k);
+      }
+    }
+  }
+
+  private async updateStorageEntries(entriesToUpdate: [string, string][]): Promise<void> {
+    if (entriesToUpdate.length === 0) return;
+    if (this.hasIndexedDB()) {
+      const { setMany } = await import('idb-keyval');
+      await setMany(entriesToUpdate);
+    } else {
+      for (const [k, v] of entriesToUpdate) {
+        this.memoryFallbackStore.set(k, v);
+      }
+    }
+  }
+
+  private isNavigatorOnline(): boolean {
+    if (typeof navigator === 'undefined' || typeof navigator.onLine !== 'boolean') {
+      return true;
+    }
+    return navigator.onLine;
+  }
 
   public initReconciler() {
     if (this.listenerInitialized || typeof window === 'undefined') return;
@@ -29,12 +93,51 @@ class OfflineQueueService {
       this.processQueue().catch((err: unknown) => console.warn('[OfflineQueue] Échec de réconciliation :', err));
     });
 
-    if (navigator.onLine) {
+    if (this.isNavigatorOnline()) {
       setTimeout(() => this.processQueue().catch(() => {}), 3000);
     }
   }
 
   private queueSequence = 0;
+
+  /**
+   * Inspecte l'état actuel de la file d'attente hors-ligne dans IndexedDB (ou mémoire de repli)
+   */
+  public async getQueueStats(): Promise<{
+    pendingCount: number;
+    byType: Record<string, number>;
+    items: OfflineQueueItem[];
+  }> {
+    try {
+      const entries = await this.readAllQueueEntries();
+      if (entries.length === 0) {
+        return { pendingCount: 0, byType: {}, items: [] };
+      }
+      const items: OfflineQueueItem[] = [];
+      const byType: Record<string, number> = {};
+
+      for (const [, raw] of entries) {
+        if (!raw) continue;
+        try {
+          const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+          const valid = OfflineQueueItemSchema.safeParse(parsed);
+          if (valid.success) {
+            items.push(valid.data);
+            byType[valid.data.type] = (byType[valid.data.type] || 0) + 1;
+          }
+        } catch {
+          // Ignore malformed entry during inspection
+        }
+      }
+      return {
+        pendingCount: items.length,
+        byType,
+        items,
+      };
+    } catch {
+      return { pendingCount: 0, byType: {}, items: [] };
+    }
+  }
 
   /**
    * Enregistre un élément dans la queue locale IndexedDB et tente une synchronisation si en ligne
@@ -73,13 +176,13 @@ class OfflineQueueService {
     const queueItem = parsedItem.data;
     const storageKey = `${OFFLINE_QUEUE_PREFIX}${type}_${id}`;
     try {
-      await set(storageKey, JSON.stringify(queueItem));
+      await this.writeStorageItem(storageKey, JSON.stringify(queueItem));
     } catch (err: unknown) {
       console.warn(`[OfflineQueue] Impossible d'écrire l'élément ${id} dans IndexedDB :`, err);
     }
 
     // Tenter immédiatement d'envoyer si nous sommes en ligne
-    if (navigator.onLine && !this.isProcessing) {
+    if (this.isNavigatorOnline() && !this.isProcessing) {
       this.processQueue().catch(() => {});
     }
   }
@@ -88,7 +191,7 @@ class OfflineQueueService {
    * Traite tous les éléments en attente dans la queue IndexedDB et synchronise avec Supabase
    */
   public async processQueue(): Promise<{ processed: number; errors: number }> {
-    if (this.isProcessing || !navigator.onLine || !isSupabaseConfigured()) {
+    if (this.isProcessing || !this.isNavigatorOnline() || !isSupabaseConfigured()) {
       return { processed: 0, errors: 0 };
     }
 
@@ -97,12 +200,8 @@ class OfflineQueueService {
     let errors = 0;
 
     try {
-      const allKeys = await keys();
-      const queueKeys = allKeys.filter(
-        (k): k is string => typeof k === 'string' && k.startsWith(OFFLINE_QUEUE_PREFIX)
-      );
-
-      if (queueKeys.length === 0) {
+      const entries = await this.readAllQueueEntries();
+      if (entries.length === 0) {
         this.isProcessing = false;
         return { processed: 0, errors: 0 };
       }
@@ -115,14 +214,11 @@ class OfflineQueueService {
         user = null;
       }
 
-      const { getMany, delMany, setMany } = await import('idb-keyval');
-      const values = await getMany(queueKeys);
       const keysToDelete: string[] = [];
       const entriesToUpdate: [string, string][] = [];
 
-      for (let i = 0; i < values.length; i++) {
-        const raw = values[i];
-        const key = queueKeys[i];
+      for (let i = 0; i < entries.length; i++) {
+        const [key, raw] = entries[i];
         if (!raw) continue;
 
         let parsedRaw: unknown;
@@ -173,12 +269,8 @@ class OfflineQueueService {
         }
       }
       
-      if (keysToDelete.length > 0) {
-          await delMany(keysToDelete);
-      }
-      if (entriesToUpdate.length > 0) {
-          await setMany(entriesToUpdate);
-      }
+      await this.deleteStorageKeys(keysToDelete);
+      await this.updateStorageEntries(entriesToUpdate);
       
     } catch (err: unknown) {
       console.error('[OfflineQueue] Erreur critique durant la réconciliation :', err);
