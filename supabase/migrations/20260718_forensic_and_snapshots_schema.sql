@@ -90,6 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_prediction_snapshots_entropy_hurst ON public.pred
 ALTER TABLE public.post_mortem_reviews ENABLE ROW LEVEL SECURITY;
 
 -- Select/Read Policies
+DROP POLICY IF EXISTS "Users can view reviews of their own snapshots" ON public.post_mortem_reviews;
 CREATE POLICY "Users can view reviews of their own snapshots" 
   ON public.post_mortem_reviews 
   FOR SELECT 
@@ -102,6 +103,7 @@ CREATE POLICY "Users can view reviews of their own snapshots"
   );
 
 -- Write/Modify Policies (Only through service role or user creator validation)
+DROP POLICY IF EXISTS "Users can insert reviews for their own snapshots" ON public.post_mortem_reviews;
 CREATE POLICY "Users can insert reviews for their own snapshots" 
   ON public.post_mortem_reviews 
   FOR INSERT 
@@ -114,6 +116,7 @@ CREATE POLICY "Users can insert reviews for their own snapshots"
   );
 
 -- Service Role Bypass Policies (Gives edge functions and automated workers unrestricted access)
+DROP POLICY IF EXISTS "Service role full access on post_mortem_reviews" ON public.post_mortem_reviews;
 CREATE POLICY "Service role full access on post_mortem_reviews" 
   ON public.post_mortem_reviews 
   FOR ALL 

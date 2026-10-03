@@ -258,6 +258,7 @@ ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.predictions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.post_mortem_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forensic_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.draw_regimes ENABLE ROW LEVEL SECURITY;
@@ -265,49 +266,108 @@ ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.model_performance_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.model_weights_config ENABLE ROW LEVEL SECURITY;
 
--- Policies Publiques
+-- Policies Publiques (Idempotentes)
+DROP POLICY IF EXISTS "Public Read Results" ON public.draw_results;
 CREATE POLICY "Public Read Results" ON public.draw_results FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Analytics" ON public.draw_analytics;
 CREATE POLICY "Public Read Analytics" ON public.draw_analytics FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Weights" ON public.algo_weights;
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Logs" ON public.learning_logs;
 CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Regimes" ON public.draw_regimes;
 CREATE POLICY "Public Read Regimes" ON public.draw_regimes FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Performance Metrics" ON public.model_performance_metrics;
 CREATE POLICY "Public Read Performance Metrics" ON public.model_performance_metrics FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Weights Config" ON public.model_weights_config;
 CREATE POLICY "Public Read Weights Config" ON public.model_weights_config FOR SELECT USING (true);
 
--- Policies User
+-- Policies User (Idempotentes)
+DROP POLICY IF EXISTS "User Manage Own Prefs" ON public.user_preferences;
 CREATE POLICY "User Manage Own Prefs" ON public.user_preferences FOR ALL USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "User Insert Feedback" ON public.prediction_feedback;
 CREATE POLICY "User Insert Feedback" ON public.prediction_feedback FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "User View Own Tx" ON public.transactions;
 CREATE POLICY "User View Own Tx" ON public.transactions FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "User View Own Subscriptions" ON public.subscriptions;
 CREATE POLICY "User View Own Subscriptions" ON public.subscriptions FOR SELECT USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view their own predictions" ON public.predictions;
 CREATE POLICY "Users can view their own predictions" ON public.predictions FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert their own predictions" ON public.predictions;
 CREATE POLICY "Users can insert their own predictions" ON public.predictions FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update their own predictions" ON public.predictions;
 CREATE POLICY "Users can update their own predictions" ON public.predictions FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete their own predictions" ON public.predictions;
 CREATE POLICY "Users can delete their own predictions" ON public.predictions FOR DELETE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can insert their own snapshots" ON public.prediction_snapshots;
 CREATE POLICY "Users can insert their own snapshots" ON public.prediction_snapshots FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can view their own snapshots" ON public.prediction_snapshots;
 CREATE POLICY "Users can view their own snapshots" ON public.prediction_snapshots FOR SELECT USING (auth.uid() = user_id);
-
+DROP POLICY IF EXISTS "Users can update their own snapshots" ON public.prediction_snapshots;
 CREATE POLICY "Users can update their own snapshots" ON public.prediction_snapshots FOR UPDATE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view reviews of their own snapshots" ON public.post_mortem_reviews;
+CREATE POLICY "Users can view reviews of their own snapshots"
+  ON public.post_mortem_reviews
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.prediction_snapshots s
+      WHERE s.id = public.post_mortem_reviews.snapshot_id
+      AND s.user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can insert reviews for their own snapshots" ON public.post_mortem_reviews;
+CREATE POLICY "Users can insert reviews for their own snapshots"
+  ON public.post_mortem_reviews
+  FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.prediction_snapshots s
+      WHERE s.id = public.post_mortem_reviews.snapshot_id
+      AND s.user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can view their own forensic reports" ON public.forensic_reports;
 CREATE POLICY "Users can view their own forensic reports" ON public.forensic_reports FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert their own forensic reports" ON public.forensic_reports;
 CREATE POLICY "Users can insert their own forensic reports" ON public.forensic_reports FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update their own forensic reports" ON public.forensic_reports;
 CREATE POLICY "Users can update their own forensic reports" ON public.forensic_reports FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can delete their own forensic reports" ON public.forensic_reports;
 CREATE POLICY "Users can delete their own forensic reports" ON public.forensic_reports FOR DELETE USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can view their own learning sessions" ON public.learning_sessions;
 CREATE POLICY "Users can view their own learning sessions" ON public.learning_sessions FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert their own learning sessions" ON public.learning_sessions;
 CREATE POLICY "Users can insert their own learning sessions" ON public.learning_sessions FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update their own learning sessions" ON public.learning_sessions;
 CREATE POLICY "Users can update their own learning sessions" ON public.learning_sessions FOR UPDATE USING (auth.uid() = user_id);
 
--- Policies Service Role
+-- Policies Service Role (Idempotentes)
+DROP POLICY IF EXISTS "Service Full Access Results" ON public.draw_results;
 CREATE POLICY "Service Full Access Results" ON public.draw_results FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Analytics" ON public.draw_analytics;
 CREATE POLICY "Service Full Access Analytics" ON public.draw_analytics FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Weights" ON public.algo_weights;
 CREATE POLICY "Service Full Access Weights" ON public.algo_weights FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Logs" ON public.learning_logs;
 CREATE POLICY "Service Full Access Logs" ON public.learning_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Tx" ON public.transactions;
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Subscriptions" ON public.subscriptions;
 CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service role can update snapshots" ON public.prediction_snapshots;
 CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
+DROP POLICY IF EXISTS "Service role full access on post_mortem_reviews" ON public.post_mortem_reviews;
+CREATE POLICY "Service role full access on post_mortem_reviews" ON public.post_mortem_reviews FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Performance Metrics" ON public.model_performance_metrics;
 CREATE POLICY "Service Full Access Performance Metrics" ON public.model_performance_metrics FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Weights Config" ON public.model_weights_config;
 CREATE POLICY "Service Full Access Weights Config" ON public.model_weights_config FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- 6. REALTIME
