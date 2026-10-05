@@ -1,1323 +1,1874 @@
-import React, { useState, useMemo, useCallback } from "react";
-import { useNexusStore } from "../../store/useNexusStore";
-import {
-  gapRangeSequenceService,
-  GapRangeStep,
-  GapRangeBinInfo,
-} from "../../services/prediction/gapRangeSequenceService";
-import {
-  PLATT_SCORE_STANDARDIZATION,
-  GAP_SURVIVOR_FUSION,
-  GAP_SURVIVOR_TAG_CENTERS,
-} from "../../services/prediction/calibrationConstants";
-import { NumberBall } from "../NumberBall";
-import { useToast } from "../ui/Toast";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
+import React, { useMemo, useState, useEffect } from 'react';
 import {
   Layers,
   TrendingUp,
+  TrendingDown,
+  Minus,
+  History,
   Sparkles,
-  Filter,
-  CheckCircle2,
-  SlidersHorizontal,
+  Grid,
   ChevronRight,
-  HelpCircle,
-  Dna,
-  ArrowUpDown,
-  ShieldCheck,
-  Activity,
+  Sliders,
+  Compass,
+  Award,
+  BarChart2,
+  Brain,
+  Target,
+  BookmarkCheck,
   RotateCcw,
-  Search,
-  Copy,
+  Plus,
   Check,
   Flame,
-  Zap,
-  Target,
-  BrainCircuit,
-  Sliders,
-  Cpu,
-  Atom,
-} from "lucide-react";
-import { audioEngine } from "../../utils/audioEngine";
+} from 'lucide-react';
+import { useNexusStore } from '../../store/useNexusStore';
+import {
+  gapRangeSequenceService,
+  GAP_RANGE_BINS,
+  GapBinId,
+  GapRangeSequenceReport,
+  GapBallCandidate,
+} from '../../services/prediction/gapRangeSequenceService';
+import { saveTicket } from '../../services/userPreferencesService';
+import { NumberBall } from '../NumberBall';
+import { audioEngine } from '../../utils/audioEngine';
+import { useToast } from '../ui/Toast';
 
 interface GapRangeSequenceWidgetProps {
   drawName: string;
 }
 
-type SurvivorSortMode = "fused" | "dna" | "markov" | "quantum" | "proof" | "gap";
-type SurvivorCategoryFilter =
-  | "ALL"
-  | "CONVERGENCE"
-  | "DNA_DOMINANT"
-  | "MARKOV"
-  | "TAMIS_BOOSTED"
-  | "CRITICAL_GAP"
-  | "PROOF_ONLY";
-type SurvivorCategory = Exclude<SurvivorCategoryFilter, "ALL">;
-
-interface SurvivorItem {
-  num: number;
-  score: number;
-  rawSievedScore: number;
-  rawMarkovScore: number;
-  markovScore: number;
-  dnaScore: number;
-  dnaAffinity: number;
-  dnaMultiplier: number;
-  isDnaBoosted: boolean;
-  isInFavoredBin: boolean;
-  zScore: number | null;
-  lift: number | null;
-  quantumCoherence: number | null;
-  empiricalProof: number | null;
-  burstMomentum: number | null;
-  gap: number;
-  binLabel: string;
-  binIndex: number;
-  memberships: Record<SurvivorCategory, number>;
-  tag: string;
-  tagColor: string;
-  categoryKey: SurvivorCategoryFilter;
-}
-
-// Conversion d'un canal optionnel en mesure réelle : null si absent ou non
-// fini — jamais une valeur par défaut inventée (rendue « n/d » à l'affichage).
-const measuredNum = (value: number | undefined): number | null =>
-  typeof value === "number" && Number.isFinite(value) ? value : null;
-
-const logistic = (z: number): number => 1.0 / (1.0 + Math.exp(-z));
-
-// Écart-type empirique de la population mesurée (estimateur sans biais).
-const populationStd = (values: number[], mean: number): number => {
-  if (values.length < 2) return 0;
-  const variance =
-    values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (values.length - 1);
-  return Math.sqrt(variance);
-};
-
-const CATEGORY_ORDER: SurvivorCategory[] = [
-  "CONVERGENCE",
-  "DNA_DOMINANT",
-  "MARKOV",
-  "TAMIS_BOOSTED",
-  "CRITICAL_GAP",
-  "PROOF_ONLY",
-];
-
-const TAG_STYLES: Record<SurvivorCategory, { tag: string; tagColor: string }> = {
-  CONVERGENCE: {
-    tag: "🔥 Convergence Tamisée Élite",
-    tagColor:
-      "text-amber-300 bg-amber-500/20 border-amber-500/30 shadow-amber-500/10",
+const ROLE_STYLES: Record<
+  GapBallCandidate['role'],
+  { bg: string; text: string; border: string }
+> = {
+  'ANCRE DE TRANCHE': {
+    bg: 'bg-indigo-500/10',
+    text: 'text-indigo-600 dark:text-indigo-400',
+    border: 'border-indigo-500/30',
   },
-  DNA_DOMINANT: {
-    tag: "⚡ Signal ADN Dominant",
-    tagColor: "text-indigo-300 bg-indigo-500/20 border-indigo-500/30",
+  'RÉSONANCE HAZARD': {
+    bg: 'bg-emerald-500/10',
+    text: 'text-emerald-600 dark:text-emerald-400',
+    border: 'border-emerald-500/30',
   },
-  MARKOV: {
-    tag: "🎯 Transition Écart",
-    tagColor: "text-emerald-300 bg-emerald-500/20 border-emerald-500/30",
+  'ÉCHO SÉQUENTIEL': {
+    bg: 'bg-purple-500/10',
+    text: 'text-purple-600 dark:text-purple-400',
+    border: 'border-purple-500/30',
   },
-  TAMIS_BOOSTED: {
-    tag: "✨ Tamisé ADN +",
-    tagColor: "text-cyan-300 bg-cyan-500/20 border-cyan-500/30",
-  },
-  CRITICAL_GAP: {
-    tag: "⏳ Rupture d'Écart",
-    tagColor: "text-rose-300 bg-rose-500/20 border-rose-500/30",
-  },
-  PROOF_ONLY: {
-    tag: "🛡️ Preuve Statistique",
-    tagColor: "text-purple-300 bg-purple-500/20 border-purple-500/30",
+  'RUPTURE DE SÉCHERESSE': {
+    bg: 'bg-amber-500/10',
+    text: 'text-amber-600 dark:text-amber-400',
+    border: 'border-amber-500/30',
   },
 };
 
 export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
   drawName,
 }) => {
+  const globalHistory = useNexusStore((state) => state.history);
   const { showToast } = useToast();
-  const history = useNexusStore((state) => state.history);
-  const globalWeights = useNexusStore((state) => state.globalWeights);
-  const lastPrediction = useNexusStore((state) => state.lastPrediction);
 
-  const [step, setStep] = useState<GapRangeStep>("combined");
-  const [selectedBinIndex, setSelectedBinIndex] = useState<number | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<
+    'forecast' | 'timeline' | 'matrix' | 'simulator'
+  >('forecast');
+  const [selectedBinId, setSelectedBinId] = useState<GapBinId | null>(null);
+  const [selectedDrawIndex, setSelectedDrawIndex] = useState<number | null>(0);
+  const [timelineLimit, setTimelineLimit] = useState<number>(15);
 
-  // Specialist Controls for Survivants de l'ADN Algorithmique & Filtres
-  const [sortMode, setSortMode] = useState<SurvivorSortMode>("fused");
-  const [categoryFilter, setCategoryFilter] =
-    useState<SurvivorCategoryFilter>("ALL");
-  const [minScoreCutoff, setMinScoreCutoff] = useState<number>(50);
-  const [filterBinIndex, setFilterBinIndex] = useState<number | "all">("all");
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Interactive Tactical Selection State (initialized with Hamilton-Hare optimalFive)
+  const [customSelection, setCustomSelection] = useState<number[]>([]);
+  const [showReasoningDetails, setShowReasoningDetails] = useState<boolean>(true);
+  const [candidateFilterBin, setCandidateFilterBin] = useState<GapBinId | 'ALL'>(
+    'ALL'
+  );
 
-  // Compute Gap Range Sequence analysis dynamically with Active Algorithmic DNA weights
-  const report = useMemo(() => {
-    return gapRangeSequenceService.analyzeGapRangePatterns(
+  // Interactive Simulator & Backtest States
+  const [customMinGap, setCustomMinGap] = useState<number>(5);
+  const [customMaxGap, setCustomMaxGap] = useState<number>(12);
+  const [simPrevBin, setSimPrevBin] = useState<GapBinId>('G1_3');
+  const [simCurrBin, setSimCurrBin] = useState<GapBinId>('G8_14');
+  const [backtestWindow, setBacktestWindow] = useState<number>(30);
+  const [compareDrawName, setCompareDrawName] = useState<string>('ALL');
+
+  const availableDrawNames = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of globalHistory) {
+      const name = d.drawName || d.draw_name;
+      if (name) set.add(name);
+    }
+    return Array.from(set).sort();
+  }, [globalHistory]);
+
+  const report: GapRangeSequenceReport | null = useMemo(() => {
+    if (!globalHistory || globalHistory.length < 12) return null;
+    return gapRangeSequenceService.analyzeGapRangeSequences(
       drawName,
-      history,
-      step,
-      90,
-      globalWeights
+      globalHistory
     );
-  }, [drawName, history, step, globalWeights]);
+  }, [drawName, globalHistory]);
 
-  const activeBin = useMemo(() => {
-    if (selectedBinIndex !== null && report.bins[selectedBinIndex]) {
-      return report.bins[selectedBinIndex];
+  // Synchronize default tactical selection when report changes
+  useEffect(() => {
+    if (report?.selectionSynthesis?.optimalFive) {
+      setCustomSelection(report.selectionSynthesis.optimalFive);
     }
-    return report.topPredictedBins[0] || report.bins[0];
-  }, [selectedBinIndex, report]);
+  }, [report]);
 
-  // Refined & Optimized Differentiable Fusion for "Survivants de l'ADN Algorithmique" & Décision Tamisée
-  const { survivingNumbers, populationStats, totalFavoredCandidateCount, hasMeasuredHistory } = useMemo(() => {
-    // Mode dégradé (aucun tirage mesuré pour ce tirage) : le service retourne des
-    // canaux vides. Aucun score ni survivant n'est synthétisé — l'état est exposé tel quel.
-    if (report.totalDraws === 0) {
+  const compareReport: GapRangeSequenceReport | null = useMemo(() => {
+    if (!globalHistory || globalHistory.length < 12 || !report) return null;
+    const target =
+      compareDrawName === drawName ? 'ALL' : compareDrawName;
+    return gapRangeSequenceService.analyzeGapRangeSequences(
+      target,
+      globalHistory
+    );
+  }, [compareDrawName, drawName, globalHistory, report]);
+
+  // Candidate lookup map for O(1) access
+  const candidateMap = useMemo(() => {
+    const map = new Map<number, GapBallCandidate>();
+    if (!report) return map;
+    for (const c of report.selectionSynthesis.allCandidates) {
+      map.set(c.number, c);
+    }
+    return map;
+  }, [report]);
+
+  // Toggle a ball in the custom 5-number selection
+  const toggleBallInSelection = (num: number) => {
+    audioEngine.play('click');
+    setCustomSelection((prev) => {
+      if (prev.includes(num)) {
+        return prev.filter((n) => n !== num);
+      }
+      if (prev.length >= 5) {
+        // Replace the lowest-scoring ball currently in selection
+        let worstNum = prev[0];
+        let worstScore = Infinity;
+        for (const existing of prev) {
+          const s = candidateMap.get(existing)?.compositeScore ?? 0;
+          if (s < worstScore) {
+            worstScore = s;
+            worstNum = existing;
+          }
+        }
+        return [...prev.filter((n) => n !== worstNum), num].sort((a, b) => a - b);
+      }
+      return [...prev, num].sort((a, b) => a - b);
+    });
+  };
+
+  const resetOptimalSelection = () => {
+    if (!report) return;
+    audioEngine.play('click');
+    setCustomSelection(report.selectionSynthesis.optimalFive);
+    showToast(
+      'Sélection optimale Hamilton-Hare restaurée (5 boules)',
+      'info'
+    );
+  };
+
+  const handleSaveSelectionTicket = async () => {
+    if (!report || customSelection.length !== 5) {
+      showToast('Veuillez sélectionner exactement 5 numéros.', 'error');
+      return;
+    }
+    try {
+      audioEngine.play('success');
+      await saveTicket({
+        drawName,
+        numbers: [...customSelection].sort((a, b) => a - b),
+        strategy: `Quotas d'Écarts Markov-Wasserstein (${report.selectionSynthesis.selectionConfidence.toFixed(0)}%)`,
+      });
+      showToast(
+        `Combinaison [${customSelection.join(', ')}] enregistrée dans le Portefeuille !`,
+        'success'
+      );
+    } catch {
+      showToast("Erreur lors de l'enregistrement du ticket.", 'error');
+    }
+  };
+
+  // Live metrics for the active customSelection
+  const activeSelectionMetrics = useMemo(() => {
+    if (!report || customSelection.length === 0) {
       return {
-        survivingNumbers: [] as SurvivorItem[],
-        totalFavoredCandidateCount: 0,
-        hasMeasuredHistory: false,
-        populationStats: {
-          avgScore: 0,
-          retentionPercent: "0",
-          topConvergenceCount: 0,
-        },
+        meanScore: 0,
+        meanHazard: 0,
+        uniqueBins: 0,
+        uniqueDecades: 0,
       };
     }
+    const cands = customSelection
+      .map((n) => candidateMap.get(n))
+      .filter((c): c is GapBallCandidate => Boolean(c));
+    const meanScore =
+      cands.reduce((a, c) => a + c.compositeScore, 0) /
+      Math.max(1, cands.length);
+    const meanHazard =
+      (cands.reduce((a, c) => a + c.individualHazard, 0) /
+        Math.max(1, cands.length)) *
+      100;
+    const uniqueBins = new Set(cands.map((c) => c.binId)).size;
+    const uniqueDecades = new Set(
+      customSelection.map((n) => Math.min(8, Math.floor((n - 1) / 10)))
+    ).size;
+    return {
+      meanScore,
+      meanHazard,
+      uniqueBins,
+      uniqueDecades,
+    };
+  }, [report, customSelection, candidateMap]);
 
-    // 1. Dynamic Favored Bin Selection (Dynamic Mean Probability Mass Cutoff)
-    const totalBinsCount = report.bins.length;
-    const meanProb =
-      report.bins.reduce((sum, b) => sum + b.probability, 0) /
-      (totalBinsCount || 1);
+  // 1. Custom Gap Range Inspector Calculations
+  const customRangeAnalysis = useMemo(() => {
+    if (!report) return null;
+    const minG = Math.max(0, Math.min(customMinGap, customMaxGap));
+    const maxG = Math.max(customMinGap, customMaxGap);
 
-    // Bins with above-average transition probability mass
-    const favoredBins = report.bins.filter((b) => b.probability >= meanProb);
-    const topBinsToUse =
-      favoredBins.length > 0 ? favoredBins : report.topPredictedBins.slice(0, 3);
-    const favoredBinIndices = new Set(topBinsToUse.map((b) => b.binIndex));
+    const p = 5 / 90;
+    const q = 1 - p;
+    const theoreticalProb = Math.max(
+      0.0001,
+      Math.pow(q, minG) - Math.pow(q, maxG + 1)
+    );
 
-    // Evaluate all active lottery numbers (1-90). Un numéro sans mesure réelle sur
-    // les canaux primaires est exclu : aucun score n'est inventé pour lui.
-    const allNumbers = Array.from({ length: 90 }, (_, i) => i + 1);
+    let totalHits = 0;
+    let totalBalls = 0;
+    const hitsPerDraw: number[] = [];
 
-    // Statistiques de population mesurées sur les canaux bruts : elles servent de
-    // largeur de sigmoïde aux catégories sans échelle naturelle (variance réelle).
-    const gapValues: number[] = [];
-    const multValues: number[] = [];
-    for (const num of allNumbers) {
-      const g = report.currentGapsByNumber[num]?.gap;
-      const m = report.dnaMultipliers[num];
-      if (Number.isFinite(g)) gapValues.push(g);
-      if (Number.isFinite(m)) multValues.push(m);
+    for (const fp of report.recentFootprints) {
+      let drawHits = 0;
+      for (const w of fp.winningNumbers) {
+        totalBalls++;
+        if (w.gapAtDraw >= minG && w.gapAtDraw <= maxG) {
+          totalHits++;
+          drawHits++;
+        }
+      }
+      hitsPerDraw.push(drawHits);
     }
-    const meanGap =
-      gapValues.length > 0
-        ? gapValues.reduce((s, v) => s + v, 0) / gapValues.length
-        : 0;
-    const stdGap = populationStd(gapValues, meanGap);
-    const meanMult =
-      multValues.length > 0
-        ? multValues.reduce((s, v) => s + v, 0) / multValues.length
-        : 0;
-    const stdMult = populationStd(multValues, meanMult);
 
-    const allItems: SurvivorItem[] = [];
-    for (const num of allNumbers) {
-      const rawMarkovScore = report.rawScoresByNumber[num];
-      const dnaMultiplierRaw = report.dnaMultipliers[num];
-      const gapInfo = report.currentGapsByNumber[num];
+    const empiricalProb = totalBalls > 0 ? totalHits / totalBalls : 0;
+    const lift = empiricalProb / theoreticalProb;
+
+    const currentBalls: Array<{
+      number: number;
+      currentGap: number;
+      microScore: number;
+    }> = [];
+    for (const bin of GAP_RANGE_BINS) {
+      for (const item of report.currentNumbersByBin[bin.id] || []) {
+        if (item.currentGap >= minG && item.currentGap <= maxG) {
+          currentBalls.push({
+            ...item,
+            microScore: candidateMap.get(item.number)?.compositeScore ?? 50,
+          });
+        }
+      }
+    }
+    currentBalls.sort(
+      (a, b) => b.microScore - a.microScore || a.currentGap - b.currentGap
+    );
+
+    return {
+      minG,
+      maxG,
+      theoreticalProb,
+      empiricalProb,
+      lift,
+      expectedPerDraw: empiricalProb * 5,
+      hitsPerDraw,
+      currentBalls,
+    };
+  }, [report, customMinGap, customMaxGap, candidateMap]);
+
+  // 2. Trajectory Simulator (Order-2 Bi-gram Explorer)
+  const simulatedTrajectory = useMemo(() => {
+    if (!report) return null;
+    const chrono = [...report.recentFootprints].reverse();
+    const nextCounts: Record<GapBinId, number> = {
+      G0: 0,
+      G1_3: 0,
+      G4_7: 0,
+      G8_14: 0,
+      G15_24: 0,
+      G25_39: 0,
+      G40_PLUS: 0,
+    };
+    let matchOccurrences = 0;
+    let totalNextBalls = 0;
+
+    for (let i = 2; i < chrono.length; i++) {
       if (
-        !Number.isFinite(rawMarkovScore) ||
-        !Number.isFinite(dnaMultiplierRaw) ||
-        !gapInfo
+        chrono[i - 2].dominantBin === simPrevBin &&
+        chrono[i - 1].dominantBin === simCurrBin
       ) {
-        continue;
-      }
-
-      // b. DNA Breakdown Score derived from active global weights & last prediction matrix (TIRAGE ISOLATION RULE)
-      let dnaScore: number | null = measuredNum(report.dnaAffinity[num]);
-      if (lastPrediction && lastPrediction.drawName === drawName && lastPrediction.breakdown?.[num]) {
-        let totalVal = 0;
-        let totalW = 0;
-        for (const [algo, val] of Object.entries(lastPrediction.breakdown[num])) {
-          const w = globalWeights[algo as keyof typeof globalWeights] || 1;
-          totalVal += (val || 0) * w;
-          totalW += w;
-        }
-        if (totalW > 0) {
-          dnaScore = Math.max(0, Math.min(100, totalVal / totalW));
+        matchOccurrences++;
+        for (const bin of GAP_RANGE_BINS) {
+          nextCounts[bin.id] += chrono[i].binCounts[bin.id];
+          totalNextBalls += chrono[i].binCounts[bin.id];
         }
       }
-      if (dnaScore === null) continue;
+    }
 
-      // c. Telemetry optionnelle : null si non mesurée (rendue « n/d »), jamais une constante inventée.
-      const zScore = measuredNum(report.zScoresByNumber?.[num]);
-      const lift = measuredNum(report.liftsByNumber?.[num]);
-      const quantumCoherence = measuredNum(report.quantumCoherenceByNumber?.[num]);
-      const empiricalProof = measuredNum(report.empiricalProofConfidence?.[num]);
-      const burstMomentum = measuredNum(report.burstMomentumByNumber?.[num]);
-
-      // d. Continuous Differentiable Sieved Decision Score (standardisation moteur mutualisée)
-      const zMarkov =
-        (rawMarkovScore - PLATT_SCORE_STANDARDIZATION.CENTER) /
-        PLATT_SCORE_STANDARDIZATION.SCALE;
-      const zDna =
-        (dnaScore - PLATT_SCORE_STANDARDIZATION.CENTER) /
-        PLATT_SCORE_STANDARDIZATION.SCALE;
-      const zMult =
-        (dnaMultiplierRaw - 1.0) * GAP_SURVIVOR_FUSION.DNA_MULTIPLIER_Z_SCALE;
-      const zFused =
-        GAP_SURVIVOR_FUSION.W_MARKOV * zMarkov +
-        GAP_SURVIVOR_FUSION.W_DNA * zDna +
-        GAP_SURVIVOR_FUSION.W_DNA_MULTIPLIER * zMult;
-      const sievedScore =
-        100.0 /
-        (1.0 + Math.exp(-GAP_SURVIVOR_FUSION.FUSED_SIGMOID_SLOPE * zFused));
-
-      const isInFavoredBin = favoredBinIndices.has(gapInfo.binIndex);
-
-      // e. Continuous category memberships (sigmoids centered on the registered tag
-      // centers, widths from the engine scale or the measured population — no binary
-      // gates). Conjunction membership = geometric mean, which stays exactly at 0.5
-      // when every component sits on its center.
-      const memberships: Record<SurvivorCategory, number> = {
-        CONVERGENCE: Math.cbrt(
-          logistic(
-            (sievedScore - GAP_SURVIVOR_TAG_CENTERS.CONVERGENCE_FUSED) /
-              PLATT_SCORE_STANDARDIZATION.SCALE
-          ) *
-            logistic(
-              (rawMarkovScore - GAP_SURVIVOR_TAG_CENTERS.CONVERGENCE_MARKOV) /
-                PLATT_SCORE_STANDARDIZATION.SCALE
-            ) *
-            logistic(
-              (dnaScore - GAP_SURVIVOR_TAG_CENTERS.CONVERGENCE_DNA) /
-                PLATT_SCORE_STANDARDIZATION.SCALE
-            )
-        ),
-        DNA_DOMINANT: logistic(
-          (dnaScore - GAP_SURVIVOR_TAG_CENTERS.DNA_DOMINANT) /
-            PLATT_SCORE_STANDARDIZATION.SCALE
-        ),
-        MARKOV: logistic(
-          (rawMarkovScore - GAP_SURVIVOR_TAG_CENTERS.MARKOV) /
-            PLATT_SCORE_STANDARDIZATION.SCALE
-        ),
-        TAMIS_BOOSTED:
-          stdMult > 1e-9
-            ? logistic((dnaMultiplierRaw - 1.0) / stdMult)
-            : 0.5,
-        CRITICAL_GAP:
-          stdGap > 1e-9
-            ? logistic((gapInfo.gap - meanGap) / stdGap)
-            : 0.5,
-        PROOF_ONLY:
-          empiricalProof !== null && zScore !== null
-            ? Math.sqrt(
-                logistic(
-                  (empiricalProof - GAP_SURVIVOR_TAG_CENTERS.EMPIRICAL_PROOF) /
-                    PLATT_SCORE_STANDARDIZATION.SCALE
-                ) * logistic(zScore)
-              )
-            : 0.0,
+    const distribution = GAP_RANGE_BINS.map((bin) => {
+      const m1Prob = report.transitionMatrixOrder1[simCurrBin]?.[bin.id] ?? 0;
+      const m2Raw =
+        totalNextBalls > 0 ? nextCounts[bin.id] / totalNextBalls : m1Prob;
+      const blended =
+        matchOccurrences > 0 ? 0.65 * m2Raw + 0.35 * m1Prob : m1Prob;
+      return {
+        bin,
+        prob: blended,
+        expectedBalls: blended * 5,
+        lift: blended / Math.max(0.001, bin.theoreticalProb),
       };
+    }).sort((a, b) => b.prob - a.prob);
 
-      // Catégorie dominante = argmax des appartenances ; le point neutre 0.5 de la
-      // logistique (« la preuve penche pour ») sépare l'étiquette du standard.
-      let bestCategory: SurvivorCategory | null = null;
-      let bestMembership = 0.5;
-      for (const cat of CATEGORY_ORDER) {
-        if (memberships[cat] > bestMembership) {
-          bestMembership = memberships[cat];
-          bestCategory = cat;
-        }
-      }
+    return {
+      matchOccurrences,
+      distribution,
+      topBin: distribution[0],
+    };
+  }, [report, simPrevBin, simCurrBin]);
 
-      allItems.push({
-        num,
-        score: parseFloat(sievedScore.toFixed(1)),
-        rawSievedScore: sievedScore,
-        rawMarkovScore: parseFloat(rawMarkovScore.toFixed(1)),
-        markovScore: parseFloat(rawMarkovScore.toFixed(1)),
-        dnaScore: parseFloat(dnaScore.toFixed(1)),
-        dnaAffinity: Math.round(dnaScore),
-        dnaMultiplier: parseFloat(dnaMultiplierRaw.toFixed(2)),
-        isDnaBoosted: dnaMultiplierRaw > 1.0,
-        isInFavoredBin,
-        zScore,
-        lift,
-        quantumCoherence,
-        empiricalProof,
-        burstMomentum,
-        gap: gapInfo.gap,
-        binLabel: gapInfo.binLabel,
-        binIndex: gapInfo.binIndex,
-        memberships,
-        tag: bestCategory ? TAG_STYLES[bestCategory].tag : "Survivant Standard",
-        tagColor: bestCategory
-          ? TAG_STYLES[bestCategory].tagColor
-          : "text-slate-400 bg-slate-800/60 border-slate-700/50",
-        categoryKey: bestCategory ?? "ALL",
+  // 3. Historical Backtest Precision Metrics
+  const backtestMetrics = useMemo(() => {
+    if (!report || report.recentFootprints.length < 6) return null;
+    const footprints = [...report.recentFootprints].reverse();
+    const evalCount = Math.min(backtestWindow, footprints.length - 2);
+    if (evalCount <= 0) return null;
+
+    let top1SuccessDraws = 0;
+    let top3CoveredBalls = 0;
+    let totalEvaluatedBalls = 0;
+    const drawEvaluations: Array<{
+      date: string;
+      predictedTopBins: GapBinId[];
+      actualCounts: Record<GapBinId, number>;
+      coveredBalls: number;
+      top1Hit: boolean;
+    }> = [];
+
+    for (
+      let i = footprints.length - evalCount;
+      i < footprints.length;
+      i++
+    ) {
+      const prevDom = footprints[i - 1].dominantBin;
+      const row = report.transitionMatrixOrder1[prevDom];
+      const rankedBins = [...GAP_RANGE_BINS]
+        .sort((a, b) => (row?.[b.id] ?? 0) - (row?.[a.id] ?? 0))
+        .slice(0, 3)
+        .map((b) => b.id);
+
+      const targetFp = footprints[i];
+      const top1Hit = targetFp.binCounts[rankedBins[0]] > 0;
+      if (top1Hit) top1SuccessDraws++;
+
+      const covered =
+        targetFp.binCounts[rankedBins[0]] +
+        targetFp.binCounts[rankedBins[1]] +
+        targetFp.binCounts[rankedBins[2]];
+      top3CoveredBalls += covered;
+      totalEvaluatedBalls += 5;
+
+      drawEvaluations.push({
+        date: targetFp.date,
+        predictedTopBins: rankedBins,
+        actualCounts: targetFp.binCounts,
+        coveredBalls: covered,
+        top1Hit,
       });
     }
 
-    // If specific tranche is selected, filter by that tranche; otherwise consider favored bins or all candidate items
-    let candidatesPool = allItems;
-    if (filterBinIndex !== "all") {
-      candidatesPool = allItems.filter((item) => item.binIndex === filterBinIndex);
-    } else {
-      // Default: prioritize numbers in favored transition bins or with non-negative fused evidence
-      candidatesPool = allItems.filter(
-        (item) =>
-          item.isInFavoredBin ||
-          item.score >= PLATT_SCORE_STANDARDIZATION.CENTER
-      );
-    }
-
-    const totalFavoredCount = candidatesPool.length;
-
-    // Category Filter: soft continuous membership (> 0.5) — a number can
-    // meaningfully belong to several categories; the tag shows the dominant one.
-    let filtered = candidatesPool;
-    if (categoryFilter !== "ALL") {
-      filtered = filtered.filter(
-        (item) => item.memberships[categoryFilter] > 0.5
-      );
-    }
-
-    // Apply Search Query Filter
-    if (searchQuery.trim() !== "") {
-      const q = searchQuery.trim();
-      filtered = filtered.filter((item) => item.num.toString().includes(q));
-    }
-
-    // Apply Score Retention Threshold Cutoff (user control)
-    filtered = filtered.filter((item) => item.score >= minScoreCutoff);
-
-    // Tri déterministe : décroissant sur les valeurs mesurées, non mesurées en
-    // fin, puis départage par hachage stable sur le seed du tirage (pas de seed arbitraire).
-    const drawSeed = drawName
-      ? drawName.split("").reduce((acc, c, i) => (acc + c.charCodeAt(0) * (i + 1)) | 0, 0)
-      : 0;
-    const cmpDesc = (a: number | null, b: number | null): number => {
-      if (a === null && b === null) return 0;
-      if (a === null) return 1;
-      if (b === null) return -1;
-      return b - a;
-    };
-    filtered.sort((a, b) => {
-      let r = 0;
-      if (sortMode === "fused") {
-        r =
-          cmpDesc(a.rawSievedScore, b.rawSievedScore) ||
-          cmpDesc(a.rawMarkovScore, b.rawMarkovScore) ||
-          cmpDesc(a.dnaAffinity, b.dnaAffinity) ||
-          cmpDesc(a.empiricalProof, b.empiricalProof);
-      } else if (sortMode === "dna") {
-        r =
-          cmpDesc(a.dnaAffinity, b.dnaAffinity) ||
-          cmpDesc(a.dnaScore, b.dnaScore) ||
-          cmpDesc(a.rawSievedScore, b.rawSievedScore);
-      } else if (sortMode === "markov") {
-        r =
-          cmpDesc(a.rawMarkovScore, b.rawMarkovScore) ||
-          cmpDesc(a.rawSievedScore, b.rawSievedScore);
-      } else if (sortMode === "quantum") {
-        r =
-          cmpDesc(a.quantumCoherence, b.quantumCoherence) ||
-          cmpDesc(a.rawSievedScore, b.rawSievedScore);
-      } else if (sortMode === "proof") {
-        r =
-          cmpDesc(a.empiricalProof, b.empiricalProof) ||
-          cmpDesc(a.zScore, b.zScore) ||
-          cmpDesc(a.rawSievedScore, b.rawSievedScore);
-      } else {
-        r = b.gap - a.gap || cmpDesc(a.rawSievedScore, b.rawSievedScore);
-      }
-      if (r !== 0) return r;
-      const hashA = ((a.num + drawSeed) * 2654435761) % 4294967296;
-      const hashB = ((b.num + drawSeed) * 2654435761) % 4294967296;
-      return hashB - hashA;
-    });
-
-    // Compute Population Stats (real means over retained survivors)
-    const avgScore =
-      filtered.length > 0
-        ? filtered.reduce((acc, curr) => acc + curr.score, 0) / filtered.length
-        : 0;
-
-    const retentionPercent =
-      totalFavoredCount > 0
-        ? ((filtered.length / totalFavoredCount) * 100).toFixed(0)
-        : "0";
-
-    const topConvergenceCount = filtered.filter(
-      (item) => item.memberships.CONVERGENCE > 0.5
-    ).length;
-
     return {
-      survivingNumbers: filtered,
-      totalFavoredCandidateCount: totalFavoredCount,
-      hasMeasuredHistory: true,
-      populationStats: {
-        avgScore: parseFloat(avgScore.toFixed(1)),
-        retentionPercent,
-        topConvergenceCount,
-      },
+      evalCount,
+      top1SuccessRate: (top1SuccessDraws / evalCount) * 100,
+      top3BallCoverageRate:
+        totalEvaluatedBalls > 0
+          ? (top3CoveredBalls / totalEvaluatedBalls) * 100
+          : 0,
+      avgBallsCoveredPerDraw: top3CoveredBalls / evalCount,
+      recentEvaluations: drawEvaluations.reverse().slice(0, 8),
     };
-  }, [
-    report,
-    drawName,
-    globalWeights,
-    lastPrediction,
-    sortMode,
-    categoryFilter,
-    minScoreCutoff,
-    filterBinIndex,
-    searchQuery,
-  ]);
+  }, [report, backtestWindow]);
 
-  const handleStepChange = (newStep: GapRangeStep) => {
-    audioEngine.play("click");
-    setStep(newStep);
-    setSelectedBinIndex(null);
-    setFilterBinIndex("all");
-  };
+  if (!report || report.totalAnalyzedDraws < 5) {
+    return null;
+  }
 
-  const handleCopyNumbers = useCallback(
-    (count?: number) => {
-      const targetList = count
-        ? survivingNumbers.slice(0, count)
-        : survivingNumbers;
-      if (targetList.length === 0) return;
+  const activeBinForecast =
+    report.binForecasts.find((f) => f.bin.id === selectedBinId) ||
+    report.binForecasts.find((f) => f.bin.id === report.topPredictedBins[0]) ||
+    report.binForecasts[0];
 
-      const numsString = targetList.map((item) => item.num).join(", ");
-      navigator.clipboard.writeText(numsString);
-      setCopiedId("all");
-      audioEngine.play("success");
-      showToast(
-        `${targetList.length} numéro(s) survivant(s) copié(s) : [${numsString}]`,
-        "success"
-      );
+  const inspectedFootprint =
+    report.recentFootprints.find((fp) => fp.drawIndex === selectedDrawIndex) ||
+    report.recentFootprints[0];
 
-      setTimeout(() => setCopiedId(null), 2500);
-    },
-    [survivingNumbers, showToast]
-  );
-
-  const handleCopySingle = useCallback(
-    (num: number) => {
-      navigator.clipboard.writeText(num.toString());
-      setCopiedId(`num_${num}`);
-      audioEngine.play("click");
-      showToast(`Numéro #${num} copié dans le presse-papier`, "info");
-      setTimeout(() => setCopiedId(null), 2000);
-    },
-    [showToast]
-  );
-
-  const chartData = useMemo(() => {
-    return report.bins.map((bin) => ({
-      binIndex: bin.binIndex,
-      label: bin.label,
-      probability: parseFloat((bin.probability * 100).toFixed(1)),
-      count: bin.matchingNumbers.length,
-    }));
-  }, [report]);
+  const filteredCandidates = report.selectionSynthesis.allCandidates
+    .filter((c) => candidateFilterBin === 'ALL' || c.binId === candidateFilterBin)
+    .slice(0, 12);
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-xl space-y-6 relative overflow-hidden">
-      {/* Background Accent Glow */}
-      <div className="absolute top-0 right-0 -mt-12 -mr-12 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 -mb-12 -ml-12 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      {/* Header & Step Selector */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-2 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20">
-              <Layers className="w-5 h-5" />
+    <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 md:p-8 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
+      {/* Header Banner */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-5">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+              <Layers size={18} />
+            </div>
+            <span className="text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+              Markov • 1-Wasserstein • Quotas Hamilton-Hare
             </span>
-            <h3 className="text-lg font-black text-white tracking-wide uppercase">
-              Séquences & Patterns des Écarts par Tranches
-            </h3>
+            <span className="text-[10px] font-mono text-slate-400">
+              {report.totalAnalyzedDraws} tirages purifiés • {drawName}
+            </span>
           </div>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Modèle Markovien de transition de fréquences d'écarts d'apparition
-            d'un tirage au suivant. Prédit les tranches d'écarts les plus
-            probables pour filtrer l'ADN des numéros.
+          <h3 className="text-lg md:text-xl font-black text-slate-900 dark:text-white tracking-tight">
+            Séquences & Patterns des Écarts par Tranches
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+            Modélisation bayésienne par gain d’information (Divergence KL), distance topologique Earth-Mover (1-Wasserstein) et micro-résonance de hasard individuel (noyau de Silverman) pour projeter les quotas exacts de tranches et synthétiser la sélection optimale.
           </p>
         </div>
 
-        {/* Granularity Switcher */}
-        <div className="flex flex-wrap items-center bg-slate-950 p-1 rounded-2xl border border-slate-800 self-start md:self-auto gap-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-3 flex items-center gap-1">
-            <SlidersHorizontal className="w-3 h-3 text-indigo-400" />
-            Tranches
-          </span>
+        {/* Sub-navigation */}
+        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/90 p-1.5 rounded-2xl self-start lg:self-center flex-wrap">
           <button
-            onClick={() => handleStepChange("combined")}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
-              step === "combined"
-                ? "bg-gradient-to-r from-indigo-600 to-emerald-600 text-white shadow-lg shadow-indigo-600/30"
-                : "text-slate-400 hover:text-white"
+            onClick={() => setActiveSubTab('forecast')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeSubTab === 'forecast'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Multi-Res (5 & 10)
+            <Sparkles size={14} />
+            Projection & Réservoirs
           </button>
           <button
-            onClick={() => handleStepChange(10)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
-              step === 10
-                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                : "text-slate-400 hover:text-white"
+            onClick={() => setActiveSubTab('timeline')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeSubTab === 'timeline'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Tranches de 10
+            <History size={14} />
+            Séquences Récentes
           </button>
           <button
-            onClick={() => handleStepChange(5)}
-            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all ${
-              step === 5
-                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
-                : "text-slate-400 hover:text-white"
+            onClick={() => setActiveSubTab('matrix')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeSubTab === 'matrix'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            Tranches de 5
+            <Grid size={14} />
+            Transitions & Échos W1
+          </button>
+          <button
+            onClick={() => setActiveSubTab('simulator')}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeSubTab === 'simulator'
+                ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Sliders size={14} />
+            Simulateur & Backtest
           </button>
         </div>
       </div>
 
-      {/* Main Chart and Bin Selector */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 relative z-10">
-        {/* Probability Distribution Chart */}
-        <div className="lg:col-span-2 bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between text-xs border-b border-slate-800/80 pb-2">
-            <span className="font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
-              Distribution des Probabilités de Transition
+      {/* Executive Summary & Regime KPIs */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3.5">
+        <div className="md:col-span-2 p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-transparent border border-indigo-500/20 flex flex-col justify-between">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+              Synthèse Stratégique Markov-Wasserstein
             </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              Résolution : {step === "combined" ? "Fusion Multi-Échelle" : `Pas de ${step}`}
+            <span className="text-[10px] font-mono font-bold text-slate-500">
+              Stabilité Régime : {(report.reasoning.regimeStabilityIndex * 100).toFixed(0)}%
             </span>
           </div>
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-200 leading-relaxed">
+            {report.narrativeSummary}
+          </p>
+        </div>
 
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                onClick={(state) => {
-                  if (
-                    state &&
-                    state.activeTooltipIndex !== undefined &&
-                    state.activeTooltipIndex !== null
-                  ) {
-                    audioEngine.play("click");
-                    setSelectedBinIndex(state.activeTooltipIndex);
-                  }
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" opacity={0.08} />
-                <XAxis dataKey="label" stroke="#64748b" fontSize={10} />
-                <YAxis stroke="#64748b" fontSize={10} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#020617",
-                    borderColor: "#1e293b",
-                    borderRadius: "12px",
-                    fontSize: "11px",
+        {/* Next Mean Gap Forecast */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Écart Moyen Projeté (T+1)
+            </span>
+            {report.predictedNextMeanGap.trend === 'COMPRESSION' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                <TrendingDown size={11} /> Compression
+              </span>
+            )}
+            {report.predictedNextMeanGap.trend === 'EXPANSION' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                <TrendingUp size={11} /> Expansion
+              </span>
+            )}
+            {report.predictedNextMeanGap.trend === 'EQUILIBRIUM' && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                <Minus size={11} /> Équilibre
+              </span>
+            )}
+          </div>
+          <div className="my-1.5 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-slate-900 dark:text-white font-mono">
+              {report.predictedNextMeanGap.expected}
+            </span>
+            <span className="text-xs text-slate-500">tirages d’écart</span>
+          </div>
+          <div className="text-[10px] text-slate-400 font-mono">
+            Intervalle : [{report.predictedNextMeanGap.lowerBound} –{' '}
+            {report.predictedNextMeanGap.upperBound}]
+          </div>
+        </div>
+
+        {/* Priority Gap Tranches */}
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 flex flex-col justify-between">
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+            Quotas Optimaux (Hamilton-Hare)
+          </span>
+          <div className="flex flex-wrap gap-1.5 my-2">
+            {GAP_RANGE_BINS.filter(
+              (b) => (report.selectionSynthesis.trancheQuotas[b.id] || 0) > 0
+            ).map((bin) => {
+              const q = report.selectionSynthesis.trancheQuotas[bin.id];
+              return (
+                <button
+                  key={bin.id}
+                  onClick={() => {
+                    setSelectedBinId(bin.id);
+                    setActiveSubTab('forecast');
                   }}
-                  formatter={(val: number) => [`${val}%`, "Vraisemblance"]}
-                  labelFormatter={(label) => `Tranche d'écarts ${label}`}
-                />
-                <Bar dataKey="probability" radius={[6, 6, 0, 0]}>
-                  {chartData.map((entry, index) => {
-                    const isSelected = selectedBinIndex === index;
-                    const isTop = report.topPredictedBins.some(
-                      (b) => b.binIndex === entry.binIndex,
-                    );
-                    return (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={
-                          isSelected
-                            ? "#10b981"
-                            : isTop
-                              ? "#6366f1"
-                              : "#334155"
-                        }
-                        className="cursor-pointer transition-all hover:opacity-80"
-                      />
-                    );
-                  })}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-black text-white shadow-xs transition-transform hover:scale-105 cursor-pointer flex items-center gap-1"
+                  style={{ backgroundColor: bin.color }}
+                >
+                  <span>{q}×</span>
+                  <span>{bin.shortLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span className="text-[10px] text-slate-400">
+            Fidélité distribution : {report.selectionSynthesis.quotaFidelity}%
+          </span>
+        </div>
+      </div>
+
+      {/* CELLULE DE RAISONNEMENT & SÉLECTION SYNTHÉTIQUE PAR QUOTAS DE TRANCHES */}
+      <div className="rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950/90 to-slate-900 text-white p-5 md:p-6 border border-indigo-500/30 shadow-lg space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
+                <Brain size={12} /> Cellule de Raisonnement & Sélection Multi-Tranches
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                KL M1: {report.reasoning.klDivergenceMarkov1.toFixed(3)} nats • KL M2:{' '}
+                {report.reasoning.klDivergenceMarkov2.toFixed(3)} nats
+              </span>
+            </div>
+            <h4 className="text-base md:text-lg font-black tracking-tight text-white">
+              Synthèse Sous-Modulaire & Micro-Scoring Intra-Tranche (Noyau de Silverman)
+            </h4>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowReasoningDetails((v) => !v)}
+              className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-white/10 hover:bg-white/15 text-slate-200 transition-colors cursor-pointer"
+            >
+              {showReasoningDetails ? 'Masquer Chaîne Logique' : 'Afficher Chaîne Logique'}
+            </button>
+            <button
+              onClick={resetOptimalSelection}
+              className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 transition-colors flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw size={12} />
+              Synthèse Optimale Auto
+            </button>
+            <button
+              onClick={handleSaveSelectionTicket}
+              disabled={customSelection.length !== 5}
+              className="px-3.5 py-1.5 rounded-xl text-[11px] font-black bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 transition-all flex items-center gap-1.5 shadow-md shadow-emerald-500/20 cursor-pointer"
+            >
+              <BookmarkCheck size={14} />
+              Enregistrer dans le Portefeuille
+            </button>
           </div>
         </div>
 
-        {/* Tranche Details Panel */}
-        <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between space-y-4">
-          <div>
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 mb-3">
-              <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Tranche Sélectionnée
-              </span>
-              <span className="text-xs font-black font-mono text-emerald-400">
-                {(activeBin.probability * 100).toFixed(1)}%
-              </span>
+        {/* 4-Step Explainable Reasoning Chain + Adaptive Bayesian Weights */}
+        {showReasoningDetails && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {report.reasoning.reasoningChain.map((item) => (
+                <div
+                  key={item.step}
+                  className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex flex-col justify-between space-y-2"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-black text-indigo-400">
+                        ÉTAPE {item.step}
+                      </span>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-200">
+                        {item.metricValue}
+                      </span>
+                    </div>
+                    <div className="text-xs font-black text-white">
+                      {item.title}
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      {item.detail}
+                    </p>
+                  </div>
+                  <div className="text-[9px] font-mono uppercase tracking-wider text-slate-400 pt-1 border-t border-white/5">
+                    {item.metricLabel}
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <div className="text-lg font-black text-white">
-                  Écarts {activeBin.label}
-                </div>
-                <div className="text-xs text-slate-400">
-                  Écarts actuels de {activeBin.minGap} à{" "}
-                  {activeBin.maxGap === Infinity ? "60+" : activeBin.maxGap}{" "}
-                  tirages
-                </div>
+            {/* Dynamic Information-Gain Model Weights Bar */}
+            <div className="p-3 rounded-2xl bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                Poids Bayésiens Adaptatifs (Gain d’Information KL) :
               </div>
+              <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono">
+                <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                  M1 Markov-1:{' '}
+                  {(report.reasoning.modelWeights.markov1Weight * 100).toFixed(1)}%
+                </span>
+                <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300">
+                  M2 Markov-2:{' '}
+                  {(report.reasoning.modelWeights.markov2Weight * 100).toFixed(1)}%
+                </span>
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                  M3 Renouvellement:{' '}
+                  {(report.reasoning.modelWeights.renewalWeight * 100).toFixed(1)}%
+                </span>
+                <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">
+                  M4 Écho W1:{' '}
+                  {(report.reasoning.modelWeights.seqEchoWeight * 100).toFixed(1)}%
+                </span>
+                <span className="px-2 py-0.5 rounded bg-slate-500/20 text-slate-300">
+                  M0 Empirique:{' '}
+                  {(report.reasoning.modelWeights.empiricalWeight * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
 
-              <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 space-y-1">
-                <div className="text-[10px] uppercase font-bold text-slate-400">
-                  Numéros Éligibles dans cette Tranche
-                </div>
-                <div className="text-xs font-mono font-bold text-indigo-300">
-                  {activeBin.matchingNumbers.length} numéros
-                </div>
-                <div className="flex flex-wrap gap-1 mt-2 max-h-24 overflow-y-auto pr-1">
-                  {activeBin.matchingNumbers.map((num) => (
-                    <span
+        {/* Active 5-Ball Selection Tray + 2 Tactical Reserves */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center bg-white/5 rounded-2xl p-4 border border-white/10">
+          <div className="lg:col-span-7 flex flex-col sm:flex-row sm:items-center gap-4">
+            <div className="space-y-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400 block">
+                Vecteur 5 Numéros Sélectionnés ({customSelection.length}/5)
+              </span>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                {customSelection.map((num) => {
+                  const cand = candidateMap.get(num);
+                  return (
+                    <div
                       key={num}
-                      className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[10px] font-mono font-bold rounded-lg"
+                      onClick={() => toggleBallInSelection(num)}
+                      title="Cliquer pour retirer de la sélection"
+                      className="group relative flex flex-col items-center p-2 rounded-2xl bg-slate-900/90 border border-white/15 hover:border-rose-400/60 transition-all cursor-pointer"
                     >
-                      #{num}
-                    </span>
-                  ))}
-                </div>
+                      <NumberBall number={num} size="md" />
+                      {cand && (
+                        <>
+                          <span
+                            className="mt-1 px-1.5 py-0.5 rounded text-[9px] font-black text-white"
+                            style={{ backgroundColor: cand.binColor }}
+                          >
+                            {cand.binShortLabel} ({cand.currentGap}t)
+                          </span>
+                          <span className="text-[9px] font-mono text-emerald-300 mt-0.5">
+                            {cand.compositeScore.toFixed(1)} pts
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2 Tactical Reserves */}
+            <div className="sm:border-l sm:border-white/10 sm:pl-4 space-y-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-amber-300 block">
+                Réserves Tactiques (+2)
+              </span>
+              <div className="flex items-center gap-2">
+                {report.selectionSynthesis.reserveTwo.map((num) => {
+                  const cand = candidateMap.get(num);
+                  const isSelected = customSelection.includes(num);
+                  return (
+                    <div
+                      key={num}
+                      onClick={() => toggleBallInSelection(num)}
+                      title="Cliquer pour permuter dans la sélection"
+                      className={`flex flex-col items-center p-2 rounded-2xl border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-500/20 border-emerald-400/50'
+                          : 'bg-slate-900/60 border-amber-400/30 hover:border-amber-400'
+                      }`}
+                    >
+                      <NumberBall number={num} size="sm" />
+                      {cand && (
+                        <span className="mt-1 text-[9px] font-mono text-amber-200">
+                          {cand.binShortLabel} ({cand.currentGap}t)
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          <div className="text-[11px] text-slate-400 bg-slate-900/80 p-3 rounded-xl border border-slate-800/60 flex items-start gap-2">
-            <HelpCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-            <span>
-              Les probabilités de transition sont calculées par chaîne de Markov
-              conditionnelle lissée par la loi de Laplace, dérivée uniquement de
-              l'historique du tirage actif.
+          {/* Selection Quality KPIs */}
+          <div className="lg:col-span-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-center">
+              <span className="text-[9px] font-bold uppercase text-slate-400 block">
+                Score Moyen
+              </span>
+              <span className="text-base font-black font-mono text-emerald-400">
+                {activeSelectionMetrics.meanScore.toFixed(1)}
+              </span>
+              <span className="text-[9px] text-slate-400 block">/ 100</span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-center">
+              <span className="text-[9px] font-bold uppercase text-slate-400 block">
+                Résonance Hazard
+              </span>
+              <span className="text-base font-black font-mono text-indigo-300">
+                {activeSelectionMetrics.meanHazard.toFixed(0)}%
+              </span>
+              <span className="text-[9px] text-slate-400 block">Silverman</span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-center">
+              <span className="text-[9px] font-bold uppercase text-slate-400 block">
+                Tranches Couvertes
+              </span>
+              <span className="text-base font-black font-mono text-amber-300">
+                {activeSelectionMetrics.uniqueBins}
+              </span>
+              <span className="text-[9px] text-slate-400 block">sur 7</span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-center">
+              <span className="text-[9px] font-bold uppercase text-slate-400 block">
+                Dizaines Distinctes
+              </span>
+              <span className="text-base font-black font-mono text-cyan-300">
+                {activeSelectionMetrics.uniqueDecades}/5
+              </span>
+              <span className="text-[9px] text-slate-400 block">Anti-Colinéaire</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Top Micro-Scored Candidates Explorer across Tranches */}
+        <div className="space-y-2.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <span className="text-[11px] font-black uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+              <Target size={13} className="text-indigo-400" />
+              Classement Micro-Scoring Intra-Tranche (Cliquer pour injecter dans les 5)
             </span>
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                onClick={() => setCandidateFilterBin('ALL')}
+                className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                  candidateFilterBin === 'ALL'
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-white/10 text-slate-300 hover:bg-white/20'
+                }`}
+              >
+                Toutes Tranches
+              </button>
+              {GAP_RANGE_BINS.map((b) => (
+                <button
+                  key={b.id}
+                  onClick={() => setCandidateFilterBin(b.id)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                    candidateFilterBin === b.id
+                      ? 'text-white shadow-xs'
+                      : 'bg-white/10 text-slate-300 hover:bg-white/20'
+                  }`}
+                  style={
+                    candidateFilterBin === b.id
+                      ? { backgroundColor: b.color }
+                      : undefined
+                  }
+                >
+                  {b.shortLabel}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {filteredCandidates.map((cand) => {
+              const isSelected = customSelection.includes(cand.number);
+              const roleStyle = ROLE_STYLES[cand.role];
+              return (
+                <div
+                  key={cand.number}
+                  onClick={() => toggleBallInSelection(cand.number)}
+                  className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                    isSelected
+                      ? 'bg-indigo-500/20 border-emerald-400/70 shadow-sm'
+                      : 'bg-white/5 border-white/10 hover:border-white/25'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <NumberBall number={cand.number} size="sm" />
+                      <div>
+                        <div className="flex items-center gap-1">
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[9px] font-black text-white"
+                            style={{ backgroundColor: cand.binColor }}
+                          >
+                            {cand.binShortLabel}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-slate-300">
+                            Écart {cand.currentGap}t
+                          </span>
+                        </div>
+                        <span
+                          className={`inline-block mt-1 px-1.5 py-0.2 rounded text-[8px] font-black uppercase border ${roleStyle.bg} ${roleStyle.text} ${roleStyle.border}`}
+                        >
+                          {cand.role}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-sm font-black font-mono text-white block">
+                        {cand.compositeScore.toFixed(1)}
+                      </span>
+                      <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-300">
+                        {isSelected ? (
+                          <>
+                            <Check size={10} /> Actif
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={10} /> Choisir
+                          </>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1 pt-1.5 border-t border-white/10 text-[9px] font-mono text-slate-300">
+                    <div>
+                      <span className="text-slate-400 block">Hazard</span>
+                      <span className="font-bold text-emerald-300">
+                        {(cand.individualHazard * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Affinité</span>
+                      <span className="font-bold text-indigo-300">
+                        {(cand.trancheAffinity * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Cycle μ</span>
+                      <span className="font-bold text-amber-300">
+                        {cand.meanHistoricalGap.toFixed(1)}t
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* SURVIVANTS DE L'ADN ALGORITHMIQUE - REFINED & OPTIMIZED PANEL */}
-      <div className="bg-slate-950/70 border border-slate-800/90 rounded-2xl p-5 sm:p-6 space-y-5 relative z-10 shadow-2xl">
-        {/* Section Header & Control Toolbar */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
-          <div className="flex items-center gap-3">
-            <span className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20 shadow-inner">
-              <Dna className="w-5 h-5" />
-            </span>
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-sm font-black text-white uppercase tracking-wider">
-                  Décision & Survivants de l'ADN Algorithmique
-                </h4>
-                <span className="px-2.5 py-0.5 text-[10px] bg-emerald-500/20 text-emerald-300 rounded-full font-black border border-emerald-500/30 shadow-sm">
-                  {survivingNumbers.length} Numéros
-                </span>
-                {report.dnaSieveInfo?.active ? (
-                  <span className="px-2 py-0.5 text-[9px] bg-amber-500/15 text-amber-300 rounded-full font-bold border border-amber-500/25 flex items-center gap-1">
-                    <Sparkles size={10} /> Tamis ADN Actif
-                  </span>
-                ) : (
-                  <span className="px-2 py-0.5 text-[9px] bg-slate-800/60 text-slate-400 rounded-full font-bold border border-slate-700/60 flex items-center gap-1">
-                    <Sparkles size={10} /> Tamis ADN Inactif
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                {report.dnaSieveInfo?.active
-                  ? `Filtrage différentiable continu : les transitions d'écarts de tranches sont tamisées par l'ADN algorithmique (${report.dnaSieveInfo.dominantAlgos.join(", ")}).`
-                  : "Tamis ADN inactif : aucun historique mesuré n'est disponible pour calibrer le filtrage algorithmique sur ce tirage."}
-              </p>
-            </div>
-          </div>
-
-          {/* Quick Copy & Export Actions */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleCopyNumbers(5)}
-              disabled={survivingNumbers.length === 0}
-              className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-40"
-              title="Copier le Top 5 Élite"
-            >
-              <Flame size={13} className="text-amber-400" />
-              <span>Top 5 Élite</span>
-            </button>
-
-            <button
-              onClick={() => handleCopyNumbers(10)}
-              disabled={survivingNumbers.length === 0}
-              className="px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-40"
-              title="Copier le Top 10 Élite"
-            >
-              <Zap size={13} className="text-indigo-400" />
-              <span>Top 10</span>
-            </button>
-
-            <button
-              onClick={() => handleCopyNumbers()}
-              disabled={survivingNumbers.length === 0}
-              className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-40"
-            >
-              {copiedId === "all" ? (
-                <>
-                  <Check size={13} className="text-emerald-300" />
-                  <span>Copié !</span>
-                </>
-              ) : (
-                <>
-                  <Copy size={13} />
-                  <span>Copier Tout ({survivingNumbers.length})</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Category Filters Pills Bar */}
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/90 p-2 rounded-xl border border-slate-800">
-          <span className="text-[10px] font-black uppercase text-slate-400 px-2 flex items-center gap-1">
-            <Filter className="w-3 h-3 text-indigo-400" /> Filtres :
-          </span>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("ALL");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all ${
-              categoryFilter === "ALL"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-slate-400 hover:text-white hover:bg-slate-800"
-            }`}
-          >
-            Tous les Survivants
-          </button>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("CONVERGENCE");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-              categoryFilter === "CONVERGENCE"
-                ? "bg-amber-600 text-white shadow-sm"
-                : "text-amber-300/80 hover:text-amber-200 hover:bg-amber-500/10"
-            }`}
-          >
-            <Flame size={12} />
-            Convergence Élite
-          </button>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("DNA_DOMINANT");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-              categoryFilter === "DNA_DOMINANT"
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "text-indigo-300/80 hover:text-indigo-200 hover:bg-indigo-500/10"
-            }`}
-          >
-            <Zap size={12} />
-            Signal ADN
-          </button>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("MARKOV");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-              categoryFilter === "MARKOV"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "text-emerald-300/80 hover:text-emerald-200 hover:bg-emerald-500/10"
-            }`}
-          >
-            <Target size={12} />
-            Markov Transition
-          </button>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("TAMIS_BOOSTED");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-              categoryFilter === "TAMIS_BOOSTED"
-                ? "bg-cyan-600 text-white shadow-sm"
-                : "text-cyan-300/80 hover:text-cyan-200 hover:bg-cyan-500/10"
-            }`}
-          >
-            <Sparkles size={12} />
-            Tamisé ADN +
-          </button>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("CRITICAL_GAP");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-              categoryFilter === "CRITICAL_GAP"
-                ? "bg-rose-600 text-white shadow-sm"
-                : "text-rose-300/80 hover:text-rose-200 hover:bg-rose-500/10"
-            }`}
-          >
-            ⏳ Rupture Écart
-          </button>
-
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setCategoryFilter("PROOF_ONLY");
-            }}
-            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all flex items-center gap-1 ${
-              categoryFilter === "PROOF_ONLY"
-                ? "bg-purple-600 text-white shadow-sm"
-                : "text-purple-300/80 hover:text-purple-200 hover:bg-purple-500/10"
-            }`}
-          >
-            <ShieldCheck size={12} />
-            Preuve Statistique
-          </button>
-        </div>
-
-        {/* Controls Grid Toolbar */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-900/60 p-3.5 rounded-xl border border-slate-800/80">
-          {/* Tranche Filter */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-              <Filter className="w-3 h-3 text-indigo-400" /> Tranche d'Écart
-            </span>
-            <select
-              value={filterBinIndex}
-              onChange={(e) => {
-                audioEngine.play("click");
-                setFilterBinIndex(
-                  e.target.value === "all" ? "all" : Number(e.target.value)
-                );
-              }}
-              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="all" className="bg-slate-900 text-slate-200">
-                Toutes tranches favorisées
-              </option>
-              {report.bins.map((bin) => (
-                <option
-                  key={bin.binIndex}
-                  value={bin.binIndex}
-                  className="bg-slate-900 text-slate-200"
-                >
-                  Tranche {bin.label} ({(bin.probability * 100).toFixed(0)}%)
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Sort Mode Selector */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-              <ArrowUpDown className="w-3 h-3 text-emerald-400" /> Tri Prioritaire
-            </span>
-            <select
-              value={sortMode}
-              onChange={(e) => {
-                audioEngine.play("click");
-                setSortMode(e.target.value as SurvivorSortMode);
-              }}
-              className="bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
-            >
-              <option value="fused">Fusion ADN (Consensus Optimal)</option>
-              <option value="dna">Signal ADN (Affinité Génomique)</option>
-              <option value="markov">Markov (Probabilité Transition)</option>
-              <option value="quantum">Quantique (Cohérence Spectrale)</option>
-              <option value="proof">Preuve Statistique (Z-Score & Lift)</option>
-              <option value="gap">Écart (Tension d'Absence)</option>
-            </select>
-          </div>
-
-          {/* Threshold Filter Slider & Presets */}
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
-              <span className="flex items-center gap-1">
-                <Sliders className="w-3 h-3 text-amber-400" /> Seuil Score Min
+      {/* TAB 1: FORECAST & RESERVOIRS */}
+      {activeSubTab === 'forecast' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left 7 columns: Probability & Lift Bars per Gap Range */}
+          <div className="lg:col-span-7 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Distribution de Probabilité Conditionnelle & Sécheresse par Tranche
+              </h4>
+              <span className="text-[10px] font-mono text-slate-400">
+                Cliquez sur une tranche pour inspecter son réservoir
               </span>
-              <span className="text-amber-300 font-mono font-black">{minScoreCutoff}/100</span>
             </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="range"
-                min={0}
-                max={90}
-                step={5}
-                value={minScoreCutoff}
-                onChange={(e) => setMinScoreCutoff(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-              />
-              <div className="flex gap-1 shrink-0">
-                {[30, 50, 65].map((preset) => (
-                  <button
-                    key={preset}
-                    onClick={() => {
-                      audioEngine.play("click");
-                      setMinScoreCutoff(preset);
-                    }}
-                    className={`px-1.5 py-0.5 text-[9px] font-bold rounded ${
-                      minScoreCutoff === preset
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-800 text-slate-400 hover:text-white"
+
+            <div className="space-y-2.5">
+              {report.binForecasts.map((f) => {
+                const isSelected = activeBinForecast?.bin.id === f.bin.id;
+                const pct = Math.round(f.blendedProb * 1000) / 10;
+                const basePct = Math.round(f.poolOccupancyProb * 1000) / 10;
+                const isOver = f.liftOverTheoretical >= 1.08;
+                const isDroughtAlert = f.droughtPressureIndex >= 0.65;
+
+                return (
+                  <div
+                    key={f.bin.id}
+                    onClick={() => setSelectedBinId(f.bin.id)}
+                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-500/50 shadow-xs'
+                        : 'bg-slate-50/60 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                     }`}
                   >
-                    {preset}
+                    <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: f.bin.color }}
+                        />
+                        <span className="text-xs font-black text-slate-800 dark:text-slate-100">
+                          {f.bin.label}
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-700/70 text-slate-700 dark:text-slate-300 font-bold">
+                          {f.currentPoolCount} boules dispo
+                        </span>
+                        {f.optimalQuotaBalls > 0 && (
+                          <span className="text-[10px] font-mono font-black px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
+                            Quota: {f.optimalQuotaBalls} boule
+                            {f.optimalQuotaBalls > 1 ? 's' : ''}
+                          </span>
+                        )}
+                        {isDroughtAlert && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                            <Flame size={10} /> Tension Retour (
+                            {f.currentDroughtDraws}t)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                            isOver
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-slate-200/60 dark:bg-slate-700/60 text-slate-500'
+                          }`}
+                        >
+                          Lift {f.liftOverTheoretical.toFixed(2)}×
+                        </span>
+                        <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
+                          {pct.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Progress bar with baseline marker */}
+                    <div className="relative h-2.5 w-full bg-slate-200 dark:bg-slate-700/70 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.min(100, pct * 2.2)}%`,
+                          backgroundColor: f.bin.color,
+                        }}
+                      />
+                      {/* Baseline H0 occupancy marker */}
+                      <div
+                        className="absolute top-0 bottom-0 w-0.5 bg-slate-900 dark:bg-white opacity-70"
+                        style={{ left: `${Math.min(98, basePct * 2.2)}%` }}
+                        title={`Occupation réelle H0 : ${basePct}%`}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between mt-2 text-[10px] text-slate-500 dark:text-slate-400 font-mono flex-wrap gap-1">
+                      <span>
+                        Espérance :{' '}
+                        <strong className="text-slate-700 dark:text-slate-200">
+                          {f.expectedBallsInNextDraw.toFixed(2)}
+                        </strong>{' '}
+                        / 5 • H0 : {basePct.toFixed(1)}%
+                      </span>
+                      <span>
+                        M1: {(f.markovOrder1Prob * 100).toFixed(0)}% • M2:{' '}
+                        {(f.markovOrder2Prob * 100).toFixed(0)}% • Renouv:{' '}
+                        {(f.renewalHazardProb * 100).toFixed(0)}% • Sécheresse:{' '}
+                        {f.currentDroughtDraws}t (μ={f.meanInterActivationInterval.toFixed(1)}t)
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right 5 columns: Active Bin Reservoir Inspector with Micro-Scored Candidates */}
+          <div className="lg:col-span-5">
+            {activeBinForecast && (
+              <div className="h-full p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 flex flex-col justify-between space-y-4">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider text-white"
+                      style={{ backgroundColor: activeBinForecast.bin.color }}
+                    >
+                      Réservoir Actuel • {activeBinForecast.bin.shortLabel}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-slate-500">
+                      Quota optimal : {activeBinForecast.optimalQuotaBalls} boule(s)
+                    </span>
+                  </div>
+
+                  <h4 className="text-base font-black text-slate-900 dark:text-white">
+                    {activeBinForecast.bin.label}
+                  </h4>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Cette tranche contient actuellement{' '}
+                    <strong>{activeBinForecast.currentPoolCount} numéros</strong>{' '}
+                    (occupation historique H0 :{' '}
+                    {(activeBinForecast.poolOccupancyProb * 100).toFixed(1)}%). La
+                    fusion bayésienne projette{' '}
+                    <strong>
+                      {activeBinForecast.expectedBallsInNextDraw.toFixed(2)} boule(s)
+                    </strong>{' '}
+                    au prochain tirage (Lift{' '}
+                    <strong>
+                      {activeBinForecast.liftOverTheoretical.toFixed(2)}×
+                    </strong>
+                    , sécheresse actuelle :{' '}
+                    <strong>{activeBinForecast.currentDroughtDraws} tirages</strong>).
+                  </p>
+
+                  {/* Top Micro-Scored Candidates inside this Tranche */}
+                  {activeBinForecast.topPoolCandidates.length > 0 && (
+                    <div className="pt-2 space-y-2">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block">
+                        Top Candidats Micro-Scorés de la Tranche (Cliquer pour choisir) :
+                      </span>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {activeBinForecast.topPoolCandidates
+                          .slice(0, 4)
+                          .map((c) => {
+                            const isSelected = customSelection.includes(c.number);
+                            return (
+                              <div
+                                key={c.number}
+                                onClick={() => toggleBallInSelection(c.number)}
+                                className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col items-center ${
+                                  isSelected
+                                    ? 'bg-indigo-500/15 border-indigo-500 shadow-xs'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                                }`}
+                              >
+                                <NumberBall number={c.number} size="sm" />
+                                <span className="mt-1 text-[10px] font-mono font-black text-slate-800 dark:text-slate-100">
+                                  {c.microScore.toFixed(1)} pts
+                                </span>
+                                <span className="text-[9px] font-mono text-slate-400">
+                                  Écart {c.currentGap}t • H:{' '}
+                                  {(c.individualHazard * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                      Tous les Numéros du Réservoir (Triés par Écart décroissant) :
+                    </span>
+                    {activeBinForecast.currentPoolCount === 0 ? (
+                      <div className="p-4 rounded-xl bg-white dark:bg-slate-900 text-xs text-slate-400 text-center">
+                        Aucun numéro ne se situe dans cette tranche d’écart actuellement.
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 max-h-56 overflow-y-auto p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                        {(
+                          report.currentNumbersByBin[activeBinForecast.bin.id] || []
+                        ).map((item) => {
+                          const isSelected = customSelection.includes(
+                            item.number
+                          );
+                          const micro =
+                            candidateMap.get(item.number)?.compositeScore ?? 0;
+                          return (
+                            <div
+                              key={item.number}
+                              onClick={() => toggleBallInSelection(item.number)}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-indigo-500/15 border-indigo-500 ring-1 ring-indigo-500/40'
+                                  : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                              }`}
+                            >
+                              <NumberBall number={item.number} size="sm" />
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-slate-200">
+                                  {item.currentGap}t
+                                </span>
+                                <span className="text-[9px] font-mono text-indigo-500">
+                                  {micro.toFixed(0)}p
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Historical Sequence Echo Summary */}
+                {report.historicalMatches.length > 0 && (
+                  <div className="p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                        Meilleur Écho Topologique 1-Wasserstein
+                      </span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-500">
+                        Sim. W1+ADN :{' '}
+                        {Math.round(report.historicalMatches[0].similarity * 100)}%
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                      Lors du tirage analogue du{' '}
+                      <strong>{report.historicalMatches[0].date}</strong>, le
+                      tirage suivant (
+                      <strong>{report.historicalMatches[0].nextDrawDate}</strong>) a
+                      produit un écart moyen de{' '}
+                      <strong>
+                        {report.historicalMatches[0].nextDrawFootprint.meanGap.toFixed(
+                          1
+                        )}
+                      </strong>{' '}
+                      avec dominante{' '}
+                      <strong>
+                        {
+                          GAP_RANGE_BINS.find(
+                            (b) =>
+                              b.id ===
+                              report.historicalMatches[0].nextDrawFootprint
+                                .dominantBin
+                          )?.shortLabel
+                        }
+                      </strong>
+                      .
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: TIMELINE OF RECENT GAP SEQUENCES */}
+      {activeSubTab === 'timeline' && (
+        <div className="space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Chronologie Interactive des Séquences d’Écarts
+              </h4>
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+                {[10, 15, 25].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setTimelineLimit(n)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition-colors ${
+                      timelineLimit === n
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-slate-500 hover:text-slate-800 dark:hover:text-white'
+                    }`}
+                  >
+                    {n} tirages
                   </button>
                 ))}
               </div>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {GAP_RANGE_BINS.map((b) => (
+                <span
+                  key={b.id}
+                  onClick={() => {
+                    setSelectedBinId(b.id);
+                    setActiveSubTab('forecast');
+                  }}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 cursor-pointer hover:opacity-80"
+                  title="Cliquer pour filtrer ce réservoir"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-xs"
+                    style={{ backgroundColor: b.color }}
+                  />
+                  {b.shortLabel}
+                </span>
+              ))}
+            </div>
           </div>
 
-          {/* Number Search Filter */}
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1">
-              <Search className="w-3 h-3 text-cyan-400" /> Recherche Numéro
-            </span>
-            <div className="relative">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Ex: 7, 24, 88..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 font-mono placeholder:text-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-2 text-[10px] text-slate-400 hover:text-white"
+          {/* Inspected Draw Detail Banner */}
+          {inspectedFootprint && (
+            <div className="p-4 rounded-2xl bg-indigo-500/5 border border-indigo-500/20 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                    Inspection Tirage #{inspectedFootprint.drawIndex} •{' '}
+                    {inspectedFootprint.date}
+                  </span>
+                  <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300">
+                    μ : {inspectedFootprint.meanGap.toFixed(1)}t • Médiane :{' '}
+                    {inspectedFootprint.medianGap.toFixed(1)}t • σ :{' '}
+                    {inspectedFootprint.stdGap.toFixed(1)} • Entropie H :{' '}
+                    {(inspectedFootprint.trancheEntropy * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Cliquez sur n’importe quelle boule ci-dessous pour l’ajouter au panier de sélection ou inspecter sa tranche.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {inspectedFootprint.winningNumbers.map((w) => {
+                  const bin = GAP_RANGE_BINS.find((b) => b.id === w.binId);
+                  return (
+                    <button
+                      key={w.number}
+                      onClick={() => toggleBallInSelection(w.number)}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:scale-105 transition-transform cursor-pointer shadow-2xs"
+                    >
+                      <NumberBall number={w.number} size="sm" />
+                      <div className="text-left">
+                        <span
+                          className="block text-[10px] font-black"
+                          style={{ color: bin?.color }}
+                        >
+                          Écart {w.gapAtDraw}t
+                        </span>
+                        <span className="block text-[9px] text-slate-400">
+                          {bin?.shortLabel}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+            {report.recentFootprints.slice(0, timelineLimit).map((fp) => {
+              const isInspected =
+                inspectedFootprint?.drawIndex === fp.drawIndex;
+              return (
+                <div
+                  key={`${fp.drawIndex}-${fp.date}`}
+                  onClick={() => setSelectedDrawIndex(fp.drawIndex)}
+                  className={`p-3 rounded-2xl border grid grid-cols-1 md:grid-cols-12 items-center gap-3 cursor-pointer transition-all ${
+                    isInspected
+                      ? 'bg-indigo-50/70 dark:bg-indigo-950/30 border-indigo-500/50 shadow-xs'
+                      : 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                  }`}
                 >
-                  ✕
-                </button>
+                  <div className="md:col-span-2 flex items-center justify-between md:block">
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-200 block">
+                      {fp.date}
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      T-{fp.drawIndex} • μ={fp.meanGap.toFixed(1)} • H=
+                      {(fp.trancheEntropy * 100).toFixed(0)}%
+                    </span>
+                  </div>
+
+                  {/* 5 Stacked Proportional Blocks */}
+                  <div className="md:col-span-4 flex h-5 rounded-xl overflow-hidden border border-slate-200/50 dark:border-slate-700">
+                    {GAP_RANGE_BINS.map((bin) => {
+                      const count = fp.binCounts[bin.id];
+                      if (count === 0) return null;
+                      return (
+                        <div
+                          key={bin.id}
+                          style={{
+                            width: `${(count / 5) * 100}%`,
+                            backgroundColor: bin.color,
+                          }}
+                          className="h-full flex items-center justify-center text-[10px] font-black text-white"
+                          title={`${bin.label}: ${count} boule(s)`}
+                        >
+                          {count}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Winning Numbers with Individual Exact Gap Badge */}
+                  <div className="md:col-span-6 flex flex-wrap items-center gap-1.5 justify-end">
+                    {fp.winningNumbers.map((w) => {
+                      const bin = GAP_RANGE_BINS.find((b) => b.id === w.binId);
+                      return (
+                        <span
+                          key={w.number}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-white shadow-2xs"
+                          style={{ backgroundColor: bin?.color || '#6366f1' }}
+                        >
+                          <span>
+                            {w.number < 10 ? `0${w.number}` : w.number}
+                          </span>
+                          <span className="opacity-80 text-[9px] bg-black/20 px-1 rounded">
+                            {w.gapAtDraw}t
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: TRANSITION MATRIX & WASSERSTEIN ECHOES */}
+      {activeSubTab === 'matrix' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Transition Matrix Order 1 */}
+          <div className="lg:col-span-7 space-y-3 overflow-x-auto">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Matrice de Transition Markovienne (Dominante T → Répartition T+1)
+            </h4>
+            <table className="w-full text-left border-collapse text-[11px]">
+              <thead>
+                <tr>
+                  <th className="p-2 text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
+                    De \ Vers
+                  </th>
+                  {GAP_RANGE_BINS.map((b) => (
+                    <th
+                      key={b.id}
+                      className="p-2 text-center font-black border-b border-slate-200 dark:border-slate-800"
+                      style={{ color: b.color }}
+                    >
+                      {b.id.replace('G', '')}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {GAP_RANGE_BINS.map((rowBin) => (
+                  <tr
+                    key={rowBin.id}
+                    className="border-b border-slate-100 dark:border-slate-800/60"
+                  >
+                    <td className="p-2 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                      <span
+                        className="inline-block w-2 h-2 rounded-full mr-1.5"
+                        style={{ backgroundColor: rowBin.color }}
+                      />
+                      {rowBin.shortLabel}
+                    </td>
+                    {GAP_RANGE_BINS.map((colBin) => {
+                      const prob =
+                        report.transitionMatrixOrder1[rowBin.id][colBin.id];
+                      const pct = Math.round(prob * 100);
+                      const intensity = Math.min(1, prob / 0.35);
+                      return (
+                        <td
+                          key={colBin.id}
+                          onClick={() => {
+                            setSimCurrBin(rowBin.id);
+                            setSelectedBinId(colBin.id);
+                          }}
+                          className="p-2 text-center font-mono font-bold rounded transition-transform hover:scale-105 cursor-pointer"
+                          style={{
+                            backgroundColor: `rgba(99, 102, 241, ${
+                              intensity * 0.38
+                            })`,
+                          }}
+                          title={`De ${rowBin.shortLabel} vers ${colBin.shortLabel}: ${(
+                            prob * 100
+                          ).toFixed(1)}%`}
+                        >
+                          {pct}%
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Historical Sequence Analog Matches (1-Wasserstein + 4D DNA) */}
+          <div className="lg:col-span-5 space-y-3">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Échos Topologiques 1-Wasserstein & ADN 4D
+            </h4>
+            <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
+              {report.historicalMatches.map((m, idx) => (
+                <div
+                  key={`${m.matchIndex}-${idx}`}
+                  onClick={() => {
+                    const domId = m.nextDrawFootprint.dominantBin;
+                    setSelectedBinId(domId);
+                    setActiveSubTab('forecast');
+                  }}
+                  className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 space-y-2 hover:border-indigo-500/40 transition-all cursor-pointer"
+                >
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-xs font-black text-slate-800 dark:text-slate-200">
+                      Analogue #{idx + 1} • {m.date}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                        W1: {Math.round(m.wassersteinSimilarity * 100)}%
+                      </span>
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        Global: {Math.round(m.similarity * 100)}%
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    <span>Tirage suivant ({m.nextDrawDate}) :</span>
+                    <ChevronRight size={12} />
+                    <span className="font-bold text-slate-800 dark:text-slate-200">
+                      μ = {m.nextDrawFootprint.meanGap.toFixed(1)}t (H=
+                      {(m.nextDrawFootprint.trancheEntropy * 100).toFixed(0)}%)
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {GAP_RANGE_BINS.filter(
+                      (b) => m.nextDrawFootprint.binCounts[b.id] > 0
+                    ).map((b) => (
+                      <span
+                        key={b.id}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold text-white"
+                        style={{ backgroundColor: b.color }}
+                      >
+                        {b.shortLabel}: {m.nextDrawFootprint.binCounts[b.id]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: INTERACTIVE SIMULATOR, CUSTOM RANGE INSPECTOR & BACKTEST */}
+      {activeSubTab === 'simulator' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* 1. Custom Gap Interval Inspector */}
+            <div className="lg:col-span-6 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Compass size={16} className="text-indigo-500" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                    Explorateur de Plage d’Écarts sur Mesure
+                  </h4>
+                </div>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
+                  Écart [{customRangeAnalysis?.minG} – {customRangeAnalysis?.maxG}]
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                    Écart Minimum : {customMinGap}
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={50}
+                    value={customMinGap}
+                    onChange={(e) => setCustomMinGap(Number(e.target.value))}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                    Écart Maximum : {customMaxGap}
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={60}
+                    value={customMaxGap}
+                    onChange={(e) => setCustomMaxGap(Number(e.target.value))}
+                    className="w-full accent-indigo-600 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              {customRangeAnalysis && (
+                <>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">
+                        Fréquence Observée
+                      </span>
+                      <span className="text-base font-black font-mono text-slate-900 dark:text-white">
+                        {(customRangeAnalysis.empiricalProb * 100).toFixed(1)}%
+                      </span>
+                      <span className="text-[9px] text-slate-400 block">
+                        Théorique :{' '}
+                        {(customRangeAnalysis.theoreticalProb * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">
+                        Lift Empirique
+                      </span>
+                      <span
+                        className={`text-base font-black font-mono ${
+                          customRangeAnalysis.lift >= 1.05
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-slate-900 dark:text-white'
+                        }`}
+                      >
+                        {customRangeAnalysis.lift.toFixed(2)}×
+                      </span>
+                      <span className="text-[9px] text-slate-400 block">
+                        Espérance :{' '}
+                        {customRangeAnalysis.expectedPerDraw.toFixed(2)} / tirage
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                      <span className="text-[10px] text-slate-400 block">
+                        Réservoir Actuel
+                      </span>
+                      <span className="text-base font-black font-mono text-indigo-600 dark:text-indigo-400">
+                        {customRangeAnalysis.currentBalls.length} boules
+                      </span>
+                      <span className="text-[9px] text-slate-400 block">
+                        Dans [{customRangeAnalysis.minG}–{customRangeAnalysis.maxG}]
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-2">
+                      Numéros dans la Plage [{customRangeAnalysis.minG} –{' '}
+                      {customRangeAnalysis.maxG}] (Triés par Micro-Score, cliquer pour choisir) :
+                    </span>
+                    {customRangeAnalysis.currentBalls.length === 0 ? (
+                      <div className="p-3 rounded-xl bg-white dark:bg-slate-900 text-xs text-slate-400 text-center">
+                        Aucune boule dans cet intervalle actuellement.
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                        {customRangeAnalysis.currentBalls.map((item) => {
+                          const isSelected = customSelection.includes(
+                            item.number
+                          );
+                          return (
+                            <div
+                              key={item.number}
+                              onClick={() => toggleBallInSelection(item.number)}
+                              className={`flex items-center gap-1 px-2 py-1 rounded-lg border cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'bg-indigo-500/15 border-indigo-500'
+                                  : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                              }`}
+                            >
+                              <NumberBall number={item.number} size="sm" />
+                              <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">
+                                {item.currentGap}t • {item.microScore.toFixed(0)}p
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 2. Trajectory Simulator (What-If Markov Order-2 Explorer) */}
+            <div className="lg:col-span-6 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sliders size={16} className="text-purple-500" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                    Simulateur de Trajectoire Markov (Ordre 2)
+                  </h4>
+                </div>
+                <span className="text-[10px] font-mono text-slate-400">
+                  {simulatedTrajectory?.matchOccurrences || 0} occurrences
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                    Dominante T-1
+                  </label>
+                  <select
+                    value={simPrevBin}
+                    onChange={(e) => setSimPrevBin(e.target.value as GapBinId)}
+                    className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                  >
+                    {GAP_RANGE_BINS.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.shortLabel}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                    Dominante T (Actuel)
+                  </label>
+                  <select
+                    value={simCurrBin}
+                    onChange={(e) => setSimCurrBin(e.target.value as GapBinId)}
+                    className="w-full px-3 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200"
+                  >
+                    {GAP_RANGE_BINS.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.shortLabel}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {simulatedTrajectory && (
+                <div className="space-y-2">
+                  {simulatedTrajectory.distribution.slice(0, 5).map((d) => (
+                    <div
+                      key={d.bin.id}
+                      onClick={() => {
+                        setSelectedBinId(d.bin.id);
+                        setActiveSubTab('forecast');
+                      }}
+                      className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/70 dark:border-slate-800 flex items-center justify-between cursor-pointer hover:border-indigo-500/40"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: d.bin.color }}
+                        />
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          {d.bin.shortLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono text-xs">
+                        <span className="text-[10px] text-slate-400">
+                          Esp. {d.expectedBalls.toFixed(2)} b.
+                        </span>
+                        <span className="font-black text-indigo-600 dark:text-indigo-400">
+                          {(d.prob * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
-        </div>
 
-        {/* Telemetry & Mathematical Diagnostics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs bg-slate-900/60 p-3 rounded-xl border border-slate-800/80">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 font-mono">Concordance ADN</span>
-            <span className="font-bold text-indigo-300 font-mono">
-              {hasMeasuredHistory &&
-              report.dnaSieveInfo?.dnaConcordanceMean != null
-                ? `${report.dnaSieveInfo.dnaConcordanceMean.toFixed(1)}%`
-                : "n/d"}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 font-mono">Intensité Tamisage (SNR)</span>
-            <span className="font-bold text-emerald-400 font-mono">
-              {report.dnaSieveInfo?.sieveIntensityPercent != null
-                ? `${report.dnaSieveInfo.sieveIntensityPercent.toFixed(1)}%`
-                : "n/d"}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 font-mono">Entropie Shannon</span>
-            <span className="font-bold text-amber-300 font-mono">
-              {report.entropyBits != null ? `${report.entropyBits.toFixed(2)} bits` : "n/d"}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[10px] text-slate-400 font-mono">Markov Ordre 2</span>
-            <span className="font-bold text-cyan-300 font-mono">
-              {report.markovOrder2Confidence != null
-                ? `${report.markovOrder2Confidence.toFixed(1)}%`
-                : "n/d"}
-            </span>
-          </div>
-        </div>
-
-        {/* Population Summary Stats Banner */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-900/90 border border-slate-800/80 p-3.5 rounded-xl text-center">
-          <div>
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
-              Survivants Retenus
-            </span>
-            <div className="text-sm font-black text-white mt-0.5">
-              {survivingNumbers.length}{" "}
-              <span className="text-[10px] font-normal text-slate-400">
-                / {totalFavoredCandidateCount}
-              </span>
-            </div>
-          </div>
-
-          <div>
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
-              Taux de Rétention
-            </span>
-            <div className="text-sm font-black text-emerald-400 mt-0.5">
-              {populationStats.retentionPercent}%
-            </div>
-          </div>
-
-          <div>
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
-              Score Moyen Convergence
-            </span>
-            <div className="text-sm font-black text-indigo-400 mt-0.5">
-              {populationStats.avgScore} / 100
-            </div>
-          </div>
-
-          <div>
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
-              Convergences Absolues
-            </span>
-            <div className="text-sm font-black text-amber-400 mt-0.5">
-              {populationStats.topConvergenceCount}
-            </div>
-          </div>
-        </div>
-
-        {/* Numbers Grid */}
-        {survivingNumbers.length === 0 ? (
-          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-8 text-center space-y-3">
-            {hasMeasuredHistory ? (
-              <p className="text-xs text-slate-400 italic">
-                Aucun numéro ne satisfait les critères actuels du filtre (Seuil &gt; {minScoreCutoff}, Filtre: {categoryFilter}).
-              </p>
-            ) : (
-              <p className="text-xs text-slate-400 italic">
-                Aucun historique mesuré pour ce tirage : les canaux Markov, ADN et écarts
-                nécessitent un historique réel pour produire des survivants. Aucune valeur
-                n'est synthétisée en l'absence de mesure.
-              </p>
-            )}
-            {hasMeasuredHistory && (
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setMinScoreCutoff(30);
-                  setCategoryFilter("ALL");
-                  setFilterBinIndex("all");
-                  setSearchQuery("");
-                }}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md"
-              >
-                <RotateCcw className="w-3.5 h-3.5" /> Réinitialiser tous les filtres
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {survivingNumbers.map(
-              (
-                {
-                  num,
-                  score,
-                  markovScore,
-                  dnaAffinity,
-                  dnaMultiplier,
-                  isDnaBoosted,
-                  zScore,
-                  lift,
-                  quantumCoherence,
-                  empiricalProof,
-                  gap,
-                  binLabel,
-                  tag,
-                  tagColor,
-                },
-                idx
-              ) => {
-                const isItemCopied = copiedId === `num_${num}`;
-                const rank = idx + 1;
-                return (
-                  <div
-                    key={num}
-                    className="bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-3.5 flex flex-col justify-between gap-3 shadow-sm hover:shadow-md transition-all group relative overflow-hidden"
-                  >
-                    {/* Top Row: Rank + NumberBall + Tag + Quick Copy */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="relative">
-                          <NumberBall number={num} size="md" />
-                          <span className="absolute -top-1 -left-1 px-1.5 py-0.2 bg-slate-950/90 border border-slate-700 text-[9px] font-black text-indigo-300 rounded-full font-mono shadow-sm">
-                            #{rank}
-                          </span>
-                        </div>
-                        <div>
-                          <div className="text-xs font-black text-white font-mono flex items-center gap-1.5">
-                            <span>N° {num}</span>
-                            {isDnaBoosted && (
-                              <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                ADN+
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-mono">
-                            Écart : <span className="text-indigo-300 font-bold">{gap}</span> ({binLabel})
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleCopySingle(num)}
-                          className="p-1 text-slate-500 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
-                          title={`Copier #${num}`}
-                        >
-                          {isItemCopied ? (
-                            <Check size={12} className="text-emerald-400" />
-                          ) : (
-                            <Copy size={12} />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Tag Label Badge */}
-                    <div className="flex items-center justify-between gap-1">
-                      <span
-                        className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${tagColor} truncate`}
-                      >
-                        {tag}
-                      </span>
-                      <span className="font-mono text-emerald-400 font-black text-xs">
-                        {score.toFixed(1)}/100
-                      </span>
-                    </div>
-
-                    {/* Score Bar */}
-                    <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden p-0.5 border border-slate-800">
-                      <div
-                        className="bg-gradient-to-r from-indigo-500 via-emerald-400 to-amber-300 h-full rounded-full transition-all duration-300"
-                        style={{
-                          width: `${Math.min(100, Math.max(0, score))}%`,
-                        }}
-                      />
-                    </div>
-
-                    {/* Multi-Signal Diagnostic Metrics Grid */}
-                    <div className="grid grid-cols-2 gap-1.5 bg-slate-950/60 p-2 rounded-xl border border-slate-800/70 text-[9px] font-mono">
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Markov :</span>
-                        <span className="font-bold text-emerald-400">{markovScore}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Signal ADN :</span>
-                        <span className="font-bold text-indigo-300">{dnaAffinity}%</span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Tamis ADN :</span>
-                        <span className={`font-bold ${isDnaBoosted ? 'text-amber-300' : 'text-slate-400'}`}>
-                          {dnaMultiplier}x
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Z-Score / Lift :</span>
-                        <span className={`font-bold ${zScore !== null && zScore > 0 ? 'text-emerald-300' : 'text-slate-400'}`}>
-                          {zScore !== null ? (zScore > 0 ? `+${zScore}` : `${zScore}`) : "n/d"} /{" "}
-                          {lift !== null ? `${lift}x` : "n/d"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Cohérence :</span>
-                        <span className="font-bold text-cyan-300">
-                          {quantumCoherence !== null ? `${quantumCoherence.toFixed(1)}%` : "n/d"}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between text-slate-400">
-                        <span>Preuve Hist. :</span>
-                        <span className="font-bold text-purple-300">
-                          {empiricalProof !== null ? `${empiricalProof.toFixed(1)}%` : "n/d"}
-                        </span>
-                      </div>
-                    </div>
+          {/* 3. Backtest Accuracy & Multi-Draw Regime Comparator */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {backtestMetrics && (
+              <div className="lg:col-span-7 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Award size={16} className="text-emerald-500" />
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                      Validation Backtest des Prédictions de Tranches
+                    </h4>
                   </div>
-                );
-              }
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Historical Sequence Pattern Transitions Section */}
-      {report.sequenceMatches && report.sequenceMatches.length > 0 && (
-        <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-5 space-y-4 relative z-10">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-emerald-400" />
-              <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                Analogie Historique : Patterns de Séquences Similaires &
-                Transitions
-              </h4>
-            </div>
-            <span className="text-[10px] text-slate-400 font-mono">
-              Top {report.sequenceMatches.length} séquences historiques
-              analogues
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {report.sequenceMatches.slice(0, 4).map((match, idx) => (
-              <div
-                key={idx}
-                className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 space-y-2 text-xs"
-              >
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-slate-400 font-bold">
-                    Tirage Historique #{match.historicalDrawIndex}
-                  </span>
-                  <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full font-bold border border-emerald-500/20">
-                    Similarité Jaccard :{" "}
-                    {(match.similarityScore * 100).toFixed(0)}%
-                  </span>
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                    {[10, 20, 30].map((w) => (
+                      <button
+                        key={w}
+                        onClick={() => setBacktestWindow(w)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                          backtestWindow === w
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-slate-500'
+                        }`}
+                      >
+                        {w} tirages
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-[10px] font-mono">
-                  <span className="text-slate-400">Signature :</span>
-                  <span className="text-indigo-300">
-                    {match.historicalGapsSignature.join(", ")}
-                  </span>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">
+                      Précision Tranche #1
+                    </span>
+                    <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
+                      {backtestMetrics.top1SuccessRate.toFixed(0)}%
+                    </span>
+                    <span className="text-[9px] text-slate-400 block">
+                      Au moins 1 boule dans Top 1
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">
+                      Couverture Top 3 Tranches
+                    </span>
+                    <span className="text-lg font-black font-mono text-indigo-600 dark:text-indigo-400">
+                      {backtestMetrics.top3BallCoverageRate.toFixed(1)}%
+                    </span>
+                    <span className="text-[9px] text-slate-400 block">
+                      Des boules gagnantes capturées
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">
+                      Moyenne Capturée / Tirage
+                    </span>
+                    <span className="text-lg font-black font-mono text-slate-900 dark:text-white">
+                      {backtestMetrics.avgBallsCoveredPerDraw.toFixed(2)} / 5
+                    </span>
+                    <span className="text-[9px] text-slate-400 block">
+                      Sur {backtestMetrics.evalCount} tirages testés
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-[10px] font-mono">
-                  <span className="text-slate-400">Transition Suivante :</span>
-                  <span className="text-emerald-400 font-bold">
-                    {match.subsequentGapsSignature.join(" ➔ ")}
-                  </span>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  {backtestMetrics.recentEvaluations.map((ev, i) => (
+                    <div
+                      key={`${ev.date}-${i}`}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-xs"
+                    >
+                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                        {ev.date}
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] text-slate-400">
+                          Top 3 prévus :
+                        </span>
+                        {ev.predictedTopBins.map((bid) => {
+                          const b = GAP_RANGE_BINS.find((x) => x.id === bid);
+                          const hitCount = ev.actualCounts[bid];
+                          return (
+                            <span
+                              key={bid}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                              style={{
+                                backgroundColor: b?.color,
+                                opacity: hitCount > 0 ? 1 : 0.35,
+                              }}
+                            >
+                              {b?.id.replace('G', '')}: {hitCount}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <span
+                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                          ev.coveredBalls >= 3
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                        }`}
+                      >
+                        {ev.coveredBalls}/5 capturées
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
+            )}
+
+            {/* Multi-Draw Regime Comparator */}
+            <div className="lg:col-span-5 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <BarChart2 size={16} className="text-amber-500" />
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                    Comparateur de Régime
+                  </h4>
+                </div>
+                <select
+                  value={compareDrawName}
+                  onChange={(e) => setCompareDrawName(e.target.value)}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200"
+                >
+                  <option value="ALL">Référence Globale (Tous)</option>
+                  {availableDrawNames
+                    .filter((n) => n !== drawName)
+                    .map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {compareReport && (
+                <div className="space-y-2.5">
+                  {report.binForecasts.map((f, idx) => {
+                    const compF = compareReport.binForecasts[idx];
+                    const diffPct =
+                      (f.blendedProb - (compF?.blendedProb ?? 0)) * 100;
+                    return (
+                      <div
+                        key={f.bin.id}
+                        className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: f.bin.color }}
+                          />
+                          <span className="font-bold text-slate-700 dark:text-slate-200">
+                            {f.bin.shortLabel}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 font-mono">
+                          <span className="text-slate-800 dark:text-slate-200 font-bold">
+                            {(f.blendedProb * 100).toFixed(1)}%
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            vs {(compF.blendedProb * 100).toFixed(1)}%
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                              diffPct > 0.5
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                : diffPct < -0.5
+                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                            }`}
+                          >
+                            {diffPct >= 0 ? `+${diffPct.toFixed(1)}%` : `${diffPct.toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

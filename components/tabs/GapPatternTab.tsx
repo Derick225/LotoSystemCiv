@@ -4,6 +4,7 @@ import { logger } from "../../utils/logger";
 import { NumberBall } from "../NumberBall";
 import { gapSequencePatternService } from "../../services/prediction/gapSequencePatternService";
 import { sequencePatternAnalyzer } from "../../services/prediction/sequencePatternAnalyzer";
+import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
 import { StatsSkeleton } from "../skeletons/StatsSkeleton";
 import {
   LineChart,
@@ -406,6 +407,9 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           </p>
         </div>
       </div>
+
+      {/* MODULE SÉQUENCES & PATTERNS DES ÉCARTS PAR TRANCHES */}
+      <GapRangeSequenceWidget drawName={drawName} />
 
       {/* TOP DECK: RESONANCE & FATIGUE */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">

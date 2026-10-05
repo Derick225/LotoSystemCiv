@@ -1,74 +1,74 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin, AlgorithmContext } from '../algorithmRegistry';
-import { gapRangeSequenceService, GapRangeStep } from '../gapRangeSequenceService';
+import { gapRangeSequenceService } from '../gapRangeSequenceService';
+
+const CACHE_KEY = 'gap_range_sequence_scores';
 
 /**
-  * ALGORITHME : SÉQUENCES ET PATTERNS DE TRANCHES D'ÉCARTS (GAP RANGE SEQUENCE & MARKOV PATTERN)
-  *
-  * Principes :
-  * 1. Analyse la suite chronologique des signatures de tranches d'écarts d'apparition (tranches de 10 ou 5).
-  * 2. Modélise les transitions de Markov entre les tranches d'écarts observées d'un tirage T-1 vers le tirage T.
-  * 3. Extrait la signature d'écarts du dernier tirage connu et calcule la distribution conditionnelle
-  *    de probabilité des tranches d'écarts attendues au prochain tirage.
-  * 4. Évalue chaque numéro (1 à 90) selon son écart d'apparition actuel et la résonance
-  *    de sa tranche d'écart par rapport au modèle de transition de Markov.
-  *
-  * Garantie : 100% Déterministe, Zéro Nombre Magique, Respect de la Règle d'Isolation du Tirage.
-  */
-export const gapRangeSequencePlugin: AlgorithmPlugin = {
+ * Plugin Algorithmique : Séquences & Patterns des Écarts par Tranches (Markov-Wasserstein)
+ *
+ * Modélise la dynamique des 7 tranches d'écarts (0, 1–3, 4–7, 8–14, 15–24, 25–39, 40+)
+ * via une chaîne de Markov d'ordre 1 & 2 pondérée par gain d'information de Kullback-Leibler,
+ * la distance Earth-Mover (1-Wasserstein), et la résonance de hasard individuel de Silverman.
+ */
+export const gapRangeSequencePlugin: AlgorithmPlugin & {
+  execute: (context: { history: AlgorithmContext['history']; drawName?: string }) => {
+    scores: Record<number, number>;
+  };
+} = {
   key: AlgoKey.GAP_BAND_SEQUENCE,
   category: 'advanced',
   stability: 'stable',
-  mathematicalBasis: 'Chaîne de Markov conditionnelle et modèle de transition de fréquences sur tranches d\'écarts d\'apparition',
-  description: 'Analyse les séquences et motifs de transitions de tranches d\'écarts (par tranches de 5 ou 10) entre tirages successifs pour prédire les tranches d\'écarts les plus probables et sélectionner les numéros correspondants.',
+  mathematicalBasis:
+    'Chaînes de Markov d’ordre 1 & 2 pondérées par Divergence KL + Distance 1-Wasserstein + Noyau de Renouvellement de Silverman',
+  description:
+    'Projette les quotas optimaux de tranches d’écarts (Hamilton-Hare) et départage les 90 boules par leur densité de renouvellement individuel et la continuité Gaussienne aux frontières.',
   isStrictlyDeterministic: true,
 
-  precompute(ctx: AlgorithmContext) {
-    const drawName = ctx.drawName || '';
-    const history = ctx.history;
-    const step: GapRangeStep = 'combined'; // Multi-resolution fusion (5 & 10)
-
-    const report = gapRangeSequenceService.analyzeGapRangePatterns(
+  precompute(context: AlgorithmContext): void {
+    if (!context.pluginCache) return;
+    const drawName = context.drawName || 'ALL';
+    const scores = gapRangeSequenceService.getBallScoresFromGapSequences(
       drawName,
-      history,
-      step,
-      90,
-      ctx.weights
+      context.history
     );
-
-    ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache[AlgoKey.GAP_BAND_SEQUENCE] = report;
+    const arr = new Float64Array(91);
+    let maxVal = 0.0001;
+    for (let i = 1; i <= 90; i++) {
+      const s = scores[i] ?? 0.2;
+      arr[i] = s;
+      if (s > maxVal) maxVal = s;
+    }
+    for (let i = 1; i <= 90; i++) {
+      arr[i] = Math.min(1, Math.max(0.05, arr[i] / maxVal));
+    }
+    context.pluginCache[CACHE_KEY] = arr;
   },
 
-  evaluate(num: number, ctx: AlgorithmContext) {
-    if (!ctx.pluginCache?.[AlgoKey.GAP_BAND_SEQUENCE]) {
-      this.precompute(ctx);
+  evaluate(
+    num: number,
+    context: AlgorithmContext
+  ): { score: number; confidence: number } {
+    const cached = context.pluginCache?.[CACHE_KEY] as Float64Array | undefined;
+    if (!cached || num < 1 || num > 90) {
+      return { score: 0.5, confidence: 0.5 };
     }
-
-    const report = ctx.pluginCache![AlgoKey.GAP_BAND_SEQUENCE];
-    if (!report || !report.scoresByNumber) {
-      return { score: 50, confidence: 0.5 };
-    }
-
-    const score = report.scoresByNumber[num] ?? 50.0;
-    
-    // Confidence is derived continuously from total draws available with Laplace sample saturation
-    const totalDraws = report.totalDraws || ctx.history.length;
-    const sampleConfidence = Math.min(0.95, 0.4 + 0.55 * (1.0 - Math.exp(-totalDraws / 30.0)));
-
+    const rawScore = cached[num];
+    const historyFactor = Math.min(1, context.history.length / 80);
     return {
-      score,
-      confidence: sampleConfidence,
-      metadata: {
-        lastDrawBinSignature: report.lastDrawBinSignature,
-        topPredictedBins: report.topPredictedBins.slice(0, 3).map((b: { label: string; probability: number }) => ({
-          label: b.label,
-          probability: Number((b.probability * 100).toFixed(1))
-        })),
-        entropyBits: report.entropyBits,
-        markovOrder2Confidence: report.markovOrder2Confidence,
-        dnaSieveInfo: report.dnaSieveInfo
-      }
+      score: rawScore,
+      confidence: 0.58 + 0.34 * historyFactor,
     };
-  }
+  },
+
+  execute(context: {
+    history: AlgorithmContext['history'];
+    drawName?: string;
+  }): { scores: Record<number, number> } {
+    const scores = gapRangeSequenceService.getBallScoresFromGapSequences(
+      context.drawName || 'ALL',
+      context.history
+    );
+    return { scores };
+  },
 };
