@@ -81,18 +81,81 @@ export class ConceptDriftDetector {
     }
 
     /**
-     * Mesure la divergence de Kullback-Leibler (KL-Divergence) entre deux distributions de fréquences.
+     * Mesure la divergence de Kullback-Leibler (KL-Divergence) régularisée par un a priori de Dirichlet-Laplace
+     * alpha_0 = 5/90 pour éliminer les singularités log(0) sur de petits échantillons.
      */
     public computeKLDivergence(distP: Float64Array, distQ: Float64Array): number {
+        const N = 90;
+        const prior = 5.0 / (N * N); // Régularisation bayésienne continue dérivée du ratio 5/90
+        let sumP = 0;
+        let sumQ = 0;
+        for (let i = 1; i < distP.length; i++) {
+            sumP += distP[i] + prior;
+            sumQ += distQ[i] + prior;
+        }
         let kl = 0.0;
-        const epsilon = 1e-12; // Régularisation infinitésimale continue
-        
-        for (let i = 0; i < distP.length; i++) {
-            const p = distP[i] + epsilon;
-            const q = distQ[i] + epsilon;
+        for (let i = 1; i < distP.length; i++) {
+            const p = (distP[i] + prior) / (sumP || 1.0);
+            const q = (distQ[i] + prior) / (sumQ || 1.0);
             kl += p * Math.log(p / q);
         }
-        return kl;
+        return Math.max(0, kl);
+    }
+
+    /**
+     * Divergence de Jensen-Shannon symétrique et bornée D_JS(P || Q) normalisée dans [0, 1]
+     * avec lissage de Dirichlet-Laplace continu (alpha_0 = 5 / 90^2).
+     */
+    public computeJensenShannonDivergence(distP: Float64Array, distQ: Float64Array): number {
+        const N = 90;
+        const prior = 5.0 / (N * N);
+        let sumP = 0;
+        let sumQ = 0;
+        for (let i = 1; i < distP.length; i++) {
+            sumP += distP[i] + prior;
+            sumQ += distQ[i] + prior;
+        }
+        let js = 0.0;
+        for (let i = 1; i < distP.length; i++) {
+            const p = (distP[i] + prior) / (sumP || 1.0);
+            const q = (distQ[i] + prior) / (sumQ || 1.0);
+            const m = 0.5 * (p + q);
+            js += 0.5 * (p * Math.log(p / m) + q * Math.log(q / m));
+        }
+        return Math.min(1.0, Math.max(0.0, js / Math.LN2));
+    }
+
+    /**
+     * Distance de transport optimal de Wasserstein 1D exacte sur l'anneau circulaire Z_90 (Kantorovich-Rubinstein)
+     * normalisée dans [0, 1] par la demi-période maximale (45.0).
+     */
+    public computeCircularWassersteinDistance(distP: Float64Array, distQ: Float64Array): number {
+        const N = 90;
+        let sumP = 0;
+        let sumQ = 0;
+        for (let i = 1; i <= N; i++) {
+            sumP += distP[i] || 0;
+            sumQ += distQ[i] || 0;
+        }
+        if (sumP <= 0 || sumQ <= 0) return 0.0;
+
+        const cumDiff = new Float64Array(N);
+        let running = 0.0;
+        for (let i = 1; i <= N; i++) {
+            const p = (distP[i] || 0) / sumP;
+            const q = (distQ[i] || 0) / sumQ;
+            running += p - q;
+            cumDiff[i - 1] = running;
+        }
+
+        // Solution analytique exacte sur le cercle : centrage autour de la médiane de la différence cumulée
+        const sorted = Float64Array.from(cumDiff).sort();
+        const median = 0.5 * (sorted[44] + sorted[45]);
+        let transportCost = 0.0;
+        for (let i = 0; i < N; i++) {
+            transportCost += Math.abs(cumDiff[i] - median);
+        }
+        return Math.min(1.0, transportCost / 45.0);
     }
 
     /**
@@ -197,9 +260,18 @@ export class ConceptDriftDetector {
         }
 
         const klDiv = this.computeKLDivergence(freqRecent, freqOld);
+        const jsDiv = this.computeJensenShannonDivergence(freqRecent, freqOld);
+        const circularW = this.computeCircularWassersteinDistance(freqRecent, freqOld);
+
         const sampleSizeRecent = recent.length * 5;
-        const expectedKLSampleNoise = 89.0 / (2.0 * sampleSizeRecent);
-        const deviationRatio = klDiv / (expectedKLSampleNoise || 1e-4);
+        // Bruit asymptotique attendu pour la divergence de Jensen-Shannon sous H0 : (N - 1) / (8 * n * ln(2))
+        const expectedJSSampleNoise = 89.0 / (8.0 * sampleSizeRecent * Math.LN2);
+        const jsRatio = jsDiv / (expectedJSSampleNoise || 1e-4);
+        // Bruit d'échantillonnage de Wasserstein 1D sur le cercle : 1 / sqrt(6 * sampleSizeRecent)
+        const expectedWSampleNoise = 1.0 / Math.sqrt(6.0 * sampleSizeRecent);
+        const wRatio = circularW / (expectedWSampleNoise || 1e-4);
+
+        const deviationRatio = 0.5 * (jsRatio + wRatio);
 
         let globalSeverity: 'LOW' | 'MEDIUM' | 'CRITICAL' = 'LOW';
         if (deviationRatio >= 3.0) {
@@ -208,11 +280,11 @@ export class ConceptDriftDetector {
             globalSeverity = 'MEDIUM';
         }
 
-        const globalConfidenceProb = 1.0 / (1.0 + Math.exp(-2.5 * (deviationRatio - 1.5)));
+        const globalConfidenceProb = 1.0 / (1.0 + Math.exp(-1.702 * (deviationRatio - 1.5)));
         const globalConfidence = parseFloat((globalConfidenceProb * 100).toFixed(2));
         const globalDriftDetected = deviationRatio >= 1.5;
 
-        // --- 2. ÉVALUATION SÉQUENTIELLE GLISSANTE (Page-Hinkley sur KL-Divergence) ---
+        // --- 2. ÉVALUATION SÉQUENTIELLE GLISSANTE (Page-Hinkley sur Jensen-Shannon + Wasserstein Circulaire) ---
         const chronologicalHistory = [...purifiedHistory].reverse();
         const N_chrono = chronologicalHistory.length;
         // Sliding window: sqrt(N) draws — bias-variance optimal for change-point detection
@@ -242,8 +314,9 @@ export class ConceptDriftDetector {
                 freqB[i] /= (sumB_t || 1);
             }
 
-            const kl = this.computeKLDivergence(freqR, freqB);
-            klStream.push(kl);
+            const jsStep = this.computeJensenShannonDivergence(freqR, freqB);
+            const wStep = this.computeCircularWassersteinDistance(freqR, freqB);
+            klStream.push(0.5 * (jsStep + wStep));
             // Indice original inversé correspondant dans purifiedHistory (0 est le plus récent)
             klIndices.push(N_chrono - 1 - t);
         }

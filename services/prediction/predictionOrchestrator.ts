@@ -4,7 +4,12 @@ import { AlgoKey } from "../../shared/prediction.types";
 import { getAlgoWeights, normalizeWeights, computeChronologicalAlgoReinforcement } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
-import { generateCombination } from "./combinationGenerator";
+import {
+  generateCombination,
+  computeAdaptiveOutsiderQuota,
+  computeConformalCandidateSet,
+} from "./combinationGenerator";
+import { driftDetector } from "./conceptDriftDetector";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { PredictiveHyperparameters, getTunedHyperparameters } from "./hyperParameterTuner";
 import { logger } from "../../utils/logger";
@@ -531,8 +536,9 @@ export const selectPredictionNumbers = async (
     });
   }
 
-  // --- DÉTECTION DYNAMIQUE DU RÉGIME DE JEU (RÉGULATION THERMODYNAMIQUE & DIVERGENCE KL POISSON) ---
+  // --- DÉTECTION DYNAMIQUE DU RÉGIME DE JEU (RÉGULATION THERMODYNAMIQUE & DIVERGENCE JENSEN-SHANNON / WASSERSTEIN) ---
   const thermoRegime = calculateThermodynamicRegime(context.history);
+  const structuralDrift = driftDetector.evaluateStructuralDrift(context.history, context.drawName);
   const empiricalCalibration = generateEmpiricalCalibration(
     context.history, 
     thermoRegime.hurst, 
@@ -541,7 +547,12 @@ export const selectPredictionNumbers = async (
   
   const outsiderCount = context.forcedOutsiderCount !== undefined 
     ? context.forcedOutsiderCount 
-    : thermoRegime.continuousOutsiderCount;
+    : computeAdaptiveOutsiderQuota(
+        thermoRegime.continuousOutsiderCount,
+        thermoRegime.entropy,
+        thermoRegime.hurst,
+        structuralDrift.confidence
+      );
 
   const regimeStateNormalized = Math.max(0, Math.min(1,
     (thermoRegime.thermodynamicIndex + thermoRegime.entropy + thermoRegime.volatility / 100.0) / 3.0
@@ -557,12 +568,14 @@ export const selectPredictionNumbers = async (
     thermoRegime.hurst
   );
 
-  const maxCandidates = (shrinkageApplied || context.adversarialMode) ? 15 : 10;
-  const candidates = sortedScores
-    .slice(5, 5 + maxCandidates)
-    .map(s => s.num)
-    .filter(n => !selection.includes(n))
-    .slice(0, 10);
+  const conformalSet = computeConformalCandidateSet(
+    sortedScores,
+    selection,
+    thermoRegime.entropy,
+    thermoRegime.hurst,
+    structuralDrift.confidence
+  );
+  const candidates = conformalSet.candidates;
 
   return {
     selection,

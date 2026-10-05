@@ -4,6 +4,10 @@ import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { LABELS_MAP, ALGO_CATEGORIES } from "../../hooks/useAlgorithmSync";
 import { runSystematicDnaAudit } from "./dnaAuditService";
 import { evaluateAlgoEmpiricalProof } from "./weightsManager";
+import { extractFeatures } from "./featureExtractor";
+import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
+import { getAlgorithmsForContext, AlgorithmContext } from "./algorithmRegistry";
+import "./coreAlgorithms";
 
 export interface SubAlgoCorrelationMetric {
   algoKey: AlgoKey;
@@ -153,6 +157,127 @@ export async function computeSubAlgorithmDivergenceCorrelations(
     drawDivergencesMap[draw.date || `T-${dIdx}`] = divScore;
   });
 
+  // Pré-évaluation causale réelle des plugins algorithmiques sur les sous-historiques T-idx (sans fuite du futur)
+  interface CausalAlgoDrawEval {
+    divergenceByAlgo: Record<string, number>;
+    falsePosByAlgo: Record<string, number>;
+    missedByAlgo: Record<string, number>;
+    nearMissByAlgo: Record<string, number>;
+    wassersteinByAlgo: Record<string, number>;
+  }
+
+  const causalEvals: CausalAlgoDrawEval[] = [];
+  for (let idx = 0; idx < recentHistory.length; idx++) {
+    const targetDraw = recentHistory[idx];
+    const winners = (Array.isArray(targetDraw.gagnants) ? targetDraw.gagnants : []).filter(n => n >= 1 && n <= 90);
+    const subHistory = pureHistory.slice(idx + 1, Math.min(pureHistory.length, idx + 41));
+
+    const divergenceByAlgo: Record<string, number> = {};
+    const falsePosByAlgo: Record<string, number> = {};
+    const missedByAlgo: Record<string, number> = {};
+    const nearMissByAlgo: Record<string, number> = {};
+    const wassersteinByAlgo: Record<string, number> = {};
+
+    if (subHistory.length >= 5 && winners.length > 0) {
+      try {
+        const subFeatures = await extractFeatures(drawName, subHistory);
+        const subMetrics = await computeAdvancedMetrics(subHistory, drawName, {}, false);
+        const ctx: AlgorithmContext = {
+          features: subFeatures,
+          advancedMetrics: subMetrics,
+          history: subHistory,
+          drawName,
+          weights: { ...activeWeights },
+          algoWeights: { ...activeWeights },
+          statisticalBounds: subMetrics.statisticalBounds || {
+            median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0.5, hurstExponent: 0.5
+          },
+          deterministicSeed: idx + 1,
+          maxFreq: Math.max(1, ...Array.from(subFeatures.freqMap || [])),
+          maxMarkov: Math.max(0.001, ...Array.from(subFeatures.markovMap || [])),
+          maxMachineTransfer: Math.max(0.001, ...Array.from(subFeatures.machineTransferMap || [])),
+          pluginCache: {},
+        };
+
+        const plugins = getAlgorithmsForContext(ctx);
+        plugins.forEach(p => {
+          try { p.precompute?.(ctx); } catch { /* ignore */ }
+        });
+
+        const sortedWinners = [...winners].sort((a, b) => a - b);
+
+        for (const plugin of plugins) {
+          const scored90: { num: number; score: number }[] = [];
+          for (let n = 1; n <= 90; n++) {
+            let s = 0;
+            try {
+              const res = plugin.evaluate(n, ctx);
+              s = Number.isFinite(res.score) ? res.score : 0;
+            } catch {
+              s = 0;
+            }
+            scored90.push({ num: n, score: s });
+          }
+
+          scored90.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.num - b.num));
+          const rankMap = new Map<number, number>();
+          scored90.forEach((item, rIdx) => rankMap.set(item.num, rIdx));
+
+          // 1. Divergence de rang moyen des gagnants (0 = rangs 0..4 idéaux, 100 = pire rang 89)
+          let rankSum = 0;
+          let missedCount = 0;
+          for (const w of winners) {
+            const r = rankMap.get(w) ?? 45;
+            rankSum += r;
+            if (r >= 45) missedCount++;
+          }
+          const meanRank = rankSum / winners.length;
+          divergenceByAlgo[plugin.key] = Math.min(100, Math.max(0, Math.round((meanRank / 89.0) * 100)));
+          missedByAlgo[plugin.key] = missedCount / winners.length;
+
+          // 2. Taux de faux positifs dans le Top-10
+          const top10 = scored90.slice(0, 10).map(x => x.num);
+          const hits10 = top10.filter(n => winners.includes(n)).length;
+          falsePosByAlgo[plugin.key] = (10 - hits10) / 10.0;
+
+          // 3. Sensibilité Near-Miss circulaire sur le tore Z_90 (distance géodésique 1 ou 2)
+          const top5 = scored90.slice(0, 5).map(x => x.num);
+          let nearMisses = 0;
+          for (const pNum of top5) {
+            if (winners.includes(pNum)) continue;
+            const isNear = winners.some(w => {
+              const diff = Math.abs(pNum - w);
+              const circDist = Math.min(diff, 90 - diff);
+              return circDist >= 1 && circDist <= 2;
+            });
+            if (isNear) nearMisses++;
+          }
+          nearMissByAlgo[plugin.key] = nearMisses / 5.0;
+
+          // 4. Transport optimal 1D de Wasserstein circulaire sur Z_90 entre Top-5 prédit et gagnants
+          const sortedTop5 = [...top5].sort((a, b) => a - b);
+          const pairCount = Math.min(sortedTop5.length, sortedWinners.length);
+          let wSum = 0;
+          for (let m = 0; m < pairCount; m++) {
+            const diff = Math.abs(sortedTop5[m] - sortedWinners[m]);
+            wSum += Math.min(diff, 90 - diff) / 45.0;
+          }
+          wassersteinByAlgo[plugin.key] = pairCount > 0 ? wSum / pairCount : 0.5;
+        }
+      } catch {
+        // Repli neutre si sous-historique trop court
+      }
+    }
+
+    causalEvals.push({
+      divergenceByAlgo,
+      falsePosByAlgo,
+      missedByAlgo,
+      nearMissByAlgo,
+      wassersteinByAlgo,
+    });
+  }
+
   const correlationMetrics: SubAlgoCorrelationMetric[] = [];
   const algoErrorProfiles: { [key: string]: number[] } = {};
 
@@ -161,11 +286,12 @@ export async function computeSubAlgorithmDivergenceCorrelations(
     const cat = ALGO_CATEGORIES.find((c) => c.keys.includes(algoKey))?.name || "Général";
     const auditItem = dnaAudit.algorithmAuditList.find((a) => a.key === algoKey);
 
-    const activeWeight = activeWeights[algoKey] ?? 0.05;
-    const canonicalWeight = auditItem?.canonicalWeight ?? 0.05;
-    const weightDriftDelta = auditItem?.weightDriftDelta ?? Math.abs(activeWeight - canonicalWeight) / Math.max(0.001, canonicalWeight);
+    const defaultW = 1.0 / Math.max(1, numAlgos);
+    const activeWeight = activeWeights[algoKey] ?? defaultW;
+    const canonicalWeight = auditItem?.canonicalWeight ?? defaultW;
+    const weightDriftDelta = auditItem?.weightDriftDelta ?? Math.abs(activeWeight - canonicalWeight) / Math.max(1e-4, canonicalWeight);
 
-    // Profil synthétique déterministe d'erreur par tirage basé sur l'alignement spectral et la variance
+    // Profil causal réel d'erreur par tirage issu de l'évaluation Walk-Forward des plugins
     const algoErrors: number[] = [];
     const drawDivergencesList: {
       drawDate: string;
@@ -174,24 +300,30 @@ export async function computeSubAlgorithmDivergenceCorrelations(
       isAnomaly: boolean;
     }[] = [];
 
+    let sumFalsePos = 0;
+    let sumMissed = 0;
+    let sumNearMiss = 0;
+    let sumWasserstein = 0;
+    let validEvalCount = 0;
+
     recentHistory.forEach((draw, idx) => {
-      const numbers = Array.isArray(draw.gagnants) ? draw.gagnants : [];
       const globalError = drawErrors[idx] || 50;
-      
-      // Fonction de couplage continue entre l'entropie du tirage et la nature de l'algorithme
-      const dateStr = draw.date || "";
-      const dateSeed = dateStr.split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
-      const cyclicCoupling = Math.sin((idx + 1) * 1.618 + (dateSeed % 31) * 0.1);
-      
-      // L'erreur de l'algorithme augmente continûment avec son écart au poids canonique
-      const driftAmplifier = 1.0 + weightDriftDelta * 2.5;
-      const algoSpecificDivergence = Math.min(
-        100,
-        Math.max(
-          5,
-          Math.round(globalError * (0.6 + 0.4 * cyclicCoupling * (weightDriftDelta > 0.05 ? 1 : 0.5)) * driftAmplifier)
-        )
-      );
+      const evalAtIdx = causalEvals[idx];
+      const empiricalDiv = evalAtIdx?.divergenceByAlgo[algoKey];
+
+      let algoSpecificDivergence: number;
+      if (typeof empiricalDiv === "number") {
+        algoSpecificDivergence = empiricalDiv;
+        sumFalsePos += evalAtIdx.falsePosByAlgo[algoKey] ?? 0.5;
+        sumMissed += evalAtIdx.missedByAlgo[algoKey] ?? 0.5;
+        sumNearMiss += evalAtIdx.nearMissByAlgo[algoKey] ?? 0.1;
+        sumWasserstein += evalAtIdx.wassersteinByAlgo[algoKey] ?? 0.5;
+        validEvalCount++;
+      } else {
+        // Repli continu basé sur la dérive de poids lorsque le sous-historique causal a moins de 5 tirages
+        const driftAmplifier = 1.0 / (1.0 + Math.exp(-weightDriftDelta));
+        algoSpecificDivergence = Math.min(100, Math.max(5, Math.round(globalError * driftAmplifier)));
+      }
 
       algoErrors.push(algoSpecificDivergence);
       drawDivergencesList.push({
@@ -204,45 +336,74 @@ export async function computeSubAlgorithmDivergenceCorrelations(
 
     algoErrorProfiles[algoKey] = algoErrors;
 
-    // Corrélation de Pearson entre les erreurs de cet algorithme et l'erreur globale du système
+    // Corrélation de Pearson entre les erreurs causales de cet algorithme et l'erreur globale du système
     const errorCorrelation = computePearsonCorrelation(algoErrors, drawErrors);
 
-    // Perte de Wasserstein estimée continûment
+    const stability = auditItem?.spectralResonance ?? 0.85;
     const meanAlgoError = algoErrors.reduce((a, b) => a + b, 0) / Math.max(1, algoErrors.length);
-    const wassersteinLoss = parseFloat(Math.min(1.0, (meanAlgoError / 100.0) * (1.0 + weightDriftDelta)).toFixed(4));
 
-    // Taux de faux positifs et de signaux manqués
-    const falsePositiveRate = parseFloat(
-      Math.min(1.0, Math.max(0.02, 0.15 + 0.6 * weightDriftDelta + (errorCorrelation > 0 ? errorCorrelation * 0.25 : 0))).toFixed(4)
+    const wassersteinLoss = parseFloat(
+      Math.min(
+        1.0,
+        validEvalCount > 0
+          ? sumWasserstein / validEvalCount
+          : (meanAlgoError / 100.0) * (1.0 + weightDriftDelta)
+      ).toFixed(4)
     );
 
-    const stability = auditItem?.spectralResonance ?? 0.85;
+    const falsePositiveRate = parseFloat(
+      Math.min(
+        1.0,
+        Math.max(
+          0.01,
+          validEvalCount > 0
+            ? sumFalsePos / validEvalCount
+            : (meanAlgoError / 100.0)
+        )
+      ).toFixed(4)
+    );
+
     const missedSignalRate = parseFloat(
-      Math.min(1.0, Math.max(0.01, 0.1 + 0.5 * (1.0 - stability))).toFixed(4)
+      Math.min(
+        1.0,
+        Math.max(
+          0.01,
+          validEvalCount > 0
+            ? sumMissed / validEvalCount
+            : 1.0 - stability
+        )
+      ).toFixed(4)
     );
 
     const nearMissSensitivity = parseFloat(
-      Math.min(1.0, Math.max(0.05, 0.25 + 0.3 * Math.abs(Math.sin(weightDriftDelta * 10)))).toFixed(4)
+      Math.min(
+        1.0,
+        Math.max(
+          0.01,
+          validEvalCount > 0
+            ? sumNearMiss / validEvalCount
+            : 1.0 / (1.0 + Math.exp(-weightDriftDelta))
+        )
+      ).toFixed(4)
     );
 
     const noiseEntropyDivergence = parseFloat(
-      Math.min(1.0, Math.max(0.02, (1.0 - stability) * (1.0 + weightDriftDelta))).toFixed(4)
+      Math.min(1.0, Math.max(0.01, (1.0 - stability) * (1.0 + weightDriftDelta))).toFixed(4)
     );
 
-    // Calcul continu de l'indice composite de toxicité (0 à 100)
-    // Combine : dérive de poids, corrélation d'erreur positive, perte de Wasserstein, et faux positifs
-    const corrFactor = Math.max(0, errorCorrelation); // Seule une corrélation d'erreur positive est toxique
-    const rawToxicity = (
-      weightDriftDelta * 35.0 +
-      corrFactor * 30.0 +
-      wassersteinLoss * 20.0 +
-      falsePositiveRate * 15.0
-    );
+    // Calcul continu de l'indice composite de toxicité (0 à 100) par moyenne pondérée sur le simplexe
+    const corrFactor = Math.max(0, errorCorrelation);
+    const normalizedComposite = (
+      Math.min(1.0, weightDriftDelta) +
+      corrFactor +
+      wassersteinLoss +
+      falsePositiveRate
+    ) / 4.0;
 
-    // Fonction logistique sigmoïde pour une graduation continue et souple
+    // Activation logistique continue centrée sur 0.5
     const toxicityIndex = Math.min(
       100,
-      Math.max(0, Math.round(100 / (1 + Math.exp(-0.08 * (rawToxicity * 1.5 - 35)))))
+      Math.max(0, Math.round(100.0 / (1.0 + Math.exp(-6.0 * (normalizedComposite - 0.45)))))
     );
     const reliabilityScore = 100 - toxicityIndex;
 

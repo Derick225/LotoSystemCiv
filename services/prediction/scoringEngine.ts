@@ -49,6 +49,107 @@ const getModifiedZScore = (val: number, median: number, mad: number): number => 
   return (0.6745 * (val - median)) / (mad + Number.EPSILON);
 };
 
+/**
+ * Décorrélation informationnelle anti-colinéarité entre les algorithmes actifs :
+ * Calcule la matrice de corrélation de Pearson instantanée R (K x K) sur les 90 numéros
+ * et pondère continûment chaque algorithme par son unicité informationnelle :
+ *   w_k^{eff} = w_k / (1 + \sum_{j \neq k} w_j * \max(0, r_{k,j})^2)
+ * Les algorithmes redondants partagent leur masse tandis que les détecteurs orthogonaux
+ * conservent 100 % de leur pouvoir discriminant.
+ */
+export const computeOrthogonalUniquenessWeights = (
+  algoValues: Record<string, number[]>,
+  weights: AlgoWeights,
+  failedAlgos: Set<string> = new Set()
+): AlgoWeights => {
+  const activeKeys = (Object.keys(weights) as AlgoKey[]).filter(
+    (k) => !failedAlgos.has(k) && (Number(weights[k]) || 0) > 0 && (algoValues[k]?.length || 0) > 1
+  );
+
+  if (activeKeys.length <= 1) {
+    return { ...weights };
+  }
+
+  // Standardisation centrée-réduite de chaque vecteur de scores sur [1..N]
+  const standardized: Record<string, Float64Array> = {};
+  const validSignalKeys: AlgoKey[] = [];
+
+  for (const key of activeKeys) {
+    const vals = algoValues[key];
+    const n = vals.length;
+    let sum = 0;
+    for (let i = 0; i < n; i++) sum += vals[i];
+    const mean = sum / n;
+
+    let sumSq = 0;
+    for (let i = 0; i < n; i++) {
+      const d = vals[i] - mean;
+      sumSq += d * d;
+    }
+    const std = Math.sqrt(sumSq / n);
+    if (std > 1e-6) {
+      const normVec = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        normVec[i] = (vals[i] - mean) / std;
+      }
+      standardized[key] = normVec;
+      validSignalKeys.push(key);
+    }
+  }
+
+  if (validSignalKeys.length <= 1) {
+    return { ...weights };
+  }
+
+  // Calcul de la pénalité continue de colinéarité positive pour chaque algorithme
+  const rawAdjusted: AlgoWeights = { ...weights };
+  let totalOriginalMass = 0;
+  let totalAdjustedMass = 0;
+
+  for (const keyK of activeKeys) {
+    const wK = Number(weights[keyK]) || 0;
+    totalOriginalMass += wK;
+    const vecK = standardized[keyK];
+    if (!vecK) {
+      rawAdjusted[keyK] = wK;
+      totalAdjustedMass += wK;
+      continue;
+    }
+
+    const n = vecK.length;
+    let redundancySum = 0;
+    for (const keyJ of validSignalKeys) {
+      if (keyJ === keyK) continue;
+      const wJ = Number(weights[keyJ]) || 0;
+      if (wJ <= 0) continue;
+      const vecJ = standardized[keyJ];
+      let dot = 0;
+      for (let i = 0; i < n; i++) {
+        dot += vecK[i] * vecJ[i];
+      }
+      const rKJ = Math.max(-1.0, Math.min(1.0, dot / n));
+      if (rKJ > 0) {
+        redundancySum += wJ * (rKJ * rKJ);
+      }
+    }
+
+    const uniquenessFactor = 1.0 / (1.0 + redundancySum);
+    const wEff = wK * uniquenessFactor;
+    rawAdjusted[keyK] = wEff;
+    totalAdjustedMass += wEff;
+  }
+
+  // Conservation exacte de la masse totale sur le simplexe
+  if (totalAdjustedMass > 1e-9 && totalOriginalMass > 0) {
+    const scale = totalOriginalMass / totalAdjustedMass;
+    for (const keyK of activeKeys) {
+      rawAdjusted[keyK] = (Number(rawAdjusted[keyK]) || 0) * scale;
+    }
+  }
+
+  return rawAdjusted;
+};
+
 export const calculateScores = (
   features: ExtractedFeatures,
   weights: AlgoWeights,
@@ -156,6 +257,9 @@ export const calculateScores = (
     if (!vals || vals.length === 0) return;
     algoRobustStats[k] = { median: getMedian(vals), mad: getMAD(vals, getMedian(vals)) };
   });
+
+  // Étape 3.2 : Décorrélation anti-colinéarité entre algorithmes actifs
+  effectiveWeights = computeOrthogonalUniquenessWeights(algoValues, effectiveWeights, failedAlgos);
 
   // Étape 3.5 : Pré-calcul du Profilage Micro-ADN pour Modulation Comportementale Continue
   const targetDrawName = history[0]?.drawName || "ALL";

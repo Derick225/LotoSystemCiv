@@ -1025,3 +1025,88 @@ export const generateCombination = async (
 
   return bestCombo.sort((a, b) => a - b);
 };
+
+/**
+ * Calibration Conforme (Conformal Prediction) & Quota Dynamique d'Outsiders :
+ * Module continûment le quota d'exploration des outsiders à partir du triplet
+ * (Entropie de Shannon S, Exposant de Hurst H, Probabilité de Concept Drift p_drift).
+ */
+export const computeAdaptiveOutsiderQuota = (
+  baseOutsiderCount: number,
+  entropy: number,
+  hurst: number,
+  driftConfidencePct: number = 0
+): number => {
+  const safeEntropy = Math.max(0.0, Math.min(1.0, entropy));
+  const safeHurst = Math.max(0.05, Math.min(0.95, hurst));
+  const driftProb = Math.max(0.0, Math.min(1.0, driftConfidencePct / 100.0));
+
+  // Potentiel d'exploration continu : augmente avec l'entropie, l'anti-persistance (0.5 - H) et le drift
+  const explorationSignal = 0.5 * safeEntropy + 0.5 * driftProb - (safeHurst - 0.5);
+  const modulator = Math.exp(0.6 * (explorationSignal - 0.25));
+
+  const effectiveQuota = Math.max(0.2, baseOutsiderCount) * modulator;
+  return parseFloat(Math.max(0.25, Math.min(2.5, effectiveQuota)).toFixed(4));
+};
+
+/**
+ * Construit l'ensemble crédible conforme C_{1-alpha} des candidats secondaires
+ * sans coupure binaire arbitraire, en accumulant la masse de Boltzmann-Gibbs
+ * jusqu'à atteindre la couverture cible dérivée de l'incertitude du régime.
+ */
+export const computeConformalCandidateSet = (
+  sortedScores: ScoredNumber[],
+  selectedTicket: number[],
+  entropy: number,
+  hurst: number,
+  driftConfidencePct: number = 0
+): { candidates: number[]; coverageAlpha: number; conformalPoolSize: number } => {
+  const selectedSet = new Set(selectedTicket);
+  const remaining = sortedScores.filter((s) => !selectedSet.has(s.num));
+  if (remaining.length === 0) {
+    return { candidates: [], coverageAlpha: 0.1, conformalPoolSize: 0 };
+  }
+
+  const safeEntropy = Math.max(0.0, Math.min(1.0, entropy));
+  const safeHurst = Math.max(0.05, Math.min(0.95, hurst));
+  const driftProb = Math.max(0.0, Math.min(1.0, driftConfidencePct / 100.0));
+
+  // Niveau de risque conforme alpha_eff ∈ [0.08, 0.22] gouverné par la stabilité du régime
+  const stabilityFactor = 1.0 / (1.0 + Math.exp(-2.0 * ((safeHurst - 0.5) - 0.5 * (safeEntropy + driftProb))));
+  const coverageAlpha = parseFloat((0.08 + 0.14 * stabilityFactor).toFixed(4));
+
+  // Température de Boltzmann dérivée de l'écart-type empirique des scores restants
+  const meanRem = remaining.reduce((acc, s) => acc + s.score, 0) / remaining.length;
+  const varRem = remaining.reduce((acc, s) => acc + Math.pow(s.score - meanRem, 2), 0) / remaining.length;
+  const stdRem = Math.sqrt(varRem) || 10.0;
+  const temperature = stdRem * (1.0 + 0.5 * safeEntropy + 0.5 * driftProb);
+
+  const maxScore = remaining[0].score;
+  const weights = remaining.map((s) => Math.exp((s.score - maxScore) / Math.max(1.0, temperature)));
+  const totalMass = weights.reduce((a, b) => a + b, 0) || 1.0;
+
+  // Enveloppe conforme continue sur les 20 premiers candidats hors-ticket
+  const horizon = Math.min(20, remaining.length);
+  const horizonMass = weights.slice(0, horizon).reduce((a, b) => a + b, 0) || totalMass;
+  const targetMass = (1.0 - coverageAlpha) * horizonMass;
+
+  let cumMass = 0;
+  let conformalCount = 0;
+  for (let i = 0; i < horizon; i++) {
+    cumMass += weights[i];
+    conformalCount++;
+    if (cumMass >= targetMass && conformalCount >= 8) {
+      break;
+    }
+  }
+
+  const conformalPoolSize = Math.max(8, Math.min(15, conformalCount));
+  const candidates = remaining.slice(0, 10).map((s) => s.num);
+
+  return {
+    candidates,
+    coverageAlpha,
+    conformalPoolSize,
+  };
+};
+

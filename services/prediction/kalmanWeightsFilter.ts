@@ -13,6 +13,7 @@ export interface KalmanFilterState {
   kalmanGains?: Record<string, number>;
   errorHistory?: number[]; // Historique glissant des erreurs de prédiction
   innovationHistory?: number[]; // Historique glissant de la norme de l'innovation
+  innovationVectorsHistory?: number[][]; // Historique glissant des vecteurs d'innovation complets (K-D)
 }
 
 export interface KalmanUpdateResult {
@@ -20,10 +21,61 @@ export interface KalmanUpdateResult {
   kalmanState: KalmanFilterState;
   innovationNorm: number;
   traceCovariance: number;
+  offDiagonalNorm: number;
   driftDamped: boolean;
 }
 
 const KALMAN_CACHE: Record<string, KalmanFilterState> = {};
+
+/**
+ * Inversion matricielle exacte de Gauss-Jordan avec pivot partiel et régularisation de Tikhonov
+ * pour l'opérateur d'innovation S_t = P_{t|t-1} + R_t (K x K, K <= 24).
+ */
+function invertSymmetricPositiveMatrix(matrix: number[][]): number[][] {
+  const n = matrix.length;
+  const aug: number[][] = Array.from({ length: n }, (_, i) => {
+    const row = new Array(2 * n).fill(0);
+    for (let j = 0; j < n; j++) {
+      row[j] = matrix[i][j] + (i === j ? 1e-9 : 0);
+    }
+    row[n + i] = 1.0;
+    return row;
+  });
+
+  for (let col = 0; col < n; col++) {
+    let pivotRow = col;
+    let maxVal = Math.abs(aug[col][col]);
+    for (let row = col + 1; row < n; row++) {
+      const absVal = Math.abs(aug[row][col]);
+      if (absVal > maxVal) {
+        maxVal = absVal;
+        pivotRow = row;
+      }
+    }
+
+    if (pivotRow !== col) {
+      const tmp = aug[col];
+      aug[col] = aug[pivotRow];
+      aug[pivotRow] = tmp;
+    }
+
+    const pivot = Math.abs(aug[col][col]) < 1e-12 ? (aug[col][col] >= 0 ? 1e-12 : -1e-12) : aug[col][col];
+    for (let j = 0; j < 2 * n; j++) {
+      aug[col][j] /= pivot;
+    }
+
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const factor = aug[row][col];
+      if (Math.abs(factor) < 1e-15) continue;
+      for (let j = 0; j < 2 * n; j++) {
+        aug[row][j] -= factor * aug[col][j];
+      }
+    }
+  }
+
+  return Array.from({ length: n }, (_, i) => aug[i].slice(n, 2 * n));
+}
 
 /**
  * Calcule la moyenne et la variance d'une série historique
@@ -67,6 +119,7 @@ export function initializeKalmanState(drawName: string, initialWeights?: AlgoWei
     lastUpdated: new Date().toISOString(),
     errorHistory: [],
     innovationHistory: [],
+    innovationVectorsHistory: [],
   };
 
   KALMAN_CACHE[drawName] = state;
@@ -74,17 +127,17 @@ export function initializeKalmanState(drawName: string, initialWeights?: AlgoWei
 }
 
 /**
- * FILTRE DE KALMAN ADAPTATIF POUR LES POIDS ALGORITHMIQUES
+ * FILTRE DE KALMAN ADAPTATIF MULTIVARIÉ SOUS FORME DE JOSEPH (COVARIANCE CROISÉE K x K)
  * 
  * Élimine le bruit d'échantillonnage ponctuel (mesure R_t)
- * tout en capturant fidèlement les vraies dérives structurelles (processus Q_t).
+ * tout en capturant fidèlement les dérives structurelles et les co-variations inter-algorithmes (processus Q_t).
  * 
  * Équations :
  * 1. Prédiction : x_{t|t-1} = x_{t-1},  P_{t|t-1} = P_{t-1} + Q_t
- * 2. Innovation : y_t = z_t - H x_{t|t-1}
- * 3. Gain de Kalman : K_t = P_{t|t-1} (P_{t|t-1} + R_t)^{-1}
- * 4. Mise à jour de Joseph : P_t = (I - K_t) P_{t|t-1} (I - K_t)^T + K_t R_t K_t^T
- * 5. Projection continue sur le simplexe par Softmax
+ * 2. Innovation : \nu_t = z_t - x_{t|t-1}
+ * 3. Opérateur d'innovation : S_t = P_{t|t-1} + R_t I_K
+ * 4. Gain de Kalman multivarié : K_t = P_{t|t-1} S_t^{-1}
+ * 5. Mise à jour stabilisée de Joseph : P_t = (I_K - K_t) P_{t|t-1} (I_K - K_t)^T + K_t R_t K_t^T
  */
 export function updateWeightsWithKalmanFilter(params: {
   drawName: string;
@@ -100,81 +153,176 @@ export function updateWeightsWithKalmanFilter(params: {
     state = initializeKalmanState(drawName, measuredWeights);
   }
 
-  // Initialisation des tableaux historiques s'ils proviennent d'un cache restauré
-  if (!state.errorHistory) state.errorHistory = [];
-  if (!state.innovationHistory) state.innovationHistory = [];
-
   const keys = Object.keys(measuredWeights) as AlgoKey[];
   const K = keys.length;
 
+  // Redimensionnement défensif si le nombre de clés a évolué
+  if (!state.covarianceMatrix || state.covarianceMatrix.length !== K) {
+    state = initializeKalmanState(drawName, measuredWeights);
+  }
+
+  // Initialisation garantie des tableaux historiques
+  const errorHistory = state.errorHistory ?? (state.errorHistory = []);
+  const innovationHistory = state.innovationHistory ?? (state.innovationHistory = []);
+  const innovationVectorsHistory = state.innovationVectorsHistory ?? (state.innovationVectorsHistory = []);
+
   // Enregistrer l'erreur de prédiction actuelle (Closed-Loop Autopsy Feedback)
-  state.errorHistory.push(predictionError);
-  if (state.errorHistory.length > 15) {
-    state.errorHistory.shift();
+  errorHistory.push(predictionError);
+  if (errorHistory.length > 15) {
+    errorHistory.shift();
   }
 
   // 1. Autotuning continu du bruit de mesure R_t
-  const errorStats = getRollingStats(state.errorHistory, predictionError);
-  const baseVar = customVar ?? 0.01;
-  // rBase est calculé de manière continue par la variance de l'erreur historique cumulée
-  const rBase = Math.max(0.0001, errorStats.variance * (1.0 + errorStats.mean) + baseVar * 0.1);
+  const errorStats = getRollingStats(errorHistory, predictionError);
+  const baseVar = customVar ?? (1.0 / (K * K));
+  const rBase = Math.max(1e-5, errorStats.variance * (1.0 + errorStats.mean) + baseVar / Math.sqrt(K));
 
-  // 2. Autotuning continu du bruit de processus Q_t (Sage-Husa)
-  // ALGO-7 : l'exposant de Lyapunov local ne module plus Q_t. Sur des tirages physiquement
-  // aléatoires il ne mesure aucun « régime chaotique » réel — seulement du bruit
-  // d'échantillonnage — et gonflait donc le bruit de processus de façon arbitraire. Q_t
-  // reste auto-ajusté par la dispersion légitime des corrections (variance d'innovation).
-  const prevInnovationNorm = state.innovationVector
-    ? Math.sqrt(Object.values(state.innovationVector).reduce((sum, v) => sum + v * v, 0))
-    : 0.0;
-
-  state.innovationHistory.push(prevInnovationNorm);
-  if (state.innovationHistory.length > 15) {
-    state.innovationHistory.shift();
-  }
-
-  const innovationStats = getRollingStats(state.innovationHistory, prevInnovationNorm);
-  // qBase s'auto-ajuste à la dispersion des corrections optimales (innovation)
-  const qBase = (1.0 / (K * K)) * (1.0 + innovationStats.variance * 10.0);
-
-  const currentCov = state.covarianceMatrix;
-  const nextCov: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));
-  const newWeightsMap: Record<string, number> = {};
-  const kalmanGains: Record<string, number> = {};
+  // 2. Vecteur d'innovation actuel \nu_t = z_t - x_{t|t-1}
+  const innovationVec: number[] = new Array(K).fill(0);
   const innovation: Record<string, number> = {};
   let totalInnovation = 0;
 
   for (let i = 0; i < K; i++) {
     const key = keys[i];
-    const priorState = state.stateVector[key] ?? (1.0 / K);
-    const measured = (measuredWeights as any)[key] ?? (1.0 / K);
-
-    // 1. Prédiction Covariance P_{t|t-1} = P_{i,i} + Q
-    const pPrior = currentCov[i][i] + qBase;
-
-    // 2. Gain de Kalman K_i = P_{prior} / (P_{prior} + R)
-    const kGain = pPrior / (pPrior + rBase);
-    kalmanGains[key] = parseFloat(kGain.toFixed(4));
-
-    // 3. Innovation
-    const diff = measured - priorState;
+    const priorVal = state.stateVector[key] ?? (1.0 / K);
+    const measuredVal = (measuredWeights as Record<string, number>)[key] ?? (1.0 / K);
+    const diff = measuredVal - priorVal;
+    innovationVec[i] = diff;
     innovation[key] = parseFloat(diff.toFixed(5));
     totalInnovation += diff * diff;
+  }
 
-    // 4. Mise à jour de l'état (lissage bayésien)
-    const updatedVal = priorState + kGain * diff;
-    newWeightsMap[key] = Math.max(0.001, updatedVal);
+  const currentInnovationNorm = Math.sqrt(totalInnovation);
+  innovationHistory.push(currentInnovationNorm);
+  if (innovationHistory.length > 15) {
+    innovationHistory.shift();
+  }
 
-    // 5. Mise à jour de la variance P_t
-    const pPosterior = (1.0 - kGain) * pPrior;
-    nextCov[i][i] = pPosterior;
+  innovationVectorsHistory.push(innovationVec);
+  if (innovationVectorsHistory.length > 15) {
+    innovationVectorsHistory.shift();
+  }
+
+  const innovationStats = getRollingStats(innovationHistory, currentInnovationNorm);
+  const qDiagBase = (1.0 / (K * K)) * (1.0 + innovationStats.variance * K);
+
+  // 3. Matrice de bruit de processus Q_t (K x K) de Sage-Husa :
+  // Combine la base isotrope et la covariance empirique croisée des innovations \nu_\tau \nu_\tau^T
+  const histLen = innovationVectorsHistory.length;
+  const QMatrix: number[][] = Array.from({ length: K }, (_, i) =>
+    Array.from({ length: K }, (__, j) => (i === j ? qDiagBase : 0.0))
+  );
+
+  if (histLen >= 2) {
+    const meanNu = new Array(K).fill(0);
+    for (let m = 0; m < histLen; m++) {
+      for (let i = 0; i < K; i++) {
+        meanNu[i] += innovationVectorsHistory[m][i] / histLen;
+      }
+    }
+    const couplingWeight = histLen / (histLen + Math.sqrt(K));
+    for (let i = 0; i < K; i++) {
+      for (let j = i; j < K; j++) {
+        let covIJ = 0;
+        for (let m = 0; m < histLen; m++) {
+          covIJ +=
+            (innovationVectorsHistory[m][i] - meanNu[i]) *
+            (innovationVectorsHistory[m][j] - meanNu[j]);
+        }
+        covIJ = (covIJ / histLen) * couplingWeight;
+        QMatrix[i][j] += covIJ;
+        if (i !== j) {
+          QMatrix[j][i] += covIJ;
+        }
+      }
+    }
+  } else if (histLen === 1) {
+    // Produit extérieur instantané amorti au premier pas
+    const damp = 1.0 / (K + 1.0);
+    for (let i = 0; i < K; i++) {
+      for (let j = i; j < K; j++) {
+        const outer = innovationVec[i] * innovationVec[j] * damp;
+        QMatrix[i][j] += outer;
+        if (i !== j) QMatrix[j][i] += outer;
+      }
+    }
+  }
+
+  // 4. Covariance a priori P_{t|t-1} = P_{t-1} + Q_t et Opérateur d'innovation S_t = P_{t|t-1} + R_t I_K
+  const currentCov = state.covarianceMatrix;
+  const pPrior: number[][] = Array.from({ length: K }, (_, i) =>
+    Array.from({ length: K }, (__, j) => currentCov[i][j] + QMatrix[i][j])
+  );
+  const sMatrix: number[][] = Array.from({ length: K }, (_, i) =>
+    Array.from({ length: K }, (__, j) => pPrior[i][j] + (i === j ? rBase : 0.0))
+  );
+
+  // 5. Gain de Kalman multivarié K_t = P_{t|t-1} * S_t^{-1}
+  const sInv = invertSymmetricPositiveMatrix(sMatrix);
+  const kMatrix: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));
+  for (let i = 0; i < K; i++) {
+    for (let j = 0; j < K; j++) {
+      let sum = 0;
+      for (let m = 0; m < K; m++) {
+        sum += pPrior[i][m] * sInv[m][j];
+      }
+      kMatrix[i][j] = sum;
+    }
+  }
+
+  // 6. Mise à jour couplée de l'état : x_t = x_{t|t-1} + K_t \nu_t
+  const newWeightsMap: Record<string, number> = {};
+  const kalmanGains: Record<string, number> = {};
+  const minFloor = 1.0 / (K * 90.0);
+
+  for (let i = 0; i < K; i++) {
+    const key = keys[i];
+    const priorState = state.stateVector[key] ?? (1.0 / K);
+    let deltaI = 0;
+    for (let j = 0; j < K; j++) {
+      deltaI += kMatrix[i][j] * innovationVec[j];
+    }
+    kalmanGains[key] = parseFloat(kMatrix[i][i].toFixed(4));
+    newWeightsMap[key] = Math.max(minFloor, priorState + deltaI);
+  }
+
+  // 7. Mise à jour stabilisée de Joseph : P_t = (I - K_t) P_{t|t-1} (I - K_t)^T + K_t R_t K_t^T
+  const iMinusK: number[][] = Array.from({ length: K }, (_, i) =>
+    Array.from({ length: K }, (__, j) => (i === j ? 1.0 : 0.0) - kMatrix[i][j])
+  );
+  const tempMat: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));
+  for (let i = 0; i < K; i++) {
+    for (let j = 0; j < K; j++) {
+      let s = 0;
+      for (let m = 0; m < K; m++) {
+        s += iMinusK[i][m] * pPrior[m][j];
+      }
+      tempMat[i][j] = s;
+    }
+  }
+
+  const nextCov: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));
+  for (let i = 0; i < K; i++) {
+    for (let j = i; j < K; j++) {
+      let josephTerm = 0;
+      let noiseTerm = 0;
+      for (let m = 0; m < K; m++) {
+        josephTerm += tempMat[i][m] * iMinusK[j][m];
+        noiseTerm += kMatrix[i][m] * rBase * kMatrix[j][m];
+      }
+      const val = josephTerm + noiseTerm;
+      nextCov[i][j] = val;
+      if (i !== j) {
+        nextCov[j][i] = val;
+      }
+    }
   }
 
   // Normalisation continue des poids résultants
   const normalized = normalizeWeights(newWeightsMap as AlgoWeights);
 
   // Mise à jour du cache d'état
-  state.stateVector = { ...normalized } as any;
+  state.stateVector = { ...normalized } as Record<string, number>;
   state.covarianceMatrix = nextCov;
   state.stepCount++;
   state.lastUpdated = new Date().toISOString();
@@ -182,13 +330,20 @@ export function updateWeightsWithKalmanFilter(params: {
   state.kalmanGains = kalmanGains;
 
   let trace = 0;
-  for (let i = 0; i < K; i++) trace += nextCov[i][i];
+  let offDiagSq = 0;
+  for (let i = 0; i < K; i++) {
+    trace += nextCov[i][i];
+    for (let j = 0; j < K; j++) {
+      if (i !== j) offDiagSq += nextCov[i][j] * nextCov[i][j];
+    }
+  }
 
   return {
     updatedWeights: normalized,
     kalmanState: state,
-    innovationNorm: parseFloat(Math.sqrt(totalInnovation).toFixed(5)),
+    innovationNorm: parseFloat(currentInnovationNorm.toFixed(5)),
     traceCovariance: parseFloat(trace.toFixed(6)),
+    offDiagonalNorm: parseFloat(Math.sqrt(offDiagSq).toFixed(6)),
     driftDamped: true,
   };
 }
