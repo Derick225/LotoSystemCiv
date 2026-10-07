@@ -523,14 +523,27 @@ export const runBayesianResonanceEngine = (
     betaDecay
   });
 
+  // Excitation relative signée du noyau : r = (λ_c - μ_c)/μ_c ∈ ℝ, compressée par un
+  // log1p signé (croissance logarithmique dans les deux sens, continue en 0, pente 1).
+  // L'ancienne forme log(max(1e-4, λ/μ)) écrasait toute intensité négative (possible
+  // avec des couplages inhibiteurs signés) sur un plancher artificiel ≈ -9.21.
   const rawHawkes = new Float64Array(N + 1);
   for (let c = 1; c <= N; c++) {
     const mu = targetBaseline[c] > 0 ? targetBaseline[c] : p0;
-    rawHawkes[c] = Math.log(Math.max(1e-4, hawkesRes.intensities[c] / mu));
+    const excitationRatio = (hawkesRes.intensities[c] - mu) / mu;
+    rawHawkes[c] = Math.sign(excitationRatio) * Math.log(1.0 + Math.abs(excitationRatio));
   }
 
-  // Poids adaptatif continu du canal de Hawkes dérivé de l'énergie totale d'excitation et de la variance de l'échantillon
-  const hawkesWeight = Math.tanh(hawkesRes.totalEnergy / Math.max(1.0, Math.sqrt(sampleSize)));
+  // Poids adaptatif continu du canal de Hawkes, dérivé de l'énergie ABSOLUE d'excitation.
+  // La somme signée (totalEnergy) est typiquement négative (les pénalités de lissage des
+  // cellules non observées dominent), ce qui saturait tanh() à ≈ -1 et INVERSAIT la
+  // contribution du canal dans la fusion — l'excitation devenait une pénalité. Le poids
+  // est une fiabilité de canal : il doit rester dans [0, 1), le signe vit dans rawHawkes.
+  let absExcitationEnergy = 0;
+  for (let c = 1; c <= N; c++) {
+    absExcitationEnergy += Math.abs(hawkesRes.netExcitations[c]);
+  }
+  const hawkesWeight = Math.tanh(absExcitationEnergy / Math.max(1.0, Math.sqrt(sampleSize)));
 
   // 3d. Intégration continue du graphe complet all-to-all du réseau fermé (AGENTS.md)
   const evidenceNetwork = new Float64Array(N + 1);
@@ -679,6 +692,22 @@ export const runBayesianResonanceEngine = (
   const varHawkes = hawkesProbs.reduce((a, b) => a + Math.pow(b - meanHawkes, 2), 0) / hawkesProbs.length;
   const stdHawkes = Math.max(Math.sqrt(varHawkes), 1e-6);
 
+  // Part d'énergie retardée (dt ≥ 2) attendue sous le modèle ajusté : le noyau pondère
+  // le lag l par exp(-β·(l+1)), donc E[part queue] = r(1-r^(L-1))/(1-r^L) avec r = e^{-β}
+  // — et non 1/L (uniforme), qui surestimait la barre. La part observée est mesurée sur
+  // les énergies ABSOLUES par lag, robuste aux annulations de signe des couplages
+  // inhibiteurs (une somme signée pouvait rendre la barre max(1e-6, totalEnergy) ≈ 0).
+  const decayRatio = Math.exp(-betaDecay);
+  const expectedLagTailShare = (decayRatio * (1.0 - Math.pow(decayRatio, lagCount - 1))) / (1.0 - Math.pow(decayRatio, lagCount));
+  let absTotalLagEnergy = 0;
+  let absTailLagEnergy = 0;
+  for (let l = 0; l < hawkesRes.lagExcitations.length; l++) {
+    const lagEnergy = Math.abs(hawkesRes.lagExcitations[l]);
+    absTotalLagEnergy += lagEnergy;
+    if (l >= 1) absTailLagEnergy += lagEnergy;
+  }
+  const observedLagTailShare = absTotalLagEnergy > 0 ? absTailLagEnergy / absTotalLagEnergy : 0;
+
   const seChannel = Math.sqrt((p0 * (1.0 - p0)) / Math.max(1, sampleSize));
 
   const scoredCandidates: InterDrawCandidateScore[] = candidateMetrics.map(item => {
@@ -711,7 +740,6 @@ export const runBayesianResonanceEngine = (
     // Seuils statistiques dérivés des quantiles gaussiens (z90 = 1.28155, z75 = 0.67449)
     const z90 = 1.28155;
     const z75 = 0.67449;
-    const uniformLagEnergy = 1.0 / lagCount;
 
     if (zTrans > z90 && !item.flags.includes('HAUTE_TRANSITION')) {
       item.flags.push('HAUTE_TRANSITION');
@@ -721,10 +749,9 @@ export const runBayesianResonanceEngine = (
       item.flags.push('HAWKES_EXCITATION');
     }
 
-    if (lagCount > 1 && hawkesRes.lagExcitations.subarray(1).reduce((a: number, b: number) => a + b, 0) > uniformLagEnergy * Math.max(1e-6, hawkesRes.totalEnergy)) {
-      if (zHawkes > z75 && !item.flags.includes('HAWKES_REMANENCE')) {
-        item.flags.push('HAWKES_REMANENCE');
-      }
+    // Rémanence = excès d'énergie retardée par rapport au modèle de décroissance ajusté
+    if (lagCount > 1 && observedLagTailShare > expectedLagTailShare && zHawkes > z75 && !item.flags.includes('HAWKES_REMANENCE')) {
+      item.flags.push('HAWKES_REMANENCE');
     }
 
     return {
