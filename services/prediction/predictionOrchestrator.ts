@@ -399,7 +399,11 @@ export const applyPredictionDnaSieve = (
   const multipliersRecord: Record<number, number> = {};
   const affinityRecord: Record<number, number> = {};
 
-  const snr = (stdDevDna || 0.1) / (meanDna || 1.0);
+  // CV de l'ADN (σ/μ). Un σ MESURÉ à 0 (multipliers uniformes = signal nul) doit donner snr=0
+  // (inertie pure) au lieu du 0.1 fabriqué ; μ ne peut être nul (multipliers > 0), garde de division seule.
+  const safeStdDevDna = typeof stdDevDna === "number" && Number.isFinite(stdDevDna) ? stdDevDna : 0;
+  const safeMeanDna = typeof meanDna === "number" && meanDna > 1e-9 ? meanDna : 1.0;
+  const snr = safeStdDevDna / safeMeanDna;
   
   // Pondération dynamique (sans constantes fixes) selon la qualité du signal (SNR)
   const signalWeight = 2.0 * (1.0 / (1.0 + Math.exp(-snr * Math.PI)) - 0.5);

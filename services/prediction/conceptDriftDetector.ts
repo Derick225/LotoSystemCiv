@@ -137,6 +137,8 @@ export class ConceptDriftDetector {
             sumP += distP[i] || 0;
             sumQ += distQ[i] || 0;
         }
+        // Masses nulles = données absentes (branche hors du pipeline gardé, qui garantit des tirages peuplés) ;
+        // la convention 0.0 signifie « incomparable », pas « accord parfait mesuré ».
         if (sumP <= 0 || sumQ <= 0) return 0.0;
 
         const cumDiff = new Float64Array(N);
@@ -150,7 +152,8 @@ export class ConceptDriftDetector {
 
         // Solution analytique exacte sur le cercle : centrage autour de la médiane de la différence cumulée
         const sorted = Float64Array.from(cumDiff).sort();
-        const median = 0.5 * (sorted[44] + sorted[45]);
+        // Médiane d'un échantillon pair de taille N : moyenne des éléments N/2-1 et N/2
+        const median = 0.5 * (sorted[N / 2 - 1] + sorted[N / 2]);
         let transportCost = 0.0;
         for (let i = 0; i < N; i++) {
             transportCost += Math.abs(cumDiff[i] - median);
@@ -174,8 +177,8 @@ export class ConceptDriftDetector {
 
     /**
      * Évalue le risque de dérive de performance basé sur des critères rigoureux (Zéro Nombre Magique).
-     * Élimine les seuils fixes comme 0.85 ou 0.80 au profit d'un niveau de signification alpha (0.05).
-     * Le seuil dynamique est dérivé directement de la significativité alpha : 1 - alpha = 0.95 (confiance de 95%).
+     * Le risque combine la fraction de Kelly lissée, la significativité du test t et l'effondrement
+     * du taux de succès ; la décision binaire utilise le point médiant probabiliste 0.5 (équiprobable).
      * 
      * @param tStatistic Statistique t de Student pour comparer la moyenne récente et historique.
      * @param baselineVar Variance empirique du groupe de référence.
@@ -194,20 +197,28 @@ export class ConceptDriftDetector {
 
         const w = 1.0 - pValue;
         const l = pValue;
-        const kellyRisk = (successCollapseRisk > 0) ? Math.max(0, w - (l / (successCollapseRisk + 1e-9))) : w;
+        // Fraction de Kelly lissée : le rapport b/(b+l) est continu en b=0 (ni porte binaire,
+        // ni division singulière), croissant en l'effondrement, et saturant à w quand celui-ci domine l'évidence.
+        const kellyRisk = Math.max(
+            0,
+            w * (successCollapseRisk / Math.max(1e-9, successCollapseRisk + l))
+        );
 
         let driftRisk = 0;
         if (tStatistic < 0) {
             driftRisk = 1.0 - pValue; // P(t < tStatistic)
         }
 
-        // Étalement continu de la marge de sécurité (fraction Kelly) basé sur l'incertitude empirique (variance)
-        const safetyFraction = 0.5 + 0.5 * Math.min(1.0, baselineVar / 10.0);
+        // Étalement continu de la marge de sécurité (fraction Kelly) basé sur l'incertitude empirique (variance).
+        // Normalisation par la borne de Popoviciu : la variance d'une variable bornée dans [0,1] (scores de Brier)
+        // est majorée par 0.25, donc baselineVar/0.25 balaye [0,1] au lieu d'être inerte (var/10 ≤ 0.025).
+        const safetyFraction = 0.5 + 0.5 * Math.min(1.0, baselineVar / 0.25);
         driftRisk = Math.max(driftRisk, kellyRisk * safetyFraction);
         driftRisk = 1 - (1 - driftRisk) * (1 - successCollapseRisk); // Union probabiliste
 
-        const alphaSignificance = 0.05;
-        const dynamicDriftThreshold = 1.0 - alphaSignificance; // Seuil de confiance rigoureux (95%, soit 0.95)
+        // Seuil de décision = point médian naturel d'une probabilité (équiprobable P=0.5), la même
+        // convention que detectDriftPageHinkley — aucun alpha fixe arbitraire (AGENTS.md).
+        const dynamicDriftThreshold = 0.5;
         const isPerformanceDrift = driftRisk > dynamicDriftThreshold;
 
         return {
@@ -230,7 +241,10 @@ export class ConceptDriftDetector {
         lyapunovExponent?: number;
         isChaotic?: boolean;
     } {
-        const activeDraw = targetDrawName || history[0]?.drawName || "Reveil";
+        const activeDraw = targetDrawName || history[0]?.drawName;
+        if (!activeDraw) {
+            return { driftDetected: false, divergence: 0, severity: 'LOW', confidence: 0 };
+        }
         const purifiedHistory = purifyHistoryForDraw(activeDraw, history);
 
         // Minimum requis pour une représentativité statistique minimale sur 2 blocs

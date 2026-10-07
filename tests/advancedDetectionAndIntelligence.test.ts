@@ -201,8 +201,11 @@ describe('Améliorations Avancées de Détection & Intelligence Décisionnelle (
       const conformalStable = computeConformalCandidateSet(mockScores, ticket, 0.20, 0.75, 5);
       const conformalTurbulent = computeConformalCandidateSet(mockScores, ticket, 0.90, 0.32, 90);
 
-      expect(conformalStable.candidates).toHaveLength(10);
-      expect(conformalTurbulent.candidates).toHaveLength(10);
+      // Les candidats SONT l'enveloppe conforme : taille = pool conforme du régime, borné [8, 15]
+      expect(conformalStable.candidates).toHaveLength(conformalStable.conformalPoolSize);
+      expect(conformalTurbulent.candidates).toHaveLength(conformalTurbulent.conformalPoolSize);
+      expect(conformalStable.candidates.length).toBeGreaterThanOrEqual(8);
+      expect(conformalTurbulent.candidates.length).toBeLessThanOrEqual(15);
       // En régime turbulent/drifté, le risque alpha est abaissé (couverture 1 - alpha plus large)
       expect(conformalTurbulent.coverageAlpha).toBeLessThan(conformalStable.coverageAlpha);
       expect(conformalTurbulent.conformalPoolSize).toBeGreaterThanOrEqual(conformalStable.conformalPoolSize);

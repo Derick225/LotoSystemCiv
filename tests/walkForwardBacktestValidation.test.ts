@@ -107,7 +107,7 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
         `[WALK-FORWARD QUOTIDIEN - Reveil] Tests=${reportA.totalTests} | AvgHits=${reportA.averageHits} (Lift=${lift.toFixed(2)}x vs hasard) | SuccessRate=${reportA.successRate}% | Brier=${reportA.brier_score} | MRR=${reportA.mrr} | NDCG=${reportA.ndcg}`
       );
       expect(lift).toBeGreaterThan(1.0);
-    }, 45000);
+    }, 90000); // 2 campagnes complètes (déterminisme A/B) : 45s était sous la marge en exécution parallèle
   });
 
   describe('2. Filtrage Kernel PCA & Porte de Préservation des Outsiders (Huber-Wiener)', () => {

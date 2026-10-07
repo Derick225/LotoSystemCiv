@@ -131,31 +131,35 @@ export async function computeSubAlgorithmDivergenceCorrelations(
     label: d.date ? d.date.slice(0, 10) : `T-${idx + 1}`
   }));
 
-  // Extraire les erreurs et divergences pour chaque tirage
-  const drawErrors: number[] = [];
-  const drawDivergencesMap: { [drawDate: string]: number } = {};
+  // Divergence système RÉELLE (rapports forensiques : prédiction vs résultat) et
+  // dispersion intrinsèque du tirage (statistique réelle des gagnants) — deux séries
+  // distinctes, jamais mélangées dans un même calcul statistique.
+  const systemDivergences: (number | null)[] = [];
+  const drawDispersion: number[] = [];
 
-  recentHistory.forEach((draw, dIdx) => {
+  recentHistory.forEach((draw) => {
     const matchedReport = forensicReports.find(
       (r) => r.drawResultId === draw.id || r.date === draw.date
     );
+    systemDivergences.push(matchedReport ? (matchedReport.divergenceMetric ?? null) : null);
 
-    let divScore = 50; // Base médiane neutre
-    if (matchedReport) {
-      divScore = matchedReport.divergenceMetric ?? 50;
+    const numbers = Array.isArray(draw.gagnants) ? draw.gagnants : [];
+    if (numbers.length > 1) {
+      const mean = numbers.reduce((a: number, b: number) => a + b, 0) / numbers.length;
+      const variance = numbers.reduce((s: number, n: number) => s + (n - mean) ** 2, 0) / numbers.length;
+      const normalizedVar = Math.min(1.0, variance / 675.0); // 675 = variance uniforme exacte de Z_90 : (90²-1)/12
+      drawDispersion.push(Math.round(30 + normalizedVar * 50));
     } else {
-      // Dériver la dispersion intrinsèque du tirage sans constante arbitraire
-      const numbers = Array.isArray(draw.gagnants) ? draw.gagnants : [];
-      if (numbers.length > 1) {
-        const mean = numbers.reduce((a: number, b: number) => a + b, 0) / numbers.length;
-        const variance = numbers.reduce((s: number, n: number) => s + (n - mean) ** 2, 0) / numbers.length;
-        const normalizedVar = Math.min(1.0, variance / 675.0); // 675 ~ variance uniforme sur 90
-        divScore = Math.round(30 + normalizedVar * 50);
-      }
+      drawDispersion.push(NaN);
     }
-    drawErrors.push(divScore);
-    drawDivergencesMap[draw.date || `T-${dIdx}`] = divScore;
   });
+
+  // Médiane réelle des dispersions observées (remplace l'ancienne base neutre 50 fabriquée)
+  const finiteDispersions = drawDispersion.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  const medianDispersion =
+    finiteDispersions.length > 0
+      ? finiteDispersions[Math.floor(finiteDispersions.length / 2)]
+      : NaN;
 
   // Pré-évaluation causale réelle des plugins algorithmiques sur les sous-historiques T-idx (sans fuite du futur)
   interface CausalAlgoDrawEval {
@@ -307,7 +311,6 @@ export async function computeSubAlgorithmDivergenceCorrelations(
     let validEvalCount = 0;
 
     recentHistory.forEach((draw, idx) => {
-      const globalError = drawErrors[idx] || 50;
       const evalAtIdx = causalEvals[idx];
       const empiricalDiv = evalAtIdx?.divergenceByAlgo[algoKey];
 
@@ -322,7 +325,12 @@ export async function computeSubAlgorithmDivergenceCorrelations(
       } else {
         // Repli continu basé sur la dérive de poids lorsque le sous-historique causal a moins de 5 tirages
         const driftAmplifier = 1.0 / (1.0 + Math.exp(-weightDriftDelta));
-        algoSpecificDivergence = Math.min(100, Math.max(5, Math.round(globalError * driftAmplifier)));
+        const dispersionBase = Number.isFinite(drawDispersion[idx])
+          ? drawDispersion[idx]
+          : Number.isFinite(medianDispersion)
+          ? medianDispersion
+          : 100 * driftAmplifier;
+        algoSpecificDivergence = Math.min(100, Math.max(5, Math.round(dispersionBase * driftAmplifier)));
       }
 
       algoErrors.push(algoSpecificDivergence);
@@ -336,10 +344,22 @@ export async function computeSubAlgorithmDivergenceCorrelations(
 
     algoErrorProfiles[algoKey] = algoErrors;
 
-    // Corrélation de Pearson entre les erreurs causales de cet algorithme et l'erreur globale du système
-    const errorCorrelation = computePearsonCorrelation(algoErrors, drawErrors);
+    // Corrélation de Pearson restreinte aux paires réellement mesurées :
+    // divergence empirique causale de l'algo × divergence système du rapport forensique.
+    // (0 si moins de 2 paires mesurables — aucune valeur fabriquée n'entre dans r.)
+    const corrX: number[] = [];
+    const corrY: number[] = [];
+    recentHistory.forEach((_, idx) => {
+      const empiricalDiv = causalEvals[idx]?.divergenceByAlgo[algoKey];
+      const sysDiv = systemDivergences[idx];
+      if (typeof empiricalDiv === "number" && typeof sysDiv === "number") {
+        corrX.push(empiricalDiv);
+        corrY.push(sysDiv);
+      }
+    });
+    const errorCorrelation = computePearsonCorrelation(corrX, corrY);
 
-    const stability = auditItem?.spectralResonance ?? 0.85;
+    const stability = auditItem?.spectralResonance ?? null;
     const meanAlgoError = algoErrors.reduce((a, b) => a + b, 0) / Math.max(1, algoErrors.length);
 
     const wassersteinLoss = parseFloat(
@@ -370,7 +390,9 @@ export async function computeSubAlgorithmDivergenceCorrelations(
           0.01,
           validEvalCount > 0
             ? sumMissed / validEvalCount
-            : 1.0 - stability
+            : stability != null
+            ? 1.0 - stability
+            : Math.min(1.0, meanAlgoError / 100.0)
         )
       ).toFixed(4)
     );
@@ -388,7 +410,15 @@ export async function computeSubAlgorithmDivergenceCorrelations(
     );
 
     const noiseEntropyDivergence = parseFloat(
-      Math.min(1.0, Math.max(0.01, (1.0 - stability) * (1.0 + weightDriftDelta))).toFixed(4)
+      Math.min(
+        1.0,
+        Math.max(
+          0.01,
+          (stability != null
+            ? 1.0 - stability
+            : Math.min(1.0, weightDriftDelta)) * (1.0 + weightDriftDelta)
+        )
+      ).toFixed(4)
     );
 
     // Calcul continu de l'indice composite de toxicité (0 à 100) par moyenne pondérée sur le simplexe
@@ -434,7 +464,7 @@ export async function computeSubAlgorithmDivergenceCorrelations(
       hasEmpiricalProof: Boolean(proof?.hasProof),
       proofScore: proof?.proofScore || 0,
       empiricalHitRate: proof?.empiricalHitRate || 0,
-      baselineRate: proof?.baselineRate || 0.0556,
+      baselineRate: proof?.baselineRate ?? 5 / 90,
       errorCorrelation,
       wassersteinLoss,
       falsePositiveRate,

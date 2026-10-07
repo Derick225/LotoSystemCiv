@@ -164,6 +164,9 @@ export interface GapRangeSequenceReport {
 const P_SINGLE =
   LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS; // 5/90 = 1/18
 
+// Quantile Gaussien z75 (bande centrale ~50%) — borne d'intervalle honnête, non arbitraire
+const Z_GAUSS_75 = 0.67449;
+
 function computeGeometricRangeProb(minGap: number, maxGap: number): number {
   const q = 1 - P_SINGLE;
   const pMin = Math.pow(q, minGap);
@@ -412,7 +415,10 @@ export const gapRangeSequenceService = {
         ? purifyHistoryForDraw(drawName, rawHistory)
         : rawHistory;
 
-    const history = purified.length >= 10 ? purified : rawHistory;
+    // Isolation stricte : jamais de repli vers l'historique brut mixte (pollution
+    // inter-réseaux interdite par AGENTS.md). Les priors (Dirichlet, burn-in,
+    // géométrique) absorbent honnêtement la parcimonie d'un historique court.
+    const history = purified;
     // Ordre chronologique ancien -> récent pour reconstruire exactement les écarts à chaque tirage
     const chronological = [...history].reverse();
     const totalDraws = chronological.length;
@@ -438,6 +444,9 @@ export const gapRangeSequenceService = {
     for (let t = 0; t < totalDraws; t++) {
       const draw = chronological[t];
       const gagnants = (draw.gagnants || []).filter((n) => n >= 1 && n <= 90);
+
+      // Tirage invalide (aucune boule valide) : aucune donnée, aucune empreinte fabriquée
+      if (gagnants.length === 0) continue;
 
       if (t >= burnIn) {
         // Mesurer l'occupation exacte des 90 boules avant le tirage t (Modèle Nul H0 exact)
@@ -627,10 +636,13 @@ export const gapRangeSequenceService = {
 
       if (i >= 1) {
         const prevDom = footprintsChrono[i - 1].dominantBin;
+        // Pondération continue par la confiance d'état : la part de l'échantillon t-1
+        // réellement occupée par sa tranche dominante module la crédibilité de la transition
+        // (les lignes restent exactement stochastiques après normalisation).
+        const prevShare =
+          footprintsChrono[i - 1].binCounts[prevDom] /
+          LOTTERY_CONSTANTS.NUMBERS_PER_DRAW;
         for (const id of binIds) {
-          // Pondération continue : chaque boule de t contribue proportionnellement au profil de t-1
-          const prevShare =
-            footprintsChrono[i - 1].binCounts[prevDom] > 0 ? 1 : 1;
           transCounts1[prevDom][id] += fp.binCounts[id] * prevShare;
           transRowTotals1[prevDom] += fp.binCounts[id] * prevShare;
         }
@@ -816,7 +828,10 @@ export const gapRangeSequenceService = {
         )
       );
 
-      for (let i = 2; i < nFootprints - 1; i++) {
+      // i + 2 <= nFootprints - 1 : l'issue (i+1) de chaque analogue précède STRICTEMENT
+      // le tirage requête (dernier élément). Sinon le meilleur analogue devient le
+      // présent lui-même et le canal d'écho s'auto-confirme.
+      for (let i = 2; i < nFootprints - 2; i++) {
         const candCurr = footprintsChrono[i];
         const candPrev = footprintsChrono[i - 1];
         const candPrev2 = footprintsChrono[i - 2];
@@ -872,7 +887,7 @@ export const gapRangeSequenceService = {
           .sort((a, b) => a - b);
         wassersteinBandwidth = Math.max(
           0.05,
-          sortedDists[Math.floor(sortedDists.length / 2)] || 0.15
+          sortedDists[Math.floor(sortedDists.length / 2)]
         );
 
         for (const item of rawDistances) {
@@ -1084,7 +1099,7 @@ export const gapRangeSequenceService = {
         }
       }
       const sequenceEchoScore =
-        seqEchoNorm > 0 ? Math.min(1, seqEchoHits / seqEchoNorm) : 0.25;
+        seqEchoNorm > 0 ? Math.min(1, seqEchoHits / seqEchoNorm) : 0;
 
       // D. Continuité Gaussienne aux Frontières des Tranches (AGENTS.md : Zéro discontinuité de seuil)
       let boundaryWeightSum = 0;
@@ -1176,7 +1191,11 @@ export const gapRangeSequenceService = {
       const baseProb = poolBaselineProb[id];
       const lift = bProb / Math.max(1e-5, baseProb);
 
-      const n1 = Math.max(1, transRowTotals1[currentDom1]);
+      // z-score sur le nombre effectif de TRANSITIONS (5 boules par tirage), pas de boules
+      const n1 = Math.max(
+        1,
+        transRowTotals1[currentDom1] / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW
+      );
       const stdErr = Math.sqrt((baseProb * (1 - baseProb)) / n1);
       const zScore = stdErr > 0 ? (bProb - baseProb) / stdErr : 0;
 
@@ -1335,10 +1354,7 @@ export const gapRangeSequenceService = {
 
     const selectionConfidence = Math.min(
       98.5,
-      Math.max(
-        15,
-        0.55 * meanComposite + 0.25 * quotaFidelity + 0.20 * decadeDiversity
-      )
+      0.55 * meanComposite + 0.25 * quotaFidelity + 0.20 * decadeDiversity
     );
 
     // Top 3 tranches recommandées (triées par score combiné quota + probabilité + lift)
@@ -1386,10 +1402,13 @@ export const gapRangeSequenceService = {
           Math.min(10, recentFootprints.length)
         : 6.0;
 
+    // Seuil dérivé : erreur-type de la moyenne récente (n observations) au quantile z75
+    const trendSe =
+      (meanStd / Math.sqrt(Math.max(1, recentMeans.length))) * Z_GAUSS_75;
     let trend: 'COMPRESSION' | 'EXPANSION' | 'EQUILIBRIUM' = 'EQUILIBRIUM';
-    if (expectedNextMean < recentAvgMean - 1.15) {
+    if (expectedNextMean < recentAvgMean - trendSe) {
       trend = 'COMPRESSION';
-    } else if (expectedNextMean > recentAvgMean + 1.15) {
+    } else if (expectedNextMean > recentAvgMean + trendSe) {
       trend = 'EXPANSION';
     }
 
@@ -1511,8 +1530,10 @@ export const gapRangeSequenceService = {
       topPredictedBins,
       predictedNextMeanGap: {
         expected: Number(expectedNextMean.toFixed(1)),
-        lowerBound: Number(Math.max(0, expectedNextMean - meanStd * 0.6).toFixed(1)),
-        upperBound: Number((expectedNextMean + meanStd * 0.6).toFixed(1)),
+        lowerBound: Number(
+          Math.max(0, expectedNextMean - meanStd * Z_GAUSS_75).toFixed(1)
+        ),
+        upperBound: Number((expectedNextMean + meanStd * Z_GAUSS_75).toFixed(1)),
         trend,
       },
       historicalMatches: topMatches,

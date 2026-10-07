@@ -276,8 +276,11 @@ export const calculateScores = (
   // Constantes d'activation mathématique dérivées de la théorie
   const RESONANCE_BASE = 1.0;
   
-  // L'amplitude de résonance est déduite de l'exposant de Hurst (mémoire longue)
-  const H = context.statisticalBounds?.hurstExponent || 0.5;
+  // L'amplitude de résonance est déduite de l'exposant de Hurst (mémoire longue).
+  // H absent → 0.5 (nul brownien, convention du moteur) ; une valeur MESURÉE est bornée à [0,1]
+  // au lieu d'être écrasée par la truthiness (H=0 mesuré devenait 0.5).
+  const rawHurst = context.statisticalBounds?.hurstExponent;
+  const H = Number.isFinite(rawHurst) ? Math.min(1, Math.max(0, rawHurst as number)) : 0.5;
   const RESONANCE_AMPLITUDE_MAX = Math.max(0, H);
 
   // Matrice de profil cyclique (Attracteur Périodique vs Dispersion Stochastique)
@@ -295,9 +298,12 @@ export const calculateScores = (
     const shapValues: Record<string, number> = {};
     const effectiveWeightsPerNum: Record<string, number> = {};
     
-    // Gradient multiplicatif de résonance continue selon le Micro-ADN du numéro
-    const microDnaResonanceModulator = microDnaCache[num] 
-        ? RESONANCE_BASE + (sigmoid(microDnaCache[num], RESONANCE_BASE, 0.5) * RESONANCE_AMPLITUDE_MAX) 
+    // Gradient multiplicatif de résonance continue selon le Micro-ADN du numéro.
+    // Présence testée par finite (pas par truthiness) : une puissance spectrale MESURÉE de 0
+    // alimente la sigmoïde au lieu d'être traitée comme une absence.
+    const microDnaPower = microDnaCache[num];
+    const microDnaResonanceModulator = Number.isFinite(microDnaPower)
+        ? RESONANCE_BASE + (sigmoid(microDnaPower, RESONANCE_BASE, 0.5) * RESONANCE_AMPLITUDE_MAX)
         : RESONANCE_BASE;
 
     Object.keys(effectiveWeights).forEach((k) => {

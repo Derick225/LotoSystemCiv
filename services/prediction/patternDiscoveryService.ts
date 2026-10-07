@@ -101,7 +101,7 @@ export interface CycleAnalysisSummary {
   topPeriodicResonancePatterns?: RecurringSequencePattern[];
   candidateRankings?: PatternCandidateSelection[];
   recommendedSelection?: PatternSynthesizedSelection;
-  overallCycleEntropy: number;
+  overallCycleEntropy: number | null;
 }
 
 export interface PatternDiscoveryOptions {
@@ -256,7 +256,7 @@ export const patternDiscoveryService = {
           currentPhaseLabel: 'Données insuffisantes',
           selectionRationale: ['Historique insuffisant pour segmenter des cycles complets.'],
         },
-        overallCycleEntropy: 1.0,
+        overallCycleEntropy: null,
       };
     }
 
@@ -568,20 +568,22 @@ export const patternDiscoveryService = {
       // Exact Z-Score against Binomial(M, expUnionProb) + simultaneous draw evidence
       const varianceUnion = Math.max(1e-6, numCyclesForStats * expUnionProb * (1 - expUnionProb));
       const zUnion = (support - numCyclesForStats * expUnionProb) / Math.sqrt(varianceUnion);
-      const varianceSameDraw = Math.max(
-        1e-6,
-        numCyclesForStats * expSameDrawProb * (1 - expSameDrawProb)
-      );
+      // sameDrawCount compte des ÉVÉNEMENTS (co-occurrences intra-tirage, possiblement > M) :
+      // la moyenne nulle doit être le nombre attendu d'événements sur tous les tirages complétés,
+      // pas M·P(≥1 par cycle). Inversion exacte p_draw = 1-(1-p_cycle)^(1/D), variance de Poisson.
+      const pSameDrawPerDraw = 1 - Math.pow(1 - expSameDrawProb, 1 / Math.max(1, cycleLength));
+      const expectedSameDrawEvents =
+        numCyclesForStats * Math.max(1, cycleLength) * pSameDrawPerDraw;
+      const varianceSameDraw = Math.max(1e-6, expectedSameDrawEvents);
       const zSameDraw =
         sameDrawCount > 0
-          ? (sameDrawCount - numCyclesForStats * expSameDrawProb) / Math.sqrt(varianceSameDraw)
+          ? (sameDrawCount - expectedSameDrawEvents) / Math.sqrt(varianceSameDraw)
           : 0;
       const zScore =
-        zUnion * (1 - sameDrawWeight * 0.45) +
-        Math.max(zUnion, Math.min(35, zSameDraw)) * (sameDrawWeight * 0.45);
+        zUnion * (1 - sameDrawWeight * 0.45) + Math.max(zUnion, zSameDraw) * (sameDrawWeight * 0.45);
 
-      // Pointwise Mutual Information (PMI) & Multi-Way Dice Cohesion
-      // Avoids penalizing patterns that occur in 100% of cycles (where P(n) -> 1)
+      // Lift de synergie intrinsèque : pénalise moins les motifs présents dans 100%
+      // des cycles (où P(n) -> 1). Voir le commentaire du "pmi" ci-dessous.
       const sumIndividualCycles = seq.reduce(
         (acc, n) => acc + Math.max(1, ballCycleCounts[n] || 1),
         0
@@ -597,6 +599,8 @@ export const patternDiscoveryService = {
         baseStochasticLift *
         (0.5 + 0.5 * diceCycleCohesion) *
         (1 + 0.45 * sameDrawWeight * Math.log1p(sameDrawLift));
+      // "pmi" = log2 du lift de synergie intrinsèque (en bits), pas une information
+      // mutuelle ponctuelle stricte P(x,y)/P(x)P(y) — nom conservé pour l'API/UI.
       const pmi = Math.log2(Math.max(1e-6, intrinsicSynergyLift));
 
       // Recency-weighted Hawking exponential momentum
@@ -660,10 +664,14 @@ export const patternDiscoveryService = {
       const gaussianLagResonance = Math.exp(
         -Math.pow(currentCycleLag - meanInterval, 2) / (2 * (intervalVariance + 1.0))
       );
-      const renewalHazard = Math.min(
-        99,
-        100 * gaussianLagResonance * (0.55 + 0.45 * (regularityIndex / 100))
-      );
+      // Sans intervalles mesurés (support < 3, i.e. < 2 intervalles), aucune périodicité
+      // n'est démontrable : le hazard retombe sur le H0 géométrique sans mémoire
+      // (probabilité d'union exacte par cycle) au lieu d'une résonance gaussienne
+      // auto-réalisatrice (lag == moyenne extrapolée depuis une occurrence unique).
+      const hasMeasuredPeriodicity = intervals.length >= 2;
+      const renewalHazard = hasMeasuredPeriodicity
+        ? Math.min(99, 100 * gaussianLagResonance * (0.55 + 0.45 * (regularityIndex / 100)))
+        : Math.min(99, 100 * expUnionProb);
 
       // Phase distribution & continuous phase alignment with current cycle progress
       const totalPhases = Math.max(
@@ -1026,6 +1034,41 @@ export const patternDiscoveryService = {
             ? Math.max(0, numCyclesForStats - 1 - sortedTransCycles[sortedTransCycles.length - 1])
             : 1;
 
+        // Hazard de renouvellement RÉEL : résonance gaussienne sur les intervalles mesurés
+        // (≥ 2), sinon H0 géométrique sans mémoire (probabilité attendue de la transition
+        // par cycle). Ne jamais exposer phaseAlignment sous l'étiquette renewalHazard.
+        const expectedTransCycleProb =
+          smoothedBallCycleProb[entry.source] * targetMarginalProb;
+        const transIntervalVariance =
+          intervals.length > 1
+            ? intervals.reduce((acc, iv) => acc + Math.pow(iv - meanInterval, 2), 0) /
+              intervals.length
+            : 0;
+        const transRegularity = (1 - Math.min(1, transEntropy)) * 100;
+        const transRenewalHazard =
+          intervals.length >= 2
+            ? Math.min(
+                99,
+                100 *
+                  Math.exp(
+                    -Math.pow(lastCycleSeen + 1 - meanInterval, 2) /
+                      (2 * (transIntervalVariance + 1.0))
+                  ) *
+                  (0.55 + 0.45 * (transRegularity / 100))
+              )
+            : Math.min(99, 100 * expectedTransCycleProb);
+
+        // Momentum de récence réel (décroissance exponentielle de Hawking vs attente H0)
+        const transRecencyWeightedSum = sortedTransCycles.reduce(
+          (acc, cIdx) => acc + Math.exp(-(numCyclesForStats - 1 - cIdx) / hawkingTau),
+          0
+        );
+        const transRecencyMomentum = logisticScore100(
+          transRecencyWeightedSum /
+            Math.max(1e-6, totalRecencyWeightNorm * expectedTransCycleProb) -
+            1.0
+        );
+
         const compositeScore = Math.min(
           99.0,
           0.45 * transConf +
@@ -1067,11 +1110,11 @@ export const patternDiscoveryService = {
             pmi: parseFloat(pmi.toFixed(2)),
             intrinsicSynergyLift: parseFloat(lift.toFixed(2)),
             sameDrawOccurrences: 0,
-            recencyMomentum: parseFloat(transConf.toFixed(1)),
-            renewalHazard: parseFloat(phaseAlignment.toFixed(1)),
+            recencyMomentum: parseFloat(transRecencyMomentum.toFixed(1)),
+            renewalHazard: parseFloat(transRenewalHazard.toFixed(1)),
             phaseAlignment: parseFloat(phaseAlignment.toFixed(1)),
             conditionalCompletionRate: parseFloat((smoothedTransProb * 100).toFixed(1)),
-            regularityIndex: parseFloat(((1 - Math.min(1, transEntropy)) * 100).toFixed(1)),
+            regularityIndex: parseFloat(transRegularity.toFixed(1)),
             dominantDriver: 'MARKOV_TRANSITION',
             verdict: isPrimedForCurrentCycle
               ? `Chaîne Markovienne [${entry.source} ➔ ${entry.target}] activée (P(B|A) = ${(smoothedTransProb * 100).toFixed(1)}%, Lift ${lift.toFixed(2)}x).`

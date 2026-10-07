@@ -351,7 +351,7 @@ export const calculateCombinationEnergyDetailed = (
         }
       }
       const meanSim = pairCount > 0 ? sumSim / pairCount : 0;
-      const numAlgos = precomputed.numAlgos || 26;
+      const numAlgos = precomputed.numAlgos;
       const dynamicMonocultureThreshold = 1.0 - 1.0 / Math.sqrt(Math.max(1, numAlgos));
       
       if (meanSim > dynamicMonocultureThreshold) {
@@ -739,7 +739,9 @@ export const generateCombination = async (
         for (let j = 1; j <= 90; j++) {
           const rawAff = row[j] || 0;
           const lift = Math.max(0.1, rawAff / P0_PAIR);
-          flatAffinity[offset + j] = Math.max(0.0, Math.log(lift) * 10.0);
+          // Même paysage que calculateCombinationEnergyDetailed (12.0) : le recuit doit
+          // optimiser la fonctionnelle canonique de re-scoring, pas une variante affaiblie.
+          flatAffinity[offset + j] = Math.max(0.0, Math.log(lift) * 12.0);
         }
       }
     }
@@ -824,7 +826,10 @@ export const generateCombination = async (
     }
   }
 
-  const meanDelta = samplesCount > 0 ? sumDelta / samplesCount : 2.5;
+  // Aucun échantillon valide (pools dégénérés) : échelle dérivée de l'énergie réelle
+  // courante (magnitude moyenne par boule) au lieu d'une constante fabriquée.
+  const meanDelta =
+    samplesCount > 0 ? sumDelta / samplesCount : Math.abs(currentEnergy) / DRAW_SIZE;
   // En régime d'exploration (faible SNR), la température initiale s'élève pour favoriser la recherche globale
   // En régime d'exploitation (fort SNR), la température se concentre pour le raffinement fin
   const tempScale = 1.2 - 0.4 * exploitationBeta;
@@ -1101,7 +1106,8 @@ export const computeConformalCandidateSet = (
   }
 
   const conformalPoolSize = Math.max(8, Math.min(15, conformalCount));
-  const candidates = remaining.slice(0, 10).map((s) => s.num);
+  // Les candidats SONT l'ensemble conforme : coupe de Boltzmann réelle (et non un slice fixe)
+  const candidates = remaining.slice(0, conformalPoolSize).map((s) => s.num);
 
   return {
     candidates,
