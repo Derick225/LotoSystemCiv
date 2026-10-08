@@ -29,25 +29,27 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   }, [wavelet]);
 
   const dominantPeriod = useMemo(() => {
-    return spectral[0]?.dominantPeriod || 12.0;
+    const period = spectral[0]?.dominantPeriod;
+    return typeof period === "number" && Number.isFinite(period) ? period : null;
   }, [spectral]);
 
   const energyStats = useMemo(() => {
-    if (spectral.length === 0) return { mean: 75, stdDev: 10 };
+    if (spectral.length === 0) return null;
     const energies = spectral.map((s) => s.energy);
     const mean = energies.reduce((a, b) => a + b, 0) / energies.length;
     let sumSq = 0;
     for (let i = 0; i < energies.length; i++) {
       sumSq += (energies[i] - mean) ** 2;
     }
-    const stdDev = Math.sqrt(sumSq / energies.length) || 1.0;
+    // Écart-type réel de la distribution, plancher technique pour la sigmoïde
+    const stdDev = Math.max(Math.sqrt(sumSq / energies.length), Number.EPSILON);
     return { mean, stdDev };
   }, [spectral]);
 
-  const svdModes = useMemo(() => {
+  const svdModes = useMemo((): number[] | null => {
     const N = Math.min(history.length, 100);
-    // CORRECTION : Les modes de repli (SVD) doivent être harmoniques (1/2, 1/3, 1/6)
-    if (N < 10) return [50, 100 / 3, 100 / 6];
+    // Historique insuffisant : l'UI affichera n/d au lieu de valeurs SVD fabriquées
+    if (N < 10) return null;
 
     const M = 90; // 90 Boules standards
 
@@ -77,13 +79,20 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
     try {
       const { s } = computeSVD(H, 3);
-      const totalVal = s.reduce((a, b) => a + b, 0) || 1;
+      const totalVal = s.reduce((a, b) => a + b, 0);
+      if (!Number.isFinite(totalVal) || totalVal <= 0) return null;
       return s.map((v) => (v / totalVal) * 100);
     } catch (e) {
-      // CORRECTION : Les modes de repli (SVD) doivent être harmoniques (1/2, 1/3, 1/6)
-      return [50, 100 / 3, 100 / 6]; // Fallback continu
+      return null;
     }
   }, [history]);
+
+  const maxEnergy = highEnergy[0]?.energy;
+
+  const svdValue = (idx: number) =>
+    svdModes && Number.isFinite(svdModes[idx]) ? `${svdModes[idx].toFixed(1)}%` : "n/d";
+  const svdWidth = (idx: number) =>
+    svdModes && Number.isFinite(svdModes[idx]) ? `${svdModes[idx]}%` : "0%";
 
   if (loading || spectral.length === 0)
     return (
@@ -107,14 +116,15 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
               Charge des Numéros
             </h3>
             <p className="text-slate-400 text-sm font-medium leading-relaxed max-w-xl">
-              Plus la jauge est pleine, plus le numéro a accumulé une tension
-              cyclique. Ces numéros sont statistiquement "dus" et cherchent à
-              décharger leur énergie en sortant au tirage.
+              Plus la jauge est pleine, plus le numéro présente un cyclisme
+              marqué dans l'historique récent. Ce score mesure une régularité
+              passée : il n'augmente pas la probabilité réelle de sortie au
+              prochain tirage.
             </p>
           </div>
           <div className="bg-white/5 p-6 rounded-3xl border border-white/10 text-center min-w-[200px]">
             <div className="text-amber-400 font-black text-4xl mb-1">
-              {highEnergy[0]?.energy || 0}%
+              {typeof maxEnergy === "number" ? `${maxEnergy}%` : "n/d"}
             </div>
             <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">
               Potentiel de Charge Max
@@ -149,7 +159,7 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   Facteur Périodique (T)
                 </div>
                 <div className="text-sm font-mono font-black text-slate-900 dark:text-amber-400">
-                  {dominantPeriod} Cycles
+                  {dominantPeriod !== null ? `${dominantPeriod} Cycles` : "n/d"}
                 </div>
               </div>
             </div>
@@ -182,13 +192,13 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     Amplitude Relat. (SVD)
                   </span>
                   <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
-                    {svdModes[0]?.toFixed(1)}%
+                    {svdValue(0)}
                   </span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-900 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 rounded-full"
-                    style={{ width: `${svdModes[0]}%` }}
+                    style={{ width: svdWidth(0) }}
                   ></div>
                 </div>
               </div>
@@ -210,13 +220,13 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     Amplitude Relat. (SVD)
                   </span>
                   <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
-                    {svdModes[1]?.toFixed(1)}%
+                    {svdValue(1)}
                   </span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-900 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-purple-500 to-purple-400 rounded-full"
-                    style={{ width: `${svdModes[1]}%` }}
+                    style={{ width: svdWidth(1) }}
                   ></div>
                 </div>
               </div>
@@ -238,13 +248,13 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     Amplitude Relat. (SVD)
                   </span>
                   <span className="text-sm font-black font-mono text-slate-900 dark:text-white">
-                    {svdModes[2]?.toFixed(1)}%
+                    {svdValue(2)}
                   </span>
                 </div>
                 <div className="h-1.5 w-full bg-slate-200 dark:bg-slate-900 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-pink-500 to-pink-400 rounded-full"
-                    style={{ width: `${svdModes[2]}%` }}
+                    style={{ width: svdWidth(2) }}
                   ></div>
                 </div>
               </div>
@@ -350,9 +360,10 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       )}
 
       {/* Energy Grid */}
+      {energyStats && (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
         {highEnergy.map((m) => {
-          // CORRECTION : Sigmoïde logistique continue centrée sur la moyenne avec facteur d'étalement basé sur l'écart-type
+          // Sigmoïde logistique continue centrée sur la moyenne avec étalement = écart-type réel
           const saturationRatio =
             1 /
             (1 + Math.exp(-(m.energy - energyStats.mean) / energyStats.stdDev));
@@ -363,20 +374,20 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           const blue = Math.round(129 + (94 - 129) * saturationRatio);
           const activeColor = `rgb(${red}, ${green}, ${blue})`;
 
-          // Statut de tension continue
+          // Libellés d'affichage pilotés par le ratio continu (cosmétique)
           const statusText =
             saturationRatio < 0.2
-              ? "Phase Accumulation (Basse)"
+              ? "Signal Faible (Basse Énergie)"
               : saturationRatio > 0.8
-                ? "Saturation Critique (Déchargement)"
-                : "Tension Progressive (Intermédiaire)";
+                ? "Signal Marqué (Haute Énergie)"
+                : "Signal Intermédiaire";
 
           const interpretationText =
             saturationRatio < 0.2
-              ? "Signal de veille : accumulation graduelle en arrière-plan."
+              ? "Peu de régularité cyclique détectée dans l'historique."
               : saturationRatio > 0.8
-                ? "Potentiel imminent : décharge cyclique imminente attendue."
-                : "Courbe de résonance active : tension stable.";
+                ? "Cyclisme prononcé dans le passé, sans garantie de sortie prochaine."
+                : "Tension cyclique modérée autour de la moyenne du flux.";
 
           return (
             <div
@@ -445,6 +456,7 @@ export const SpectralTab: React.FC<{ drawName: string }> = ({ drawName }) => {
           );
         })}
       </div>
+      )}
     </div>
   );
 };

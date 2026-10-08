@@ -13,11 +13,13 @@ import {
   saveTicket,
 } from "../../services/userPreferencesService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
+import { AlgoKey } from "../../types";
 import type {
   ClusterPoint,
   ClusterSummary,
   NumberRegularity,
   Prediction,
+  ScoreBreakdown,
 } from "../../types";
 import {
   ScatterChart,
@@ -164,8 +166,11 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
     const reg = regularity.find((r) => r.number === selectedPoint.number);
     const config = CLUSTER_CONFIG[selectedPoint.cluster];
 
-    const formScore = Math.min(100, (selectedPoint.y / 8) * 100);
-    const gapScore = Math.min(100, (selectedPoint.x / 40) * 100);
+    // Normalisation relative au nuage réel (zéro constante absolue /8 ou /40)
+    const maxForm = points.reduce((m, p) => Math.max(m, p.y), 0);
+    const maxGapAll = points.reduce((m, p) => Math.max(m, p.x), 0);
+    const formScore = maxForm > 0 ? (selectedPoint.y / maxForm) * 100 : 0;
+    const gapScore = maxGapAll > 0 ? (selectedPoint.x / maxGapAll) * 100 : 0;
 
     return {
       ...selectedPoint,
@@ -173,7 +178,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
       config,
       scores: { form: formScore, gap: gapScore },
     };
-  }, [selectedPoint, regularity]);
+  }, [selectedPoint, regularity, points]);
 
   const handleToggleWatchlist = (num: number) => {
     audioEngine.play("click");
@@ -233,31 +238,29 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
         strategy: `Cluster ${clusterType}`,
       });
 
-      const breakdown: Record<number, Record<string, number>> = {};
+      // Scores réels dérivés des métriques mesurées du cluster (zéro constante fabriquée)
+      const maxForm = clusterPoints.reduce((m, p) => Math.max(m, p.y), 0) || 1;
+      const maxGap = clusterPoints.reduce((m, p) => Math.max(m, p.x), 0) || 1;
+      const breakdown: Record<number, ScoreBreakdown> = {};
+      let scoreSum = 0;
       bestTicket.forEach((num) => {
+        const pt = clusterPoints.find((p) => p.number === num);
+        const freqScore = pt ? Math.round((pt.y / maxForm) * 100) : 0;
+        const gapScore = pt ? Math.round((pt.x / maxGap) * 100) : 0;
+        scoreSum += (freqScore + gapScore) / 2;
         breakdown[num] = {
-          meta_llm_ensemble: bestAC * 10,
-          spatial:
-            clusterType === "Sprinter"
-              ? 90
-              : clusterType === "Marathonien"
-                ? 70
-                : clusterType === "Dormeur"
-                  ? 80
-                  : 50,
-          frequency:
-            clusterType === "Sprinter"
-              ? 85
-              : clusterType === "Dormeur"
-                ? 10
-                : 50,
+          [AlgoKey.FREQUENCY]: freqScore,
+          [AlgoKey.GAPS]: gapScore,
         };
       });
 
       const predictionObj: Prediction = {
         suggestedNumbers: bestTicket,
         candidates: bestTicket,
-        confidence: 80, // Arbitrary confidence
+        confidence:
+          bestTicket.length > 0
+            ? Math.round(scoreSum / bestTicket.length)
+            : 0,
         analysis: `Cluster Generation (${clusterType})`,
         breakdown: breakdown,
         timestamp: Date.now(),
@@ -330,7 +333,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 <div
                   className={`text-[11px] font-black uppercase tracking-wide ${activeFilter === s.type ? "text-white" : ""}`}
                   style={{
-                    color: activeFilter === s.type ? "white" : (s as any).color,
+                    color: activeFilter === s.type ? "white" : s.color,
                   }}
                 >
                   {s.type}s
@@ -355,7 +358,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
 
               <div
                 className="absolute -right-4 -bottom-4 opacity-10 transform rotate-12 scale-150 pointer-events-none"
-                style={{ color: (s as any).color }}
+                style={{ color: s.color }}
               >
                 {s.type === "Sprinter" ? (
                   <Zap size={60} />
@@ -470,7 +473,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                 {filteredPoints.map((p, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={CLUSTER_CONFIG[p.cluster]?.color || "#9ca3af"}
+                    fill={CLUSTER_CONFIG[p.cluster].color}
                     strokeWidth={selectedPoint?.number === p.number ? 4 : 0}
                     stroke="#fff"
                   />
@@ -544,19 +547,33 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                         {Object.entries(markovData.matrix[numberProfile.number])
                           .sort(([, a], [, b]) => b - a)
                           .slice(0, 3)
-                          .map(([nextNum, score]) => (
-                            <div
-                              key={nextNum}
-                              className="flex justify-between items-center text-[10px]"
-                            >
-                              <span className="text-slate-300 font-bold">
-                                Sort souvent avant le{" "}
-                                <span className="text-indigo-300">
-                                  {nextNum}
+                          .map(([nextNum, score]) => {
+                            const srcTotal =
+                              markovData.totals[numberProfile.number];
+                            // P(c|p) = matrice[p][c] / (5 numéros par tirage × total pondéré de p)
+                            const prob =
+                              typeof srcTotal === "number" && srcTotal > 0
+                                ? (score / (5 * srcTotal)) * 100
+                                : null;
+                            return (
+                              <div
+                                key={nextNum}
+                                className="flex justify-between items-center text-[10px]"
+                              >
+                                <span className="text-slate-300 font-bold">
+                                  Sort souvent avant le{" "}
+                                  <span className="text-indigo-300">
+                                    {nextNum}
+                                  </span>
                                 </span>
-                              </span>
-                            </div>
-                          ))}
+                                {prob !== null && (
+                                  <span className="font-mono text-indigo-400">
+                                    {prob.toFixed(1)}%
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
                       </div>
                     </div>
                   )}
@@ -583,6 +600,9 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
                                   <span className="text-cyan-300">
                                     {corrNum}
                                   </span>
+                                </span>
+                                <span className="font-mono text-cyan-400">
+                                  {(score * 100).toFixed(1)}%
                                 </span>
                               </div>
                             ))}

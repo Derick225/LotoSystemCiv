@@ -102,31 +102,55 @@ export const MathTab: React.FC<MathTabProps> = ({ drawName }) => {
       const osc = calculateTrendOscillator(history, 40);
       setTrendData(osc);
 
-      const lastMomentum = osc[osc.length - 1]?.momentum || 0;
-      if (lastMomentum > 20)
+      // Bande dérivée des statistiques réelles de la série (moyenne ± écart-type), pas de seuil fixe
+      const momentums = osc
+        .map((p) => p.momentum)
+        .filter(
+          (m): m is number => typeof m === "number" && Number.isFinite(m),
+        );
+      const lastMomentum = momentums[momentums.length - 1];
+
+      if (typeof lastMomentum !== "number") {
         setTempStatus({
-          value: lastMomentum,
-          label: "Surchauffe",
-          color: "text-orange-500",
-          icon: <AlertOctagon />,
-          desc: "Le système produit des anomalies fréquentes.",
+          value: 0,
+          label: "Indéterminé",
+          color: "text-slate-400",
+          icon: <Waves />,
+          desc: "Historique insuffisant pour mesurer le momentum.",
         });
-      else if (lastMomentum < -20)
-        setTempStatus({
-          value: lastMomentum,
-          label: "Bruit Blanc",
-          color: "text-indigo-500",
-          icon: <Wind />,
-          desc: "Déséquilibre vers le hasard pur.",
-        });
-      else
-        setTempStatus({
-          value: lastMomentum,
-          label: "Tempéré",
-          color: "text-emerald-500",
-          icon: <CheckCircle2 />,
-          desc: "Conditions optimales pour les patterns classiques.",
-        });
+      } else {
+        const mMean =
+          momentums.reduce((a, b) => a + b, 0) / momentums.length;
+        const mVar =
+          momentums.reduce((a, b) => a + (b - mMean) ** 2, 0) /
+          momentums.length;
+        const band = Math.max(Math.sqrt(mVar), Number.EPSILON);
+
+        if (lastMomentum > mMean + band)
+          setTempStatus({
+            value: lastMomentum,
+            label: "Surchauffe",
+            color: "text-orange-500",
+            icon: <AlertOctagon />,
+            desc: "Le système produit des anomalies fréquentes.",
+          });
+        else if (lastMomentum < mMean - band)
+          setTempStatus({
+            value: lastMomentum,
+            label: "Bruit Blanc",
+            color: "text-indigo-500",
+            icon: <Wind />,
+            desc: "Déséquilibre vers le hasard pur.",
+          });
+        else
+          setTempStatus({
+            value: lastMomentum,
+            label: "Tempéré",
+            color: "text-emerald-500",
+            icon: <CheckCircle2 />,
+            desc: "Conditions ordinaires pour les patterns classiques.",
+          });
+      }
     }
   }, [history]);
 

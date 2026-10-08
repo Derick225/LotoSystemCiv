@@ -40,13 +40,17 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const turbulence = volatility?.score || 50;
-  const weylDiscrepancy = regime?.weylDiscrepancy ?? 0.18;
-  const chaosDimension = regime?.chaosDimension ?? 1.84;
+  const volatilityScore = volatility?.score;
+  const turbulence =
+    typeof volatilityScore === "number" && Number.isFinite(volatilityScore)
+      ? volatilityScore
+      : null;
+  const weylDiscrepancy = regime?.weylDiscrepancy;
+  const chaosDimension = regime?.chaosDimension;
 
   const lyapMetrics = useMemo(() => {
     if (!history || history.length < 12) {
-      return { lyapunov_exponent: 0, is_chaotic: false, divergence_force: 0, topological_entropy: 0 };
+      return null;
     }
     const numDraws = Math.min(60, history.length);
     const flatDraws = new Int32Array(numDraws * 5);
@@ -60,6 +64,15 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   }, [history]);
 
   const status = useMemo(() => {
+    if (turbulence === null)
+      return {
+        label: "INDÉTERMINÉ (Flux non mesuré)",
+        color: "text-slate-400",
+        border: "border-slate-500/25",
+        bg: "bg-slate-500/10",
+        desc: "Métriques de volatilité indisponibles pour ce tirage.",
+        icon: <Gauge className="text-slate-400" size={20} />,
+      };
     if (turbulence > 75)
       return {
         label: "TEMPÊTE (Hasard pur)",
@@ -152,8 +165,8 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
     const totalParticles = 400; // Active particles in pool
     const buf = particleBufferRef.current;
 
-    // Base parameters derived from actual chaos dimension & turbulence
-    const sigma = 10.0 + (turbulence / 100) * 4.0;
+    // σ=10 : paramètre canonique de Lorenz, la turbulence module continûment (+4 max)
+    const sigma = 10.0 + ((turbulence ?? 0) / 100) * 4.0;
     const rho = 28.0;
     const beta = 8 / 3;
 
@@ -508,7 +521,9 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
               Discrépance Weyl (W)
             </div>
             <div className="text-xs font-black font-mono text-slate-200 mt-1">
-              {weylDiscrepancy.toFixed(4)}
+              {typeof weylDiscrepancy === "number" && Number.isFinite(weylDiscrepancy)
+                ? weylDiscrepancy.toFixed(4)
+                : "n/d"}
             </div>
           </div>
         </div>
@@ -522,7 +537,9 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
               Dimension GP (ν)
             </div>
             <div className="text-xs font-black font-mono text-slate-200 mt-1">
-              {chaosDimension.toFixed(3)}
+              {typeof chaosDimension === "number" && Number.isFinite(chaosDimension)
+                ? chaosDimension.toFixed(3)
+                : "n/d"}
             </div>
           </div>
         </div>
@@ -536,7 +553,11 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
               Lyapunov λ (HPC)
             </div>
             <div className="text-xs font-black font-mono text-slate-200 mt-1">
-              {lyapMetrics.lyapunov_exponent > 0 ? `+${lyapMetrics.lyapunov_exponent.toFixed(4)}` : lyapMetrics.lyapunov_exponent.toFixed(4)}
+              {lyapMetrics
+                ? lyapMetrics.lyapunov_exponent > 0
+                  ? `+${lyapMetrics.lyapunov_exponent.toFixed(4)}`
+                  : lyapMetrics.lyapunov_exponent.toFixed(4)
+                : "n/d"}
             </div>
           </div>
         </div>
@@ -550,7 +571,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
               Entropie Topo (h)
             </div>
             <div className="text-xs font-black font-mono text-slate-200 mt-1">
-              {lyapMetrics.topological_entropy.toFixed(3)}
+              {lyapMetrics ? lyapMetrics.topological_entropy.toFixed(3) : "n/d"}
             </div>
           </div>
         </div>
@@ -561,15 +582,15 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
         <div className="flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-wider">
           <span>Stabilité du Flux Chaotique</span>
           <span className="font-mono text-slate-200">
-            {turbulence.toFixed(0)}%
+            {turbulence === null ? "n/d" : `${turbulence.toFixed(0)}%`}
           </span>
         </div>
         <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
           <div
             className="h-full transition-all duration-1000"
             style={{
-              width: `${Math.min(100, Math.max(0, turbulence))}%`,
-              backgroundColor: `hsl(${120 - Math.min(100, turbulence) * 1.2}, 80%, 50%)`,
+              width: `${turbulence === null ? 0 : Math.min(100, Math.max(0, turbulence))}%`,
+              backgroundColor: `hsl(${turbulence === null ? 0 : 120 - Math.min(100, turbulence) * 1.2}, 80%, 50%)`,
             }}
           ></div>
         </div>

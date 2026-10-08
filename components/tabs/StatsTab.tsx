@@ -95,12 +95,22 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   const probabilityScores = useMemo(() => {
     const scores: Record<number, number> = {};
-    const maxFreq = safeStats[0]?.count || 1;
-    const gapsGaps = safeGaps.map((g) => g.gap);
-    const maxGap = gapsGaps.length > 0 ? Math.max(...gapsGaps) : 1;
+    // Poids continus dérivés de la dispersion mesurée (variance) de chaque signal, sans constante arbitraire.
+    const freqMean = safeStats.reduce((a, s) => a + s.count, 0) / (safeStats.length || 1);
+    const freqVar = safeStats.reduce((a, s) => a + (s.count - freqMean) ** 2, 0) / (safeStats.length || 1);
+    const gapVals = safeGaps.map((g) => g.gap);
+    const gapMean = gapVals.reduce((a, b) => a + b, 0) / (gapVals.length || 1);
+    const gapVar = gapVals.reduce((a, g) => a + (g - gapMean) ** 2, 0) / (gapVals.length || 1);
+    const totalVar = freqVar + gapVar;
+    const wFreq = totalVar > 0 ? freqVar / totalVar : 0.5;
+    const wGap = 1 - wFreq;
+    const maxFreq = safeStats[0]?.count ?? 0;
+    const maxGap = gapVals.length > 0 ? Math.max(...gapVals) : 0;
     safeStats.forEach((s) => {
-      const g = safeGaps.find((x) => x.number === s.number)?.gap || 0;
-      const score = (s.count / maxFreq) * 60 + (g / maxGap) * 40;
+      const g = safeGaps.find((x) => x.number === s.number)?.gap;
+      const score =
+        (maxFreq > 0 ? (s.count / maxFreq) * 100 * wFreq : 0) +
+        (maxGap > 0 && typeof g === "number" ? (g / maxGap) * 100 * wGap : 0);
       scores[s.number] = Math.round(score);
     });
     return scores;
@@ -110,7 +120,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     return safeStats.slice(0, 15).map((s) => ({
       name: s.number.toString(),
       count: s.count,
-      gap: safeGaps.find((g) => g.number === s.number)?.gap || 0,
+      gap: safeGaps.find((g) => g.number === s.number)?.gap ?? 0,
     }));
   }, [safeStats, safeGaps]);
 
@@ -121,7 +131,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       .map((g) => ({
         name: g.number.toString(),
         gap: g.gap,
-        count: safeStats.find((s) => s.number === g.number)?.count || 0,
+        count: safeStats.find((s) => s.number === g.number)?.count ?? 0,
       }));
   }, [safeStats, safeGaps]);
 
@@ -490,14 +500,14 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   <div className="flex items-center gap-6 my-4">
                     <div className="relative flex items-center justify-center w-24 h-24 rounded-full bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-800">
                       <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tighter">
-                        {advReport.averageRepeats}
+                        {advReport.totalDraws > 1 ? advReport.averageRepeats : "n/d"}
                       </span>
                     </div>
                     <div className="flex-1 space-y-2">
                       <p className="text-xs font-bold text-slate-600 dark:text-slate-400 leading-relaxed">
                         Chaque tirage hérite en moyenne de{" "}
                         <span className="text-amber-500 font-extrabold">
-                          {advReport.averageRepeats}
+                          {advReport.totalDraws > 1 ? advReport.averageRepeats : "n/d"}
                         </span>{" "}
                         numéros du tirage précédent.
                       </p>
@@ -513,7 +523,7 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </p>
                     <div className="grid grid-cols-6 gap-1 text-center">
                       {[0, 1, 2, 3, 4, 5].map((v) => {
-                        const count = advReport.repeatsDistribution[v] || 0;
+                        const count = advReport.repeatsDistribution[v] ?? 0;
                         const pct =
                           advReport.totalDraws > 0
                             ? (count / advReport.totalDraws) * 100
@@ -563,15 +573,17 @@ export const StatsTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         des tirages contiennent au moins un doublet consécutif.
                       </p>
                       <p className="text-[10px] text-slate-400 uppercase tracking-wider">
-                        Forte cohésion spatiale de l'appareil de tirage
+                        Taux observé sur l'historique disponible
                       </p>
                     </div>
                   </div>
 
                   <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 text-xs text-slate-400 dark:text-slate-500 leading-relaxed font-bold">
-                    Cette proportion indique que la production séquentielle
-                    n'est pas purement uniforme, facilitant les regroupements de
-                    "barycentre" topologiques.
+                    Cette proportion mesure la fréquence observée des doublets
+                    consécutifs sur l'historique disponible. Sous un tirage
+                    uniforme, le taux théorique est d'environ 21 % ; l'écart
+                    mesuré est un indicateur de régime, non une garantie
+                    prédictive.
                   </div>
                 </div>
               </div>

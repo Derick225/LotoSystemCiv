@@ -36,7 +36,6 @@ import {
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from "../../shared/prediction.types";
-import { lotteryService } from "../../services/lotteryService";
 import { generateMasterPrediction, getAlgoWeights } from "../../services/predictionEngine";
 
 /**
@@ -112,21 +111,19 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   // States and logic for Gap Family Cross-Correlation Analysis
   const [correlationData, setCorrelationData] = useState<{
-    matrix: Record<string, Record<string, number>>;
+    matrix: Record<string, Record<string, number | null>>;
     average: number;
-    drawKey: string;
     timestamp: string;
     sampleSize: number;
   } | null>(null);
   const [isCalculatingCorr, setIsCalculatingCorr] = useState(false);
-  const [selectedCorrDraw, setSelectedCorrDraw] = useState<string>("current");
 
   const calculateCorrelation = (
     scoresX: number[],
     scoresY: number[],
-  ): number => {
+  ): number | null => {
     const n = scoresX.length;
-    if (n === 0) return 0;
+    if (n === 0) return null;
     const meanX = scoresX.reduce((a, b) => a + b, 0) / n;
     const meanY = scoresY.reduce((a, b) => a + b, 0) / n;
 
@@ -142,11 +139,12 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       denY += diffY * diffY;
     }
 
-    if (denX === 0 || denY === 0) return 0;
+    // Variance nulle : la corrélation de Pearson est indéfinie, ne pas l'afficher comme mesurée.
+    if (denX === 0 || denY === 0) return null;
     return num / Math.sqrt(denX * denY);
   };
 
-  const runCorrelationAnalysis = async (drawKey: string) => {
+  const runCorrelationAnalysis = async () => {
     setIsCalculatingCorr(true);
     try {
       // Respect TIRAGE ISOLATION RULE: analyze strictly the isolated active draw history
@@ -159,10 +157,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       });
 
       for (const dName of drawNamesToAnalyze) {
-        let gameHistory = history;
-        if (dName !== drawName) {
-          gameHistory = await lotteryService.fetchHistory(dName);
-        }
+        const gameHistory = history;
 
         if (!gameHistory || gameHistory.length === 0) continue;
 
@@ -194,7 +189,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         }
       }
 
-      const matrix: Record<string, Record<string, number>> = {};
+      const matrix: Record<string, Record<string, number | null>> = {};
       let sumCorr = 0;
       let countCorr = 0;
 
@@ -205,14 +200,14 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             matrix[k1][k2] = 1.0;
           } else {
             const r = calculateCorrelation(algoScores[k1], algoScores[k2]);
-            matrix[k1][k2] = parseFloat(r.toFixed(4));
+            matrix[k1][k2] = r === null ? null : parseFloat(r.toFixed(4));
             // La moyenne affichée ne porte que sur les canaux qui contribuent réellement à
             // l'ensemble : les canaux retirés (colinéaires par construction) restent mesurés
             // dans la matrice pour l'audit, mais ne faussent plus l'indicateur de tête.
             const bothActive =
               !RETIRED_ALGO_WEIGHT_KEYS.has(k1 as AlgoKey) &&
               !RETIRED_ALGO_WEIGHT_KEYS.has(k2 as AlgoKey);
-            if (bothActive) {
+            if (bothActive && r !== null) {
               sumCorr += Math.abs(r);
               countCorr++;
             }
@@ -220,12 +215,18 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         });
       });
 
+      const sampleSize = algoScores[AlgoKey.GAPS].length;
+      if (sampleSize === 0) {
+        // Données insuffisantes : masquer le widget plutôt que d'afficher des corrélations fabriquées.
+        setCorrelationData(null);
+        return;
+      }
+
       setCorrelationData({
         matrix,
         average: parseFloat((sumCorr / (countCorr || 1)).toFixed(4)),
-        drawKey,
         timestamp: new Date().toLocaleTimeString(),
-        sampleSize: algoScores[AlgoKey.GAPS].length,
+        sampleSize,
       });
     } catch (err) {
       console.error("Failed to run correlation analysis:", err);
@@ -236,9 +237,9 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   useEffect(() => {
     if (history && history.length > 0) {
-      runCorrelationAnalysis(selectedCorrDraw);
+      runCorrelationAnalysis();
     }
-  }, [drawName, history, selectedCorrDraw]);
+  }, [drawName, history]);
 
   // Compute Gap Sequence Analysis report reactively on history or draw change
   const report = useMemo(() => {
@@ -315,7 +316,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         valB = b.meanGap;
       } else if (sortBy === "lag1") {
         valA = a.autocorrelationLag1;
-        valB = b.autocorrelationLag2;
+        valB = b.autocorrelationLag1;
       } else if (sortBy === "signal") {
         valA = a.signalScore;
         valB = b.signalScore;
@@ -732,9 +733,6 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   {selectedStats.autocorrelationLag1 > 0
                     ? "🔄 Tendance Persistante"
                     : "🔀 Retour d'Oscillation"}
-                </div>
-                <div className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-400 rounded-lg font-black uppercase text-[10px]">
-                  Confiance : 88%
                 </div>
               </div>
             </div>
@@ -1217,23 +1215,8 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <select
-              value={selectedCorrDraw}
-              onChange={(e) => setSelectedCorrDraw(e.target.value)}
-              className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none"
-              disabled={isCalculatingCorr}
-            >
-              <option value="current">Tirage Actif ({drawName})</option>
-              <option value="Reveil">Loto Réveil (LONACI)</option>
-              <option value="Etoile">Loto Étoile (LONACI)</option>
-              <option value="Akwaba">Loto Akwaba (LONACI)</option>
-              <option value="National">Loto National (LONACI)</option>
-              <option value="all_4">
-                Données Globales (Fusion des 4 Jeux)
-              </option>
-            </select>
             <button
-              onClick={() => runCorrelationAnalysis(selectedCorrDraw)}
+              onClick={() => runCorrelationAnalysis()}
               disabled={isCalculatingCorr}
               className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-indigo-500 hover:text-white rounded-xl transition text-slate-500 dark:text-slate-300 disabled:opacity-50"
             >
@@ -1300,12 +1283,15 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                         </td>
                         {GAP_FAMILY_KEYS.map((colKey) => {
                           const val =
-                            correlationData.matrix[rowKey]?.[colKey] ?? 0;
+                            correlationData.matrix[rowKey]?.[colKey] ?? null;
                           const isIdentity = rowKey === colKey;
                           // Intensité et teinte portées continûment par |ρ| mesuré : plus la
                           // corrélation est forte, plus la teinte glisse vers le rouge. Aucun
                           // seuil de « redondance » binaire n'est appliqué.
-                          const weight = isIdentity ? 0 : Math.min(1, Math.abs(val));
+                          const weight =
+                            isIdentity || val === null
+                              ? 0
+                              : Math.min(1, Math.abs(val));
                           const hue = 152 * (1 - weight);
 
                           return (
@@ -1314,10 +1300,12 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 className={`py-1.5 px-2 rounded-lg text-[10px] font-mono border ${
                                   isIdentity
                                     ? "bg-slate-100 dark:bg-slate-800 text-slate-500 font-bold border-slate-200 dark:border-slate-700"
-                                    : "text-slate-700 dark:text-slate-100 border-slate-200/60 dark:border-slate-700/60"
+                                    : val === null
+                                      ? "bg-slate-50 dark:bg-slate-900 text-slate-400 dark:text-slate-500 border-dashed border-slate-200 dark:border-slate-700/60"
+                                      : "text-slate-700 dark:text-slate-100 border-slate-200/60 dark:border-slate-700/60"
                                 }`}
                                 style={
-                                  isIdentity
+                                  isIdentity || val === null
                                     ? undefined
                                     : {
                                         backgroundColor: `hsla(${hue}, 85%, 45%, ${0.08 + 0.4 * weight})`,
@@ -1326,10 +1314,12 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                                 title={
                                   isIdentity
                                     ? "Identité"
-                                    : `Corrélation de Pearson mesurée : ${val} (redondance ${(weight * 100).toFixed(1)}%)`
+                                    : val === null
+                                      ? "Corrélation indéfinie (variance nulle ou échantillon vide)"
+                                      : `Corrélation de Pearson mesurée : ${val} (redondance ${(weight * 100).toFixed(1)}%)`
                                 }
                               >
-                                {val.toFixed(3)}
+                                {val === null ? "n/d" : val.toFixed(3)}
                               </div>
                             </td>
                           );

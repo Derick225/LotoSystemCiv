@@ -8,7 +8,6 @@ import {
   type CyclicCandidate,
   type CrossMonthResonanceAnalysis,
   type CausalFlowAnalysis,
-  type CausalDependencyFlow,
 } from "../../services/temporalAnalysisService";
 import { NumberBall } from "../NumberBall";
 import { useNexusStore } from "../../store/useNexusStore";
@@ -348,14 +347,18 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     Gènes Dominants Actifs :
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    {crossMonthResonance.dnaSieveInfo?.dominantAlgos?.map((algo, i) => (
-                      <span
-                        key={i}
-                        className="text-[9px] font-mono font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 rounded-lg"
-                      >
-                        {algo}
-                      </span>
-                    )) || <span className="text-slate-500 text-xs">Génome Global</span>}
+                    {(crossMonthResonance.dnaSieveInfo?.dominantAlgos?.length ?? 0) > 0 ? (
+                      crossMonthResonance.dnaSieveInfo?.dominantAlgos?.map((algo, i) => (
+                        <span
+                          key={i}
+                          className="text-[9px] font-mono font-bold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-2 py-0.5 rounded-lg"
+                        >
+                          {algo}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-slate-500 text-xs">n/d</span>
+                    )}
                   </div>
                 </div>
 
@@ -372,7 +375,7 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                     </div>
                     <div className="flex items-center justify-between text-[9px] text-slate-400">
                       <span>Cycle : <strong className="text-slate-200">{crossMonthResonance.interDrawInfo.predecessorName}</strong> → <strong className="text-emerald-400">{drawName}</strong></span>
-                      {crossMonthResonance.interDrawInfo.carryOverLift && (
+                      {crossMonthResonance.interDrawInfo.carryOverLift != null && (
                         <span className="font-mono text-amber-400">Lift Carry-Over : ×{crossMonthResonance.interDrawInfo.carryOverLift}</span>
                       )}
                     </div>
@@ -629,7 +632,10 @@ export const TemporalTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 Numéros cibles recevant la plus forte attraction causale combinée depuis les 5 gagnants et 5 machines du tirage précédent.
               </span>
               <span className="text-amber-400 font-mono font-bold">
-                Lift Moyen Système : {causalAnalysis?.meanSystemLift || 1.0}x
+                Lift Moyen Système :{" "}
+                {causalAnalysis && typeof causalAnalysis.meanSystemLift === "number" && Number.isFinite(causalAnalysis.meanSystemLift)
+                  ? `${causalAnalysis.meanSystemLift}x`
+                  : "n/d"}
               </span>
             </div>
 

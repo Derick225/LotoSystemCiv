@@ -46,40 +46,40 @@ export const AcademyTab: React.FC = () => {
       title: "Énergie Spectrale (FFT)",
       icon: <Waves className="text-purple-500" />,
       desc: "Mesure la 'vibration' d'un numéro. Une énergie haute indique qu'un numéro suit un cycle régulier.",
-      tip: "Ciblez les énergies > 70% pour des bases solides.",
+      tip: "Une énergie > 70% signale un cyclisme marqué dans l'historique récent.",
       impact: "Élevé",
       difficulty: "Intermédiaire",
       content:
-        "L'analyse spectrale décompose le flux de tirages en fréquences. Si un numéro sort à intervalles réguliers, il crée une onde de résonance. Plus l'onde est propre, plus la probabilité de sortie au prochain cycle est calculable.",
+        "L'analyse spectrale décompose le flux de tirages en fréquences. Si un numéro sort à intervalles réguliers, il crée une onde de résonance. Plus l'onde est propre, plus le cyclisme passé est marqué — sans que cela garantisse la sortie au prochain cycle.",
     },
     {
       id: "hurst",
       title: "Exposant de Hurst",
       icon: <Layers className="text-emerald-500" />,
       desc: "Détermine si le jeu a de la 'mémoire'. Tendance persistante ou retour à la moyenne.",
-      tip: "En régime 'Persistant', jouez les favoris. En 'Anti-persistant', jouez les écarts.",
-      impact: "Critique",
+      tip: "Un régime 'Persistant' prolonge les tendances passées, 'Anti-persistant' revient vers la moyenne. Observations statistiques, pas garanties.",
+      impact: "Élevé",
       difficulty: "Expert",
       content:
-        "Le coefficient de Hurst (H) varie de 0 à 1. H > 0.5 indique un système persistant (les tendances se maintiennent). H < 0.5 indique un système anti-persistant (le hasard cherche à compenser immédiatement).",
+        "Le coefficient de Hurst (H) varie de 0 à 1. H = 0.5 correspond à une marche aléatoire sans mémoire. H > 0.5 indique un système persistant (les tendances passées se prolongent). H < 0.5 indique un système anti-persistant (retour vers la moyenne).",
     },
     {
       id: "entropy",
       title: "Entropie de Shannon",
       icon: <Activity className="text-rose-500" />,
       desc: "Niveau de chaos du flux. Une entropie basse signifie que des patterns prévisibles se forment.",
-      tip: "Plus l'entropie est basse, plus l'Oracle est précis.",
+      tip: "Une entropie basse signale des régularités passées ; elle ne rend pas le prochain tirage prévisible.",
       impact: "Moyen",
       difficulty: "Expert",
       content:
-        "L'entropie mesure le désordre. Dans un loto parfait, l'entropie est maximale. Mais les machines physiques et les cycles humains créent des 'poches' de basse entropie que Nexus exploite.",
+        "L'entropie mesure le désordre. Dans un loto parfait, l'entropie est maximale. Mais les machines physiques et les cycles humains créent des 'poches' de basse entropie que Nexus détecte.",
     },
     {
       id: "ac",
       title: "Complexité AC",
       icon: <Binary className="text-indigo-500" />,
       desc: "Score mesurant la structure d'une grille. Un score bas signifie que les numéros sont trop 'simples'.",
-      tip: "Évitez les tickets avec un AC < 7, ils sortent statistiquement moins souvent.",
+      tip: "Évitez les tickets à AC < 7 : non pas qu'ils sortent moins, mais ils sont plus souvent joués par d'autres, donc plus partagés en cas de gain.",
       impact: "Sécurité",
       difficulty: "Débutant",
       content:
@@ -108,8 +108,8 @@ export const AcademyTab: React.FC = () => {
           </h2>
           <p className="text-slate-400 text-sm md:text-lg font-medium leading-relaxed">
             Bienvenue dans le centre d'instruction Nexus. Apprenez à décoder les
-            signaux stochastiques pour transformer le hasard brut en
-            probabilités exploitables par l'IA.
+            signaux stochastiques et la manière dont l'IA analyse le passé pour
+            le comprendre — jamais pour garantir l'avenir.
           </p>
         </div>
       </div>
@@ -186,9 +186,9 @@ export const AcademyTab: React.FC = () => {
               Mode "Inertie"
             </h4>
             <p className="text-xs text-slate-500 leading-relaxed font-medium">
-              Quand le Hurst est élevé (&gt; 0.6), favorisez les numéros qui
-              sont sortis lors des 3 derniers tirages. La tendance
-              s'auto-alimente.
+              Quand le Hurst est élevé (&gt; 0.6), l'historique montre une
+              continuité des tendances passées. Observation statistique, pas
+              une garantie de sortie.
             </p>
           </div>
           <div className="p-8 space-y-4 hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
@@ -199,8 +199,9 @@ export const AcademyTab: React.FC = () => {
               Mode "Écart"
             </h4>
             <p className="text-xs text-slate-500 leading-relaxed font-medium">
-              Si un numéro dépasse 3 fois son écart moyen (Gap), son énergie
-              spectrale augmente drastiquement. C'est un pivot de ticket idéal.
+              Si un numéro dépasse 3 fois son écart moyen (Gap), son cycle est
+              statistiquement en retard sur sa moyenne historique. Cela décrit
+              son passé, sans garantir sa sortie prochaine.
             </p>
           </div>
           <div className="p-8 space-y-4 hover:bg-slate-50 dark:hover:bg-slate-900/30 transition-colors">
@@ -211,9 +212,10 @@ export const AcademyTab: React.FC = () => {
               Règle de l'AC
             </h4>
             <p className="text-xs text-slate-500 leading-relaxed font-medium">
-              Ne jouez jamais des suites simples (ex: 1, 2, 3, 4, 5). La nature
-              déteste la simplicité. Gardez un score de complexité AC supérieur
-              à 7.
+              Évitez les suites simples (ex: 1, 2, 3, 4, 5) : elles sortent
+              aussi souvent que les autres, mais sont plus jouées et donc plus
+              partagées en cas de gain. Un score de complexité AC élevé réduit
+              ce risque de partage.
             </p>
           </div>
         </div>
@@ -231,7 +233,7 @@ export const AcademyTab: React.FC = () => {
           </h4>
           <p className="text-slate-400 text-sm md:text-base font-medium">
             Fusionnez ces concepts mathématiques dans le module Oracle pour
-            générer votre prochaine prédiction vectorielle.
+            explorer votre prochaine analyse vectorielle.
           </p>
         </div>
         <button

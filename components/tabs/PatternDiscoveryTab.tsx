@@ -104,7 +104,7 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
     } else if (activeCategory === 'PRIMED') {
       list = analysis.activePrimedPatterns;
     } else if (activeCategory === 'PERIODIC') {
-      list = analysis.topPeriodicResonancePatterns || [];
+      list = analysis.topPeriodicResonancePatterns ?? [];
     }
 
     // Filter by searched ball number
@@ -194,11 +194,12 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
     setIsSavingTicket(true);
     try {
       audioEngine.play('click');
-      const conf = analysis.recommendedSelection?.selectionConfidence ?? 75;
+      const conf = analysis.recommendedSelection?.selectionConfidence;
+      const confLabel = typeof conf === 'number' && Number.isFinite(conf) ? ` • C:${conf}%` : '';
       await saveTicket({
         numbers: customSelection,
         drawName,
-        strategy: `Motifs Répétitifs (${cycleLength}T • C:${conf}%)`,
+        strategy: `Motifs Répétitifs (${cycleLength}T${confLabel})`,
       });
       showToast('Sélection Multi-Motifs enregistrée dans le Portefeuille.', 'success');
     } catch {
@@ -341,7 +342,7 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
             <div className="bg-slate-950/70 p-3.5 rounded-2xl border border-slate-800 space-y-1">
               <span className="text-[10px] font-bold uppercase text-slate-400 block">Résonances Dues</span>
               <div className="text-lg font-black font-mono text-fuchsia-400 flex items-center gap-1.5">
-                <Clock size={15} /> {analysis.topPeriodicResonancePatterns?.length || 0}
+                <Clock size={15} /> {analysis.topPeriodicResonancePatterns?.length ?? 0}
               </div>
             </div>
 
@@ -696,8 +697,11 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                     Prob. Complétion : {pat.completionProbability}%
                   </span>
                   <span className="text-[10px] font-mono text-slate-400">
-                    PMI: <strong className="text-emerald-400">+{pat.reasoning?.pmi ?? 0}b</strong> • Lift:{' '}
-                    <strong className="text-emerald-400">{pat.lift}x</strong>
+                    PMI:{' '}
+                    <strong className="text-emerald-400">
+                      {typeof pat.reasoning?.pmi === 'number' ? `+${pat.reasoning.pmi}b` : 'n/d'}
+                    </strong>{' '}
+                    • Lift: <strong className="text-emerald-400">{pat.lift}x</strong>
                   </span>
                 </div>
 
@@ -917,8 +921,9 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                   <div>
                     <span className="text-[9px] text-slate-500 uppercase block font-sans">Synergie PMI</span>
                     <span className="text-xs font-black text-emerald-400">
-                      {(pat.reasoning?.pmi ?? 0) >= 0 ? '+' : ''}
-                      {pat.reasoning?.pmi ?? 0}b
+                      {typeof pat.reasoning?.pmi === 'number'
+                        ? `${pat.reasoning.pmi >= 0 ? '+' : ''}${pat.reasoning.pmi}b`
+                        : 'n/d'}
                     </span>
                   </div>
 
@@ -932,7 +937,9 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                   <div>
                     <span className="text-[9px] text-slate-500 uppercase block font-sans">Tension Retour</span>
                     <span className="text-xs font-bold text-fuchsia-400">
-                      {pat.reasoning?.renewalHazard ?? 50}%
+                      {typeof pat.reasoning?.renewalHazard === 'number'
+                        ? `${pat.reasoning.renewalHazard}%`
+                        : 'n/d'}
                     </span>
                   </div>
 
@@ -1030,13 +1037,20 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
                 <span className="text-slate-400 block text-[10px] uppercase">Lift & Synergie PMI</span>
                 <strong className="text-emerald-400 text-sm">
-                  {selectedPattern.lift}x ({selectedPattern.reasoning?.pmi ?? 0} bits)
+                  {selectedPattern.lift}x (
+                  {typeof selectedPattern.reasoning?.pmi === 'number'
+                    ? `${selectedPattern.reasoning.pmi} bits`
+                    : 'n/d'}
+                  )
                 </strong>
               </div>
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
                 <span className="text-slate-400 block text-[10px] uppercase">Tension de Retour</span>
                 <strong className="text-fuchsia-400 text-sm">
-                  {selectedPattern.reasoning?.renewalHazard ?? 50}% (~{selectedPattern.meanCycleInterval} cyc)
+                  {typeof selectedPattern.reasoning?.renewalHazard === 'number'
+                    ? `${selectedPattern.reasoning.renewalHazard}%`
+                    : 'n/d'}{' '}
+                  (~{selectedPattern.meanCycleInterval} cyc)
                 </strong>
               </div>
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 col-span-2">

@@ -10,6 +10,7 @@ import {
 
 export const FractalTab: React.FC<{ drawName: string }> = () => {
   const regime = useNexusStore((state) => state.regime);
+  const history = useNexusStore((state) => state.history);
   const loading = useNexusStore((state) => state.loading);
 
   if (loading)
@@ -21,32 +22,47 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
       </div>
     );
 
-  const hurst = regime?.hurst || 0.5;
-  const weylDiscrepancy = regime?.weylDiscrepancy ?? 0.18;
-  const chaosDimension = regime?.chaosDimension ?? 1.84;
+  if (!regime)
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-6 bg-slate-950 rounded-3xl border border-slate-800">
+        <AlertTriangle className="text-slate-500" size={48} />
+        <p className="text-xs font-black uppercase tracking-[0.3em] text-slate-400">
+          Données insuffisantes pour établir la météo du jeu
+        </p>
+      </div>
+    );
 
-  // Logique pour l'utilisateur
-  let status = "Neutre";
-  let description = "Le jeu est normal, rien de particulier.";
+  const hurst = regime.hurst;
+  const weylDiscrepancy = regime.weylDiscrepancy;
+  const chaosDimension = regime.chaosDimension;
+
+  // Marge d'incertitude d'échantillonnage, convention identique au moteur detectGameRegime (1/sqrt(N))
+  const sampleSize = Math.min(history.length, 200);
+  const uncertaintyMargin = sampleSize > 0 ? 1.0 / Math.sqrt(sampleSize) : 0;
+
+  // Logique pour l'utilisateur : seuils centrés sur 0.5 avec marge statistique, pas de constantes fixes
+  let status = "Neutre (Marche Aléatoire)";
+  let description =
+    "Aucune mémoire statistique détectable : le flux se comporte comme un hasard équitable.";
   let color = "bg-slate-500";
   let icon = <TrendingUp size={60} />;
 
-  if (hurst > 0.6) {
-    status = "Facile (Suivre la tendance)";
+  if (hurst > 0.5 + uncertaintyMargin) {
+    status = "Persistant (Tendance)";
     description =
-      "Les numéros qui sortent souvent vont continuer de sortir. Jouez les favoris !";
+      "L'historique montre une continuité des tendances (H > 0.5). Cela décrit le passé, ne garantit pas le futur.";
     color = "bg-emerald-500";
     icon = <CheckCircle2 size={80} />;
-  } else if (hurst < 0.4) {
-    status = "Rebond (Jouer les inverses)";
+  } else if (hurst < 0.5 - uncertaintyMargin) {
+    status = "Anti-persistant (Retour à la moyenne)";
     description =
-      "Le jeu cherche à s'équilibrer. Jouez ceux qui ne sont pas sortis depuis longtemps.";
+      "L'historique oscille autour de sa moyenne (H < 0.5). Tendance statistique passée, sans promesse de gain.";
     color = "bg-indigo-500";
     icon = <TrendingUp size={80} />;
   } else {
-    status = "Difficile (Hasard total)";
+    status = "Neutre (Marche Aléatoire)";
     description =
-      "Aucune logique détectée aujourd'hui. Prudence, c'est du pur hasard.";
+      "Aucune mémoire statistique détectable : le flux se comporte comme un hasard équitable.";
     color = "bg-rose-500";
     icon = <AlertTriangle size={80} />;
   }
@@ -121,13 +137,21 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
                   Weyl D* Stat
                 </span>
                 <span className="text-2xl font-black font-mono text-indigo-500">
-                  {weylDiscrepancy.toFixed(4)}
+                  {typeof weylDiscrepancy === "number"
+                    ? weylDiscrepancy.toFixed(4)
+                    : "n/d"}
                 </span>
               </div>
               <div className="h-2 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-indigo-500 rounded-full transition-all duration-1000"
-                  style={{ width: `${Math.min(100, weylDiscrepancy * 100)}%` }}
+                  style={{
+                    width: `${
+                      typeof weylDiscrepancy === "number"
+                        ? Math.min(100, weylDiscrepancy * 100)
+                        : 0
+                    }%`,
+                  }}
                 ></div>
               </div>
               <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase tracking-widest pt-1">
@@ -166,14 +190,23 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
                   Dimension Fractale ν
                 </span>
                 <span className="text-2xl font-black font-mono text-violet-500">
-                  {chaosDimension.toFixed(3)}
+                  {typeof chaosDimension === "number"
+                    ? chaosDimension.toFixed(3)
+                    : "n/d"}
                 </span>
               </div>
               <div className="h-2 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-violet-500 rounded-full transition-all duration-1000"
                   style={{
-                    width: `${Math.min(100, ((chaosDimension - 1.0) / 2.0) * 100)}%`,
+                    width: `${
+                      typeof chaosDimension === "number"
+                        ? Math.min(
+                            100,
+                            Math.max(0, ((chaosDimension - 1.0) / 2.0) * 100)
+                          )
+                        : 0
+                    }%`,
                   }}
                 ></div>
               </div>
@@ -192,8 +225,9 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
             Quand c'est Vert
           </h4>
           <p className="text-xs text-emerald-800 dark:text-emerald-200">
-            C'est le moment idéal pour jouer. Les répétitions sont fréquentes.
-            Misez sur les numéros en forme.
+            L'historique montre une continuité des tendances : les séries de
+            sorties ont tendance à se prolonger. Observation statistique du
+            passé, pas une garantie de gain.
           </p>
         </div>
         <div className="bg-rose-50 dark:bg-rose-900/20 p-6 rounded-[2rem] border border-rose-100 dark:border-rose-800/30">
@@ -201,8 +235,8 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
             Quand c'est Rouge
           </h4>
           <p className="text-xs text-rose-800 dark:text-rose-200">
-            Attention ! Le jeu est chaotique. Réduisez vos mises ou jouez des
-            grilles "Flash" au hasard.
+            Le régime ressemble à une marche aléatoire : aucune mémoire
+            statistique exploitable. Restez prudent et gérez votre budget.
           </p>
         </div>
         <div className="bg-indigo-50 dark:bg-indigo-900/20 p-6 rounded-[2rem] border border-indigo-100 dark:border-indigo-800/30">
@@ -210,8 +244,9 @@ export const FractalTab: React.FC<{ drawName: string }> = () => {
             Quand c'est Bleu
           </h4>
           <p className="text-xs text-indigo-800 dark:text-indigo-200">
-            Effet élastique. Les numéros en retard ont de fortes chances de
-            sortir pour rattraper la moyenne.
+            Effet élastique observé dans le passé : après des tirages
+            déficitaires, le flux a tendance à revenir vers sa moyenne. Rien
+            n'oblige le prochain tirage à suivre cette tendance.
           </p>
         </div>
       </div>

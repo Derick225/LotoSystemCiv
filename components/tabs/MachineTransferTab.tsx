@@ -52,7 +52,7 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
             Matrice de Transfert Machine & Gagnants
           </div>
           <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight flex items-center gap-3">
-            Transfert Stochastique Machine $\rightarrow$ Gagnants
+            Transfert Stochastique Machine → Gagnants
           </h2>
           <p className="text-xs text-slate-400 font-medium max-w-2xl">
             {report.diagnosticRemark}
@@ -106,7 +106,7 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
             <div
               className="bg-indigo-500 h-full rounded-full"
-              style={{ width: `${Math.min(100, report.meanTransfersPerDraw * 50)}%` }}
+              style={{ width: `${Math.min(100, report.meanTransfersPerDraw * 20)}%` }}
             />
           </div>
         </div>
@@ -132,7 +132,15 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
             </span>
           </div>
           <div className="text-[10px] text-cyan-400 font-mono">
-            {report.lagDistribution.lag1 > 0 ? "Forte dominance Lag 1" : "Distribution diffuse"}
+            {(() => {
+              const totalLags =
+                report.lagDistribution.lag1 +
+                report.lagDistribution.lag2 +
+                report.lagDistribution.lag3;
+              return totalLags > 0
+                ? `Lag 1 : ${((report.lagDistribution.lag1 / totalLags) * 100).toFixed(0)}% des ${totalLags} transferts`
+                : "n/d";
+            })()}
           </div>
         </div>
 
@@ -151,7 +159,7 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
             ))}
           </div>
           <span className="text-[10px] text-slate-400 font-mono">
-            Sources actives pour le prochain tirage
+            Dernier plateau Machine enregistré
           </span>
         </div>
       </div>
@@ -231,7 +239,7 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
         <div className="bg-slate-900/60 p-6 rounded-3xl border border-white/5 space-y-4">
           <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
             <TrendingUp size={16} className="text-emerald-400" />
-            Top Numéros à Forte Conversion Machine $\rightarrow$ Gagnants
+            Top Numéros à Forte Conversion Machine → Gagnants
           </h4>
           <div className="space-y-2">
             {report.topHistoricalTransfers.map((item, idx) => (
@@ -247,7 +255,7 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
                     {item.number}
                   </span>
                   <span className="text-slate-300">
-                    {item.transfersToWinnersCount} sorties consécutives
+                    {item.transfersToWinnersCount} transferts vers les gagnants
                   </span>
                 </div>
                 <div className="text-right">
@@ -267,7 +275,7 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
         <div className="bg-slate-900/60 p-6 rounded-3xl border border-white/5 space-y-4">
           <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
             <Share2 size={16} className="text-indigo-400" />
-            Paires d'Affinité Croisée (Machine $m \rightarrow$ Gagnant $w$)
+            Paires d'Affinité Croisée (Machine m → Gagnant w)
           </h4>
           <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
             {report.crossAffinityMatrix.map((pair, idx) => (

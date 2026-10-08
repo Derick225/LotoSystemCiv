@@ -11,13 +11,13 @@ interface GapEfficiencyMeterProps {
 export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({
   data,
 }) => {
-  // Filtrage intelligent : On garde ceux qui ont une probabilité de survie < 50% (Breakout > 50%) ou Z-Score positif significatif
+  // Sélection catégorielle par zone (calculée côté service), tri continu par pression de rupture
   const activeData = useMemo(() => {
+    const rupturePressure = (d: GapEfficiency) =>
+      typeof d.kaplanMeierProb === "number" ? d.kaplanMeierProb : d.breakoutProb;
     return data
-      .filter(
-        (d) => d.zScore > 0.5 || (d.kaplanMeierProb && d.kaplanMeierProb > 50),
-      ) // Filtre de bruit
-      .sort((a, b) => (b.kaplanMeierProb || 0) - (a.kaplanMeierProb || 0)) // Trie par proba de survie KM en priorité
+      .filter((d) => d.zone === "HOT" || d.zone === "CRITICAL")
+      .sort((a, b) => rupturePressure(b) - rupturePressure(a))
       .slice(0, 10);
   }, [data]);
 
@@ -32,7 +32,7 @@ export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({
           Pression Atmosphérique Normale
         </p>
         <p className="text-[10px] mt-2 opacity-60">
-          Aucune anomalie d'écart détectée (&gt; 0.5 σ)
+          Aucune zone HOT ou CRITICAL sous pression
         </p>
       </div>
     );
@@ -112,22 +112,22 @@ export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({
                   >
                     {item.zone}
                   </span>
-                  {/* Critères d'inclusion stochastiques explicites */}
+                  {/* Critères de pression mesurés */}
                   <div className="flex flex-col gap-0.5 mt-1 items-center shrink-0 w-full">
-                    {item.zScore > 0.5 && (
+                    {item.zScore > 0 && (
                       <span
                         className="text-[7px] font-extrabold tracking-wide text-indigo-400 bg-indigo-950/40 border border-indigo-500/20 px-1 rounded uppercase scale-90"
-                        title="Inclus par anomalie de pression Z-score"
+                        title="Pression Z positive"
                       >
-                        Z-score
+                        Z+
                       </span>
                     )}
-                    {(item.kaplanMeierProb ?? 0) > 50 && (
+                    {typeof item.kaplanMeierProb === "number" && (
                       <span
                         className="text-[7px] font-extrabold tracking-wide text-emerald-400 bg-emerald-950/40 border border-emerald-500/20 px-1 rounded uppercase scale-90"
-                        title="Inclus par probabilité de survie Kaplan-Meier"
+                        title="Survie Kaplan-Meier mesurée"
                       >
-                        KM Survie
+                        KM
                       </span>
                     )}
                   </div>
@@ -144,9 +144,11 @@ export const GapEfficiencyMeter: React.FC<GapEfficiencyMeterProps> = ({
                       Rupture S(t)
                     </span>
                     <span
-                      className={`text-base xl:text-lg font-black font-mono ${(item.kaplanMeierProb || 0) > 85 ? "text-amber-400" : "text-emerald-400"}`}
+                      className={`text-base xl:text-lg font-black font-mono ${(item.kaplanMeierProb ?? 0) > 85 ? "text-amber-400" : "text-emerald-400"}`}
                     >
-                      {item.kaplanMeierProb ?? Math.round(item.breakoutProb)}%
+                      {typeof item.kaplanMeierProb === "number"
+                        ? `${item.kaplanMeierProb}%`
+                        : "n/d"}
                     </span>
                   </div>
 
