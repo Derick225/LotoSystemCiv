@@ -7,10 +7,14 @@ import {
   AlgoUnderperformanceMetric,
   loadExpertBiases,
   saveExpertBiases,
+  loadExpertBaseWeights,
+  saveExpertBaseWeights,
+  clearExpertBaseWeights,
   applyExpertBiasesToWeights,
   analyzeUnderperformingSubAlgos,
   calculateExpertBiasDecay,
 } from "../../services/prediction/expertBiasService";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { audioEngine } from "../../utils/audioEngine";
 import { logger } from "../../utils/logger";
 import { useToast } from "../ui/Toast";
@@ -59,20 +63,34 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
   const [showUnderperformingOnly, setShowUnderperformingOnly] = useState(false);
   const [globalHorizon, setGlobalHorizon] = useState<number>(5);
 
-  // Analyse sous-jacente des sous-algos
+  // Historique isolé du tirage courant pour éviter tout croisement de longueur d'historique
+  const pureHistory = useMemo(
+    () => purifyHistoryForDraw(drawName, history),
+    [drawName, history]
+  );
+
+  // Poids de référence non-biaisés du tirage (évite la composition cumulative à chaque "Appliquer")
+  const [baseWeights, setBaseWeights] = useState(() => {
+    return loadExpertBaseWeights(drawName) ?? globalWeights;
+  });
+
+  // Analyse sous-jacente des sous-algos sur les poids de référence non-biaisés
   const underperformanceMetrics = useMemo(() => {
-    return analyzeUnderperformingSubAlgos(drawName, history, globalWeights);
-  }, [drawName, history, globalWeights]);
+    return analyzeUnderperformingSubAlgos(drawName, history, baseWeights);
+  }, [drawName, history, baseWeights]);
 
   // Synchronisation au changement de tirage
   useEffect(() => {
-    setBiases(loadExpertBiases(drawName));
+    const loadedBiases = loadExpertBiases(drawName);
+    setBiases(loadedBiases);
+    const storedBase = loadExpertBaseWeights(drawName);
+    setBaseWeights(storedBase ?? globalWeights);
   }, [drawName]);
 
-  // Calcul en direct des poids modulés simulés
+  // Calcul en direct des poids modulés simulés sur `baseWeights` (et non `globalWeights` déjà biaisé)
   const simulatedWeights = useMemo(() => {
-    return applyExpertBiasesToWeights(globalWeights, biases, history.length);
-  }, [globalWeights, biases, history.length]);
+    return applyExpertBiasesToWeights(baseWeights, biases, pureHistory.length);
+  }, [baseWeights, biases, pureHistory.length]);
 
   // Nombre de biais actifs
   const activeBiasesCount = useMemo(() => {
@@ -87,7 +105,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
         biasDelta: 0,
         biasMultiplier: 1.0,
         decayHorizon: globalHorizon,
-        appliedAtDrawIndex: history.length,
+        appliedAtDrawIndex: pureHistory.length,
         appliedAtTimestamp: Date.now(),
         isActive: true,
       };
@@ -97,7 +115,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
         biasMultiplier: multiplier,
         isActive: multiplier !== 1.0 || current.biasDelta !== 0,
         decayHorizon: current.decayHorizon || globalHorizon,
-        appliedAtDrawIndex: history.length,
+        appliedAtDrawIndex: pureHistory.length,
         appliedAtTimestamp: Date.now(),
       };
 
@@ -113,7 +131,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
         biasDelta: 0,
         biasMultiplier: 1.0,
         decayHorizon: globalHorizon,
-        appliedAtDrawIndex: history.length,
+        appliedAtDrawIndex: pureHistory.length,
         appliedAtTimestamp: Date.now(),
         isActive: true,
       };
@@ -123,7 +141,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
         biasDelta: delta,
         isActive: delta !== 0 || current.biasMultiplier !== 1.0,
         decayHorizon: current.decayHorizon || globalHorizon,
-        appliedAtDrawIndex: history.length,
+        appliedAtDrawIndex: pureHistory.length,
         appliedAtTimestamp: Date.now(),
       };
 
@@ -143,7 +161,8 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
     });
   };
 
-  // Nudge rapide (Preset : Boost Sous-Performants Ciblés)
+  // Nudge rapide respectant la règle de preuve : amortit les sous-performants sans preuve
+  // et renforce uniquement les sous-algorithmes à preuve empirique positive.
   const handleBoostUnderperformers = () => {
     try {
       audioEngine.play("click");
@@ -152,6 +171,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
     }
 
     const newBiases: Record<AlgoKey, ExpertBiasConfig> = { ...biases };
+    let dampenedCount = 0;
     let boostedCount = 0;
     const safeMetrics = Array.isArray(underperformanceMetrics) ? underperformanceMetrics : [];
 
@@ -160,57 +180,117 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       if (metric.isUnderperforming || metric.proofScore < 0) {
         newBiases[metric.algoKey] = {
           algoKey: metric.algoKey,
-          biasDelta: 0.05,
-          biasMultiplier: 1.35,
+          biasDelta: metric.suggestedExpertNudge < 0 ? metric.suggestedExpertNudge : -0.10,
+          biasMultiplier: 0.75,
           decayHorizon: globalHorizon,
-          appliedAtDrawIndex: history.length,
+          appliedAtDrawIndex: pureHistory.length,
           appliedAtTimestamp: Date.now(),
           isActive: true,
-          expertRationale: "Nudge expert : relance temporaire de sous-algorithme en creux statistique",
+          expertRationale:
+            "Amortissement expert : réduction d'exposition d'un sous-algorithme en déficit de preuve",
+        };
+        dampenedCount++;
+      } else if (metric.hasEmpiricalProof && metric.proofScore > 0.5) {
+        newBiases[metric.algoKey] = {
+          algoKey: metric.algoKey,
+          biasDelta: metric.suggestedExpertNudge > 0 ? metric.suggestedExpertNudge : 0.08,
+          biasMultiplier: 1.20,
+          decayHorizon: globalHorizon,
+          appliedAtDrawIndex: pureHistory.length,
+          appliedAtTimestamp: Date.now(),
+          isActive: true,
+          expertRationale:
+            "Renforcement expert : amplification d'un sous-algorithme à preuve empirique confirmée",
         };
         boostedCount++;
       }
     });
 
     setBiases(newBiases);
-    showToast(`${boostedCount} sous-algorithmes sous-performants ciblés avec succès.`, "info");
+    showToast(
+      `Régulation par preuve : ${dampenedCount} sous-performants amortis, ${boostedCount} prouvés renforcés.`,
+      "info"
+    );
   };
 
-  // Réinitialisation complète des biais experts
-  const handleResetAll = () => {
+  // Réinitialisation complète des biais experts et restauration des poids de base non-biaisés
+  const handleResetAll = async () => {
     try {
       audioEngine.play("click");
     } catch (err) {
       logger.debug({ err }, "Audio error non-bloquant");
     }
 
+    const restoredBase = loadExpertBaseWeights(drawName) ?? baseWeights;
     const emptyBiases = {} as Record<AlgoKey, ExpertBiasConfig>;
     setBiases(emptyBiases);
     saveExpertBiases(drawName, emptyBiases);
-    
-    // Rétablissement des poids de base non biaisés
-    setGlobalWeights(globalWeights);
+    clearExpertBaseWeights(drawName);
+    setBaseWeights(restoredBase);
 
-    showToast("Tous les biais experts ont été réinitialisés au profil canonique.", "info");
+    try {
+      const { applyOptimizedWeights } = await import(
+        "../../services/prediction/optimizationController"
+      );
+      await applyOptimizedWeights({
+        drawName,
+        weights: restoredBase,
+        origin: "MANUAL_CALIBRATION",
+        causalAuditTrail: [
+          `Réinitialisation des biais experts sur ${drawName}`,
+          `Restauration intégrale du profil de poids non-biaisé antérieur`,
+        ],
+        reason: `Réinitialisation des biais experts (${drawName})`,
+        history: pureHistory,
+      });
+    } catch (err) {
+      console.error("Failed to restore unbiased weights via controller:", err);
+      setGlobalWeights(restoredBase);
+    }
+
+    showToast("Tous les biais experts ont été réinitialisés et les poids de base restaurés.", "info");
   };
 
-  // Application définitive au store et persistance
-  const handleApplyBiases = () => {
+  // Application définitive via la passerelle d'optimisation (dérive, version ADN, audit)
+  const handleApplyBiases = async () => {
     try {
       audioEngine.play("success");
     } catch (err) {
       logger.debug({ err }, "Audio error non-bloquant");
     }
 
+    // Sauvegarde l'instantané des poids de base non-biaisés s'il n'existe pas encore
+    if (!loadExpertBaseWeights(drawName)) {
+      saveExpertBaseWeights(drawName, baseWeights);
+    }
     saveExpertBiases(drawName, biases);
-    setGlobalWeights(simulatedWeights);
+
+    try {
+      const { applyOptimizedWeights } = await import(
+        "../../services/prediction/optimizationController"
+      );
+      await applyOptimizedWeights({
+        drawName,
+        weights: simulatedWeights,
+        origin: "MANUAL_CALIBRATION",
+        causalAuditTrail: [
+          `Application de ${activeBiasesCount} biais d'experts sur ${drawName} (Horizon: ${globalHorizon} tirages)`,
+          `Modulation relative rapportée aux poids de base non-biaisés (0 cumul parasitaire)`,
+        ],
+        reason: `Ajustement Expert (${activeBiasesCount} modificateurs actifs, H=${globalHorizon})`,
+        history: pureHistory,
+      });
+    } catch (err) {
+      console.error("Failed to apply expert biases via controller:", err);
+      setGlobalWeights(simulatedWeights);
+    }
 
     addAgentLog({
       id: `expert_bias_apply_${Date.now()}`,
       timestamp: new Date(),
-      action: `Application de ${activeBiasesCount} biais d'experts manuels sur ${drawName} (Horizon: ${globalHorizon} tirages).`,
+      action: `Application de ${activeBiasesCount} biais d'experts sur ${drawName} (Horizon: ${globalHorizon} tirages).`,
       type: "AUTOTUNE",
-      impact: `Poids opérationnels reconfigurés avec décroissance temporelle contrôlée.`,
+      impact: `Poids opérationnels reconfigurés via la passerelle ADN avec décroissance temporelle contrôlée.`,
     });
 
     showToast(`Biais d'experts appliqués avec succès (${activeBiasesCount} modificateurs actifs).`, "success");
@@ -273,10 +353,10 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
               id="btn-boost-underperformers"
               onClick={handleBoostUnderperformers}
               className="px-3.5 py-2 bg-amber-950/70 hover:bg-amber-900/80 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shadow-md shadow-amber-950/30"
-              title="Applique un boost expert calibré à tous les sous-algorithmes sous-performants"
+              title="Amortit les sous-algorithmes en déficit de preuve et renforce ceux à preuve empirique confirmée"
             >
-              <TrendingUp size={13} className="text-amber-400" />
-              <span>Cibler Sous-Performants</span>
+              <TrendingDown size={13} className="text-amber-400" />
+              <span>Réguler par Preuve</span>
             </button>
 
             <button
@@ -401,14 +481,14 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
             biasDelta: 0,
             biasMultiplier: 1.0,
             decayHorizon: globalHorizon,
-            appliedAtDrawIndex: history.length,
+            appliedAtDrawIndex: pureHistory.length,
             appliedAtTimestamp: Date.now(),
             isActive: false,
           };
 
-          const decayRemaining = calculateExpertBiasDecay(bias, history.length);
-          const simWeight = simulatedWeights[key] || 0;
-          const baseWeight = globalWeights[key] || 0;
+          const decayRemaining = calculateExpertBiasDecay(bias, pureHistory.length);
+          const simWeight = Number.isFinite(simulatedWeights[key]) ? simulatedWeights[key] : 0;
+          const baseWeight = Number.isFinite(baseWeights[key]) ? baseWeights[key] : 0;
           const isBoosted = simWeight > baseWeight + 0.001;
           const isDampened = simWeight < baseWeight - 0.001;
 

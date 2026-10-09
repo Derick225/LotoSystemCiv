@@ -1021,34 +1021,39 @@ export const UnifiedDnaSieveRadar: React.FC<{
             </div>
 
             {/* Résumé d'amplification du tamis */}
-            <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 space-y-2">
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-slate-400">
-                  Amplification Max Tamis :
-                </span>
-                <span className="font-mono font-black text-emerald-400">
-                  ×
-                  {Math.max(
-                    ...sieveGridData.map((d) => d.multiplier),
-                  ).toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-slate-400">
-                  Atténuation Min Tamis :
-                </span>
-                <span className="font-mono font-black text-rose-400">
-                  ×
-                  {Math.min(
-                    ...sieveGridData.map((d) => d.multiplier),
-                  ).toFixed(2)}
-                </span>
-              </div>
-              <div className="text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-800">
-                Isolation stricte : calibrage appliqué exclusivement à{" "}
-                <strong className="text-slate-300">{drawName}</strong>.
-              </div>
-            </div>
+            {(() => {
+              const measuredMults = sieveGridData
+                .map((d) => d.multiplier)
+                .filter((m): m is number => m !== null && Number.isFinite(m));
+              const maxMult =
+                measuredMults.length > 0 ? Math.max(...measuredMults) : null;
+              const minMult =
+                measuredMults.length > 0 ? Math.min(...measuredMults) : null;
+              return (
+                <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 space-y-2">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-bold text-slate-400">
+                      Amplification Max Tamis :
+                    </span>
+                    <span className="font-mono font-black text-emerald-400">
+                      {maxMult !== null ? `×${maxMult.toFixed(2)}` : "n/d"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-bold text-slate-400">
+                      Atténuation Min Tamis :
+                    </span>
+                    <span className="font-mono font-black text-rose-400">
+                      {minMult !== null ? `×${minMult.toFixed(2)}` : "n/d"}
+                    </span>
+                  </div>
+                  <div className="text-[9px] font-mono text-slate-500 pt-1 border-t border-slate-800">
+                    Isolation stricte : calibrage appliqué exclusivement à{" "}
+                    <strong className="text-slate-300">{drawName}</strong>.
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1124,14 +1129,14 @@ export const UnifiedDnaSieveRadar: React.FC<{
                   </span>
                   <span
                     className={`text-[8px] font-mono font-bold mt-0.5 ${
-                      item.multiplier >= 1.12
+                      item.multiplier !== null && item.multiplier >= 1.12
                         ? "text-emerald-400"
-                        : item.multiplier <= 0.88
+                        : item.multiplier !== null && item.multiplier <= 0.88
                         ? "text-rose-400/80"
                         : "text-slate-400"
                     }`}
                   >
-                    ×{item.multiplier}
+                    {item.multiplier !== null ? `×${item.multiplier}` : "n/d"}
                   </span>
                 </button>
               );

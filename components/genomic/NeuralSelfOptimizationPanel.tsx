@@ -98,7 +98,7 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
         logger.debug({ err }, "Audio error non-bloquant");
       }
       showToast(
-        `Rétropropagation terminée : perte réduite de ${result.lossReductionPct}% (Gain précision : +${result.accuracyGain}%).`,
+        `Rétropropagation terminée : perte train -${result.lossReductionPct}% | Précision validation : ${result.accuracyGain >= 0 ? "+" : ""}${result.accuracyGain}%.`,
         "success"
       );
     } catch (err) {
@@ -110,8 +110,8 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
     }
   };
 
-  // Application des poids optimisés au store
-  const handleApplyOptimizedWeights = () => {
+  // Application des poids optimisés via la passerelle unifiée (dérive, version ADN, audit)
+  const handleApplyOptimizedWeights = async () => {
     if (!optimizationResult) return;
     try {
       audioEngine.play("success");
@@ -119,22 +119,45 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
       logger.debug({ err }, "Audio error non-bloquant");
     }
 
-    setGlobalWeights(optimizationResult.optimizedWeights);
+    try {
+      const { applyOptimizedWeights } = await import(
+        "../../services/prediction/optimizationController"
+      );
+      await applyOptimizedWeights({
+        drawName,
+        weights: optimizationResult.optimizedWeights,
+        origin: "SGD_CYBERNETIC",
+        performance: {
+          score: optimizationResult.finalAccuracy,
+          relativeGain: optimizationResult.accuracyGain,
+        },
+        causalAuditTrail: [
+          `Auto-optimisation neurale par rétropropagation sur ${drawName} (${optimizationResult.epochsCompleted} époques)`,
+          `Split Walk-Forward : ${optimizationResult.trainingSampleCount ?? optimizationResult.batchSize} train / ${optimizationResult.validationSampleCount ?? 0} validation`,
+          `Réduction de perte train : -${optimizationResult.lossReductionPct}% | Gain hors-échantillon (validation) : ${optimizationResult.accuracyGain >= 0 ? "+" : ""}${optimizationResult.accuracyGain}%`,
+        ],
+        reason: `Rétropropagation Neurale Walk-Forward (${optimizationResult.epochsCompleted} époques)`,
+        history,
+      });
 
-    addAgentLog({
-      id: `neural_backprop_apply_${Date.now()}`,
-      timestamp: new Date(),
-      action: `Auto-optimisation neurale par rétropropagation exécutée sur ${drawName} (${optimizationResult.epochsCompleted} époques).`,
-      type: "AUTOTUNE",
-      impact: `Gain de précision estimé : +${optimizationResult.accuracyGain}% (Réduction de perte : ${optimizationResult.lossReductionPct}%).`,
-    });
+      addAgentLog({
+        id: `neural_backprop_apply_${Date.now()}`,
+        timestamp: new Date(),
+        action: `Auto-optimisation neurale (Walk-Forward) appliquée sur ${drawName} (${optimizationResult.epochsCompleted} époques).`,
+        type: "AUTOTUNE",
+        impact: `Précision hors-échantillon (validation) : ${optimizationResult.initialAccuracy}% → ${optimizationResult.finalAccuracy}% (${optimizationResult.accuracyGain >= 0 ? "+" : ""}${optimizationResult.accuracyGain}%) | Réduction perte : -${optimizationResult.lossReductionPct}%.`,
+      });
 
-    showToast(
-      "Poids optimisés par rétropropagation appliqués avec succès au profil actif !",
-      "success"
-    );
+      showToast(
+        "Poids optimisés appliqués via la passerelle ADN avec contrôle de dérive !",
+        "success"
+      );
 
-    if (onWeightsApplied) onWeightsApplied();
+      if (onWeightsApplied) onWeightsApplied();
+    } catch (err) {
+      console.error("Failed to apply neural optimized weights:", err);
+      showToast("Erreur lors de l'application des poids optimisés.", "error");
+    }
   };
 
   // Données pour le graphique de convergence Recharts
@@ -143,6 +166,7 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
     return optimizationResult.epochHistory.map((ep) => ({
       epoch: `Ép ${ep.epoch}`,
       loss: ep.loss,
+      validationLoss: ep.validationLoss ?? ep.loss,
       accuracyDelta: ep.accuracyDelta,
       learningRate: ep.learningRate * 10,
     }));
@@ -331,10 +355,12 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
             </div>
 
             <div className="p-4 bg-slate-900/60 rounded-2xl border border-white/10 flex flex-col justify-between">
-              <span className="text-[10px] font-black uppercase text-slate-400">Gain de Précision</span>
+              <span className="text-[10px] font-black uppercase text-slate-400">Précision Hors-Échantillon (Val)</span>
               <div className="flex items-baseline gap-1.5 mt-1">
                 <span className="text-2xl font-black font-mono text-cyan-400">
-                  +{optimizationResult.accuracyGain}%
+                  {optimizationResult.accuracyGain >= 0
+                    ? `+${optimizationResult.accuracyGain}%`
+                    : `${optimizationResult.accuracyGain}%`}
                 </span>
                 <span className="text-[10px] font-mono text-slate-400">
                   ({optimizationResult.initialAccuracy}% → {optimizationResult.finalAccuracy}%)
@@ -343,12 +369,14 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
             </div>
 
             <div className="p-4 bg-slate-900/60 rounded-2xl border border-white/10 flex flex-col justify-between">
-              <span className="text-[10px] font-black uppercase text-slate-400">Échantillons d'Entraînement</span>
+              <span className="text-[10px] font-black uppercase text-slate-400">Split Walk-Forward</span>
               <div className="flex items-baseline gap-1.5 mt-1">
                 <span className="text-2xl font-black font-mono text-indigo-400">
-                  {optimizationResult.batchSize}
+                  {optimizationResult.trainingSampleCount ?? optimizationResult.batchSize}
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">tirages passés</span>
+                <span className="text-[10px] font-mono text-slate-400">
+                  train / {optimizationResult.validationSampleCount ?? 0} val
+                </span>
               </div>
             </div>
 
@@ -393,15 +421,24 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
                   <Line
                     type="monotone"
                     dataKey="loss"
-                    name="Perte Cross-Entropy"
+                    name="Perte Train"
                     stroke="#06b6d4"
                     strokeWidth={2.5}
                     dot={{ r: 2 }}
                   />
                   <Line
                     type="monotone"
+                    dataKey="validationLoss"
+                    name="Perte Validation"
+                    stroke="#a855f7"
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
                     dataKey="accuracyDelta"
-                    name="Gain Précision (%)"
+                    name="ΔPrécision Val (%)"
                     stroke="#10b981"
                     strokeWidth={1.5}
                     dot={false}

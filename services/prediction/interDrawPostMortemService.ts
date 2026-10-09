@@ -16,7 +16,7 @@ import {
 } from '../../constants';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { globalCache } from '../cache/CacheService';
-import { generateDeterministicFallbackHistory, getDrawTimestamp } from '../lotteryService';
+import { getDrawTimestamp } from '../lotteryService';
 import {
   alignConsecutiveDrawHistories,
   runBayesianResonanceEngine,
@@ -133,8 +133,15 @@ export const auditInterDrawPatternsPostMortem = (
   const relation = getFamilyPredecessorAndSuccessor(drawName, activeFamily.id);
   if (!relation) return null;
 
-  // Récupérer l'historique purifié du prédécesseur
-  const rawPredHistory = purifyHistoryForDraw(relation.predecessor.name, rawHistory);
+  // Récupérer l'historique purifié réel du prédécesseur (aucun historique synthétique de repli,
+  // et aucune ré-attribution d'items sans nom de tirage explicite)
+  const explicitlyNamedHistory = rawHistory.filter((d: any) =>
+    Boolean(d?.drawName || d?.draw_name || d?.tirage)
+  );
+  const rawPredHistory = purifyHistoryForDraw(
+    relation.predecessor.name,
+    explicitlyNamedHistory
+  );
   let predHistory: DrawResult[] = [];
 
   if (rawPredHistory.length > 0) {
@@ -145,7 +152,7 @@ export const auditInterDrawPatternsPostMortem = (
     if (cached && cached.length > 0) {
       predHistory = cached;
     } else {
-      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+      return null;
     }
   }
 
@@ -166,7 +173,7 @@ export const auditInterDrawPatternsPostMortem = (
       break;
     }
   }
-  if (predDrawIndex === -1) predDrawIndex = 0;
+  if (predDrawIndex === -1) return null;
 
   const predDraw = predHistory[predDrawIndex];
   if (!predDraw || !predDraw.gagnants || predDraw.gagnants.length === 0) return null;
@@ -175,13 +182,14 @@ export const auditInterDrawPatternsPostMortem = (
   const actualWinners = targetDraw.gagnants;
   const actualWinnersSet = new Set(actualWinners);
 
-  // Historiques strictement antérieurs au moment de l'inférence (t-1)
+  // Historiques strictement antérieurs au moment de l'inférence (t-1) — zéro fuite temporelle
   const priorTargetHistory = purifiedTarget.slice(targetDrawIndex + 1);
   const priorPredHistory = predHistory.slice(predDrawIndex + 1);
+  if (priorTargetHistory.length === 0 || priorPredHistory.length === 0) return null;
 
   const pairedPairs = alignConsecutiveDrawHistories(
-    priorTargetHistory.length > 0 ? priorTargetHistory : purifiedTarget,
-    priorPredHistory.length > 0 ? priorPredHistory : predHistory,
+    priorTargetHistory,
+    priorPredHistory,
     targetDrawName,
     predName
   );

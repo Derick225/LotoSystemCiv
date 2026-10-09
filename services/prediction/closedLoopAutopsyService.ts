@@ -1,20 +1,40 @@
 import { DrawResult, AlgoWeights } from '../../types';
-import { AlgoKey } from '../../shared/prediction.types';
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { extractFeatures, extractDrawNumbers } from './featureExtractor';
 import { computeAdvancedMetrics } from './predictionOrchestrator';
 import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
-import { calculateStatisticalBounds, calculateTemporalDriftLearningRate, TemporalDriftLearningRateResult } from '../mathService';
-import { normalizeWeights, evaluateAlgoEmpiricalProof, saveAlgoWeights } from './weightsManager';
-import { AUTOPSY_CALIBRATION } from './calibrationConstants';
-import { recordModelDnaVersion, ModelDnaRecord } from './modelDnaKnowledgeBase';
-import { applyOptimizedWeights } from './optimizationController';
+import {
+  calculateStatisticalBounds,
+  calculateTemporalDriftLearningRate,
+  TemporalDriftLearningRateResult,
+} from '../mathService';
+import { normalizeWeights, evaluateAlgoEmpiricalProof } from './weightsManager';
+import {
+  ModelDnaRecord,
+  computeModelDnaFingerprint,
+  extractSpecializations,
+} from './modelDnaKnowledgeBase';
+import {
+  applyOptimizedWeights,
+  calculateWeightDriftMetrics,
+} from './optimizationController';
+import { computeDrawCriticalThreshold } from './dnaAuditService';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
-import { calculateCyclicPhaseProfileMatrix, CyclicPhaseProfileResult } from './dynamicProfileMatrix';
+import {
+  calculateCyclicPhaseProfileMatrix,
+  CyclicPhaseProfileResult,
+} from './dynamicProfileMatrix';
 import { parseDateSafely } from '../../utils/dateUtils';
-import { generateProbabilisticScenarioMatrix, SimulationScenarioItem } from './predictionScenarios';
-import { extractMathProofMetadata, MathematicalProofMetadata } from '../forensic/forensicProofStandard';
-import { auditInterDrawPatternsPostMortem, InterDrawPostMortemAudit } from './interDrawPostMortemService';
+import { generateProbabilisticScenarioMatrix } from './predictionScenarios';
+import {
+  extractMathProofMetadata,
+  MathematicalProofMetadata,
+} from '../forensic/forensicProofStandard';
+import {
+  auditInterDrawPatternsPostMortem,
+  InterDrawPostMortemAudit,
+} from './interDrawPostMortemService';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -79,13 +99,117 @@ export interface ClosedLoopAutopsyReport {
 }
 
 /**
- * Miroir décimal déterministe (ex: 14 -> 41, 28 -> 82, 3 -> 30)
+ * Projection sur le simplexe ∑ w_k = 1 avec respect strict :
+ * 1. Des canaux forcés à zéro (`forcedZeroKeys` et `RETIRED_ALGO_WEIGHT_KEYS`),
+ * 2. Du plafond de preuve empirique (`lockedMaxKeys` : ∀ k sans preuve, w_k <= baseline[k]).
  */
-const getMirrorNumber = (n: number): number => {
-  if (n < 10) return n * 10 <= 90 ? n * 10 : n;
-  const s = String(n);
-  const rev = Number(s.split('').reverse().join(''));
-  return !isNaN(rev) && rev >= 1 && rev <= 90 ? rev : n;
+export const projectWeightsWithProofGuard = (
+  candidateRaw: Record<string, number>,
+  baselineNormalized: AlgoWeights,
+  lockedMaxKeys: Set<AlgoKey>,
+  forcedZeroKeys: Set<AlgoKey> = new Set()
+): AlgoWeights => {
+  const validKeys = Object.values(AlgoKey);
+  const sanitizedInput: Record<string, number> = {};
+
+  validKeys.forEach((k) => {
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+      sanitizedInput[k] = 0;
+      return;
+    }
+    const baseW = Number.isFinite(baselineNormalized[k]) ? baselineNormalized[k] : 0;
+    const rawW = Number.isFinite(candidateRaw[k]) ? Math.max(0, candidateRaw[k]) : baseW;
+    sanitizedInput[k] = lockedMaxKeys.has(k) ? Math.min(rawW, baseW) : rawW;
+  });
+
+  const normalized = normalizeWeights(sanitizedInput as AlgoWeights);
+  const w: Record<string, number> = { ...normalized };
+
+  for (let iter = 0; iter < 16; iter++) {
+    let excess = 0;
+    validKeys.forEach((k) => {
+      if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+        excess += w[k] || 0;
+        w[k] = 0;
+        return;
+      }
+      if (lockedMaxKeys.has(k)) {
+        const cap = Number.isFinite(baselineNormalized[k]) ? baselineNormalized[k] : 0;
+        if ((w[k] || 0) > cap) {
+          excess += (w[k] || 0) - cap;
+          w[k] = cap;
+        }
+      }
+    });
+
+    if (excess <= 1e-7) break;
+
+    const unlockedKeys = validKeys.filter(
+      (k) =>
+        !RETIRED_ALGO_WEIGHT_KEYS.has(k) &&
+        !forcedZeroKeys.has(k) &&
+        !lockedMaxKeys.has(k) &&
+        (w[k] || 0) > 0
+    );
+
+    if (unlockedKeys.length === 0) {
+      // Aucun canal prouvé disponible pour absorber l'excédent : conservation des poids de base
+      const fallback: Record<string, number> = {};
+      let sumFallback = 0;
+      validKeys.forEach((k) => {
+        if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+          fallback[k] = 0;
+        } else {
+          const val = Number.isFinite(baselineNormalized[k]) ? baselineNormalized[k] : 0;
+          fallback[k] = val;
+          sumFallback += val;
+        }
+      });
+      if (sumFallback > 0) {
+        validKeys.forEach((k) => {
+          w[k] = parseFloat(((fallback[k] || 0) / sumFallback).toFixed(6));
+        });
+      }
+      break;
+    }
+
+    const unlockedSum = unlockedKeys.reduce((acc, k) => acc + (w[k] || 0), 0);
+    if (unlockedSum > 0) {
+      unlockedKeys.forEach((k) => {
+        w[k] = (w[k] || 0) + excess * ((w[k] || 0) / unlockedSum);
+      });
+    } else {
+      const share = excess / unlockedKeys.length;
+      unlockedKeys.forEach((k) => {
+        w[k] = (w[k] || 0) + share;
+      });
+    }
+  }
+
+  let total = 0;
+  validKeys.forEach((k) => {
+    w[k] = w[k] > 0 ? parseFloat(w[k].toFixed(6)) : 0;
+    total += w[k];
+  });
+
+  if (total > 0 && Math.abs(total - 1.0) > 1e-5) {
+    const residual = 1.0 - total;
+    const adjustCandidates = validKeys
+      .filter(
+        (k) =>
+          w[k] > 0 &&
+          !RETIRED_ALGO_WEIGHT_KEYS.has(k) &&
+          !forcedZeroKeys.has(k) &&
+          (residual < 0 || !lockedMaxKeys.has(k))
+      )
+      .sort((a, b) => w[b] - w[a]);
+    if (adjustCandidates.length > 0) {
+      const targetKey = adjustCandidates[0];
+      w[targetKey] = parseFloat(Math.max(0, w[targetKey] + residual).toFixed(6));
+    }
+  }
+
+  return w as AlgoWeights;
 };
 
 /**
@@ -99,20 +223,33 @@ export const executeClosedLoopAutopsy = async (
 ): Promise<ClosedLoopAutopsyReport> => {
   const history = purifyHistoryForDraw(drawName, rawHistory);
   if (history.length < 3) {
-    throw new Error(`Historique insuffisant pour l'autopsie en boucle fermée (${history.length} tirages trouvés).`);
+    throw new Error(
+      `Historique insuffisant pour l'autopsie en boucle fermée (${history.length} tirages trouvés).`
+    );
   }
 
   const targetDraw = history[targetDrawIndex] || history[0];
   const priorHistory = history.slice(targetDrawIndex + 1);
 
   if (priorHistory.length < 2) {
-    throw new Error(`Historique antérieur insuffisant pour reconstituer la prédiction rétrospective.`);
+    throw new Error(
+      `Historique antérieur insuffisant pour reconstituer la prédiction rétrospective.`
+    );
   }
 
   const { winners: actualWinners, machine: actualMachine } = extractDrawNumbers(targetDraw);
   const actualWinnersSet = new Set(actualWinners);
 
-  // 1. Reconstitution du contexte de prédiction à l'instant t-1
+  const hasMachineData = priorHistory.some(
+    (d) => Array.isArray(d.machine) && d.machine.length > 0
+  );
+  const baseWeightsForContext: AlgoWeights = { ...currentWeights };
+  if (!hasMachineData) {
+    baseWeightsForContext[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const normalizedCurrent = normalizeWeights(baseWeightsForContext);
+
+  // 1. Reconstitution du contexte de prédiction strictement à l'instant t-1
   const features = await extractFeatures(drawName, priorHistory);
   const bounds = calculateStatisticalBounds(priorHistory);
   const advancedMetrics = await computeAdvancedMetrics(
@@ -127,8 +264,8 @@ export const executeClosedLoopAutopsy = async (
     features,
     advancedMetrics,
     history: priorHistory,
-    weights: { ...currentWeights },
-    algoWeights: { ...currentWeights },
+    weights: { ...normalizedCurrent },
+    algoWeights: { ...normalizedCurrent },
     statisticalBounds: bounds,
     deterministicSeed: parseDateSafely(targetDraw.date).getTime(),
     drawName,
@@ -147,10 +284,9 @@ export const executeClosedLoopAutopsy = async (
   });
 
   const validKeys = Object.values(AlgoKey);
-  const numAlgos = validKeys.length;
-  const normalizedCurrent = normalizeWeights(currentWeights);
 
   // 2. Évaluation individuelle de chaque algorithme pour les 90 numéros
+  // RÈGLE : les poids nuls (canaux retirés ou transfert machine désactivé) restent strictement à 0.
   const algoScores: Record<string, Float32Array> = {};
   const ensembleScores = new Float32Array(91);
 
@@ -163,12 +299,22 @@ export const executeClosedLoopAutopsy = async (
 
     algorithmRegistry.forEach((plugin) => {
       if (!validKeys.includes(plugin.key)) return;
+      if (!hasMachineData && plugin.key === AlgoKey.MACHINE_TRANSFER) {
+        algoScores[plugin.key][num] = 0;
+        return;
+      }
       try {
         const res = plugin.evaluate(num, context);
-        const rawS = typeof res.score === 'number' && !isNaN(res.score) ? Math.max(0, Math.min(100, res.score)) : 0;
+        const rawS =
+          typeof res.score === 'number' && Number.isFinite(res.score)
+            ? Math.max(0, Math.min(100, res.score))
+            : 0;
         const s = rawS / 100.0;
         algoScores[plugin.key][num] = s;
-        combinedScore += s * (normalizedCurrent[plugin.key] || (1 / numAlgos));
+        const w = Number.isFinite(normalizedCurrent[plugin.key])
+          ? normalizedCurrent[plugin.key]
+          : 0;
+        combinedScore += s * w;
       } catch {
         algoScores[plugin.key][num] = 0;
       }
@@ -177,18 +323,20 @@ export const executeClosedLoopAutopsy = async (
     ensembleScores[num] = combinedScore;
   }
 
-  // 3. Normalisation des distributions de probabilité (Softmax / L1)
+  // 3. Normalisation de la distribution sur le simplexe (somme = 1) et marginales d'inclusion (somme = K = 5)
   let sumEnsemble = 0;
   for (let i = 1; i <= 90; i++) sumEnsemble += ensembleScores[i];
   const probEnsemble = new Float32Array(91);
-  for (let i = 1; i <= 90; i++) probEnsemble[i] = ensembleScores[i] / (sumEnsemble || 1.0);
+  for (let i = 1; i <= 90; i++) {
+    probEnsemble[i] = sumEnsemble > 0 ? ensembleScores[i] / sumEnsemble : 1.0 / 90.0;
+  }
 
   // 4. Classement rétrospectif
   const rankedNumbers = Array.from({ length: 90 }, (_, i) => ({
     num: i + 1,
     score: ensembleScores[i + 1],
     prob: probEnsemble[i + 1],
-  })).sort((a, b) => b.score - a.score);
+  })).sort((a, b) => b.score - a.score || a.num - b.num);
 
   const top5Predicted = rankedNumbers.slice(0, 5).map((r) => r.num);
   const top10Predicted = rankedNumbers.slice(0, 10).map((r) => r.num);
@@ -198,107 +346,86 @@ export const executeClosedLoopAutopsy = async (
   const directHitsTop10 = top10Predicted.filter((n) => actualWinnersSet.has(n));
   const directHitsTop20 = top20Predicted.filter((n) => actualWinnersSet.has(n));
 
-  // 5. Calcul des Near-Misses (Frôlements mathématiques)
+  // 5. Frôlements physiques (adjacence circulaire immédiate ±1 sur le Top 5 prédit, au plus 1 par gagnant)
   const nearMisses: NearMissItem[] = [];
-  const top10Set = new Set(top10Predicted);
+  const top5Set = new Set(top5Predicted);
 
   actualWinners.forEach((w) => {
-    if (top5Predicted.includes(w)) return; // Hit exact déjà comptabilisé
+    if (top5Set.has(w)) return; // Hit exact déjà comptabilisé
 
-    // Voisins +/- 1 et +/- 2 (sur tore circulaire [1, 90])
     const minus1 = w > 1 ? w - 1 : 90;
     const plus1 = w < 90 ? w + 1 : 1;
-    const minus2 = w > 2 ? w - 2 : (w === 2 ? 90 : 89);
-    const plus2 = w < 89 ? w + 2 : (w === 89 ? 1 : 2);
 
-    if (top10Set.has(minus1)) {
+    if (top5Set.has(minus1)) {
       nearMisses.push({
         actualWinner: w,
         closestPredicted: minus1,
         distance: 1,
         type: 'neighbor_1',
-        description: `Frôlement immédiat -1 : Gagnant ${w} vs Prédit ${minus1}`,
+        description: `Adjacence circulaire -1 : Gagnant ${w} vs Prédit ${minus1}`,
       });
-    } else if (top10Set.has(plus1)) {
+    } else if (top5Set.has(plus1)) {
       nearMisses.push({
         actualWinner: w,
         closestPredicted: plus1,
         distance: 1,
         type: 'neighbor_1',
-        description: `Frôlement immédiat +1 : Gagnant ${w} vs Prédit ${plus1}`,
-      });
-    } else if (top10Set.has(minus2)) {
-      nearMisses.push({
-        actualWinner: w,
-        closestPredicted: minus2,
-        distance: 2,
-        type: 'neighbor_2',
-        description: `Déviation spatiale -2 : Gagnant ${w} vs Prédit ${minus2}`,
-      });
-    } else if (top10Set.has(plus2)) {
-      nearMisses.push({
-        actualWinner: w,
-        closestPredicted: plus2,
-        distance: 2,
-        type: 'neighbor_2',
-        description: `Déviation spatiale +2 : Gagnant ${w} vs Prédit ${plus2}`,
-      });
-    }
-
-    // Miroir
-    const mirror = getMirrorNumber(w);
-    if (mirror !== w && top10Set.has(mirror)) {
-      nearMisses.push({
-        actualWinner: w,
-        closestPredicted: mirror,
-        distance: Math.abs(w - mirror),
-        type: 'mirror',
-        description: `Résonance miroir : Gagnant ${w} vs Prédit miroir ${mirror}`,
-      });
-    }
-
-    // Complémentaire 90
-    const comp90 = 91 - w;
-    if (comp90 !== w && top10Set.has(comp90)) {
-      nearMisses.push({
-        actualWinner: w,
-        closestPredicted: comp90,
-        distance: Math.abs(w - comp90),
-        type: 'complementary_90',
-        description: `Symétrie 90 : Gagnant ${w} vs Symétrique ${comp90}`,
+        description: `Adjacence circulaire +1 : Gagnant ${w} vs Prédit ${plus1}`,
       });
     }
   });
 
-  // 6. Métriques d'Entropie Croisée & Divergence KL
+  // 6. Métriques d'Entropie Croisée, Divergence KL & Score de Brier sur marginales d'inclusion (somme = K)
   let klDiv = 0;
   let crossEnt = 0;
   let brierSum = 0;
-  const pActualUniformOnWinners = 1.0 / (actualWinners.length || 5);
+  const K = actualWinners.length || 5;
+  const pActualUniformOnWinners = 1.0 / K;
 
   for (let num = 1; num <= 90; num++) {
     const isWinner = actualWinnersSet.has(num);
-    const pPred = Math.max(1e-6, probEnsemble[num]);
+    const pSimplex = Math.max(1e-6, probEnsemble[num]);
+    const qMarginal = Math.min(1.0, K * probEnsemble[num]);
     const pTarget = isWinner ? pActualUniformOnWinners : 0;
 
     if (isWinner) {
-      klDiv += pTarget * Math.log((pTarget + 1e-9) / pPred);
-      crossEnt -= pTarget * Math.log(pPred);
+      klDiv += pTarget * Math.log((pTarget + 1e-9) / pSimplex);
+      crossEnt -= pTarget * Math.log(pSimplex);
     }
-    brierSum += Math.pow(pPred - (isWinner ? 1 : 0), 2);
+    brierSum += Math.pow(qMarginal - (isWinner ? 1.0 : 0.0), 2);
   }
 
   const brierScore = brierSum / 90.0;
-  // Échelle de conversion Brier -> calibration centralisée dans calibrationConstants.AUTOPSY_CALIBRATION.
-  const calibrationAccuracy = Math.max(0, Math.min(100, Math.round(100 * Math.exp(-brierScore * AUTOPSY_CALIBRATION.BRIER_TO_ACCURACY_DECAY))));
+  // Référence exacte d'un prédicteur uniforme sur les marginales d'inclusion (q_i = K/90) :
+  // Brier_uniform = (K/90)*(1 - K/90)^2 + (1 - K/90)*(K/90)^2 = (K/90)*(1 - K/90) ≈ 0.052469
+  const pUniformMarginal = K / 90.0;
+  const expectedUniformBrier = pUniformMarginal * (1.0 - pUniformMarginal);
+  // Calibration continue : Brier = 0 (parfait) -> 100%, Brier = expectedUniformBrier (hasard uniforme) -> 50%
+  const calibrationAccuracy = Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        100 *
+          Math.exp((-brierScore / Math.max(1e-6, expectedUniformBrier)) * Math.LN2)
+      )
+    )
+  );
 
   // 7. Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
-  // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
-  const expectedUniformBrier = (5.0 / 90.0) * Math.pow(1.0 - 1.0 / 5.0, 2);
-  const maxLR = 1.0 / Math.sqrt(numAlgos);
-  const baseLR = maxLR / (1.0 + Math.exp((brierScore - expectedUniformBrier) / (expectedUniformBrier || 1e-6)));
-  const temporalDriftMetrics = calculateTemporalDriftLearningRate(priorHistory, baseLR, 10);
-  const learningRate = Math.max(0.02, Math.min(0.5, temporalDriftMetrics.learningRate));
+  // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q)) avec η0 = 1 / sqrt(K_active)
+  const activeAlgoCount =
+    validKeys.filter((k) => (normalizedCurrent[k] ?? 0) > 0).length || validKeys.length;
+  const eta0 = 1.0 / Math.sqrt(activeAlgoCount);
+  const temporalDriftMetrics = calculateTemporalDriftLearningRate(
+    priorHistory,
+    eta0,
+    10
+  );
+  const learningRate = Math.max(
+    0.02,
+    Math.min(0.5, temporalDriftMetrics.learningRate)
+  );
 
   // 7.5. Matrice de Profil Cyclique & Exposant de Lyapunov
   const cyclicPhaseProfile = calculateCyclicPhaseProfileMatrix(
@@ -315,44 +442,30 @@ export const executeClosedLoopAutopsy = async (
     for (let i = 1; i <= 90; i++) sumScore += scores[i];
     const meanScore = sumScore / 90.0;
 
+    // Attribution mesurée exclusivement sur les gagnants réels (zéro dilution par miroirs/voisins)
     let attributionWinners = 0;
-    let totalTargetMass = 0;
     actualWinners.forEach((w) => {
-      // 1. Impact direct exact (Hit exact : distance = 0, masse = 1.0)
       attributionWinners += scores[w] || 0;
-      totalTargetMass += 1.0;
-
-      // 2. Intégration continue des frôlements spatiaux (Voisins immédiats +/- 1 sur tore circulaire)
-      const neighborMinus = w > 1 ? w - 1 : 90;
-      const neighborPlus = w < 90 ? w + 1 : 1;
-      const neighborGaussWeight = Math.exp(-0.5); // Noyau gaussien continu exp(-d^2/(2*sigma^2))
-      const halfNeighborWeight = neighborGaussWeight / 2.0;
-      attributionWinners += (scores[neighborMinus] || 0) * halfNeighborWeight;
-      attributionWinners += (scores[neighborPlus] || 0) * halfNeighborWeight;
-      totalTargetMass += neighborGaussWeight;
-
-      // 3. Résonance miroir décadaire
-      const mirror = getMirrorNumber(w);
-      if (mirror !== w) {
-        const mirrorWeight = Math.exp(-1.0) / 2.0;
-        attributionWinners += (scores[mirror] || 0) * mirrorWeight;
-        totalTargetMass += mirrorWeight;
-      }
     });
-    const avgWinnerScore = attributionWinners / (totalTargetMass || 1);
+    const avgWinnerScore = attributionWinners / K;
 
-    // Gradient différentiel : gain relatif sur les gagnants vs bruit sur le reste
+    // Gradient différentiel : gain relatif sur les gagnants vs moyenne sur les 90 boules
     const signalGain = avgWinnerScore - meanScore;
-    const gradient = -signalGain; // Négatif si le gène a fortement distingué les gagnants
+    const gradient = -signalGain; // Négatif si le gène a distingué les gagnants au-dessus de sa moyenne
 
     // Modulation continue selon la phase cyclique du jeu
     const phaseModifier = cyclicPhaseProfile.algoWeightModifiers[key] || 0.0;
     const phaseMultiplier = Math.exp(phaseModifier * 0.5);
 
-    // Mise à jour exponentielle (Softmax SGD) régularisée par la résistance de dérive
-    const currentW = normalizedCurrent[key] || (1.0 / numAlgos);
+    // Respect strict des poids nuls (canaux retirés ou transfert machine sans données)
+    const currentW = Number.isFinite(normalizedCurrent[key])
+      ? normalizedCurrent[key]
+      : 0;
     const updateMultiplier = Math.exp(-learningRate * gradient * 4.0) * phaseMultiplier;
-    const newWeight = currentW * updateMultiplier;
+    const newWeight =
+      currentW > 0 && (!(!hasMachineData && key === AlgoKey.MACHINE_TRANSFER))
+        ? currentW * updateMultiplier
+        : 0;
     rawUpdatedWeights[key] = newWeight;
 
     algoGradients.push({
@@ -367,16 +480,20 @@ export const executeClosedLoopAutopsy = async (
     });
   });
 
-  const hasMachineData = priorHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
   if (!hasMachineData) {
-    (rawUpdatedWeights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
+    rawUpdatedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
   }
 
   const correctedWeights = normalizeWeights(rawUpdatedWeights as AlgoWeights);
 
   algoGradients.forEach((g) => {
-    g.recommendedWeight = correctedWeights[g.key] || (1.0 / numAlgos);
-    g.deltaPercent = ((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100;
+    g.recommendedWeight = Number.isFinite(correctedWeights[g.key])
+      ? correctedWeights[g.key]
+      : 0;
+    g.deltaPercent =
+      g.currentWeight > 0
+        ? ((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100
+        : 0;
   });
 
   // Tri par attribution décroissante
@@ -399,13 +516,12 @@ export const executeClosedLoopAutopsy = async (
     };
   });
 
-  // La carte d'explicabilité attendue par le synthétiseur est { [num]: { topologicalTension } } :
-  // on la dérive réellement de la matrice de Lyapunov disponible au lieu de lui passer une carte
-  // de nombres bruts (dont les tensions auraient toutes été lues à 0).
   const autopsyExplainability: Record<number, { topologicalTension: number }> = {};
-  Object.entries((advancedMetrics?.topologicalLyapunov as Record<string, number>) || {}).forEach(([key, value]) => {
+  Object.entries(
+    (advancedMetrics?.topologicalLyapunov as Record<string, number>) || {}
+  ).forEach(([key, value]) => {
     const num = Number(key);
-    if (Number.isFinite(num) && typeof value === "number" && Number.isFinite(value)) {
+    if (Number.isFinite(num) && typeof value === 'number' && Number.isFinite(value)) {
       autopsyExplainability[num] = { topologicalTension: value };
     }
   });
@@ -414,9 +530,6 @@ export const executeClosedLoopAutopsy = async (
     selection: top5Predicted,
     denoisedScores: simulatedScoredNumbers,
     explainabilityRecord: autopsyExplainability,
-    // `calibrationAccuracy` est une exactitude de calibration PÉRIODIQUE (dérivée du Brier), pas un
-    // indicateur de cohérence par ticket : la transmettre comme cohérence primaire serait un
-    // étiquetage abusif. L'autopsie ne consomme pas cet indicateur (elle mesure les hits réels).
     primaryCoherence: null,
     drawName,
   });
@@ -426,11 +539,13 @@ export const executeClosedLoopAutopsy = async (
     const hits = sc.ticket.filter((num) => actualWinnersSet.has(num));
     const hitCount = hits.length;
 
-    // Calcul des near-misses spécifiques au scénario
+    // Frôlements physiques du scénario : adjacence circulaire ±1 sur [1, 90], au plus 1 par gagnant non touché
     let nearMissCount = 0;
     actualWinners.forEach((w) => {
       if (ticketSet.has(w)) return;
-      if (ticketSet.has(w - 1) || ticketSet.has(w + 1) || ticketSet.has(getMirrorNumber(w)) || ticketSet.has(91 - w)) {
+      const minus1 = w > 1 ? w - 1 : 90;
+      const plus1 = w < 90 ? w + 1 : 1;
+      if (ticketSet.has(minus1) || ticketSet.has(plus1)) {
         nearMissCount++;
       }
     });
@@ -439,12 +554,18 @@ export const executeClosedLoopAutopsy = async (
     let scenKl = 0;
     for (const winNum of actualWinners) {
       const pScen = ticketSet.has(winNum) ? 1.0 / 5.0 : 1e-6;
-      scenKl += (1.0 / actualWinners.length) * Math.log((1.0 / actualWinners.length) / pScen);
+      scenKl +=
+        (1.0 / K) * Math.log((1.0 / K) / pScen);
     }
 
-    // Score d'alignement continu 0-100% (Hit direct = 20 pts, Frôlement = 6 pts, Pénalité de divergence continue)
-    const rawScore = hitCount * 20.0 + nearMissCount * 6.0;
-    const alignmentScore = Math.max(0, Math.min(100, Math.round(100 * (1.0 / (1.0 + Math.exp(-0.08 * (rawScore - 20.0)))))));
+    // Score d'alignement monotone sur [0, 100] :
+    // - 0 hit, 0 frôlement = 0%
+    // - 1 hit direct = 20% (domine strictement même 5 frôlements = 12.5%)
+    // - 5 hits directs = 100%
+    const alignmentScore = Math.max(
+      0,
+      Math.min(100, Math.round(hitCount * 20.0 + Math.min(5, nearMissCount) * 2.5))
+    );
 
     return {
       scenarioId: sc.scenarioId,
@@ -480,7 +601,7 @@ export const executeClosedLoopAutopsy = async (
   } else if (directHitsTop10.length >= 2) {
     summaryRemark += `Convergence solide : ${directHitsTop10.length} numéros détectés dans le Top 10 (${directHitsTop10.join(', ')}). `;
   } else {
-    summaryRemark += `Dispersion stochastique modérée. ${nearMisses.length} frôlements spatiaux/miroirs identifiés (${nearMisses.slice(0, 2).map((m) => m.actualWinner).join(', ')}). `;
+    summaryRemark += `Dispersion stochastique modérée. ${nearMisses.length} frôlement(s) circulaire(s) ±1 identifié(s)${nearMisses.length > 0 ? ` (${nearMisses.slice(0, 2).map((m) => m.actualWinner).join(', ')})` : ''}. `;
   }
   if (bestPerformingScenario) {
     summaryRemark += `Scénario le plus performant : "${bestPerformingScenario.scenarioName}" (${bestPerformingScenario.hitCount} exact(s), ${bestPerformingScenario.nearMissCount} frôlement(s)). `;
@@ -497,12 +618,9 @@ export const executeClosedLoopAutopsy = async (
     brierScore,
   });
 
-  // Audit Rétrospectif des Signaux Inter-Tirages & Calibration Bayesienne (Famille étanche)
-  const interDrawAudit = auditInterDrawPatternsPostMortem(
-    drawName,
-    targetDrawIndex,
-    rawHistory
-  ) || undefined;
+  // Audit Rétrospectif des Signaux Inter-Tirages & Calibration Bayesienne (Famille étanche, zéro donnée synthétique)
+  const interDrawAudit =
+    auditInterDrawPatternsPostMortem(drawName, targetDrawIndex, rawHistory) || undefined;
 
   return {
     drawName,
@@ -575,19 +693,35 @@ export const executeClosedLoopAutoAdjustment = async (
   const targetDraw = history[targetDrawIndex] || history[0];
   const priorHistory = history.slice(targetDrawIndex + 1);
 
-  // 2. Évaluation des preuves empiriques propres au tirage actif (Règle d'Or AGENTS.md)
-  const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistory.length >= 3 ? priorHistory : history);
+  const hasMachineData = priorHistory.some(
+    (d) => Array.isArray(d.machine) && d.machine.length > 0
+  );
 
-  // 3. Application du Micro-SGD avec verrouillage strict par preuve empirique
-  const initialNormalized = normalizeWeights(currentWeights);
+  // 2. Évaluation des preuves empiriques strictement sur priorHistory (zéro fuite temporelle du tirage cible)
+  const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistory);
+
+  // 3. Application du Micro-SGD avec verrouillage strict par preuve empirique sur le simplexe
+  const initialWeightsClean: AlgoWeights = { ...currentWeights };
+  if (!hasMachineData) {
+    initialWeightsClean[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const initialNormalized = normalizeWeights(initialWeightsClean);
   const candidateWeights = { ...autopsyReport.correctedWeights };
   const finalWeights: Record<string, number> = {};
+  const lockedMaxKeys = new Set<AlgoKey>();
+  const forcedZeroKeys = new Set<AlgoKey>();
 
-  const effectiveLearningRate = options?.learningRateOverride !== undefined
-    ? options.learningRateOverride
-    : autopsyReport.learningRate;
+  if (!hasMachineData) {
+    forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
+  }
 
-  const driftResistance = autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 1.0;
+  const effectiveLearningRate =
+    options?.learningRateOverride !== undefined
+      ? options.learningRateOverride
+      : autopsyReport.learningRate;
+
+  const driftResistance =
+    autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 1.0;
 
   const causalAuditTrail: string[] = [
     `Autopsie fermée exécutée sur ${drawName} (Tirage du ${targetDraw.date})`,
@@ -597,44 +731,53 @@ export const executeClosedLoopAutoAdjustment = async (
 
   if (autopsyReport.nearMisses.length > 0) {
     causalAuditTrail.push(
-      `${autopsyReport.nearMisses.length} frôlements spatiaux/miroirs détectés : ${autopsyReport.nearMisses.slice(0, 3).map((m) => m.description).join('; ')}`
+      `${autopsyReport.nearMisses.length} frôlement(s) circulaire(s) ±1 détecté(s) : ${autopsyReport.nearMisses
+        .slice(0, 3)
+        .map((m) => m.description)
+        .join('; ')}`
     );
   }
 
-  // Filtrer et régulariser par les preuves empiriques
-  Object.keys(candidateWeights).forEach((key) => {
-    const k = key as AlgoKey;
-    const oldW = initialNormalized[k] || 0;
-    let newW = candidateWeights[k] || oldW;
+  Object.values(AlgoKey).forEach((k) => {
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+      finalWeights[k] = 0;
+      return;
+    }
+    const oldW = Number.isFinite(initialNormalized[k]) ? initialNormalized[k] : 0;
+    let newW = Number.isFinite(candidateWeights[k]) ? candidateWeights[k] : oldW;
     const proof = proofMap[k];
-    const hasProof = proof && proof.hasProof && proof.proofScore > 0;
+    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
 
     if (!hasProof) {
-      // Si l'algo ne démontre pas de preuve empirique, son poids ne peut jamais augmenter
+      lockedMaxKeys.add(k);
       if (newW > oldW) {
         newW = oldW;
       } else if (proof && proof.proofScore < 0) {
         const dampener = 1.0 / (1.0 + Math.exp(-2.0 * proof.proofScore));
         newW = newW * Math.max(0.1, dampener);
       }
-    } else {
-      if (newW > oldW) {
-        const boostFactor = Math.tanh(proof.proofScore);
-        newW = oldW + (newW - oldW) * boostFactor;
-      }
+    } else if (newW > oldW) {
+      const boostFactor = Math.tanh(proof.proofScore);
+      newW = oldW + (newW - oldW) * boostFactor;
     }
-    finalWeights[key] = newW;
+    finalWeights[k] = newW;
   });
 
-  const optimizedNormalized = normalizeWeights(finalWeights as AlgoWeights);
+  // Projection sur le simplexe garantissant qu'aucun canal sans preuve ne remonte au-dessus de oldW après renormalisation
+  const optimizedNormalized = projectWeightsWithProofGuard(
+    finalWeights,
+    initialNormalized,
+    lockedMaxKeys,
+    forcedZeroKeys
+  );
 
   // Tracer les deltas significatifs dans l'audit trail
   const topBoosted: string[] = [];
   const topPenalized: string[] = [];
   Object.keys(optimizedNormalized).forEach((key) => {
     const k = key as AlgoKey;
-    const oldW = initialNormalized[k] || 0;
-    const newW = optimizedNormalized[k] || 0;
+    const oldW = initialNormalized[k] ?? 0;
+    const newW = optimizedNormalized[k] ?? 0;
     const delta = newW - oldW;
     if (delta > 0.005) {
       topBoosted.push(`${LABELS_MAP[k] || k} (+${(delta * 100).toFixed(1)}%)`);
@@ -654,14 +797,31 @@ export const executeClosedLoopAutoAdjustment = async (
     causalAuditTrail.push(`Contexte : ${options.auditContext}`);
   }
 
-  // 4. Enregistrement automatique et persistance via le Contrôleur d'Optimisation Centralisé
+  // 4. Enregistrement via le Contrôleur d'Optimisation Centralisé (ou simulation pure sans effet de bord en dryRun)
   const appliedDirectly = !options?.dryRun;
-  let finalAppliedWeights = optimizedNormalized;
-  let dnaRecord: ModelDnaRecord;
-
   const drawDateSafe = targetDraw.date.replace(/[^a-zA-Z0-9]/g, '_');
   const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
   const versionId = `v_autopsy_${drawDateSafe}`;
+
+  const measuredHurst = Number.isFinite(autopsyReport.mathProofMetadata?.hurstExponent)
+    ? autopsyReport.mathProofMetadata!.hurstExponent
+    : 0.5;
+  const measuredShannon = Number.isFinite(autopsyReport.mathProofMetadata?.shannonEntropy)
+    ? autopsyReport.mathProofMetadata!.shannonEntropy
+    : undefined;
+
+  const performancePayload = {
+    score: autopsyReport.calibrationAccuracy,
+    brierScore: autopsyReport.brierScore,
+    hitRate: autopsyReport.directHitsTop5.length / 5.0,
+    topologicalLoss: autopsyReport.mathProofMetadata?.topologicalLoss,
+  };
+
+  const regimePayload = {
+    regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
+    hurst: measuredHurst,
+    entropy: measuredShannon,
+  };
 
   if (appliedDirectly) {
     const optResult = await applyOptimizedWeights({
@@ -669,66 +829,88 @@ export const executeClosedLoopAutoAdjustment = async (
       version: versionId,
       timestamp: options?.timestamp || deterministicTimestamp,
       weights: optimizedNormalized,
+      history: priorHistory,
       origin: 'FORENSIC_AUTOPSY',
-      performance: {
-        // Mesures rétrospectives réelles du tirage : calibration (dérivée du Brier),
-        // Brier, hits Top 5 et perte topologique géodésique mesurée sur top5 vs gagnants.
-        // Aucun gain relatif version-à-version n'est mesuré ici : ce champ reste vide (n/d).
-        score: autopsyReport.calibrationAccuracy,
-        brierScore: autopsyReport.brierScore,
-        hitRate: autopsyReport.directHitsTop5.length / 5.0,
-        topologicalLoss: autopsyReport.mathProofMetadata?.topologicalLoss,
-      },
-      regimeContext: {
-        regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
-        hurst: autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 0.5,
-        entropy: autopsyReport.crossEntropy ?? 1.0,
-      },
+      performance: performancePayload,
+      regimeContext: regimePayload,
       causalAuditTrail,
       reason: `Autopsie fermée tirage ${targetDraw.date}`,
       allowCriticalDrift: false,
     });
-    dnaRecord = optResult.dnaRecord;
-    finalAppliedWeights = optResult.appliedWeights;
-  } else {
-    const drawDateSafe = targetDraw.date.replace(/[^a-zA-Z0-9]/g, '_');
-    const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
-    const versionId = `v_autopsy_${drawDateSafe}`;
 
-    dnaRecord = await recordModelDnaVersion({
+    return {
       drawName,
-      version: versionId,
-      timestamp: options?.timestamp || deterministicTimestamp,
-      origin: 'FORENSIC_AUTOPSY',
-      weights: optimizedNormalized,
-      performance: {
-        // Mesures rétrospectives réelles du tirage : calibration (dérivée du Brier),
-        // Brier, hits Top 5 et perte topologique géodésique mesurée sur top5 vs gagnants.
-        // Aucun gain relatif version-à-version n'est mesuré ici : ce champ reste vide (n/d).
-        score: autopsyReport.calibrationAccuracy,
-        brierScore: autopsyReport.brierScore,
-        hitRate: autopsyReport.directHitsTop5.length / 5.0,
-        topologicalLoss: autopsyReport.mathProofMetadata?.topologicalLoss,
-      },
-      regimeContext: {
-        regime: autopsyReport.cyclicPhaseProfile?.phaseLabel || 'Régime Dynamique',
-        hurst: autopsyReport.temporalDriftMetrics?.driftResistanceFactor ?? 0.5,
-        entropy: autopsyReport.crossEntropy ?? 1.0,
-      },
+      targetDrawDate: targetDraw.date,
+      autopsyReport,
+      previousWeights: initialNormalized,
+      optimizedWeights: optResult.appliedWeights,
+      dnaRecord: optResult.dnaRecord,
       causalAuditTrail,
-    });
+      learningRate: effectiveLearningRate,
+      appliedDirectly: true,
+    };
   }
+
+  // Mode dryRun : applique exactement le même amortissement de dérive critique que applyOptimizedWeights
+  // SANS écrire dans localStorage ni muter la lignée ADN.
+  const algoCount = Object.keys(optimizedNormalized).length;
+  const { criticalThreshold, entropy: entropyFallback } = computeDrawCriticalThreshold(
+    priorHistory,
+    algoCount
+  );
+  const { maxDelta } = calculateWeightDriftMetrics(
+    initialNormalized,
+    optimizedNormalized
+  );
+  let previewWeights: AlgoWeights = optimizedNormalized;
+  if (maxDelta > criticalThreshold) {
+    const dampingFactor = criticalThreshold / Math.max(criticalThreshold, maxDelta);
+    const dampedRecord: Record<string, number> = {};
+    (Object.keys(optimizedNormalized) as AlgoKey[]).forEach((k) => {
+      const cur = initialNormalized[k] ?? 0;
+      const tgt = optimizedNormalized[k] ?? 0;
+      dampedRecord[k] = cur + dampingFactor * (tgt - cur);
+    });
+    previewWeights = projectWeightsWithProofGuard(
+      dampedRecord,
+      initialNormalized,
+      lockedMaxKeys,
+      forcedZeroKeys
+    );
+  }
+
+  const finalTimestamp = options?.timestamp || deterministicTimestamp;
+  const dnaFingerprint = computeModelDnaFingerprint(drawName, previewWeights);
+  const specializations = extractSpecializations(previewWeights);
+
+  const dryRunDnaRecord: ModelDnaRecord = {
+    id: `dna_${drawName.toLowerCase().replace(/\s+/g, '_')}_${versionId}`,
+    drawName,
+    version: versionId,
+    dnaFingerprint,
+    timestamp: finalTimestamp,
+    origin: 'FORENSIC_AUTOPSY',
+    weights: { ...previewWeights },
+    specializations,
+    performance: performancePayload,
+    regimeContext: {
+      regime: regimePayload.regime,
+      hurst: regimePayload.hurst,
+      entropy: regimePayload.entropy ?? entropyFallback,
+    },
+    causalAuditTrail,
+  };
 
   return {
     drawName,
     targetDrawDate: targetDraw.date,
     autopsyReport,
     previousWeights: initialNormalized,
-    optimizedWeights: finalAppliedWeights,
-    dnaRecord,
+    optimizedWeights: previewWeights,
+    dnaRecord: dryRunDnaRecord,
     causalAuditTrail,
     learningRate: effectiveLearningRate,
-    appliedDirectly,
+    appliedDirectly: false,
   };
 };
 
@@ -779,7 +961,12 @@ export const executeBatchClosedLoopAutopsy = async (
   for (let i = 0; i < depth; i++) {
     onProgress?.(i + 1, depth);
     try {
-      const rep = await executeClosedLoopAutopsy(drawName, i, rawHistory, currentWeights);
+      const rep = await executeClosedLoopAutopsy(
+        drawName,
+        i,
+        rawHistory,
+        currentWeights
+      );
       reports.push(rep);
 
       sumCalibration += rep.calibrationAccuracy;
@@ -790,7 +977,8 @@ export const executeBatchClosedLoopAutopsy = async (
 
       rep.algoGradients.forEach((g) => {
         gradientSums[g.key] = (gradientSums[g.key] || 0) + g.gradient;
-        attributionSums[g.key] = (attributionSums[g.key] || 0) + g.attributionToWinners;
+        attributionSums[g.key] =
+          (attributionSums[g.key] || 0) + g.attributionToWinners;
       });
     } catch (e) {
       console.warn(`[Batch Autopsy] Tirage ${i} ignoré :`, e);
@@ -801,18 +989,48 @@ export const executeBatchClosedLoopAutopsy = async (
   const meanCalibration = sumCalibration / effectiveCount;
   const meanBrier = sumBrier / effectiveCount;
 
+  const priorHistoryForBatch = history.slice(depth);
+  const hasMachineData = history.some(
+    (d) => Array.isArray(d.machine) && d.machine.length > 0
+  );
+  const proofMap = evaluateAlgoEmpiricalProof(
+    drawName,
+    priorHistoryForBatch.length >= 3 ? priorHistoryForBatch : history.slice(1)
+  );
+
   // Calcul des gradients moyens et des nouveaux poids proposés
   const rawUpdatedWeights: Record<string, number> = {};
-  const currentNormalized = normalizeWeights(currentWeights);
-  const meanLearningRate = reports.reduce((acc, r) => acc + r.learningRate, 0) / effectiveCount;
+  const baseWeightsClean: AlgoWeights = { ...currentWeights };
+  if (!hasMachineData) {
+    baseWeightsClean[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const currentNormalized = normalizeWeights(baseWeightsClean);
+  const meanLearningRate =
+    reports.reduce((acc, r) => acc + r.learningRate, 0) / effectiveCount;
+
+  const lockedMaxKeys = new Set<AlgoKey>();
+  const forcedZeroKeys = new Set<AlgoKey>();
+  if (!hasMachineData) {
+    forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
+  }
 
   const aggregatedGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
     const meanGrad = (gradientSums[key] || 0) / effectiveCount;
     const meanAttr = (attributionSums[key] || 0) / effectiveCount;
-    const currentW = currentNormalized[key] || (1.0 / validKeys.length);
+    const currentW = Number.isFinite(currentNormalized[key])
+      ? currentNormalized[key]
+      : 0;
 
-    // Softmax update régularisé
-    const newWeight = currentW * Math.exp(-meanLearningRate * meanGrad * 3.0);
+    const proof = proofMap[key];
+    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
+    if (!hasProof) {
+      lockedMaxKeys.add(key);
+    }
+
+    const newWeight =
+      currentW > 0 && !forcedZeroKeys.has(key)
+        ? currentW * Math.exp(-meanLearningRate * meanGrad * 3.0)
+        : 0;
     rawUpdatedWeights[key] = newWeight;
 
     return {
@@ -827,11 +1045,23 @@ export const executeBatchClosedLoopAutopsy = async (
     };
   });
 
-  const recommendedWeights = normalizeWeights(rawUpdatedWeights as AlgoWeights);
+  const recommendedWeights = projectWeightsWithProofGuard(
+    rawUpdatedWeights,
+    currentNormalized,
+    lockedMaxKeys,
+    forcedZeroKeys
+  );
 
   aggregatedGradients.forEach((g) => {
-    g.recommendedWeight = recommendedWeights[g.key] || (1.0 / validKeys.length);
-    g.deltaPercent = parseFloat((((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100).toFixed(1));
+    g.recommendedWeight = Number.isFinite(recommendedWeights[g.key])
+      ? recommendedWeights[g.key]
+      : 0;
+    g.deltaPercent =
+      g.currentWeight > 0
+        ? parseFloat(
+            (((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100).toFixed(1)
+          )
+        : 0;
   });
 
   aggregatedGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
@@ -849,5 +1079,3 @@ export const executeBatchClosedLoopAutopsy = async (
     reports,
   };
 };
-
-

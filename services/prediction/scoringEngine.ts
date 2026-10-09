@@ -8,6 +8,7 @@ import { algorithmRegistry, AlgorithmContext, getAlgorithmsForContext } from "./
 import './coreAlgorithms';
 import { EnhancedMetrics } from './metrics.types';
 import { normalizeWeights } from "./weightsManager";
+import { resolveWeightsWithExpertBiasDecay } from "./expertBiasService";
 import { logger } from "../../utils/logger";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { parseDateSafely } from "../../utils/dateUtils";
@@ -190,7 +191,12 @@ export const calculateScores = (
   });
 
   const failedAlgos = new Set<string>();
-  let effectiveWeights = { ...weights };
+  const resolvedWeights = resolveWeightsWithExpertBiasDecay(
+    context.drawName,
+    weights,
+    history.length
+  );
+  let effectiveWeights = { ...resolvedWeights };
 
   // Exclusion absolue de MACHINE_TRANSFER si le tirage est sans machine
   if (!hasMachine) {

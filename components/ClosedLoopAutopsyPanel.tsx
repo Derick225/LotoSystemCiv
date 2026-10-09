@@ -8,6 +8,7 @@ import {
   ClosedLoopAutoAdjustmentResult,
   BatchClosedLoopAutopsyResult,
 } from "../services/prediction/closedLoopAutopsyService";
+import { applyOptimizedWeights } from "../services/prediction/optimizationController";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
@@ -74,7 +75,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       const res = await executeClosedLoopAutopsy(
         drawName,
         index,
-        drawHistory,
+        history,
         globalWeights
       );
       setReport(res);
@@ -95,7 +96,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
 
       const res = await executeBatchClosedLoopAutopsy(
         drawName,
-        drawHistory,
+        history,
         globalWeights,
         targetDepth,
         (current, total) => setBatchProgress({ current, total })
@@ -117,7 +118,23 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
     try {
       setIsApplying(true);
       audioEngine.play("click");
-      setGlobalWeights(batchResult.recommendedWeights);
+      const optRes = await applyOptimizedWeights({
+        drawName,
+        weights: batchResult.recommendedWeights,
+        history: drawHistory,
+        origin: "FORENSIC_AUTOPSY",
+        performance: {
+          score: batchResult.meanCalibrationAccuracy,
+          brierScore: batchResult.meanBrierScore,
+          hitRate: batchResult.totalDirectHitsTop5 / Math.max(1, batchResult.batchSize * 5),
+        },
+        causalAuditTrail: [
+          `Consensus d'autopsie par lot exécuté sur ${batchResult.batchSize} tirages (${drawName})`,
+          `Calibration moyenne = ${batchResult.meanCalibrationAccuracy}%, Brier moyen = ${batchResult.meanBrierScore.toFixed(4)}`,
+        ],
+        reason: `Consensus multi-tirages (${batchResult.batchSize} tirages)`,
+      });
+      setGlobalWeights(optRes.appliedWeights);
       setApplied(true);
       showToast(`Poids stabilisés par consensus multi-tirages appliqués avec succès (${batchResult.batchSize} tirages)`, "success");
       audioEngine.play("success");
@@ -140,7 +157,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       const result = await executeClosedLoopAutoAdjustment(
         drawName,
         selectedDrawIndex,
-        drawHistory,
+        history,
         globalWeights
       );
       setLastAdjustmentResult(result);
@@ -241,7 +258,18 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       audioEngine.play("scan");
       const scenario = await importUnifiedScenarioFromJSON(file);
       const res = await reinjectScenarioIntoState(scenario, drawHistory);
-      setGlobalWeights(res.weights);
+      const optRes = await applyOptimizedWeights({
+        drawName,
+        weights: res.weights,
+        history: drawHistory,
+        origin: "FORENSIC_AUTOPSY",
+        causalAuditTrail: [
+          `Réinjection de scénario forensique universel (${scenario.scenarioType || "JSON"})`,
+          res.message,
+        ],
+        reason: "Import JSON de scénario forensique",
+      });
+      setGlobalWeights(optRes.appliedWeights);
       showToast(res.message, "success");
       audioEngine.play("success");
     } catch (err: any) {

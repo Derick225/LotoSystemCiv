@@ -69,10 +69,20 @@ export function computeDeterministicCriticalThreshold(
   domainSize: number = 90
 ): number {
   if (algoCount <= 0) return 0.035;
-  const uniformVariance = (domainSize * domainSize - 1) / 12.0; // Variance max théorique uniforme
-  const maxEntropy = Math.log(domainSize); // Entropie max théorique
-  const normalizedEntropy = Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
-  const varianceRatio = Math.min(1.0, Math.max(0.0, variance / uniformVariance));
+  // Si `variance` est mesurée sur le simplexe des probabilités (somme = 1, variance max Dirac = (D-1)/D^2),
+  // on utilise l'échelle du simplexe ; si elle est mesurée sur les numéros [1..D], on utilise (D^2-1)/12.
+  const maxSimplexVariance = (domainSize - 1) / (domainSize * domainSize);
+  const referenceVariance =
+    variance <= maxSimplexVariance
+      ? maxSimplexVariance
+      : (domainSize * domainSize - 1) / 12.0;
+  // Si `entropy` est déjà normalisée dans [0, 1], on la conserve telle quelle ; sinon on normalise par log2(D).
+  const maxEntropy = Math.log2(domainSize);
+  const normalizedEntropy =
+    entropy <= 1.0
+      ? Math.min(1.0, Math.max(0.0, entropy))
+      : Math.min(1.0, Math.max(0.0, entropy / maxEntropy));
+  const varianceRatio = Math.min(1.0, Math.max(0.0, variance / referenceVariance));
 
   // Tolérance critique dérivée de la dispersion d'ensemble (Loi des grands nombres ~ 1 / sqrt(K))
   // et modulée continûment par l'entropie et la variance d'échantillonnage
@@ -95,15 +105,17 @@ export function computeDrawCriticalThreshold(
   history: DrawResult[],
   algoCount: number
 ): { criticalThreshold: number; entropy: number; variance: number } {
-  let entropyVal = 0.85;
-  let varianceVal = 0.005;
+  const domainSize = 90;
+  // Référence théorique neutre sous distribution uniforme maximale (H/H_max = 1.0, variance sur simplexe = 0)
+  let entropyVal = 1.0;
+  let varianceVal = 0.0;
 
   if (history && history.length > 0) {
-    const counts = new Array(91).fill(0);
+    const counts = new Array(domainSize + 1).fill(0);
     for (const d of history) {
       if (d.gagnants) {
         for (const num of d.gagnants) {
-          if (num >= 1 && num <= 90) counts[num]++;
+          if (num >= 1 && num <= domainSize) counts[num]++;
         }
       }
     }
@@ -111,7 +123,7 @@ export function computeDrawCriticalThreshold(
     if (totalHits > 0) {
       const probs = counts.slice(1).map((c) => c / totalHits);
       const hShannon = calculateShannonEntropy(probs);
-      entropyVal = hShannon / Math.log2(90);
+      entropyVal = hShannon / Math.log2(domainSize);
       varianceVal = calculateVariance(probs);
     }
   }
@@ -121,7 +133,7 @@ export function computeDrawCriticalThreshold(
       algoCount,
       entropyVal,
       varianceVal,
-      90
+      domainSize
     ),
     entropy: entropyVal,
     variance: varianceVal,

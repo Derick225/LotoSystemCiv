@@ -1930,17 +1930,25 @@ export const calculateTemporalDriftLearningRate = (
         }
     }
 
-    const epsilon = 1e-9;
-    let klDiv = 0;
+    // Régularisation Dirichlet-Laplace (prior = 1.0 par boule, soit 90 observations virtuelles uniformes)
+    // et soustraction du biais asymptotique d'échantillonnage fini sous H0 (P = Q) afin que le bruit
+    // multinomial pur (50 tirages de boules sur 90 catégories) ne soit pas interprété comme une dérive.
+    const priorAlpha = 1.0;
+    const domainSize = 90.0;
+    const pDenom = pTotal + domainSize * priorAlpha;
+    const qDenom = qTotal + domainSize * priorAlpha;
+    let rawKl = 0;
     for (let i = 1; i <= 90; i++) {
-        const p = pTotal > 0 ? (pCounts[i] / pTotal) : (1.0 / 90.0);
-        const q = qTotal > 0 ? (qCounts[i] / qTotal) : (1.0 / 90.0);
-        // Lissage continu infinitésimal
-        const pSmooth = (p + epsilon) / (1.0 + 90 * epsilon);
-        const qSmooth = (q + epsilon) / (1.0 + 90 * epsilon);
-        klDiv += pSmooth * Math.log(pSmooth / qSmooth);
+        const pSmooth = (pCounts[i] + priorAlpha) / pDenom;
+        const qSmooth = (qCounts[i] + priorAlpha) / qDenom;
+        rawKl += pSmooth * Math.log(pSmooth / qSmooth);
     }
-    klDiv = Math.max(0, klDiv);
+    const sampleRatio = qTotal > 0 ? Math.max(0, 1.0 - pTotal / qTotal) : 0;
+    const expectedNullKl =
+        ((domainSize - 1.0) / 2.0) *
+        (pTotal / (pDenom * pDenom)) *
+        sampleRatio;
+    const klDiv = Math.max(0, rawKl - expectedNullKl);
 
     // 2. Variance résiduelle de l'entropie de Shannon sur les sous-fenêtres glissantes
     const rollingEntropies: number[] = [];
@@ -1963,7 +1971,7 @@ export const calculateTemporalDriftLearningRate = (
 
     // 3. Facteur d'amortissement lambda dérivé continûment de la variance résiduelle d'entropie et de la volatilité
     const volatilityInfo = calculateVolatility(localHistory);
-    const volNorm = Math.tanh(volatilityInfo.score / 50.0);
+    const volNorm = Math.tanh((volatilityInfo.score ?? 0) / 50.0);
     const lambda = 1.0 + Math.tanh(entVar * 20.0) * (1.0 + volNorm);
 
     // 4. Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q))
