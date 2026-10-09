@@ -70,6 +70,14 @@ type InoculationProfile =
 
 type ActiveViewMode = "PANORAMA" | "RADAR" | "SIEVE" | "GENOME_TABLE";
 
+/**
+ * RÈGLE D'HONNÊTETÉ : toute valeur mesurée manquante (undefined, NaN, Infinity)
+ * devient `null` et s'affiche "n/d" — jamais une valeur "plausible" fabriquée
+ * (ex. multiplicateur 1.0, affinité 50%) qui masquerait un 0 réellement mesuré.
+ */
+const finiteOrNull = (x: unknown): number | null =>
+  typeof x === "number" && Number.isFinite(x) ? x : null;
+
 interface MacroFamilyScore {
   familyKey: string;
   familyName: string;
@@ -273,9 +281,14 @@ export const UnifiedDnaSieveRadar: React.FC<{
     });
 
     Object.entries(globalWeights || {}).forEach(([k, val]) => {
-      const numW = typeof val === "number" ? val : 0.05;
+      // RÈGLE D'HONNÊTETÉ : un poids corrompu (non fini) est exclu du calcul
+      // plutôt que remplacé par une valeur fabriquée.
+      const numW = finiteOrNull(val);
+      if (numW === null) return;
       totalCurrent += numW;
-      const rec = geneRecomMap.get(k) || numW;
+      // `??` (et non `||`) : une recommandation d'audit de 0 reste 0 ;
+      // sans audit, "cible" = valeur courante (aucun changement recommandé).
+      const rec = geneRecomMap.get(k) ?? numW;
       totalRecom += rec;
 
       for (const fKey in familyMap) {
@@ -335,7 +348,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
         subject: g.label.length > 12 ? g.label.slice(0, 10) + ".." : g.label,
         Actuel: Number((g.currentWeight * 100).toFixed(1)),
         Cible: Number((g.recommendedWeight * 100).toFixed(1)),
-        Tamis: Number((g.resonanceScore * 0.9).toFixed(1)),
+        Tamis: Number(g.resonanceScore.toFixed(1)),
         fullMark: 100,
       }));
     }
@@ -343,22 +356,35 @@ export const UnifiedDnaSieveRadar: React.FC<{
 
   // 4. Numéros du Tamis (1 à 90) avec multiplicateurs et catégories
   const sieveGridData = useMemo(() => {
-    const items = [];
+    const items: {
+      num: number;
+      multiplier: number | null;
+      affinity: number | null;
+      category: "ELITE" | "NEUTRAL" | "SHADOW";
+      dnaScore: number | null;
+    }[] = [];
     for (let n = 1; n <= 90; n++) {
-      const mult = dnaSieve.multipliers[n] || 1.0;
-      const affinity = dnaSieve.affinityPercent[n] || 50;
+      // RÈGLE D'HONNÊTETÉ : `|| 1.0` / `|| 50` masquaient un 0 mesuré et
+      // fabriquaient un neutre ; une valeur non finie reste `null` ("n/d").
+      const mult = finiteOrNull(dnaSieve.multipliers[n]);
+      const affinity = finiteOrNull(dnaSieve.affinityPercent[n]);
+      const dnaScore = dnaSieve.compositeDna
+        ? finiteOrNull(dnaSieve.compositeDna[n])
+        : null;
+      // Seuils catégoriels canoniques du tamis, documentés dans les KPI
+      // ($M_n \ge 1.12$ = amplifié, $M_n \le 0.88$ = atténué) ; sans mesure,
+      // pas de catégorie fabrique — le numéro reste "NEUTRAL" non mesuré.
       let category: "ELITE" | "NEUTRAL" | "SHADOW" = "NEUTRAL";
-      if (mult >= 1.12) category = "ELITE";
-      else if (mult <= 0.88) category = "SHADOW";
+      if (mult !== null && mult >= 1.12) category = "ELITE";
+      else if (mult !== null && mult <= 0.88) category = "SHADOW";
 
       items.push({
         num: n,
-        multiplier: parseFloat(mult.toFixed(2)),
+        multiplier: mult === null ? null : parseFloat(mult.toFixed(2)),
         affinity,
         category,
-        dnaScore: dnaSieve.compositeDna
-          ? parseFloat((dnaSieve.compositeDna[n] * 100).toFixed(1))
-          : 50,
+        dnaScore:
+          dnaScore === null ? null : parseFloat((dnaScore * 100).toFixed(1)),
       });
     }
     return items;
@@ -369,21 +395,29 @@ export const UnifiedDnaSieveRadar: React.FC<{
     const elites = sieveGridData.filter((d) => d.category === "ELITE");
     const shadows = sieveGridData.filter((d) => d.category === "SHADOW");
     const neutrals = sieveGridData.filter((d) => d.category === "NEUTRAL");
+    // Moyenne calculée uniquement sur les multiplicateurs réellement mesurés.
+    const measured = sieveGridData.filter((d) => d.multiplier !== null);
     const avgMultiplier =
-      sieveGridData.reduce((acc, d) => acc + d.multiplier, 0) / 90.0;
-    // RÈGLE D'HONNÊTETÉ : sans écart-type ADN mesuré (historique vide), le SNR
-    // reste indéfini plutôt que de fabriquer une intensité de tamisage.
-    const snr = dnaSieve.stdDevDna
-      ? (dnaSieve.stdDevDna / (dnaSieve.meanDna || 1)) * 100
-      : null;
+      measured.length > 0
+        ? measured.reduce((acc, d) => acc + (d.multiplier as number), 0) /
+          measured.length
+        : null;
+    // RÈGLE D'HONNÊTETÉ : sans écart-type ADN mesuré (historique vide) ou avec
+    // une moyenne nulle, le SNR reste indéfini plutôt que de fabriquer une
+    // intensité de tamisage. La valeur affichée est le coefficient de variation
+    // mesuré (σ/μ × 100) — sans plancher arbitraire ni coefficient magique.
+    const stdDev = finiteOrNull(dnaSieve.stdDevDna);
+    const mean = finiteOrNull(dnaSieve.meanDna);
+    const snr =
+      stdDev !== null && mean !== null && mean !== 0 ? (stdDev / mean) * 100 : null;
 
     return {
       elitesCount: elites.length,
       shadowsCount: shadows.length,
       neutralsCount: neutrals.length,
       retentionRatePct: Number(((elites.length / 90) * 100).toFixed(1)),
-      avgMultiplier: parseFloat(avgMultiplier.toFixed(2)),
-      sieveIntensitySNR: snr === null ? null : Number(Math.min(100, Math.max(20, snr * 2.5)).toFixed(1)),
+      avgMultiplier: avgMultiplier === null ? null : parseFloat(avgMultiplier.toFixed(2)),
+      sieveIntensitySNR: snr === null ? null : Number(snr.toFixed(1)),
       entropy: dnaSieve.entropyBits ?? null,
       dominantAlgos: dnaSieve.dominantAlgos || [],
     };
@@ -618,11 +652,11 @@ export const UnifiedDnaSieveRadar: React.FC<{
           </div>
         </div>
 
-        {/* KPI 2 : Intensité de Tamisage (SNR) */}
+        {/* KPI 2 : Intensité de Tamisage (contraste ADN mesuré) */}
         <div className="p-4 bg-slate-900/80 rounded-2xl border border-slate-800 shadow-sm relative flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-              Intensité Tamisage (SNR)
+              Intensité Tamisage (Contraste)
             </span>
             <Filter size={14} className="text-violet-400" />
           </div>
@@ -633,13 +667,15 @@ export const UnifiedDnaSieveRadar: React.FC<{
                 : "n/d"}
             </div>
             <span className="text-[9px] text-slate-400 block">
-              Contraste signal/bruit 1-90
+              Contraste ADN mesuré : σ/μ × 100
             </span>
           </div>
           <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
             <div
               className="bg-violet-400 h-full rounded-full"
-              style={{ width: `${sieveStats.sieveIntensitySNR ?? 0}%` }}
+              style={{
+                width: `${Math.min(100, sieveStats.sieveIntensitySNR ?? 0)}%`,
+              }}
             />
           </div>
         </div>

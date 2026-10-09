@@ -114,7 +114,16 @@ export const DnaReferenceAuditor: React.FC<{
     }
   };
 
-  const filteredAlgorithms = (report?.algorithmAuditList || []).filter(
+  const auditList = report?.algorithmAuditList || [];
+
+  // Échelle de la barre de poids : dérivée du poids canonique maximal réellement audité
+  // (aucun barème arbitraire : la barre la plus longue = l'algorithme canonique le plus lourd).
+  const maxCanonicalWeight =
+    auditList.length > 0
+      ? Math.max(...auditList.map((a) => a.canonicalWeight))
+      : 0;
+
+  const filteredAlgorithms = auditList.filter(
     (algo: AlgorithmDnaAuditItem) => {
       const matchesSearch =
         algo.label.toLowerCase().includes(searchFilter.toLowerCase()) ||
@@ -154,7 +163,12 @@ export const DnaReferenceAuditor: React.FC<{
               <span className="px-3 py-1 bg-white/5 border border-white/10 text-slate-300 text-[10px] font-mono uppercase tracking-widest rounded-full">
                 {drawName}
               </span>
-              {report?.isFullySynchronized ? (
+              {report === null ? (
+                <span className="px-3 py-1 bg-white/5 border border-white/10 text-slate-400 text-[10px] font-black uppercase tracking-widest rounded-full flex items-center gap-1.5">
+                  <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+                  {loading ? "Audit en cours..." : "Audit indisponible"}
+                </span>
+              ) : report.isFullySynchronized ? (
                 <span className="px-3 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-full flex items-center gap-1.5">
                   <CheckCircle2 size={12} />
                   100% Alignement ADN
@@ -162,7 +176,7 @@ export const DnaReferenceAuditor: React.FC<{
               ) : (
                 <span className="px-3 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[10px] font-black uppercase tracking-widest rounded-full flex items-center gap-1.5 animate-pulse">
                   <AlertTriangle size={12} />
-                  {report?.driftedAlgorithmsCount} Dérive(s) Détectée(s)
+                  {report.driftedAlgorithmsCount} Dérive(s) Détectée(s)
                 </span>
               )}
             </div>
@@ -416,7 +430,14 @@ export const DnaReferenceAuditor: React.FC<{
                       algo.isAligned ? "bg-indigo-500" : "bg-amber-400"
                     }`}
                     style={{
-                      width: `${Math.min(100, algo.canonicalWeight * 100 * 3)}%`,
+                      width: `${
+                        maxCanonicalWeight > 0
+                          ? Math.min(
+                              100,
+                              (algo.canonicalWeight / maxCanonicalWeight) * 100
+                            )
+                          : 0
+                      }%`,
                     }}
                   />
                 </div>

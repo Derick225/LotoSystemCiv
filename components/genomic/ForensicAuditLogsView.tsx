@@ -157,7 +157,10 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
       const missedOpportunities = Array.isArray(report.missedOpportunities) ? report.missedOpportunities : [];
       const divergences = Array.isArray(report.scoreDivergence) ? report.scoreDivergence : [];
 
-      // Détection des anomalies algorithmiques croisées avec l'audit ADN
+      // Détection des anomalies algorithmiques croisées avec l'audit ADN.
+      // Seules les divergences de scores RÉELLEMENT enregistrées dans ce rapport
+      // sont attribuées au tirage : la dérive globale du système (audit ADN courant)
+      // reste affichée dans l'en-tête et n'est jamais imputée à un tirage sans preuve.
       const affectedAlgorithms: {
         key: string;
         label: string;
@@ -182,21 +185,18 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
         }
       });
 
-      // Si aucune divergence explicite n'a été liée, mais que le système a des algorithmes décalés
-      if (affectedAlgorithms.length === 0 && driftedAlgorithms.length > 0 && exactHits.length < 3) {
-        driftedAlgorithms.slice(0, 3).forEach((d) => {
-          affectedAlgorithms.push({
-            key: d.key,
-            label: d.label,
-            deltaWeight: d.weightDriftDelta,
-            reason: `Dérive d'apprentissage active lors de ce tirage (Δ = ${(d.weightDriftDelta * 100).toFixed(1)}%).`,
-            isDrifted: true,
-          });
-        });
-      }
-
       const hasWeightAnomaly = affectedAlgorithms.length > 0;
-      const divergencePct = report.divergenceMetric ?? Math.round(100 - (exactHits.length / 5) * 100);
+      // Divergence mesurée ; à défaut, proxy recalculé selon la définition canonique du
+      // service (1 - (hits + 0,5×frôlements)/5) — 5 = numéros par tirage (règle du jeu).
+      const divergencePct =
+        report.divergenceMetric ??
+        Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round((1 - (exactHits.length + 0.5 * nearMisses.length) / 5) * 100)
+          )
+        );
 
       return {
         ...report,
@@ -209,6 +209,22 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
       };
     }).filter((r): r is NonNullable<typeof r> => r !== null);
   }, [reports, driftedAlgorithms]);
+
+  // Seuil « forte divergence » dérivé des données : quartile supérieur (Q3) des
+  // divergences réellement observées sur ce tirage, au lieu d'un pourcentage fixe
+  // arbitraire. Le filtre sélectionne ainsi le quart le plus divergent du jeu de données.
+  const divergenceHighThreshold = useMemo(() => {
+    const values = enrichedReports
+      .map((r) => r.divergencePct)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v))
+      .sort((a, b) => a - b);
+    if (values.length === 0) return null;
+    // Q3 par interpolation linéaire (définition standard des quantiles).
+    const pos = 0.75 * (values.length - 1);
+    const lower = Math.floor(pos);
+    const upper = Math.ceil(pos);
+    return values[lower] + (values[upper] - values[lower]) * (pos - lower);
+  }, [enrichedReports]);
 
   // Filtrage des rapports
   const filteredReports = useMemo(() => {
@@ -238,47 +254,48 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
         return rep.nearMisses.length > 0;
       }
       if (selectedFilter === "HIGH_DIVERGENCE") {
-        return (rep.divergencePct || 0) >= 60;
+        return (
+          divergenceHighThreshold !== null &&
+          rep.divergencePct >= divergenceHighThreshold
+        );
       }
       return true;
     });
-  }, [enrichedReports, searchQuery, selectedFilter]);
+  }, [enrichedReports, searchQuery, selectedFilter, divergenceHighThreshold]);
 
   // Statistiques Globales des Logs Médico-Légaux
   const globalStats = useMemo(() => {
-    const total = enrichedReports.length;
-    if (total === 0) {
-      return {
-        totalReports: 0,
-        totalHits: 0,
-        totalNearMisses: 0,
-        anomaliesCount: 0,
-        avgRmse: 0,
-        avgWasserstein: 0,
-      };
-    }
-
     let hits = 0;
     let near = 0;
     let anomalies = 0;
-    let sumRmse = 0;
-    let sumWasserstein = 0;
+    // Moyennes calculées uniquement sur les rapports disposant d'une mesure réelle :
+    // un rapport sans RMSE mesuré ne doit pas tirer la moyenne vers 0.
+    const rmseValues: number[] = [];
 
     enrichedReports.forEach((r) => {
       hits += r.exactHits.length;
       near += r.nearMisses.length;
       if (r.hasWeightAnomaly) anomalies++;
-      sumRmse += r.rmse || 0;
-      sumWasserstein += r.wassersteinLoss || 0;
+      if (typeof r.rmse === "number" && Number.isFinite(r.rmse)) {
+        rmseValues.push(r.rmse);
+      }
     });
 
+    const avgRmse =
+      rmseValues.length > 0
+        ? parseFloat(
+            (
+              rmseValues.reduce((a, b) => a + b, 0) / rmseValues.length
+            ).toFixed(2)
+          )
+        : null; // null => « n/d » : aucune mesure disponible, pas de 0 fabriqué.
+
     return {
-      totalReports: total,
+      totalReports: enrichedReports.length,
       totalHits: hits,
       totalNearMisses: near,
       anomaliesCount: anomalies,
-      avgRmse: parseFloat((sumRmse / total).toFixed(2)),
-      avgWasserstein: parseFloat((sumWasserstein / total).toFixed(2)),
+      avgRmse,
     };
   }, [enrichedReports]);
 
@@ -393,7 +410,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
               RMSE Moyen
             </div>
             <div className="text-sm md:text-lg font-mono font-black text-cyan-300 mt-0.5">
-              {globalStats.avgRmse}
+              {globalStats.avgRmse ?? "n/d"}
             </div>
           </div>
 
@@ -651,7 +668,8 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
                             <div className="flex justify-between items-center">
                               <span className="font-bold text-white">{algo.label}</span>
                               <span className="text-amber-300 font-mono font-bold">
-                                Δ = +{(algo.deltaWeight * 100).toFixed(1)}%
+                                Δ = {algo.deltaWeight > 0 ? "+" : ""}
+                                {(algo.deltaWeight * 100).toFixed(1)}%
                               </span>
                             </div>
                             <p className="text-[10px] text-slate-400 mt-1 leading-snug">
@@ -732,7 +750,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
                               #{miss.number}
                             </span>
                             <span className="text-slate-300 text-[10px]">
-                              {miss.reason || "Signal sous-pondéré"}
+                              {miss.reason || "Raison non documentée"}
                             </span>
                             {miss.bestAlgo && (
                               <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-300 text-[9px] font-mono rounded">
@@ -761,7 +779,18 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
         })}
       </div>
 
-      {filteredReports.length === 0 && (
+      {enrichedReports.length === 0 ? (
+        <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-white/5">
+          <FileText size={32} className="mx-auto text-slate-600 mb-3" />
+          <p className="text-sm font-bold text-slate-400">
+            Aucun rapport d'autopsie enregistré pour {drawName} à ce jour.
+          </p>
+          <p className="text-xs text-slate-500 mt-2">
+            Les rapports sont générés après confrontation d'une prédiction aux
+            résultats réels d'un tirage.
+          </p>
+        </div>
+      ) : filteredReports.length === 0 && (
         <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-white/5">
           <FileText size={32} className="mx-auto text-slate-600 mb-3" />
           <p className="text-sm font-bold text-slate-400">

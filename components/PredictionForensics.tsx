@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import type { ForensicReport } from "../types";
 import { logError } from "../utils/AppError";
+import { formatDateSafely } from "../utils/dateUtils";
 import { deleteForensicReportLocal } from "../services/postPredictionAnalysisService";
 import { deleteForensicReportCloud } from "../services/syncService";
 import { updatePredictionFeedback } from "../services/predictionHistoryService";
@@ -127,8 +128,15 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
 
   // Aucun diagnostic n'est présumé : un rapport sans classification reste sans verdict.
   const currentVerdict = report.failureMode || report.verdict || null;
-  const stabilityScore =
-    report.postMortemStabilityScore ?? report.forensicScore;
+  // Seule la mesure réelle de stabilité post-mortem est affichée sous cette étiquette.
+  // `forensicScore` mesure une ANOMALIE (polarité opposée : élevé = tirage atypique) :
+  // l'utiliser comme repli inverserait le sens affiché. Absence de mesure => "n/d".
+  const stabilityScore = report.postMortemStabilityScore;
+  const hasStabilityScore =
+    typeof stabilityScore === "number" && Number.isFinite(stabilityScore);
+  const lyapunovExponent = report.lyapunovChaosExponent;
+  const hasLyapunovExponent =
+    typeof lyapunovExponent === "number" && Number.isFinite(lyapunovExponent);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm p-4 animate-fade-in overflow-y-auto">
@@ -144,7 +152,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 Autopsie Forensique & Diagnostic Post-Mortem
               </h2>
               <p className="text-[10px] text-slate-500 font-medium">
-                {report.drawName} • {new Date(report.date).toLocaleDateString()}
+                {report.drawName} • {formatDateSafely(report.date)}
               </p>
             </div>
           </div>
@@ -199,9 +207,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-2xl font-black text-slate-800 dark:text-white">
-                    {stabilityScore === undefined ? "n/d" : stabilityScore}
+                    {hasStabilityScore ? stabilityScore : "n/d"}
                   </span>
-                  {stabilityScore !== undefined && (
+                  {hasStabilityScore && (
                     <span className="text-xs text-slate-400 font-bold">
                       / 100
                     </span>
@@ -243,7 +251,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
             </div>
 
             <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
-              {report.aiAnalysis || "Analyse post-mortem calculée continûment sur l'historique complet sans nombre magique."}
+              {report.aiAnalysis || "Aucune synthèse d'analyse disponible pour ce rapport."}
             </p>
 
             {report.dominantCauses && report.dominantCauses.length > 0 && (
@@ -277,25 +285,25 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Somme (Z-Score)</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.statisticalDeviations.sumZScore !== undefined ? `${report.statisticalDeviations.sumZScore > 0 ? '+' : ''}${report.statisticalDeviations.sumZScore.toFixed(2)}σ` : "N/A"}
+                    {typeof report.statisticalDeviations.sumZScore === "number" && Number.isFinite(report.statisticalDeviations.sumZScore) ? `${report.statisticalDeviations.sumZScore > 0 ? "+" : ""}${report.statisticalDeviations.sumZScore.toFixed(2)}σ` : "n/d"}
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Amplitude (Z-Score)</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.statisticalDeviations.amplitudeZScore !== undefined ? `${report.statisticalDeviations.amplitudeZScore > 0 ? '+' : ''}${report.statisticalDeviations.amplitudeZScore.toFixed(2)}σ` : "N/A"}
+                    {typeof report.statisticalDeviations.amplitudeZScore === "number" && Number.isFinite(report.statisticalDeviations.amplitudeZScore) ? `${report.statisticalDeviations.amplitudeZScore > 0 ? "+" : ""}${report.statisticalDeviations.amplitudeZScore.toFixed(2)}σ` : "n/d"}
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Indice AC (Z-Score)</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.statisticalDeviations.acZScore !== undefined ? `${report.statisticalDeviations.acZScore > 0 ? '+' : ''}${report.statisticalDeviations.acZScore.toFixed(2)}σ` : "N/A"}
+                    {typeof report.statisticalDeviations.acZScore === "number" && Number.isFinite(report.statisticalDeviations.acZScore) ? `${report.statisticalDeviations.acZScore > 0 ? "+" : ""}${report.statisticalDeviations.acZScore.toFixed(2)}σ` : "n/d"}
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">P-Valeur Parité</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.statisticalDeviations.parityPValue !== undefined ? `${(report.statisticalDeviations.parityPValue * 100).toFixed(1)}%` : "N/A"}
+                    {typeof report.statisticalDeviations.parityPValue === "number" && Number.isFinite(report.statisticalDeviations.parityPValue) ? `${(report.statisticalDeviations.parityPValue * 100).toFixed(1)}%` : "n/d"}
                   </span>
                 </div>
               </div>
@@ -303,7 +311,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
           )}
 
           {/* Chaos Dynamique Topologique (Lyapunov HPC) */}
-          {report.lyapunovChaosExponent !== undefined && (
+          {hasLyapunovExponent && (
             <div className="bg-slate-50 dark:bg-slate-800/50 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <h4 className="text-[10px] font-black uppercase text-slate-400 tracking-wider flex items-center gap-2">
@@ -322,25 +330,26 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Exposant Lyapunov (λ)</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.lyapunovChaosExponent > 0 ? `+${report.lyapunovChaosExponent.toFixed(4)}` : report.lyapunovChaosExponent.toFixed(4)}
+                    {lyapunovExponent > 0 ? `+${lyapunovExponent.toFixed(4)}` : lyapunovExponent.toFixed(4)}
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Force Divergence</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.divergenceForce !== undefined ? report.divergenceForce.toFixed(4) : "N/A"}
+                    {typeof report.divergenceForce === "number" && Number.isFinite(report.divergenceForce) ? report.divergenceForce.toFixed(4) : "n/d"}
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Entropie Topologique</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.topologicalEntropy !== undefined ? report.topologicalEntropy.toFixed(3) : "N/A"}
+                    {typeof report.topologicalEntropy === "number" && Number.isFinite(report.topologicalEntropy) ? report.topologicalEntropy.toFixed(3) : "n/d"}
                   </span>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60">
                   <span className="text-[9px] font-bold text-slate-400 block uppercase">Horizon Lyapunov</span>
                   <span className="text-xs font-black font-mono text-slate-800 dark:text-white mt-1 block">
-                    {report.lyapunovChaosExponent > 0.001 ? `${(1 / report.lyapunovChaosExponent).toFixed(1)} pas` : "∞ (Stable)"}
+                    {/* Horizon exact 1/λ ; λ ≤ 0 => trajectoires non divergentes => horizon infini. */}
+                    {lyapunovExponent > 0 ? `${(1 / lyapunovExponent).toFixed(1)} pas` : "∞ (Stable)"}
                   </span>
                 </div>
               </div>

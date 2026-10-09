@@ -23,48 +23,73 @@ export const UnifiedForensicTimeline: React.FC<
     });
   }, [reports]);
 
-  // Compute trend statistics
+  // Statistiques de tendance : seules les dérives réellement mesurées
+  // participent aux moyennes. Un rapport sans divergenceMetric n'est pas
+  // compté comme « 0 % » (valeur fabriquée) mais exclu du calcul ; sans
+  // aucune mesure, la moyenne devient « n/d ».
   const trendStats = useMemo(() => {
     if (reports.length === 0)
-      return { avgDrift: 0, avgAlignment: 0, trend: "STABLE" };
+      // Jamais rendu : le composant court-circuite sur l'état vide ci-dessous.
+      return { avgDrift: null, avgAlignment: 0, trend: "STABLE" as const };
 
-    const totalDrift = reports.reduce(
-      (acc, r) => acc + (r.divergenceMetric ?? 0),
-      0,
-    );
-    const avgDrift = totalDrift / reports.length;
+    const driftValues = reports
+      .map((r) => r.divergenceMetric)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const avgDrift =
+      driftValues.length > 0
+        ? driftValues.reduce((acc, v) => acc + v, 0) / driftValues.length
+        : null;
 
     const totalAlignment = reports.reduce((acc, r) => {
       const hits = Array.isArray(r.matches)
         ? r.matches.filter((m) => m.errorType === "Hit").length
         : 0;
-      return acc + (hits / 5) * 100;
+      return acc + (hits / 5) * 100; // conversion règle du jeu : 5 numéros par tirage
     }, 0);
     const avgAlignment = totalAlignment / reports.length;
 
-    // Compare first half vs second half to determine trend
-    const mid = Math.floor(chronologicalReports.length / 2);
-    const firstHalf = chronologicalReports.slice(0, mid);
-    const secondHalf = chronologicalReports.slice(mid);
-
-    const firstHalfDrift =
-      firstHalf.length > 0
-        ? firstHalf.reduce((acc, r) => acc + (r.divergenceMetric ?? 0), 0) /
-          firstHalf.length
-        : 0;
-    const secondHalfDrift =
-      secondHalf.length > 0
-        ? secondHalf.reduce((acc, r) => acc + (r.divergenceMetric ?? 0), 0) /
-          secondHalf.length
-        : 0;
+    // Compare first half vs second half to determine trend.
+    // Le seuil de bascule est dérivé de la dispersion réelle (écart-type)
+    // des dérives mesurées, et non d'une constante arbitraire.
+    const chronoDrifts = chronologicalReports
+      .map((r) => r.divergenceMetric)
+      .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    const mid = Math.floor(chronoDrifts.length / 2);
+    const firstHalf = chronoDrifts.slice(0, mid);
+    const secondHalf = chronoDrifts.slice(mid);
 
     let trend: "IMPROVING" | "DEGRADING" | "STABLE" = "STABLE";
-    if (secondHalfDrift < firstHalfDrift - 2)
-      trend = "IMPROVING"; // Lower drift is better
-    else if (secondHalfDrift > firstHalfDrift + 2) trend = "DEGRADING";
+    if (firstHalf.length > 0 && secondHalf.length > 0) {
+      const firstHalfDrift =
+        firstHalf.reduce((acc, v) => acc + v, 0) / firstHalf.length;
+      const secondHalfDrift =
+        secondHalf.reduce((acc, v) => acc + v, 0) / secondHalf.length;
+      const meanDrift =
+        chronoDrifts.reduce((acc, v) => acc + v, 0) / chronoDrifts.length;
+      const stdDev = Math.sqrt(
+        chronoDrifts.reduce((acc, v) => acc + (v - meanDrift) ** 2, 0) /
+          chronoDrifts.length,
+      );
+
+      if (secondHalfDrift < firstHalfDrift - stdDev)
+        trend = "IMPROVING"; // Lower drift is better
+      else if (secondHalfDrift > firstHalfDrift + stdDev) trend = "DEGRADING";
+    }
 
     return { avgDrift, avgAlignment, trend };
   }, [reports, chronologicalReports]);
+
+  // Rapports disposant d'une dérive réellement mesurée : la courbe et ses
+  // nœuds ne doivent être pilotés par aucune valeur de repli fabriquée.
+  const driftReports = useMemo(
+    () =>
+      chronologicalReports.filter(
+        (r): r is ForensicReport & { divergenceMetric: number } =>
+          typeof r.divergenceMetric === "number" &&
+          Number.isFinite(r.divergenceMetric),
+      ),
+    [chronologicalReports],
+  );
 
   // SVG dimensions for the fluid trend line
   const width = 800;
@@ -74,16 +99,15 @@ export const UnifiedForensicTimeline: React.FC<
 
   // Generate SVG path for the drift trend curve
   const svgPath = useMemo(() => {
-    if (chronologicalReports.length < 2) return "";
+    if (driftReports.length < 2) return "";
 
-    const points = chronologicalReports.map((r, idx) => {
+    const points = driftReports.map((r, idx) => {
       const x =
         paddingX +
-        (idx / (chronologicalReports.length - 1)) * (width - 2 * paddingX);
+        (idx / (driftReports.length - 1)) * (width - 2 * paddingX);
       // Map drift score [0, 100] to Y [height - paddingY, paddingY]
       // Lower drift is higher up on the graph (more optimal)
-      const driftVal = r.divergenceMetric ?? 40;
-      const y = paddingY + (driftVal / 100) * (height - 2 * paddingY);
+      const y = paddingY + (r.divergenceMetric / 100) * (height - 2 * paddingY);
       return { x, y };
     });
 
@@ -131,7 +155,9 @@ export const UnifiedForensicTimeline: React.FC<
               Dérive Moyenne
             </span>
             <span className="text-xs font-black text-slate-700 dark:text-slate-200 font-mono">
-              {trendStats.avgDrift.toFixed(1)}%
+              {trendStats.avgDrift === null
+                ? "n/d"
+                : `${trendStats.avgDrift.toFixed(1)}%`}
             </span>
           </div>
           <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200/60 dark:border-slate-850 text-right">
@@ -176,7 +202,7 @@ export const UnifiedForensicTimeline: React.FC<
       </div>
 
       {/* Fluid Trend Line Graph */}
-      {chronologicalReports.length >= 2 && (
+      {driftReports.length >= 2 && (
         <div className="relative bg-slate-50/50 dark:bg-slate-950/20 rounded-2xl p-2 border border-slate-100 dark:border-slate-850/50 overflow-hidden">
           <div className="absolute top-2 left-4 text-[8px] font-bold uppercase tracking-widest text-emerald-400 flex items-center gap-1">
             <TrendingDown size={10} /> Alignement optimal (Dérive minimum)
@@ -226,13 +252,13 @@ export const UnifiedForensicTimeline: React.FC<
             </defs>
 
             {/* Render Nodes along path */}
-            {chronologicalReports.map((r, idx) => {
+            {driftReports.map((r, idx) => {
               const x =
                 paddingX +
-                (idx / (chronologicalReports.length - 1)) *
+                (idx / (driftReports.length - 1)) *
                   (width - 2 * paddingX);
-              const driftVal = r.divergenceMetric ?? 40;
-              const y = paddingY + (driftVal / 100) * (height - 2 * paddingY);
+              const y =
+                paddingY + (r.divergenceMetric / 100) * (height - 2 * paddingY);
               const isSelected = selectedReport?.id === r.id;
 
               return (

@@ -36,6 +36,14 @@ interface ForensicTimeMachineProps {
   currentWeights: AlgoWeights;
 }
 
+// Taille d'échantillon minimale pour une estimation de régime (Hurst/entropie) :
+// alignée sur le seuil interne de computeRobustHurst (N < 10 => retour neutre 0,5).
+const MIN_REGIME_SAMPLE = 10;
+
+// Impact mesuré ou 0 : garde typée qui ne masque jamais un 0 légitime (contrairement à `||`).
+const measuredImpact = (v: unknown): number =>
+  typeof v === "number" && Number.isFinite(v) ? v : 0;
+
 export const ForensicTimeMachine: React.FC<ForensicTimeMachineProps> = ({
   drawName,
   history,
