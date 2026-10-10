@@ -444,14 +444,16 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
-          <button
-            onClick={() => setIsAuditDashboardOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-slate-200 dark:border-slate-700 cursor-pointer"
-            title="Inspecter et modifier les poids algorithmiques"
-          >
-            <Sliders size={15} className="text-indigo-500" />
-            <span>Audit des Poids</span>
-          </button>
+          {!isComputing && (
+            <button
+              onClick={() => setIsAuditDashboardOpen(true)}
+              className="flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-slate-200 dark:border-slate-700 cursor-pointer shadow-sm"
+              title="Inspecter et modifier les poids algorithmiques"
+            >
+              <Sliders size={15} className="text-indigo-500" />
+              <span>Audit des Poids</span>
+            </button>
+          )}
 
           <button
             onClick={handleTriggerForensicReport}
@@ -483,8 +485,8 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
       {/* Computation Overlay & Results Container */}
       <div className="relative min-h-[400px]">
-        {isComputing && activePrediction && (
-          <div className="absolute inset-0 z-50 bg-slate-50/60 dark:bg-slate-950/60 backdrop-blur-md rounded-3xl flex items-center justify-center p-4 transition-all duration-300">
+        {isComputing && (
+          <div className="absolute inset-0 z-50 bg-white/70 dark:bg-slate-950/70 backdrop-blur-md rounded-3xl flex items-center justify-center p-4 transition-all duration-300 shadow-[0_0_40px_rgba(0,0,0,0.05)]">
             <div className="w-full max-w-xl">
               <PredictionComputationOverlay
                 isComputing={isComputing}
@@ -493,17 +495,6 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                 progress={computingProgress}
               />
             </div>
-          </div>
-        )}
-
-        {isComputing && !activePrediction && (
-          <div className="mb-8">
-            <PredictionComputationOverlay
-              isComputing={isComputing}
-              computingStep={computingStep}
-              historyLength={history.length}
-              progress={computingProgress}
-            />
           </div>
         )}
 
