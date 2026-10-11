@@ -245,7 +245,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       });
     } catch (err) {
       console.error("Failed to restore unbiased weights via controller:", err);
-      setGlobalWeights(restoredBase);
+      setGlobalWeights(restoredBase, drawName);
     }
 
     showToast("Tous les biais experts ont été réinitialisés et les poids de base restaurés.", "info");
@@ -282,7 +282,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       });
     } catch (err) {
       console.error("Failed to apply expert biases via controller:", err);
-      setGlobalWeights(simulatedWeights);
+      setGlobalWeights(simulatedWeights, drawName);
     }
 
     addAgentLog({

@@ -311,7 +311,7 @@ export async function reinjectScenarioIntoState(
         ...scenario.summary.causalAuditTrail,
       ],
       reason: `Réinjection Scénario ${scenario.scenarioType}`,
-      allowCriticalDrift: true,
+      allowCriticalDrift: false,
       history,
     });
 

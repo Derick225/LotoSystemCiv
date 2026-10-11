@@ -294,5 +294,40 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
         expect(m.suggestedExpertNudge).toBeLessThanOrEqual(0);
       }
     }
+
+    // Point 21 & 22 : Empreinte ADN 64 bits (16 hex) et préservation de la version/origine/performance au rollback
+    const {
+      recordModelDnaVersion,
+      rollbackToModelDnaVersion,
+    } = await import('../services/prediction/modelDnaKnowledgeBase');
+    const { applyOptimizedWeights } = await import('../services/prediction/optimizationController');
+
+    const v1 = await recordModelDnaVersion({
+      drawName: 'ROLLBACK_TEST_DRAW',
+      version: 'v_origin_1',
+      origin: 'FORENSIC_AUTOPSY',
+      weights: DEFAULT_ALGO_WEIGHTS,
+      performance: { score: 88.5, brierScore: 0.041 },
+      causalAuditTrail: ['Version originale scorée'],
+    });
+    expect(v1.dnaFingerprint).toMatch(/^dna_[0-9a-f]{16}$/);
+
+    const rolledBack = await rollbackToModelDnaVersion('ROLLBACK_TEST_DRAW', v1.id);
+    expect(rolledBack).not.toBeNull();
+    expect(rolledBack?.version).toBe('v_origin_1');
+    expect(rolledBack?.origin).toBe('FORENSIC_AUTOPSY');
+    expect(rolledBack?.performance.score).toBe(88.5);
+
+    // Le lissage Kalman passe avant la garde de dérive critique et ne peut donc jamais la dépasser
+    const extremeWeights = { ...DEFAULT_ALGO_WEIGHTS, [AlgoKey.FREQUENCY]: 0.95 };
+    const kalmanOpt = await applyOptimizedWeights({
+      drawName: 'KALMAN_DRIFT_GUARD_TEST',
+      weights: extremeWeights,
+      origin: 'SGD_CYBERNETIC',
+      history: longHistory,
+      useKalmanSmoothing: true,
+      allowCriticalDrift: false,
+    });
+    expect(kalmanOpt.appliedWeights[AlgoKey.FREQUENCY]).toBeLessThan(0.5);
   });
 });

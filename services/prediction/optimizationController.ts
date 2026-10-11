@@ -108,7 +108,7 @@ export async function applyOptimizedWeights(
   const currentWeights = await getAlgoWeights(drawName);
   const normalizedCurrent = normalizeWeights(currentWeights);
 
-  // 3. Calcul de la dérive et du seuil critique statistique continu (Zéro nombre magique)
+  // 3. Calcul du seuil critique statistique continu (Zéro nombre magique)
   const algoCount = Object.keys(targetNormalized).length;
   const {
     criticalThreshold,
@@ -116,11 +116,24 @@ export async function applyOptimizedWeights(
     variance: varianceVal,
   } = computeDrawCriticalThreshold(history, algoCount);
 
-  const { maxDelta } = calculateWeightDriftMetrics(normalizedCurrent, targetNormalized);
+  // 4.a Lissage Kalman Adaptatif AVANT la garde de dérive critique (garantit que le filtre ne viole jamais le seuil critique)
+  let candidateWeights: AlgoWeights = targetNormalized;
+  if (request.useKalmanSmoothing) {
+    const kalmanRes = updateWeightsWithKalmanFilter({
+      drawName,
+      measuredWeights: candidateWeights,
+      history,
+      predictionError: performance.brierScore ?? performance.topologicalLoss,
+      empiricalVariance: varianceVal,
+    });
+    candidateWeights = normalizeWeights(kalmanRes.updatedWeights);
+  }
+
+  // 4.b Régulation par amortissement continu si dérive critique non explicitement autorisée
+  const { maxDelta } = calculateWeightDriftMetrics(normalizedCurrent, candidateWeights);
   const isCriticalDrift = maxDelta > criticalThreshold;
 
-  // 4. Régulation par amortissement continu si dérive critique non explicitement autorisée
-  let appliedWeights: AlgoWeights = targetNormalized;
+  let appliedWeights: AlgoWeights = candidateWeights;
   let wasDamped = false;
   let dampingFactor = 1.0;
 
@@ -130,33 +143,16 @@ export async function applyOptimizedWeights(
     wasDamped = true;
 
     const dampedRecord: Record<string, number> = {};
-    const allKeys = Object.keys(targetNormalized) as AlgoKey[];
+    const allKeys = Object.keys(candidateWeights) as AlgoKey[];
     for (const key of allKeys) {
       const cur = (normalizedCurrent as any)[key] ?? 0;
-      const tgt = (targetNormalized as any)[key] ?? 0;
+      const tgt = (candidateWeights as any)[key] ?? 0;
       dampedRecord[key] = cur + dampingFactor * (tgt - cur);
     }
     appliedWeights = normalizeWeights(dampedRecord as AlgoWeights);
   }
 
-  // 4.b Lissage Kalman Adaptatif si demandé
-  if (request.useKalmanSmoothing) {
-    const kalmanRes = updateWeightsWithKalmanFilter({
-      drawName,
-      measuredWeights: appliedWeights,
-      history,
-      predictionError: performance.brierScore ?? performance.topologicalLoss,
-      empiricalVariance: varianceVal,
-    });
-    appliedWeights = kalmanRes.updatedWeights;
-  }
-
-  // 5. Persistance des poids
-  await saveAlgoWeights(drawName, appliedWeights);
-
-  // 6. Enregistrement systématique dans la base de connaissances ADN.
-  // Aucune mesure n'est inventée : un score/gain absent reste absent (affiché "n/d")
-  // plutôt que dérivé d'une métrique de dérive qui n'est pas une performance.
+  // 5. Persistance atomique (Poids + Base de connaissances ADN) avec restauration transactionnelle en cas d'erreur
   const timestamp = new Date().toISOString();
   const calculatedPerformance = {
     score: performance.score,
@@ -177,28 +173,37 @@ export async function applyOptimizedWeights(
 
   const finalTimestamp = request.timestamp || timestamp;
 
-  const dnaRecord = await recordModelDnaVersion({
-    drawName,
-    version: request.version,
-    origin,
-    weights: appliedWeights,
-    timestamp: finalTimestamp,
-    performance: calculatedPerformance,
-    regimeContext: regimeContext
-      ? {
-          regime: regimeContext.regime,
-          hurst: regimeContext.hurst ?? 0.5,
-          entropy: regimeContext.entropy ?? entropyVal,
-        }
-      : undefined,
-    causalAuditTrail: fullAuditTrail,
-  });
+  await saveAlgoWeights(drawName, appliedWeights);
 
-  // 7. Mise à jour immédiate du Store Nexus si le tirage est le tirage actif
+  let dnaRecord: ModelDnaRecord;
+  try {
+    dnaRecord = await recordModelDnaVersion({
+      drawName,
+      version: request.version,
+      origin,
+      weights: appliedWeights,
+      timestamp: finalTimestamp,
+      performance: calculatedPerformance,
+      regimeContext: regimeContext
+        ? {
+            regime: regimeContext.regime,
+            hurst: regimeContext.hurst ?? 0.5,
+            entropy: regimeContext.entropy ?? entropyVal,
+          }
+        : undefined,
+      causalAuditTrail: fullAuditTrail,
+    });
+  } catch (dnaErr) {
+    // Rollback atomique des poids en cas d'échec de l'archivage ADN
+    await saveAlgoWeights(drawName, normalizedCurrent).catch(() => {});
+    throw dnaErr;
+  }
+
+  // 6. Synchronisation mémoire immédiate du Store Nexus (sans réécriture disque redondante)
   try {
     const store = useNexusStore.getState();
     if (store.drawName === drawName) {
-      store.setGlobalWeights(appliedWeights);
+      useNexusStore.setState({ globalWeights: appliedWeights });
     }
   } catch (err) {
     logger.debug({ err }, '[OptimizationController] Notification store non bloquante');
