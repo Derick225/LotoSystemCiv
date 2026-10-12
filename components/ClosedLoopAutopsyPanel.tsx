@@ -10,7 +10,6 @@ import {
 } from "../services/prediction/closedLoopAutopsyService";
 import { applyOptimizedWeights } from "../services/prediction/optimizationController";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
-import { normalizeDrawName } from "../constants";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
 import {
@@ -135,7 +134,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
         ],
         reason: `Consensus multi-tirages (${batchResult.batchSize} tirages)`,
       });
-      setGlobalWeights(optRes.appliedWeights, drawName);
+      setGlobalWeights(optRes.appliedWeights);
       setApplied(true);
       showToast(`Poids stabilisés par consensus multi-tirages appliqués avec succès (${batchResult.batchSize} tirages)`, "success");
       audioEngine.play("success");
@@ -162,7 +161,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
         globalWeights
       );
       setLastAdjustmentResult(result);
-      setGlobalWeights(result.optimizedWeights, drawName);
+      setGlobalWeights(result.optimizedWeights);
       setApplied(true);
       showToast(
         `ADN Recalibré ! Nouvelle version ${result.dnaRecord.version} enregistrée`,
@@ -179,10 +178,9 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
   const handleExportUniversalJSON = () => {
     if (!report) return;
     audioEngine.play("click");
-    const priorHistory = drawHistory.slice(selectedDrawIndex + 1);
     const mathMeta = report.mathProofMetadata || extractMathProofMetadata({
-      history: priorHistory,
-      weights: report.initialWeights || globalWeights,
+      history: drawHistory,
+      weights: globalWeights,
       algoGradients: report.algoGradients,
       suggestedNumbers: report.top5Predicted,
       actualWinners: report.actualWinners,
@@ -217,10 +215,9 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
     if (!report) return;
     try {
       audioEngine.play("click");
-      const priorHistory = drawHistory.slice(selectedDrawIndex + 1);
       const mathMeta = report.mathProofMetadata || extractMathProofMetadata({
-        history: priorHistory,
-        weights: report.initialWeights || globalWeights,
+        history: drawHistory,
+        weights: globalWeights,
         algoGradients: report.algoGradients,
         suggestedNumbers: report.top5Predicted,
         actualWinners: report.actualWinners,
@@ -260,13 +257,19 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
     try {
       audioEngine.play("scan");
       const scenario = await importUnifiedScenarioFromJSON(file);
-      if (normalizeDrawName(scenario.drawName) !== normalizeDrawName(drawName)) {
-        throw new Error(
-          `Violation d'isolation des tirages : ce scénario appartient à "${scenario.drawName}" et non au tirage actif "${drawName}".`
-        );
-      }
       const res = await reinjectScenarioIntoState(scenario, drawHistory);
-      setGlobalWeights(res.weights, drawName);
+      const optRes = await applyOptimizedWeights({
+        drawName,
+        weights: res.weights,
+        history: drawHistory,
+        origin: "FORENSIC_AUTOPSY",
+        causalAuditTrail: [
+          `Réinjection de scénario forensique universel (${scenario.scenarioType || "JSON"})`,
+          res.message,
+        ],
+        reason: "Import JSON de scénario forensique",
+      });
+      setGlobalWeights(optRes.appliedWeights);
       showToast(res.message, "success");
       audioEngine.play("success");
     } catch (err: any) {

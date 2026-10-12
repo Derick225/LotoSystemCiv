@@ -326,25 +326,18 @@ export const performAlmostInstantSync = async () => {
             }
         }));
 
-        // Planification différée (Debounce 3s) non restrictive pour le UI thread afin de protéger les quotas Supabase
-        const globalAny = globalThis as any;
-        if (globalAny.__nexusPrefSyncTimer) {
-            clearTimeout(globalAny.__nexusPrefSyncTimer);
-        }
-        globalAny.__nexusPrefSyncTimer = setTimeout(() => {
-            globalAny.__nexusPrefSyncTimer = null;
-            Promise.resolve(
-                supabase.from('user_preferences').upsert({
-                    user_id: userId,
-                    watchlist,
-                    saved_tickets,
-                    settings: unifiedSettings,
-                    updated_at: new Date().toISOString()
-                })
-            ).catch((err: unknown) => {
-                console.error("[AlmostInstantSync] Erreur d'écriture cloud en arrière plan", err);
-            });
-        }, 3000);
+        // Planification instantanée et asynchrone non restrictive pour le UI thread
+        Promise.resolve(
+            supabase.from('user_preferences').upsert({
+                user_id: userId,
+                watchlist,
+                saved_tickets,
+                settings: unifiedSettings,
+                updated_at: new Date().toISOString()
+            })
+        ).catch((err: unknown) => {
+            console.error("[AlmostInstantSync] Erreur d'écriture cloud en arrière plan", err);
+        });
 
     } catch (error) {
         console.warn("[AlmostInstantSync] Échec du déclenchement du cycle de synchronisation", error);

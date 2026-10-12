@@ -1365,6 +1365,20 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
             if (adaptiveConfig.updated_at) {
               remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
             }
+          } else {
+            const fetchLegacy = supabase
+              .from('algo_weights')
+              .select('weights, updated_at')
+              .eq('draw_name', drawName)
+              .maybeSingle();
+            const { data } = await Promise.race([fetchLegacy, timeoutPromise]);
+
+            if (data?.weights) {
+              remoteWeights = data.weights as Partial<AlgoWeights>;
+              if (data.updated_at) {
+                remoteUpdatedAt = new Date(data.updated_at);
+              }
+            }
           }
 
           if (remoteWeights && remoteUpdatedAt && localUpdatedAt) {
@@ -1417,6 +1431,20 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
         if (adaptiveConfig.updated_at) {
           remoteUpdatedAt = new Date(adaptiveConfig.updated_at);
         }
+      } else {
+        const fetchLegacy = supabase
+          .from('algo_weights')
+          .select('weights, updated_at')
+          .eq('draw_name', drawName)
+          .maybeSingle();
+        const { data } = await Promise.race([fetchLegacy, timeoutPromise]);
+
+        if (data?.weights) {
+          remoteWeights = data.weights as Partial<AlgoWeights>;
+          if (data.updated_at) {
+            remoteUpdatedAt = new Date(data.updated_at);
+          }
+        }
       }
     } catch (e) { /* Silenced */ }
   }
@@ -1440,8 +1468,6 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
   weightsCache.set(drawName, { weights: finalWeights, timestamp: now });
   return finalWeights;
 };
-
-const pendingWeightsRemoteTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) => {
   const hasMachine = drawHasMachineNumbers(drawName);
@@ -1479,22 +1505,11 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
         // Silenced
       }
     }
-    // Debounce de 2.5 secondes sur l'écriture Supabase (table unique model_weights_config)
-    // pour éviter toute saturation de quota lors d'ajustements rapides
     if (isSupabaseConfigured()) {
-      const existingTimer = pendingWeightsRemoteTimers.get(drawName);
-      if (existingTimer) clearTimeout(existingTimer);
-      const timer = setTimeout(async () => {
-        pendingWeightsRemoteTimers.delete(drawName);
-        try {
-          await supabase
-            .from('model_weights_config')
-            .upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() });
-        } catch {
-          // Silenced background sync error
-        }
-      }, 2500);
-      pendingWeightsRemoteTimers.set(drawName, timer);
+      await Promise.allSettled([
+        supabase.from('algo_weights').upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() }),
+        supabase.from('model_weights_config').upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() })
+      ]);
     }
   } catch (e) { /* Silenced */ }
 };

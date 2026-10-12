@@ -262,12 +262,50 @@ class WorkerService {
         }
     }
 
+    private edgeFailures: number = 0;
+    private edgeCooldownUntil: number = 0;
+
     public async runTask<T>(task: string, payload: unknown = {}, history: unknown[] = []): Promise<T> {
-        // Exécution 100% locale via Web Worker + Rust/WASM HPC (Zéro appel Edge Function Supabase)
+        // Mode local direct si Supabase n'est pas configuré ou si le circuit breaker est ouvert
+        if (!isSupabaseConfigured() || Date.now() < this.edgeCooldownUntil) {
+            try {
+                return await this.runInLocalWorker(task, payload, history) as T;
+            } catch (fallbackError: unknown) {
+                return await this.runInMainThreadFallback<T>(task, payload, history);
+            }
+        }
+
         try {
-            return await this.runInLocalWorker(task, payload, history) as T;
-        } catch (fallbackError: unknown) {
-            return await this.runInMainThreadFallback<T>(task, payload, history);
+            const response = await apiClient.post<{ success: boolean, result?: unknown, error?: string }>('compute-nexus-analytics', {
+                task,
+                payload,
+                history
+            }, { suppressErrorLogging: true });
+
+            if (response && response.success) {
+                // Reset circuit breaker on success
+                this.edgeFailures = 0;
+                return response.result as T;
+            } else {
+                throw new Error(response?.error || "Erreur silencieuse venant de l'Edge Function");
+            }
+        } catch (e: unknown) {
+            this.edgeFailures++;
+            if (this.edgeFailures >= 3) {
+                // Si ça rate 3 fois de suite, on met l'Edge Function en pause pendant 5 minutes
+                this.edgeCooldownUntil = Date.now() + 5 * 60 * 1000;
+                console.info(`[Nexus Worker] Edge Function hors ligne (Circuit ouvert). Passage en local exclusif pendant 5 min.`);
+            } else {
+                console.info(`[Nexus Worker] Edge Function indisponible (non déployée). Délégation en cours au Worker Local...`);
+            }
+            
+            try {
+                // Utilisation du Worker Asynchrone au lieu d'importer directement mathCore sur le thread principal
+                const result = await this.runInLocalWorker(task, payload, history);
+                return result as T;
+            } catch (fallbackError: unknown) {
+                return await this.runInMainThreadFallback<T>(task, payload, history);
+            }
         }
     }
 

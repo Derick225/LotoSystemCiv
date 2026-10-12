@@ -133,15 +133,8 @@ export const auditInterDrawPatternsPostMortem = (
   const relation = getFamilyPredecessorAndSuccessor(drawName, activeFamily.id);
   if (!relation) return null;
 
-  // Récupérer l'historique purifié réel du prédécesseur (aucun historique synthétique de repli,
-  // et aucune ré-attribution d'items sans nom de tirage explicite)
-  const explicitlyNamedHistory = rawHistory.filter((d: any) =>
-    Boolean(d?.drawName || d?.draw_name || d?.tirage)
-  );
-  const rawPredHistory = purifyHistoryForDraw(
-    relation.predecessor.name,
-    explicitlyNamedHistory
-  );
+  // Récupérer l'historique purifié réel du prédécesseur (aucun historique synthétique de repli)
+  const rawPredHistory = purifyHistoryForDraw(relation.predecessor.name, rawHistory);
   let predHistory: DrawResult[] = [];
 
   if (rawPredHistory.length > 0) {

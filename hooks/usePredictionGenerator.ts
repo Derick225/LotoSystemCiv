@@ -99,24 +99,17 @@ export const usePredictionGenerator = (drawName: string) => {
     }, [activeRegime, activeHistory]);
 
     const resolvedLearningRate = useMemo(() => {
-        // Taux d'apprentissage borné par l'erreur standard asymptotique 1/√N.
-        // La néguentropie (1 - H) module la confiance : plus le système est ordonné, plus on apprend vite.
-        const standardError = 1.0 / Math.sqrt(activeHistory.length || 1);
-        return standardError * (1.0 - currentEntropy);
-    }, [currentEntropy, activeHistory.length]);
+        return Math.max(0.01, Math.min(0.2, 0.15 * (1.0 - currentEntropy) + 0.01));
+    }, [currentEntropy]);
 
     const resolvedNoiseLevel = useMemo(() => {
-        // Le niveau de bruit est proportionnel à la volatilité observée (normalisée 0-1)
-        // et amplifiée par l'entropie courante (agitation thermique).
         const volScore = activeVolatility.score;
-        return (volScore / 100.0) * (1.0 + currentEntropy);
+        return Math.max(0.1, Math.min(3.0, (volScore / 50.0) * currentEntropy * 1.5 + 0.2));
     }, [currentEntropy, activeVolatility]);
 
     const resolvedMcIterations = useMemo(() => {
-        // Nombre d'itérations Monte-Carlo proportionnel à la variance estimée.
-        // On alloue plus d'itérations quand l'historique est grand et l'entropie élevée.
-        return Math.max(10, Math.round(activeHistory.length * currentEntropy));
-    }, [currentEntropy, activeHistory.length]);
+        return Math.max(10, Math.min(100, Math.round(20 + 80 * currentEntropy)));
+    }, [currentEntropy]);
 
     // Régime de jeu : mesure analytics si disponible, sinon mesure locale déterministe (Hurst,
     // entropie, volatilité, discrépance de Weyl, dimension de chaos) sur l'historique isolé du
@@ -155,22 +148,13 @@ export const usePredictionGenerator = (drawName: string) => {
         // Si la volatilité n'est pas mesurable (historique vide), son terme s'abstient au lieu
         // d'être remplacé par une constante neutre qui forcerait artificiellement le diagnostic.
         const hasVolatility = activeVolatility.score > 0;
-        
-        // Centrage sur l'espérance mathématique des anomalies (1/√N) et de la volatilité (50/100).
-        // La pente est calibrée sur la précision asymptotique (√N).
-        const expectedChaos = 1.0 / Math.sqrt(activeHistory.length || 1);
-        const expectedVolatility = 50.0;
-        const slopeChaos = Math.sqrt(activeHistory.length || 1);
-        const slopeVol = 2.0 / expectedVolatility; // Écart interquartile théorique
-        
-        const sChaosRatio = 1.0 / (1.0 + Math.exp(-slopeChaos * (chaoticRatio - expectedChaos)));
-        const sVolatility = 1.0 / (1.0 + Math.exp(-slopeVol * (activeVolatility.score - expectedVolatility)));
-        
+        const sChaosRatio = 1.0 / (1.0 + Math.exp(-8.0 * (chaoticRatio - 0.20)));
+        const sVolatility = 1.0 / (1.0 + Math.exp(-0.1 * (activeVolatility.score - 75.0)));
         const chaosIndex = hasVolatility
             ? 0.5 * sChaosRatio + 0.5 * sVolatility
             : sChaosRatio;
         setChaosIndex(chaosIndex);
-    }, [chaoticRatio, activeVolatility, activeHistory.length]);
+    }, [chaoticRatio, activeVolatility]);
 
     useEffect(() => {
         let isMounted = true;
@@ -254,19 +238,8 @@ export const usePredictionGenerator = (drawName: string) => {
         if (quantumMode) {
             // Mode Quantique (Exploratoire) : au lieu de booster arbitrairement 4 algorithmes,
             // on augmente l'entropie globale de la distribution des poids (relaxation thermique).
-            // La relaxation (mixingFactor) est directement dérivée de la néguentropie actuelle des poids :
-            // plus les poids sont concentrés (entropie faible), plus on les relaxe vers l'uniformité.
-            let _wSum = 0;
-            const _vals = Object.values(specificWeights) as number[];
-            for (const v of _vals) _wSum += v;
-            let _wEnt = 0;
-            for (const v of _vals) {
-                if (v > 0) { const p = v / (_wSum || 1); _wEnt -= p * Math.log(p); }
-            }
-            const _maxEnt = Math.log(_vals.length || 1);
-            const weightEntropy = _maxEnt > 0 ? _wEnt / _maxEnt : 0;
-            
-            const mixingFactor = 1.0 - weightEntropy;  
+            // Les poids se rapprochent de l'uniformité proportionnellement à la volatilité (resolvedNoiseLevel).
+            const mixingFactor = Math.min(0.8, resolvedNoiseLevel * 0.15); 
             const numAlgos = Object.keys(specificWeights).length;
             const uniformWeight = 1.0 / (numAlgos || 1);
             

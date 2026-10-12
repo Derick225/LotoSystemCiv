@@ -603,51 +603,93 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         globalRegime?.volatility !== undefined ? globalRegime.volatility : 0.1;
       const regimeStr = globalRegime?.regime || "STABLE (Harmonisé)";
 
-      // Exécution 100% locale via le moteur Rust/WASM HPC (Zéro appel Edge Function Supabase)
-      const activeBaseWeights = await resolveBaseWeights();
-      const { initializeLotoEngineWasm, computeHybridRegimeWeightsHpc } =
-        await import("../../services/wasm/lotoEngineBridge");
-      await initializeLotoEngineWasm();
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Hybrid prediction timeout threshold reached (3500ms)")), 3500)
+        );
 
-      const weightKeys = Object.keys(activeBaseWeights);
-      const baseArr = new Float64Array(weightKeys.map((k) => Number((activeBaseWeights as any)[k]) || 0));
-      const channelTypes = new Int32Array(
-        weightKeys.map((k) => {
-          const kl = k.toLowerCase();
-          if (kl.includes("hurst") || kl.includes("markov") || kl.includes("momentum") || kl.includes("frequency")) return 0;
-          if (kl.includes("gap") || kl.includes("equilibrium") || kl.includes("bayesian")) return 1;
-          if (kl.includes("spectral") || kl.includes("lyapunov") || kl.includes("hawkes") || kl.includes("aco")) return 2;
-          return 3;
-        })
-      );
+        const { data, error } = await Promise.race([
+          supabase.functions.invoke(
+            "nexus-api",
+            {
+              body: {
+                action: "hybrid-prediction",
+                drawName,
+                history,
+                regime: regimeStr,
+                hurst: hurstVal,
+                entropy: entropyVal,
+                volatility: volatilityVal,
+              },
+            },
+          ),
+          timeoutPromise
+        ]);
 
-      const hpcRes = computeHybridRegimeWeightsHpc({
-        baseWeights: baseArr,
-        channelTypes,
-        hurst: hurstVal,
-        entropyNorm: entropyVal / Math.log2(90),
-        volatilityNorm: volatilityVal / 100.0,
-        historyDepth: history.length,
-      });
+        if (error) {
+          throw error;
+        }
 
-      const hpcWeights: Record<string, number> = {};
-      weightKeys.forEach((k, idx) => {
-        hpcWeights[k] = hpcRes.optimizedWeights[idx] ?? (activeBaseWeights as any)[k];
-      });
+        if (data) {
+          // Fusion sur le socle complet : les canaux absents de la réponse cloud gardent leur
+          // poids entraîné au lieu d'être silencieusement écartés de l'ensemble pondéré.
+          aiWeights = {
+            ...(await resolveBaseWeights()),
+            ...(data.weights as Record<string, number>),
+          };
+          aiRationale = data.rationale;
+          aiConfidence = data.confidence;
+          aiStrategicAdvice = data.strategicAdvice;
+        } else {
+          throw new Error("No data returned");
+        }
+      } catch (e: any) {
+        // If it's a 412 or missing key, fallback
+        if (
+          e.message?.includes("412") ||
+          e.status === 412 ||
+          e.message?.includes("GEMINI_NOT_CONFIGURED")
+        ) {
+          // Gemini not configured - fallback to high-fidelity math optimizer
+          const activeBaseWeights = await resolveBaseWeights();
 
-      const localFb = generateSmartLocalWeightsFallback(
-        drawName,
-        regimeStr,
-        hurstVal,
-        entropyVal,
-        volatilityVal,
-        hpcWeights as unknown as AlgoWeights,
-      );
-      aiWeights = hpcWeights;
-      aiRationale = localFb.rationale;
-      aiConfidence = Math.round(hpcRes.confidence);
-      aiStrategicAdvice = localFb.strategicAdvice;
-      isLocalFallback = true;
+          const localFb = generateSmartLocalWeightsFallback(
+            drawName,
+            regimeStr,
+            hurstVal,
+            entropyVal,
+            volatilityVal,
+            activeBaseWeights,
+          );
+          aiWeights = localFb.weights;
+          aiRationale = localFb.rationale;
+          aiStrategicAdvice = localFb.strategicAdvice;
+          isLocalFallback = true;
+          showToast(
+            "Oracle IA non configuré. Recours à la convergence mathématique locale.",
+            "info",
+          );
+        } else {
+          console.warn(
+            "Could not fetch Gemini hybrid weights, falling back to local stochastics:",
+            e,
+          );
+          const activeBaseWeights = await resolveBaseWeights();
+
+          const localFb = generateSmartLocalWeightsFallback(
+            drawName,
+            regimeStr,
+            hurstVal,
+            entropyVal,
+            volatilityVal,
+            activeBaseWeights,
+          );
+          aiWeights = localFb.weights;
+          aiRationale = localFb.rationale;
+          aiStrategicAdvice = localFb.strategicAdvice;
+          isLocalFallback = true;
+        }
+      }
 
       const { generateMasterPrediction } =
         await import("../../services/prediction/predictionFacade");
@@ -666,7 +708,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         undefined,
         undefined,
         undefined,
-        false // 100% Local Rust/WASM execution
+        true // Cloud-First execution for Prédiction IA
       );
 
       setPrediction({

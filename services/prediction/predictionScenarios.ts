@@ -260,11 +260,75 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
 };
 
 /**
- * SCÉNARIO B & C : Délégation Cloud désactivée par architecture (100% Rust/WASM Local & Supabase DB Pure)
+ * SCÉNARIO B & C : Délégation Cloud / Haute Puissance avec Détection d'Erreur & Fallback Local
  */
-export const tryCloudPrediction = async (_context: PredictionRuntimeContext): Promise<Prediction | null> => {
-  // Architecture verrouillée : Supabase agit exclusivement comme base de données pure (Delta-Sync).
-  // 100% des calculs prédictifs et stochastiques sont exécutés localement par le moteur Rust/WASM.
+export const tryCloudPrediction = async (context: PredictionRuntimeContext): Promise<Prediction | null> => {
+  const useCloudEngine = context.useCloudEngine ?? getStoreStateSafely().useCloudEngine;
+
+  if (
+    useCloudEngine &&
+    isSupabaseConfigured() &&
+    context.drawName !== "ALL_COMBINED" &&
+    context.drawName !== "ALL"
+  ) {
+    context.onProgress?.(15, "[Cloud] Interrogation du supercalculateur Cloud...");
+    try {
+      logger.info({ drawName: context.drawName }, "[predictionScenarios] Scenario B : Délégation de la prédiction vers Supabase Edge Function...");
+      
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Cloud response latency threshold reached (3500ms)")), 3500)
+      );
+
+      const result = await Promise.race([
+        apiClient.post<Prediction>(
+          "predict-elite",
+          {
+            drawName: context.drawName,
+            history: context.history,
+            weights: context.weightsToUse,
+            symbioticContext: context.symbioticContext,
+            metrics: context.metrics,
+          },
+          { suppressErrorLogging: true }
+        ),
+        timeoutPromise
+      ]);
+
+      const isPayloadValid =
+        result &&
+        Array.isArray(result.suggestedNumbers) &&
+        result.suggestedNumbers.length === TICKET_SIZE &&
+        new Set(result.suggestedNumbers).size === TICKET_SIZE &&
+        result.suggestedNumbers.every(
+          (n: number) => typeof n === "number" && n >= 1 && n <= DOMAIN_SIZE && !isNaN(n) && Number.isInteger(n)
+        ) &&
+        Array.isArray(result.candidates) &&
+        result.candidates.every(
+          (n: number) => typeof n === "number" && n >= 1 && n <= DOMAIN_SIZE && !isNaN(n) && Number.isInteger(n)
+        ) &&
+        typeof result.confidence === "number" &&
+        !isNaN(result.confidence) &&
+        result.confidence >= 1 &&
+        result.confidence <= 100;
+
+      if (isPayloadValid) {
+        logger.info({ drawName: context.drawName }, "[predictionScenarios] Scenario B : Prédiction obtenue et validée avec succès depuis le Cloud.");
+        context.onProgress?.(100, "[Cloud] Alignement finalisé avec succès.");
+        return { ...result, drawName: context.drawName };
+      } else {
+        logger.warn(
+          { drawName: context.drawName, result },
+          "[predictionScenarios] Scenario C : Réponse cloud reçue mais PAYLOAD ANALYTIQUE INVALIDE ou INCOMPLET. Activation du repli local."
+        );
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      logger.warn(
+        { drawName: context.drawName, error: errorMsg },
+        "[predictionScenarios] Scenario C : Échec de la prédiction Cloud (Réseau/Serveur). Basculement automatique local."
+      );
+    }
+  }
   return null;
 };
 

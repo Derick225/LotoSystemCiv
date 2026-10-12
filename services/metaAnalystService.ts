@@ -112,21 +112,9 @@ const greedyDeterministicSelection = (
 ): number[] => {
     const candidates: { n: number; score: number; raw: number }[] = [];
     
-    // Coefficient de variation du vecteur : mesure objective de la dispersion relative des scores.
-    let _cvSum = 0, _cvSumSq = 0, _cvCount = 0;
-    for (let vi = 1; vi <= MAX_NUM; vi++) {
-        if (vector[vi] > 0) { _cvSum += vector[vi]; _cvCount++; }
-    }
-    const _cvMean = _cvSum / (_cvCount || 1);
-    for (let vi = 1; vi <= MAX_NUM; vi++) {
-        if (vector[vi] > 0) { const d = vector[vi] - _cvMean; _cvSumSq += d * d; }
-    }
-    const vectorCV = Math.sqrt(_cvSumSq / (_cvCount || 1)) / (_cvMean + Number.EPSILON);
-    // Amplitude calibrée sur la dispersion réelle du vecteur (CV × entropie).
-    // Un vecteur très dispersé (CV élevé) nécessite une modulation plus forte pour briser les ex æquo.
-    const dynamicAmp = vectorCV * entropy;
-    // Fréquence spatiale : base structurelle 2π/N modulée continûment par l'entropie et la dispersion.
-    const dynamicFreq = (2.0 * Math.PI / MAX_NUM) * (1.0 + entropy * vectorCV);
+    // Paramètres d'exploration dynamique continûment dérivés de l'entropie de Shannon
+    const dynamicAmp = 0.05 + 0.20 * entropy;
+    const dynamicFreq = (2.0 * Math.PI / MAX_NUM) * (1.0 + 0.5 * entropy);
     
     for (let i = 1; i <= MAX_NUM; i++) {
         const rawScore = vector[i];
@@ -228,13 +216,8 @@ export async function generatePlatinumPredictionCore(
     const stdDeltaSieve = standardizeVector(rawDeltaSieve);
     
     // Intensité continue du tamisage dérivée du SNR de l'ADN
-    const snrDna = (stdDevDna || Number.EPSILON) / (meanDna || 1.0);
-    // Sigmoid du SNR normalisé par √K (K = MAX_NUM). Pour K catégories iid, le CV
-    // d'échantillonnage est O(1/√K) ; multiplier le SNR mesuré par √K produit un
-    // z-score sans dimension. Le centrage à 1.0 place le point neutre au niveau
-    // du bruit d'échantillonnage attendu (SNR = 1/√K).
-    const sieveScale = Math.sqrt(MAX_NUM);
-    const dynamicSieveIntensity = sigmoid(snrDna * sieveScale - 1.0);
+    const snrDna = (stdDevDna || 0.1) / (meanDna || 1.0);
+    const dynamicSieveIntensity = sigmoid(1.5 * ((snrDna * 10.0) - 1.0));
     const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
 
     // 2. VECTORISATION STANDARDISÉE DES TENSEURS DE BASE
@@ -303,45 +286,18 @@ export async function generatePlatinumPredictionCore(
         if (qa > maxQuantAi) maxQuantAi = qa;
     }
 
-    // Contribution relative de chaque branche synergétique à la variance totale
-    let _fracSpecVar = 0, _quantAiVar = 0;
-    for (let vi = 1; vi <= MAX_NUM; vi++) {
-        const nfs = fracSpec[vi] / (maxFracSpec + Number.EPSILON);
-        const nqa = quantAi[vi] / (maxQuantAi + Number.EPSILON);
-        _fracSpecVar += nfs * nfs;
-        _quantAiVar += nqa * nqa;
-    }
-    const fracContrib = _fracSpecVar / (_fracSpecVar + _quantAiVar + Number.EPSILON);
-
     // Calcul continu de l'entropie des inputs pour le couplage thermodynamique
     const inputEntropy = computeVectorEntropy(normalizeVector(rawSums));
-    // Pente thermo-adaptative : √N (inverse de l'erreur standard 1/√N).
-    // Plus l'historique est grand, plus la sensibilité à l'entropie est fine.
-    const thermoSlope = Math.sqrt(history.length);
-    const thermoBeta = sigmoid(thermoSlope * (inputEntropy - 0.5));
-    // Bornes de la combinaison convexe dérivées de la contribution relative de chaque branche
-    // synergétique (fractal-spectral vs spatial-bayes) à la variance totale mesurée.
-    // En basse entropie (thermoBeta → 0), on suit la branche dominante ;
-    // en haute entropie (thermoBeta → 1), on diversifie vers la branche sous-représentée.
-    const weightFractal = fracContrib * (1.0 - thermoBeta) + (1.0 - fracContrib) * thermoBeta;
-    const weightQuantum = 1.0 - weightFractal;
+    const thermoBeta = sigmoid(10.0 * (inputEntropy - 0.5));
+    const weightFractal = 0.75 * (1.0 - thermoBeta) + 0.25 * thermoBeta;
+    const weightQuantum = 0.25 * (1.0 - thermoBeta) + 0.75 * thermoBeta;
 
     const consensusVector = new Float64Array(MAX_NUM + 1);
 
-    // Pente d'activation calibrée sur l'écart-type du vecteur de scores bruts normalisé.
-    // La zone de transition sigmoïdale s'étend sur ±1σ (convention 68%).
-    // Borne inférieure 1/√K empêche une pente astronomique si tous les scores sont identiques.
-    let _normVarAcc = 0;
-    for (let j = 1; j <= MAX_NUM; j++) {
-        const _d = rawSums[j] / maxRawSum - 0.5;
-        _normVarAcc += _d * _d;
-    }
-    const activationSlope = 2.0 / Math.max(Math.sqrt(_normVarAcc / MAX_NUM), 1.0 / Math.sqrt(MAX_NUM));
-
     for (let i = 1; i <= MAX_NUM; i++) {
         const normSum = rawSums[i] / maxRawSum;
-        // Activation sigmoïdale douce continue calibrée sur la dispersion réelle des scores
-        const activation = sigmoid(activationSlope * (normSum - 0.5));
+        // Activation sigmoïdale douce continue
+        const activation = sigmoid(3.0 * (normSum - 0.5));
         
         const normFracSpec = fracSpec[i] / maxFracSpec;
         const normQuantAi = quantAi[i] / maxQuantAi;
@@ -406,15 +362,11 @@ export async function generatePlatinumPredictionCore(
     const entropyScore = computeVectorEntropy(normalizedVector);
 
     const pivot = opts.regimePivot;
-    // Marge de transition de régime dérivée de l'incertitude statistique : 1/√N
-    // (erreur standard asymptotique de tout estimateur régulier sur N observations).
-    // Plus l'historique est grand, plus la transition entre régimes est nette.
-    const regimeSigma = 1.0 / Math.sqrt(history.length);
-    const regimeSlope = 1.0 / regimeSigma;
+    const regimeSigma = 0.05;
     
-    // Probabilités douces continues par sigmoïdes calibrées sur l'incertitude mesurée
-    const pStable = sigmoid(-regimeSlope * (entropyScore - (pivot - regimeSigma)));
-    const pChaotic = sigmoid(regimeSlope * (entropyScore - (pivot + regimeSigma)));
+    // Probabilités douces continues par sigmoïdes
+    const pStable = sigmoid(-20.0 * (entropyScore - (pivot - regimeSigma)));
+    const pChaotic = sigmoid(20.0 * (entropyScore - (pivot + regimeSigma)));
     const pTransition = Math.max(0, 1.0 - pStable - pChaotic);
 
     let regime: 'STABLE' | 'TRANSITION' | 'CHAOTIC' = 'TRANSITION';
@@ -485,12 +437,10 @@ export async function generatePlatinumPredictionCore(
 
     // SCÉNARIO ALPHA : ALPHA CORE (Pondération stricte sur les gènes à fort MRR)
     const alphaVector = new Float64Array(MAX_NUM + 1);
-    const wAlphaPriors = entropyScore;
-    const wAlphaCons = 1.0 - entropyScore;
     for (let i = 1; i <= MAX_NUM; i++) {
         const dnaAffScore = (dnaAffinity[i] ?? 50) / 100.0;
-        const mrrPriors = (stdFreq[i] * wAlphaCons + stdMarkov[i] * wAlphaPriors + stdGap[i] * entropyScore) / (1.0 + entropyScore + Number.EPSILON);
-        alphaVector[i] = (normalizedVector[i] * wAlphaCons) + ((mrrPriors + 2.0) * wAlphaPriors * (1.0 + dnaAffScore));
+        const mrrPriors = (stdFreq[i] * 1.3 + stdMarkov[i] * 1.2 + stdGap[i] * 1.1) / 3.6;
+        alphaVector[i] = (normalizedVector[i] * 0.4) + ((mrrPriors + 2.0) * 0.3 * (1.0 + dnaAffScore * 0.5));
     }
     const normAlpha = normalizeVector(alphaVector);
     const alphaNumbers = greedyDeterministicSelection(normAlpha, DRAW_SIZE, 0.0, entropyScore);
@@ -512,10 +462,8 @@ export async function generatePlatinumPredictionCore(
 
     // SCÉNARIO BETA : BETA FLOW (Harmonique Orbitale Déphasée)
     const betaVector = new Float64Array(MAX_NUM + 1);
-    const wBetaSpec = Math.sqrt(entropyScore);
-    const wBetaCons = 1.0 - wBetaSpec;
     for (let i = 1; i <= MAX_NUM; i++) {
-        betaVector[i] = (normalizedVector[i] * wBetaCons) + ((stdSpectral[i] + 2.0) * wBetaSpec);
+        betaVector[i] = (normalizedVector[i] * 0.6) + ((stdSpectral[i] + 2.0) * 0.4);
     }
     const normBeta = normalizeVector(betaVector);
     const betaPhase = (Math.PI / 4.0) * freqPhase;
@@ -537,13 +485,10 @@ export async function generatePlatinumPredictionCore(
 
     // SCÉNARIO GAMMA : GAMMA BURST (Amplification sur les numéros à forte accélération de tamisage ΔM_n > 0)
     const gammaVector = new Float64Array(MAX_NUM + 1);
-    const wGammaCons = 1.0 - entropyScore;
-    const wGammaMom = entropyScore * gammaRatio;
-    const wGammaSieve = entropyScore * (1.0 - gammaRatio);
     for (let i = 1; i <= MAX_NUM; i++) {
-        const momentumComp = stdMomentum[i] + 2.0;
-        const sieveAccComp = stdDeltaSieve[i] + 2.0; // Amplification directe de l'accélération de tamisage ΔM_n > 0
-        gammaVector[i] = (normalizedVector[i] * wGammaCons) + (momentumComp * wGammaMom) + (sieveAccComp * wGammaSieve);
+        const momentumComp = (stdMomentum[i] + 2.0) * gammaRatio;
+        const sieveAccComp = (stdDeltaSieve[i] + 2.0) * 1.5; // Amplification directe de l'accélération de tamisage ΔM_n > 0
+        gammaVector[i] = (normalizedVector[i] * (1.0 - gammaRatio) * 0.4) + (momentumComp * 0.3) + (sieveAccComp * 0.3);
     }
     const normGamma = normalizeVector(gammaVector);
     const gammaPhase = (Math.PI / 2.0) * freqPhase;
@@ -589,9 +534,8 @@ export async function generatePlatinumPredictionCore(
 
     // SCÉNARIO EPSILON : EPSILON FORENSIC (Correction Agentique Résiduelle)
     const epsilonVector = new Float64Array(MAX_NUM + 1);
-    const wEpsilonCons = 1.0 - Math.min(0.8, entropyScore);
     for (let i = 1; i <= MAX_NUM; i++) {
-        epsilonVector[i] = normalizedVector[i] * wEpsilonCons;
+        epsilonVector[i] = normalizedVector[i] * 0.4;
     }
     
     try {
@@ -600,41 +544,31 @@ export async function generatePlatinumPredictionCore(
         const recentReports = forensicReports.slice(0, 10);
         const gain = opts.forensicGain;
 
-        // Calibration sur la longueur de l'historique et la dérive moyenne
-        const forensicScale = Math.sqrt(history.length);
-        let _meanDrift = 0;
-        let _driftCount = 0;
-        recentReports.forEach(r => r.algorithmicDrift?.forEach(d => { _meanDrift += (d.driftScore || 0); _driftCount++; }));
-        if (_driftCount > 0) _meanDrift /= _driftCount;
-
-        // Dispersion spatiale continue pour les quasi-collisions
-        const spatialDecay = (d: number) => 1.0 / (1.0 + d * d);
-
         recentReports.forEach((report: ForensicReport, index: number) => {
-            const recencyWeight = safeExp(- (1.0 / (recentReports.length || 1)) * index);
+            const recencyWeight = safeExp(-0.25 * index);
             
             report.missedOpportunities?.forEach((miss: any) => {
                 if (miss.number >= 1 && miss.number <= MAX_NUM) {
-                    epsilonVector[miss.number] += forensicScale * spatialDecay(0) * recencyWeight * gain;
+                    epsilonVector[miss.number] += 40.0 * recencyWeight * gain;
                 }
             });
             
             report.nearMisses?.forEach((nm: any) => {
                 if (nm.actual >= 1 && nm.actual <= MAX_NUM) {
-                    epsilonVector[nm.actual] += forensicScale * spatialDecay(0.5) * recencyWeight * gain;
+                    epsilonVector[nm.actual] += 30.0 * recencyWeight * gain;
                     const left = nm.actual > 1 ? nm.actual - 1 : MAX_NUM;
                     const right = nm.actual < MAX_NUM ? nm.actual + 1 : 1;
-                    epsilonVector[left] += forensicScale * spatialDecay(1.0) * recencyWeight * gain;
-                    epsilonVector[right] += forensicScale * spatialDecay(1.0) * recencyWeight * gain;
+                    epsilonVector[left] += 12.0 * recencyWeight * gain;
+                    epsilonVector[right] += 12.0 * recencyWeight * gain;
                 }
             });
             
             report.algorithmicDrift?.forEach((drift: any) => {
                 const driftScore = drift.driftScore || 0;
-                const driftActivation = sigmoid((driftScore - _meanDrift) / Math.max(1.0, Math.sqrt(history.length)));
+                const driftActivation = sigmoid(0.2 * (driftScore - 15.0));
                 for (let i = 1; i <= MAX_NUM; i++) {
-                    const deterministicNoise = (1.0 + Math.sin(driftScore * i));
-                    const correction = driftActivation * deterministicNoise * recencyWeight * gain * forensicScale * 0.1;
+                    const deterministicNoise = 4.0 * (1.0 + Math.sin(driftScore * i));
+                    const correction = driftActivation * deterministicNoise * recencyWeight * gain;
                     if (drift.direction === 'underestimating') epsilonVector[i] += correction;
                     else if (drift.direction === 'overestimating') epsilonVector[i] -= correction * 0.5;
                 }
@@ -694,18 +628,7 @@ export async function generatePlatinumPredictionCore(
         const dampingPhase = (currentGap / (meanGapVal + Number.EPSILON)) * Math.PI;
         const harmonicDampingZeta = safeExp(-entropyScore * (currentGap / (meanGapVal + Number.EPSILON))) * (1.0 + Math.cos(dampingPhase));
         
-        // Poids adaptatifs basés sur l'entropie du système (Zéro nombres magiques)
-        const wAntiConsensus = entropyScore; 
-        const wOrthogonal = Math.sqrt(entropyScore);
-        const wCounterCyclic = 1.0 - entropyScore;
-        const wShadow = Math.max(0.1, 1.0 - entropyScore);
-        const wDamping = entropyScore * (statsGap.stdDev / (statsGap.mean + Number.EPSILON));
-
-        zetaVector[i] = (boltzmannAntiConsensus * wAntiConsensus) + 
-                        (orthogonalResonance * wOrthogonal) + 
-                        (counterCyclicRestoration * wCounterCyclic) + 
-                        (shadowAffinity * wShadow) + 
-                        (harmonicDampingZeta * wDamping);
+        zetaVector[i] = (boltzmannAntiConsensus * 1.4) + (orthogonalResonance * 1.1) + (counterCyclicRestoration * 1.0) + (shadowAffinity * 0.8) + (harmonicDampingZeta * 0.7);
     }
 
     const normZeta = normalizeVector(zetaVector);
@@ -862,13 +785,7 @@ export const performPlatinumAudit = (
         bestScore: bestHits,
         syncScore: Math.round((bestHits / DRAW_SIZE) * 100),
         timelinePerformance: performances,
-        verdict: (() => {
-            // Score de concordance continu : rapport du nombre de hits observés à l'espérance
-            // sous tirage équitable (loi hypergéométrique E[X] = k²/N).
-            const expectedHits = (DRAW_SIZE * DRAW_SIZE) / MAX_NUM;
-            const liftRatio = bestHits / (expectedHits + Number.EPSILON);
-            return `${bestHits}/${DRAW_SIZE} hits \u00B7 Lift \u00D7${liftRatio.toFixed(1)}`;
-        })()
+        verdict: bestHits >= 3 ? "Succès Confirmé" : bestHits >= 1 ? "Signal Partiel" : "Divergence"
     };
 };
 

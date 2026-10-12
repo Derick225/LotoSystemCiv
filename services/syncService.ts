@@ -19,10 +19,6 @@ import {
 } from './schemas/syncSchemas';
 
 const BATCH_SIZE = 50;
-const SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes de cooldown Delta-Sync pour protéger les quotas Supabase
-let lastPredictionsSyncTs = 0;
-let lastForensicSyncTs = 0;
-const lastSnapshotsSyncByDraw = new Map<string, number>();
 
 /**
  * Service de synchronisation bidirectionnelle Cloud <-> Local
@@ -102,13 +98,8 @@ const retryWithBackoff = async <T>(
     }
 };
 
-export const syncPredictions = async (localItems: PredictionHistoryItem[], force: boolean = false): Promise<PredictionHistoryItem[]> => {
+export const syncPredictions = async (localItems: PredictionHistoryItem[]): Promise<PredictionHistoryItem[]> => {
     if (!navigator.onLine) return localItems; // Mode hors ligne
-    const now = Date.now();
-    if (!force && now - lastPredictionsSyncTs < SYNC_COOLDOWN_MS) {
-        return localItems;
-    }
-    lastPredictionsSyncTs = now;
 
     let user = null;
     try {
@@ -285,13 +276,8 @@ export const syncPredictions = async (localItems: PredictionHistoryItem[], force
 
 // --- FORENSIC REPORTS ---
 
-export const syncForensicReports = async (localReports: ForensicReport[], force: boolean = false): Promise<ForensicReport[]> => {
+export const syncForensicReports = async (localReports: ForensicReport[]): Promise<ForensicReport[]> => {
     if (!navigator.onLine) return localReports;
-    const now = Date.now();
-    if (!force && now - lastForensicSyncTs < SYNC_COOLDOWN_MS) {
-        return localReports;
-    }
-    lastForensicSyncTs = now;
 
     let user = null;
     try {
@@ -421,14 +407,8 @@ export const syncLearningSessions = async (localSessions: LearningSession[]): Pr
 
 // --- DELETE OPERATIONS ---
 
-export const syncPredictionSnapshots = async (drawName: string, force: boolean = false) => {
+export const syncPredictionSnapshots = async (drawName: string) => {
     if (!navigator.onLine) return;
-    const now = Date.now();
-    const lastSync = lastSnapshotsSyncByDraw.get(drawName) || 0;
-    if (!force && now - lastSync < SYNC_COOLDOWN_MS) {
-        return;
-    }
-    lastSnapshotsSyncByDraw.set(drawName, now);
 
     try {
         const { data: { user } } = await supabase.auth.getUser();

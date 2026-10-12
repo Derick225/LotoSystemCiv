@@ -14,7 +14,6 @@ import {
   ModelDnaRecord,
   computeModelDnaFingerprint,
   extractSpecializations,
-  getModelDnaHistory,
 } from './modelDnaKnowledgeBase';
 import {
   applyOptimizedWeights,
@@ -244,26 +243,7 @@ export const executeClosedLoopAutopsy = async (
   const hasMachineData = priorHistory.some(
     (d) => Array.isArray(d.machine) && d.machine.length > 0
   );
-
-  // Résolution des poids en vigueur à t-1 : si targetDrawIndex > 0 et qu'une version ADN
-  // antérieure ou contemporaine au tirage cible existe, on l'utilise pour éviter toute fuite temporelle.
-  let weightsAtTargetTime: AlgoWeights = { ...currentWeights };
-  if (targetDrawIndex > 0) {
-    try {
-      const targetTimeMs = parseDateSafely(targetDraw.date).getTime();
-      const dnaHistory = await getModelDnaHistory(drawName, 60);
-      const priorDna = dnaHistory.find(
-        (r) => parseDateSafely(r.timestamp).getTime() <= targetTimeMs
-      );
-      if (priorDna && priorDna.weights && Object.keys(priorDna.weights).length > 0) {
-        weightsAtTargetTime = { ...priorDna.weights };
-      }
-    } catch {
-      // Conserver currentWeights si aucun historique ADN antérieur n'est disponible
-    }
-  }
-
-  const baseWeightsForContext: AlgoWeights = { ...weightsAtTargetTime };
+  const baseWeightsForContext: AlgoWeights = { ...currentWeights };
   if (!hasMachineData) {
     baseWeightsForContext[AlgoKey.MACHINE_TRANSFER] = 0;
   }
@@ -1010,11 +990,13 @@ export const executeBatchClosedLoopAutopsy = async (
   const meanBrier = sumBrier / effectiveCount;
 
   const priorHistoryForBatch = history.slice(depth);
-  const hasMachineData = priorHistoryForBatch.some(
+  const hasMachineData = history.some(
     (d) => Array.isArray(d.machine) && d.machine.length > 0
   );
-  // Strictement sur priorHistoryForBatch (zéro fuite temporelle des tirages cibles 0..depth-1)
-  const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistoryForBatch);
+  const proofMap = evaluateAlgoEmpiricalProof(
+    drawName,
+    priorHistoryForBatch.length >= 3 ? priorHistoryForBatch : history.slice(1)
+  );
 
   // Calcul des gradients moyens et des nouveaux poids proposés
   const rawUpdatedWeights: Record<string, number> = {};

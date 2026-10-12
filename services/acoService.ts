@@ -1,10 +1,10 @@
 import { DrawResult, AntColonyPath, OracleVocalContext } from '../types';
 import { useNexusStore } from '../store/useNexusStore';
 import { LCG } from '../utils/mathUtils';
+import { apiClient } from '../core/api/apiClient';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { packHistory } from './workers/zeroCopy';
-import { initializeLotoEngineWasm, runAntColonyOptimizationHpc } from './wasm/lotoEngineBridge';
 
 /**
  * Service ACO (Ant Colony Optimization) - Interface Client v3.0 (100% Déterministe & Continu)
@@ -74,40 +74,36 @@ export const runAntColonyOptimization = async (
         biasTargets: oracleTargets
     };
 
-    // Exécution 100% locale via Web Worker + Rust/WASM HPC (Zéro appel Edge Function Supabase)
-    if (typeof Worker === 'undefined') {
+    const useCloudEngine = useNexusStore.getState().useCloudEngine;
+    if (useCloudEngine) {
         try {
-            await initializeLotoEngineWasm();
-            const numDraws = purifiedHistory.length;
-            const flatHistory = new Int32Array(numDraws * 5);
-            for (let d = 0; d < numDraws; d++) {
-                const g = purifiedHistory[d].gagnants || [];
-                for (let c = 0; c < 5; c++) flatHistory[d * 5 + c] = g[c] || 0;
+            console.log(`Tentative ACO via Supabase Edge Function (run-ml-models)...`);
+            const timeoutPromise = new Promise<{ bestPath?: { numbers: number[], confidence: number } } | null>((resolve) => 
+                setTimeout(() => resolve(null), 5000)
+            );
+            
+            // Usage de apiClient.post pour une gestion globale des erreurs
+            const invokePromise = apiClient.post<{ bestPath?: { numbers: number[], confidence: number } }>('run-ml-models', {
+                model: 'aco', history: purifiedHistory.slice(0, 50), config
+            }, { suppressErrorLogging: true }).catch(() => null);
+
+            const data = await Promise.race([invokePromise, timeoutPromise]);
+            
+            if (data && data.bestPath) {
+                const bestPathObj = data.bestPath;
+                const isOracle = oracleTargets.some(t => bestPathObj.numbers.includes(t));
+                const confidence = isOracle ? Math.min(99, bestPathObj.confidence + 10) : bestPathObj.confidence;
+                const optimizedBestPath: AntColonyPath = {
+                    numbers: bestPathObj.numbers,
+                    pheromoneDensity: confidence / 100.0,
+                    isOracleBiased: isOracle,
+                    confidence: confidence
+                };
+                const variations = generateVariations(bestPathObj.numbers, purifiedHistory, vocalContext, confidence);
+                return [optimizedBestPath, ...variations];
             }
-            const hpcRes = runAntColonyOptimizationHpc({
-                flatHistory,
-                numDraws,
-                winCols: 5,
-                antsCount: config.antsCount,
-                generations: config.generations,
-                alpha: config.alpha,
-                beta: config.beta,
-                rho: config.rho,
-                q0: config.q0,
-                seed: getStringHash(`${activeDraw}_${purifiedHistory[0]?.date || 'default'}`)
-            });
-            const isOracle = oracleTargets.some(t => hpcRes.bestNumbers.includes(t));
-            const confidence = isOracle ? Math.min(99, hpcRes.confidence + 10) : hpcRes.confidence;
-            const optimizedBestPath: AntColonyPath = {
-                numbers: hpcRes.bestNumbers,
-                pheromoneDensity: hpcRes.pheromoneDensity,
-                isOracleBiased: isOracle,
-                confidence
-            };
-            const variations = generateVariations(hpcRes.bestNumbers, purifiedHistory, vocalContext, confidence);
-            return [optimizedBestPath, ...variations];
-        } catch {
-            return fallbackHeuristic(purifiedHistory);
+        } catch (e) {
+            console.warn("Exception Edge Function ACO, fallback sur Worker local.");
         }
     }
 

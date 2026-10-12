@@ -53,7 +53,7 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
     }
 
     const purified = history.reduce((acc: T[], d: any) => {
-        const name = d.drawName || d.draw_name || d.tirage;
+        const name = d.drawName || d.draw_name;
         if (!name) {
             // Fix corrupted items from cache by forcing the correct drawName
             acc.push({ ...d, drawName, draw_name: drawName } as T);
@@ -87,7 +87,7 @@ export const purifyHistoryForInterDrawFamily = <T extends { drawName?: string; d
     const allowedSet = new Set(fam.drawNames.map(d => normalizeDrawName(d)));
 
     return history.filter((d: any) => {
-        const name = d.drawName || d.draw_name || d.tirage;
+        const name = d.drawName || d.draw_name;
         if (!name) return false;
         const norm = normalizeDrawName(String(name));
         return allowedSet.has(norm);
