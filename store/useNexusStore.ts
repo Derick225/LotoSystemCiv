@@ -136,7 +136,7 @@ export const useNexusStore = create<NexusState>()(
       agentLogs: [],
       neuralFeedbackLogs: [],
       vocalContext: null,
-      useCloudEngine: true,
+      useCloudEngine: false,
       temporalDepth: 100,
 
       history: [],

@@ -834,3 +834,408 @@ export function computeChainReactionResonanceHpc(
   };
 }
 
+export interface AcoOptimizationHpcResult {
+  bestNumbers: number[];
+  bestScore: number;
+  confidence: number;
+  pheromoneDensity: number;
+  generationsRun: number;
+}
+
+/**
+ * 5. Optimisation par Colonie de Fourmis (ACS) en Rust/WASM (remplace `run-ml-models` Cloud)
+ */
+export function runAntColonyOptimizationHpc(params: {
+  flatHistory: Int32Array | number[];
+  numDraws: number;
+  winCols?: number;
+  antsCount: number;
+  generations: number;
+  alpha: number;
+  beta: number;
+  rho: number;
+  q0: number;
+  biasTargets?: Int32Array | number[];
+  seed: number;
+}): AcoOptimizationHpcResult {
+  const flat = params.flatHistory instanceof Int32Array ? params.flatHistory : new Int32Array(params.flatHistory);
+  const cols = Math.max(1, params.winCols ?? 5);
+  const bias = params.biasTargets instanceof Int32Array
+    ? params.biasTargets
+    : new Int32Array(params.biasTargets || []);
+
+  if (isWasmLoaded && wasmModuleInstance?.run_aco_optimization_wasm) {
+    try {
+      const res = wasmModuleInstance.run_aco_optimization_wasm(
+        flat,
+        params.numDraws,
+        cols,
+        params.antsCount,
+        params.generations,
+        params.alpha,
+        params.beta,
+        params.rho,
+        params.q0,
+        bias,
+        BigInt(Math.max(1, Math.floor(params.seed)))
+      );
+      return {
+        bestNumbers: Array.from(res.best_numbers),
+        bestScore: res.best_score,
+        confidence: res.confidence,
+        pheromoneDensity: res.pheromone_density,
+        generationsRun: res.generations_run,
+      };
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM ACO, passage au fallback vectorisé :', e);
+    }
+  }
+
+  // Exécution vectorisée en mémoire contiguë (Zéro GC, 100% Déterministe)
+  const NUM_NODES = 90;
+  const MATRIX_DIM = 91;
+  const TICKET_SIZE = 5;
+  const actualDraws = Math.min(params.numDraws, Math.floor(flat.length / cols));
+  if (actualDraws === 0) {
+    return {
+      bestNumbers: [1, 2, 3, 4, 5],
+      bestScore: 0,
+      confidence: 45,
+      pheromoneDensity: 0.45,
+      generationsRun: 0,
+    };
+  }
+
+  let lcgState = BigInt(Math.max(1, Math.floor(params.seed) || 99991));
+  const nextF64 = (): number => {
+    lcgState = (lcgState * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
+    return Number(lcgState >> 11n) / 9007199254740992.0;
+  };
+
+  const counts = new Float64Array(MATRIX_DIM);
+  let totalCount = 0;
+  for (let d = 0; d < actualDraws; d++) {
+    const offset = d * cols;
+    const limitC = Math.min(cols, TICKET_SIZE);
+    for (let c = 0; c < limitC; c++) {
+      const n = flat[offset + c];
+      if (n >= 1 && n <= NUM_NODES) {
+        counts[n] += 1.0;
+        totalCount += 1.0;
+      }
+    }
+  }
+
+  let hShannon = 0;
+  if (totalCount > 0) {
+    for (let n = 1; n <= NUM_NODES; n++) {
+      const p = counts[n] / totalCount;
+      if (p > 0) hShannon -= p * Math.log2(p);
+    }
+  }
+  const normalizedEntropy = Math.max(0.01, Math.min(0.99, hShannon / Math.log2(NUM_NODES)));
+
+  const baseEta = 1.0 / NUM_NODES;
+  const eta = new Float64Array(MATRIX_DIM * MATRIX_DIM).fill(baseEta);
+  const evalHorizon = Math.min(actualDraws, 100);
+  const decayRate = 1.0 / Math.max(5.0, Math.sqrt(evalHorizon));
+
+  for (let d = 0; d < evalHorizon; d++) {
+    const recencyWeight = Math.exp(-decayRate * d);
+    const offset = d * cols;
+    const limitC = Math.min(cols, TICKET_SIZE);
+    for (let i = 0; i < limitC; i++) {
+      const u = flat[offset + i];
+      if (u < 1 || u > NUM_NODES) continue;
+      for (let j = i + 1; j < limitC; j++) {
+        const v = flat[offset + j];
+        if (v < 1 || v > NUM_NODES || u === v) continue;
+        eta[u * MATRIX_DIM + v] += recencyWeight;
+        eta[v * MATRIX_DIM + u] += recencyWeight;
+      }
+    }
+  }
+
+  for (let i = 0; i < bias.length; i++) {
+    const t = bias[i];
+    if (t >= 1 && t <= NUM_NODES) {
+      const boost = 1.0 + (1.0 - normalizedEntropy);
+      for (let other = 1; other <= NUM_NODES; other++) {
+        if (other !== t) {
+          eta[t * MATRIX_DIM + other] *= boost;
+          eta[other * MATRIX_DIM + t] *= boost;
+        }
+      }
+    }
+  }
+
+  const tau0 = 1.0 / (NUM_NODES * Math.SQRT1_2);
+  const tau = new Float64Array(MATRIX_DIM * MATRIX_DIM).fill(tau0);
+
+  let globalBestPath = [1, 2, 3, 4, 5];
+  let globalBestScore = -Infinity;
+
+  let adaptiveRho = Math.max(0.01, Math.min(0.95, params.rho));
+  let adaptiveXi = Math.max(0.01, Math.min(0.9, normalizedEntropy / 2.0));
+  let lastHNorm = 1.0 / Math.E;
+
+  const effAnts = Math.max(10, Math.min(200, params.antsCount));
+  const effGens = Math.max(10, Math.min(250, params.generations));
+  const effAlpha = Math.max(0.1, params.alpha);
+  const effBeta = Math.max(0.1, params.beta);
+  const effQ0 = Math.max(0.05, Math.min(0.95, params.q0));
+
+  const nodeVisits = new Float64Array(MATRIX_DIM);
+  const candNodes = new Int32Array(NUM_NODES);
+  const candScores = new Float64Array(NUM_NODES);
+  const visited = new Uint8Array(MATRIX_DIM);
+  const path = new Int32Array(TICKET_SIZE);
+
+  const hMin = Math.log(TICKET_SIZE);
+  const hMax = Math.log(NUM_NODES);
+
+  for (let gen = 0; gen < effGens; gen++) {
+    nodeVisits.fill(0);
+
+    for (let k = 0; k < effAnts; k++) {
+      visited.fill(0);
+      const startNode = Math.min(NUM_NODES, Math.max(1, Math.floor(nextF64() * NUM_NODES) + 1));
+      path[0] = startNode;
+      visited[startNode] = 1;
+      nodeVisits[startNode] += 1;
+      let current = startNode;
+
+      for (let step = 1; step < TICKET_SIZE; step++) {
+        let candCount = 0;
+        let maxRaw = -Infinity;
+
+        for (let next = 1; next <= NUM_NODES; next++) {
+          if (visited[next] === 0) {
+            const idx = current * MATRIX_DIM + next;
+            const t = Math.max(1e-12, tau[idx]);
+            const n = Math.max(1e-12, eta[idx]);
+            const rawScore = Math.pow(t, effAlpha) * Math.pow(n, effBeta);
+            candNodes[candCount] = next;
+            candScores[candCount] = rawScore;
+            if (rawScore > maxRaw) maxRaw = rawScore;
+            candCount++;
+          }
+        }
+
+        if (candCount === 0) break;
+
+        const temperature = Math.max(1e-6, 1.0 - effQ0) * Math.exp(lastHNorm);
+        let sumExp = 0;
+        for (let cIdx = 0; cIdx < candCount; cIdx++) {
+          const expS = Math.exp(Math.max(-60.0, Math.min(0.0, (candScores[cIdx] - maxRaw) / temperature)));
+          candScores[cIdx] = expS;
+          sumExp += expS;
+        }
+
+        let r = nextF64() * sumExp;
+        let chosen = candNodes[candCount - 1];
+        for (let cIdx = 0; cIdx < candCount; cIdx++) {
+          r -= candScores[cIdx];
+          if (r <= 0) {
+            chosen = candNodes[cIdx];
+            break;
+          }
+        }
+
+        const idxUv = current * MATRIX_DIM + chosen;
+        const newTau = (1.0 - adaptiveXi) * tau[idxUv] + adaptiveXi * tau0;
+        tau[idxUv] = newTau;
+        tau[chosen * MATRIX_DIM + current] = newTau;
+
+        path[step] = chosen;
+        visited[chosen] = 1;
+        nodeVisits[chosen] += 1;
+        current = chosen;
+      }
+
+      const sortedPath = Array.from(path).sort((a, b) => a - b);
+      let score = 0;
+      for (let i = 0; i < TICKET_SIZE; i++) {
+        for (let j = i + 1; j < TICKET_SIZE; j++) {
+          score += eta[sortedPath[i] * MATRIX_DIM + sortedPath[j]];
+        }
+      }
+
+      if (score > globalBestScore) {
+        globalBestScore = score;
+        globalBestPath = sortedPath;
+      }
+    }
+
+    const totalVisits = effAnts * TICKET_SIZE;
+    let hGen = 0;
+    for (let n = 1; n <= NUM_NODES; n++) {
+      const p = nodeVisits[n] / totalVisits;
+      if (p > 0) hGen -= p * Math.log(p);
+    }
+    const hNorm = Math.max(0, Math.min(1, (hGen - hMin) / (hMax - hMin)));
+    lastHNorm = hNorm;
+
+    const dampingSignal = 1.0 / (1.0 + Math.exp(-Math.E * (hNorm - 1.0 / Math.E)));
+    adaptiveRho = 1.0 / Math.pow(Math.E, 3) + (1.0 / Math.E) * dampingSignal;
+    adaptiveXi = 1.0 / Math.pow(Math.E, 3) + (1.0 / Math.pow(Math.E, 1.5)) * dampingSignal;
+
+    const deposit = globalBestScore * (1.0 / (Math.PI * Math.PI));
+    for (let i = 0; i < TICKET_SIZE; i++) {
+      for (let j = i + 1; j < TICKET_SIZE; j++) {
+        const u = globalBestPath[i];
+        const v = globalBestPath[j];
+        const idxUv = u * MATRIX_DIM + v;
+        const updated = (1.0 - adaptiveRho) * tau[idxUv] + adaptiveRho * deposit;
+        tau[idxUv] = updated;
+        tau[v * MATRIX_DIM + u] = updated;
+      }
+    }
+  }
+
+  const expectedBase = ((TICKET_SIZE * (TICKET_SIZE - 1)) / 2) * (tau0 * Math.pow(0.5, effBeta));
+  const scoreRatio = globalBestScore / Math.max(1e-9, expectedBase);
+  const confSig = 1.0 / (1.0 + Math.exp(-0.1 * (scoreRatio - 1.0)));
+  const confidence = Math.max(1, Math.min(99, Math.round(confSig * 100)));
+
+  return {
+    bestNumbers: globalBestPath,
+    bestScore: globalBestScore,
+    confidence,
+    pheromoneDensity: confidence / 100.0,
+    generationsRun: effGens,
+  };
+}
+
+export interface HybridRegimeWeightsHpcResult {
+  optimizedWeights: Float64Array;
+  confidence: number;
+  stabilityIndex: number;
+}
+
+/**
+ * 6. Optimisation Continue des Poids de Régime en Rust/WASM (remplace `hybrid-prediction` Cloud)
+ */
+export function computeHybridRegimeWeightsHpc(params: {
+  baseWeights: Float64Array | number[];
+  channelTypes: Int32Array | number[];
+  hurst: number;
+  entropyNorm: number;
+  volatilityNorm: number;
+  historyDepth: number;
+}): HybridRegimeWeightsHpcResult {
+  const baseArr = params.baseWeights instanceof Float64Array ? params.baseWeights : new Float64Array(params.baseWeights);
+  const typesArr = params.channelTypes instanceof Int32Array ? params.channelTypes : new Int32Array(params.channelTypes);
+
+  if (isWasmLoaded && wasmModuleInstance?.compute_hybrid_regime_weights_wasm) {
+    try {
+      const res = wasmModuleInstance.compute_hybrid_regime_weights_wasm(
+        baseArr,
+        typesArr,
+        params.hurst,
+        params.entropyNorm,
+        params.volatilityNorm,
+        params.historyDepth
+      );
+      return {
+        optimizedWeights: new Float64Array(res.optimized_weights),
+        confidence: res.confidence,
+        stabilityIndex: res.stability_index,
+      };
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM Hybrid Regime Weights, passage au fallback :', e);
+    }
+  }
+
+  const k = baseArr.length;
+  if (k === 0) {
+    return {
+      optimizedWeights: new Float64Array(0),
+      confidence: 50.0,
+      stabilityIndex: 50.0,
+    };
+  }
+
+  const h = Math.max(0.05, Math.min(0.95, params.hurst));
+  const s = Math.max(0.05, Math.min(0.99, params.entropyNorm));
+  const v = Math.max(0.01, Math.min(1.0, params.volatilityNorm));
+
+  const persistenceDrive = Math.tanh(2.5 * (h - 0.5));
+  const meanReversionDrive = Math.tanh(2.5 * (0.5 - h));
+  const chaosDrive = Math.tanh(2.0 * (s - 0.5) + 1.5 * (v - 0.3));
+  const stabilityDrive = Math.tanh(1.5 * (1.0 - v));
+
+  const sampleConfidence = 1.0 - Math.exp(-Math.max(5, params.historyDepth) / 120.0);
+  const out = new Float64Array(k);
+  let sumW = 0.0;
+
+  for (let i = 0; i < k; i++) {
+    const cType = i < typesArr.length ? typesArr[i] : 3;
+    const drive =
+      cType === 0
+        ? persistenceDrive
+        : cType === 1
+        ? meanReversionDrive
+        : cType === 2
+        ? chaosDrive
+        : stabilityDrive;
+    const factor = Math.exp(0.35 * drive * sampleConfidence);
+    const w = Math.max(1e-5, baseArr[i]) * factor;
+    out[i] = w;
+    sumW += w;
+  }
+
+  if (sumW > 0) {
+    for (let i = 0; i < k; i++) {
+      out[i] /= sumW;
+    }
+  }
+
+  const stabilityIndex = Math.max(15.0, Math.min(98.0, (1.0 - 0.5 * v - 0.3 * Math.max(0, s - 0.5)) * 100.0));
+  const confidence = Math.max(
+    25.0,
+    Math.min(96.0, (0.45 * sampleConfidence + 0.35 * (1.0 - s * 0.4) + 0.2 * (1.0 + Math.abs(h - 0.5))) * 100.0)
+  );
+
+  return {
+    optimizedWeights: out,
+    confidence,
+    stabilityIndex,
+  };
+}
+
+/**
+ * 7. Comptage Vectorisé des Fréquences en O(N) (remplace les requêtes Supabase de `fetchRecentStats` / `fetchGlobalStats`)
+ */
+export function computeFrequencyCountsHpc(
+  flatDraws: Int32Array | number[],
+  numDraws: number,
+  winCols: number = 5
+): Int32Array {
+  const flat = flatDraws instanceof Int32Array ? flatDraws : new Int32Array(flatDraws);
+  const cols = Math.max(1, winCols);
+
+  if (isWasmLoaded && wasmModuleInstance?.compute_frequency_counts_wasm) {
+    try {
+      const res = wasmModuleInstance.compute_frequency_counts_wasm(flat, numDraws, cols);
+      return new Int32Array(res);
+    } catch (e) {
+      console.error('[LOTO-ENGINE] Erreur WASM Frequency Counts, passage au fallback :', e);
+    }
+  }
+
+  const counts = new Int32Array(91);
+  const actualDraws = Math.min(numDraws, Math.floor(flat.length / cols));
+  for (let d = 0; d < actualDraws; d++) {
+    const offset = d * cols;
+    for (let c = 0; c < cols; c++) {
+      const n = flat[offset + c];
+      if (n >= 1 && n <= 90) {
+        counts[n]++;
+      }
+    }
+  }
+  return counts;
+}
+
+

@@ -18,6 +18,9 @@ pub mod simulation_core;
 pub mod spatial_service;
 pub mod strategy_whatif;
 pub mod temporal_service;
+pub mod aco;
+pub mod neural_optimizer;
+pub mod delta_stats;
 
 use wasm_bindgen::prelude::*;
 

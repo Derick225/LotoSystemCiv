@@ -68,46 +68,7 @@ export const runSurvivalSimulation = async (
     Math.max(1, history.length - DEFAULT_SIMULATION_CONFIG.minHistoryBuffer)
   );
 
-  const useCloudEngine = useNexusStore.getState().useCloudEngine;
-  const isVercel = typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
-
-  if (useCloudEngine && !isVercel) {
-    try {
-      console.log(`Tentative de backtesting via Supabase Edge Function (run-simulation) - Strategie: ${strategy}...`);
-      
-      const timeoutPromise = new Promise<null>((resolve) => 
-        setTimeout(() => resolve(null), 8000)
-      );
-
-      const invokePromise = apiClient.post<BacktestReport>(
-        "run-simulation",
-        {
-          drawName,
-          history: history,
-          weights,
-          depth: safeDepth,
-          strategy,
-          initialBankroll: initialBankroll ?? DEFAULT_SIMULATION_CONFIG.initialBankroll,
-          unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
-          payoutModel,
-        },
-        { suppressErrorLogging: true }
-      ).catch(() => null);
-
-      const data = await Promise.race([invokePromise, timeoutPromise]);
-
-      if (data && data.totalDraws > 0) {
-        console.log("Succès Edge Function Backtest", data);
-        if (onProgress) onProgress(100);
-        return data;
-      } else {
-        console.warn("Échec Edge Function Backtest (Non déployée, erreur interne ou offline). Fallback sur le moteur local robuste.");
-      }
-    } catch (e: unknown) {
-      console.warn("Exception Edge Function Backtest, exécution locale continue.", e);
-    }
-  }
-
+  // Exécution 100% locale via Web Worker + Rust/WASM (Zéro appel Edge Function Supabase)
   // 3. Fallback Local Direct (si Worker non disponible)
   if (typeof Worker === "undefined") {
     try {
