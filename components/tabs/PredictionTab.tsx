@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { NumberBall } from "../NumberBall";
 import { useToast } from "../ui/Toast";
@@ -21,6 +21,10 @@ import { getPrimaryInterDrawFamily } from "../../constants";
 import { ACTIVE_ALGO_COUNT, RETIRED_ALGO_COUNT, TOTAL_ALGO_COUNT } from "../../shared/prediction.types";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { Prediction } from "../../types";
+import { ClosedLoopAutopsyPanel } from "../ClosedLoopAutopsyPanel";
+import { KellyCalculator } from "../KellyCalculator";
+import { BankrollRiskMonitor } from "../BankrollRiskMonitor";
+import { computeDailySpendingMetrics, DailySpendingMetrics } from "../../services/bankrollBudgetService";
 import {
   Activity,
   Target,
@@ -29,6 +33,7 @@ import {
   BrainCircuit,
   Atom,
   ShieldCheck,
+  ShieldAlert,
   Network,
   Globe,
   TrendingUp,
@@ -40,6 +45,10 @@ import {
   CheckCircle2,
   Lock,
   Layers,
+  Microscope,
+  Wallet,
+  Scale,
+  X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -68,6 +77,17 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const [isTrainingDashboardOpen, setIsTrainingDashboardOpen] = useState(false);
   const [isAuditDashboardOpen, setIsAuditDashboardOpen] = useState(false);
   const [isExportingForensicPDF, setIsExportingForensicPDF] = useState(false);
+  const [isAutopsyOpen, setIsAutopsyOpen] = useState(false);
+  const [isRiskMonitorOpen, setIsRiskMonitorOpen] = useState(false);
+  const [budgetMetrics, setBudgetMetrics] = useState<DailySpendingMetrics>(() => computeDailySpendingMetrics());
+
+  useEffect(() => {
+    const handleBudgetUpdate = () => {
+      setBudgetMetrics(computeDailySpendingMetrics());
+    };
+    window.addEventListener("BANKROLL_BUDGET_UPDATED", handleBudgetUpdate);
+    return () => window.removeEventListener("BANKROLL_BUDGET_UPDATED", handleBudgetUpdate);
+  }, []);
 
   // Réseau Inter-Tirages Déterministe (2 Réseaux Étanches AGENTS.md).
   // Un tirage qui n'appartient à aucun des 2 réseaux étanches doit être affiché comme
@@ -261,21 +281,128 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
     );
   }
 
+  // Modals partagés entre la vue initiale et la vue de résultat
+  const renderModals = () => (
+    <>
+      <ExplainabilityDrawer />
+      <TrainingEvolutionDrawer
+        isOpen={isTrainingDashboardOpen}
+        onClose={() => setIsTrainingDashboardOpen(false)}
+        drawName={drawName}
+      />
+
+      {/* Modal Dashboard d'Audit des Poids Neuronaux */}
+      <AnimatePresence>
+        {isAuditDashboardOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="w-full max-w-5xl my-auto"
+            >
+              <NeuralWeightsAuditDashboard
+                isModal={true}
+                onClose={() => setIsAuditDashboardOpen(false)}
+                onApplySuccess={() => {
+                  setIsAuditDashboardOpen(false);
+                  runInference();
+                }}
+              />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Autopsie Post-Mortem & Calibration en Boucle Fermée */}
+      <AnimatePresence>
+        {isAutopsyOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="w-full max-w-6xl my-auto bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                    <Microscope size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black text-white uppercase tracking-tight">
+                      Autopsie Post-Mortem & Calibration Déterministe
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Rétropropagation de l'erreur sur {drawName} • Dérive des algorithmes • Simplexe unitaire
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsAutopsyOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <ClosedLoopAutopsyPanel drawName={drawName} />
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Moniteur de Risque & Dépenses Quotidiennes */}
+      {isRiskMonitorOpen && (
+        <BankrollRiskMonitor
+          currentDrawName={drawName}
+          onClose={() => setIsRiskMonitorOpen(false)}
+          isModal={true}
+        />
+      )}
+    </>
+  );
+
   // ÉTAT INITIAL / EMPTY STATE : Command Center Oracle Base
   if (!activePrediction && !isComputing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[500px] w-full max-w-4xl mx-auto rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden px-6 py-12 text-center transition-all">
         {/* Header Controls */}
         <div className="w-full flex flex-col xs:flex-row xs:absolute xs:top-6 xs:left-6 xs:right-6 justify-between items-center gap-3 z-10 mb-8 xs:mb-0 xs:px-6">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setIsTrainingDashboardOpen(true)}
-              className="flex items-center justify-center gap-2 px-4 py-2 rounded-full border bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors w-full xs:w-auto text-center"
+              className="flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-full border bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors text-center text-xs font-semibold"
             >
               <TrendingUp size={14} />
-              <span className="text-xs font-semibold uppercase tracking-wider hidden sm:inline">
-                Évolution
-              </span>
+              <span className="uppercase tracking-wider hidden sm:inline">Évolution</span>
+            </button>
+            <button
+              onClick={() => setIsAutopsyOpen(true)}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-full border bg-violet-50 dark:bg-violet-900/30 border-violet-200 dark:border-violet-800 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/50 transition-colors text-xs font-semibold"
+            >
+              <Microscope size={14} />
+              <span className="uppercase tracking-wider hidden sm:inline">Autopsie</span>
+            </button>
+            <button
+              onClick={() => setIsRiskMonitorOpen(true)}
+              className={`flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-full border text-xs font-semibold transition-colors ${
+                budgetMetrics.todaySpending > budgetMetrics.dailyAverage
+                  ? "bg-rose-50 dark:bg-rose-900/30 border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-300"
+                  : "bg-emerald-50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+              }`}
+            >
+              {budgetMetrics.todaySpending > budgetMetrics.dailyAverage ? <ShieldAlert size={14} className="animate-pulse" /> : <Wallet size={14} />}
+              <span className="uppercase tracking-wider hidden sm:inline">Budget ({budgetMetrics.todaySpending.toLocaleString()} F)</span>
             </button>
           </div>
 
@@ -375,6 +502,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
             </button>
           </div>
         </div>
+        {renderModals()}
       </div>
     );
   }
@@ -454,6 +582,32 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               <span>Audit des Poids</span>
             </button>
           )}
+
+          <button
+            onClick={() => setIsAutopsyOpen(true)}
+            className="flex items-center justify-center gap-2 px-4 py-3 bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/60 transition-colors rounded-xl font-semibold text-xs uppercase tracking-wider border border-violet-200 dark:border-violet-800/80 shadow-sm cursor-pointer"
+            title="Lancer l'autopsie post-mortem sur l'historique et calibrer les algorithmes"
+          >
+            <Microscope size={15} className="text-violet-600 dark:text-violet-400" />
+            <span>Autopsie & Calibration</span>
+          </button>
+
+          <button
+            onClick={() => setIsRiskMonitorOpen(true)}
+            className={`flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-semibold text-xs uppercase tracking-wider border shadow-sm cursor-pointer transition-colors ${
+              budgetMetrics.todaySpending > budgetMetrics.dailyAverage
+                ? "bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800"
+                : "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+            }`}
+            title="Moniteur de dépenses quotidiennes et protection du budget"
+          >
+            {budgetMetrics.todaySpending > budgetMetrics.dailyAverage ? (
+              <ShieldAlert size={15} className="text-rose-500 animate-pulse" />
+            ) : (
+              <Wallet size={15} className="text-emerald-600 dark:text-emerald-400" />
+            )}
+            <span>Budget ({budgetMetrics.todaySpending.toLocaleString()} F)</span>
+          </button>
 
           <button
             onClick={handleTriggerForensicReport}
@@ -689,6 +843,13 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               onAdoptTicket={handleAdoptScenarioTicket}
             />
 
+            {/* Kelly Money Management & Continuous Budget Protection */}
+            <KellyCalculator
+              confidence={activePrediction.confidence}
+              drawName={drawName}
+              recommendedNumbers={activePrediction.suggestedNumbers}
+            />
+
             {/* Comprehensive XAP Transparency Panel */}
             <XAPTransparencyPanel
               prediction={activePrediction}
@@ -719,40 +880,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
         )}
       </div>
 
-      <ExplainabilityDrawer />
-      <TrainingEvolutionDrawer
-        isOpen={isTrainingDashboardOpen}
-        onClose={() => setIsTrainingDashboardOpen(false)}
-        drawName={drawName}
-      />
-
-      {/* Modal Dashboard d'Audit des Poids Neuronaux */}
-      <AnimatePresence>
-        {isAuditDashboardOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="w-full max-w-5xl my-auto"
-            >
-              <NeuralWeightsAuditDashboard
-                isModal={true}
-                onClose={() => setIsAuditDashboardOpen(false)}
-                onApplySuccess={() => {
-                  setIsAuditDashboardOpen(false);
-                  runInference();
-                }}
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {renderModals()}
     </div>
   );
 });
