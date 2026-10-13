@@ -12,7 +12,10 @@ import { DeterministicReplayInspector } from "../DeterministicReplayInspector";
 import { WhatIfSimulatorTab } from "./WhatIfSimulatorTab";
 import { SingleBacktestTab } from "./backtest/SingleBacktestTab";
 import { WalkForwardTab } from "./backtest/WalkForwardTab";
+import { KellyCalculator } from "../KellyCalculator";
+import { BankrollRiskMonitor } from "../BankrollRiskMonitor";
 import { audioEngine } from "../../utils/audioEngine";
+import { ShieldCheck, Scale } from "lucide-react";
 
 export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
   ({ drawName }) => {
@@ -21,7 +24,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const nexusLoading = useNexusStore((state) => state.loading);
     const activeSubTab = useNexusStore((state) => state.activeSubTab);
     const [mode, setMode] = useState<
-      "single" | "comparative" | "walkforward" | "replay" | "whatif"
+      "single" | "comparative" | "walkforward" | "replay" | "whatif" | "kelly"
     >("single");
 
     useEffect(() => {
@@ -31,6 +34,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
         else if (sub === "walkforward" || sub === "walk_forward" || sub === "mc") setMode("walkforward");
         else if (sub === "replay" || sub === "deterministic") setMode("replay");
         else if (sub === "whatif" || sub === "what_if") setMode("whatif");
+        else if (sub === "kelly" || sub === "bankroll" || sub === "budget") setMode("kelly");
         else if (sub === "single" || sub === "standard") setMode("single");
       };
 
@@ -45,6 +49,7 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
       else if (sub === "walkforward" || sub === "walk_forward" || sub === "mc") setMode("walkforward");
       else if (sub === "replay" || sub === "deterministic") setMode("replay");
       else if (sub === "whatif" || sub === "what_if") setMode("whatif");
+      else if (sub === "kelly" || sub === "bankroll" || sub === "budget") setMode("kelly");
       else if (sub === "single" || sub === "standard") setMode("single");
     }, [activeSubTab]);
 
@@ -129,6 +134,19 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
             >
               <Sliders size={14} /> Simulateur What-If
             </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
+                setMode("kelly");
+              }}
+              className={`px-6 py-3 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-2 shrink-0 ${
+                mode === "kelly"
+                  ? "bg-emerald-600 text-white shadow-lg"
+                  : "text-slate-500 hover:text-white"
+              }`}
+            >
+              <Scale size={14} /> Bankroll & Kelly
+            </button>
           </div>
         </div>
 
@@ -169,6 +187,13 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
           {mode === "whatif" && (
             <div className="animate-slide-up">
               <WhatIfSimulatorTab drawName={drawName} />
+            </div>
+          )}
+
+          {mode === "kelly" && (
+            <div className="animate-slide-up space-y-8">
+              <BankrollRiskMonitor currentDrawName={drawName} />
+              <KellyCalculator confidence={75} drawName={drawName} />
             </div>
           )}
         </div>

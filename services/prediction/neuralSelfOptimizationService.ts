@@ -523,10 +523,6 @@ export const computeFastHistoricalFeatures = (
     [AlgoKey.TEMPORAL]: normalizeChannel90(rawTemporal),
     [AlgoKey.SPATIAL]: normalizeChannel90(rawSpatial),
     [AlgoKey.AFFINITY]: normalizeChannel90(rawAffinity),
-    [AlgoKey.COHORT]: normalizeChannel90(rawCohort),
-    [AlgoKey.POISSON]: normalizeChannel90(rawPoisson),
-    [AlgoKey.RESISTANCE]: normalizeChannel90(rawResistance),
-    [AlgoKey.LEADER_SUCCESSION]: normalizeChannel90(rawLeaderSucc),
     [AlgoKey.MACHINE_TRANSFER]: hasMachine
       ? normalizeChannel90(rawMachineTransfer)
       : new Float64Array(91),

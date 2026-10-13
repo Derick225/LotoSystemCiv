@@ -78,6 +78,7 @@ export interface Prediction {
   suggestedNumbers: number[];
   candidates: number[];
   confidence: number;
+  confidenceNote?: string;
   analysis: string;
   breakdown: Record<number, ScoreBreakdown>;
   timestamp: number;
@@ -89,6 +90,7 @@ export interface Prediction {
   mathModelSummary?: string;
   symbiosisFactor?: number;
   realityAlignment?: number;
+  realityAlignmentNote?: string;
   adversarialApplied?: boolean;
   challengedNumbers?: number[];
   stabilityScore?: number;

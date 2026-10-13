@@ -46,6 +46,7 @@ import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import { audioEngine } from "../../utils/audioEngine";
 import { ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 
 interface XAPTransparencyPanelProps {
@@ -130,13 +131,11 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     audioEngine.play("click");
     setIsExportingForensicPDF(true);
     try {
-      const isolatedHistory = history.filter(
-        (d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
-      );
+      const isolatedHistory = purifyHistoryForDraw(drawName, history);
       const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
       const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
 
-      const proofs = evaluateAlgoEmpiricalProof(drawName, history);
+      const proofs = evaluateAlgoEmpiricalProof(drawName, sample);
 
       await exportService.generateForensicStochasticReportPDF({
         drawName,

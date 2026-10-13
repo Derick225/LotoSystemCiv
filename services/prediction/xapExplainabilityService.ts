@@ -34,7 +34,7 @@ export const generateXAPNarratives = (
   const explanations: Record<number, NumberXAPExplanation> = {};
 
   suggestedNumbers.forEach((num) => {
-    const rawScore = scoresMap[num] ?? 50;
+    const rawScore = typeof scoresMap[num] === "number" && Number.isFinite(scoresMap[num]) ? scoresMap[num] : 0;
     const numShap = shapMap[num] ?? {};
     const explainExtra = explainabilityData?.[num] ?? {};
 
@@ -74,10 +74,14 @@ export const generateXAPNarratives = (
     }
 
     // 3. Synthèse Narrative XAP Continue
+    // Un contributeur secondaire est considéré significatif s'il dépasse l'espérance uniforme (100 / N_drivers)
+    const uniformDriverShare = drivers.length > 0 ? 100.0 / drivers.length : 0;
+    const secondarySignificant = secondary && secondary.contribution > 0 && secondary.percentageOfScore > uniformDriverShare;
+
     let narrative = "";
     if (archetype === "Transfert Machine") {
       narrative = `Le numéro ${num} est fortement porté par le flux stochastique Machine $\\rightarrow$ Gagnants (signal cinématique de transfert).`;
-    } else if (secondary && secondary.percentageOfScore > 18) {
+    } else if (secondarySignificant) {
       narrative = `Propulsé conjointement par l'estimateur ${primary.label} (${primary.percentageOfScore.toFixed(0)}% du signal) et ${secondary.label} (${secondary.percentageOfScore.toFixed(0)}%), indiquant une résonance multi-échelle cohérente.`;
     } else {
       narrative = `Dominé par le vecteur ${primary.label} (${primary.percentageOfScore.toFixed(0)}% d'attribution SHAP), traduisant une dynamique structurelle ciblée sur l'historique du tirage.`;

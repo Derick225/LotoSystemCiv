@@ -235,7 +235,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       await applyOptimizedWeights({
         drawName,
         weights: restoredBase,
-        origin: "EXPERT_BIASES",
+        origin: "MANUAL_CALIBRATION",
         causalAuditTrail: [
           `Réinitialisation des biais experts sur ${drawName}`,
           `Restauration intégrale du profil de poids non-biaisé antérieur`,
@@ -245,7 +245,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       });
     } catch (err) {
       console.error("Failed to restore unbiased weights via controller:", err);
-      setGlobalWeights(restoredBase);
+      setGlobalWeights(restoredBase, drawName);
     }
 
     showToast("Tous les biais experts ont été réinitialisés et les poids de base restaurés.", "info");
@@ -272,7 +272,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       await applyOptimizedWeights({
         drawName,
         weights: simulatedWeights,
-        origin: "EXPERT_BIASES",
+        origin: "MANUAL_CALIBRATION",
         causalAuditTrail: [
           `Application de ${activeBiasesCount} biais d'experts sur ${drawName} (Horizon: ${globalHorizon} tirages)`,
           `Modulation relative rapportée aux poids de base non-biaisés (0 cumul parasitaire)`,
@@ -282,7 +282,7 @@ export const ExpertBiasAdjuster: React.FC<ExpertBiasAdjusterProps> = ({
       });
     } catch (err) {
       console.error("Failed to apply expert biases via controller:", err);
-      setGlobalWeights(simulatedWeights);
+      setGlobalWeights(simulatedWeights, drawName);
     }
 
     addAgentLog({

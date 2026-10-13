@@ -9,7 +9,8 @@ export type ModelDnaOrigin =
   | 'FORENSIC_AUTOPSY'
   | 'GENETIC_EVOLUTION'
   | 'HYPERPARAM_TUNER'
-  | 'MANUAL_CALIBRATION';
+  | 'MANUAL_CALIBRATION'
+  | 'EXPERT_BIASES';
 
 export interface AlgorithmicSpecialization {
   algoKey: AlgoKey | string;

@@ -80,7 +80,7 @@ interface NexusState {
   setHoveredNumber: (num: number | null) => void;
   setFocusMode: (focus: boolean) => void;
   navigateToModule: (mainTab: string, subTab?: string | null) => void;
-  setGlobalWeights: (weights: AlgoWeights) => void;
+  setGlobalWeights: (weights: AlgoWeights, targetDrawName?: string) => void;
   setForensicOptimized: (opt: boolean) => void;
   setAutonomousAgentActive: (active: boolean) => void;
   addAgentLog: (log: {
@@ -136,7 +136,7 @@ export const useNexusStore = create<NexusState>()(
       agentLogs: [],
       neuralFeedbackLogs: [],
       vocalContext: null,
-      useCloudEngine: true,
+      useCloudEngine: false,
       temporalDepth: 100,
 
       history: [],
@@ -286,12 +286,18 @@ export const useNexusStore = create<NexusState>()(
 
         set({ activeMainTab: targetMain, activeSubTab: targetSub });
       },
-      setGlobalWeights: (weights) => {
+      setGlobalWeights: (weights, targetDrawName) => {
         const currentDraw = get().drawName;
+        const effectiveDraw = targetDrawName || currentDraw;
         const normalized = normalizeWeights(weights);
-        set({ globalWeights: normalized });
-        if (currentDraw) {
-          saveAlgoWeights(currentDraw, normalized).catch((err) => {
+        if (!targetDrawName || targetDrawName === currentDraw) {
+          const prev = get().globalWeights;
+          if (JSON.stringify(prev) !== JSON.stringify(normalized)) {
+            set({ globalWeights: normalized });
+          }
+        }
+        if (effectiveDraw) {
+          saveAlgoWeights(effectiveDraw, normalized).catch((err) => {
             console.error("Failed to persist global weights:", err);
           });
         }

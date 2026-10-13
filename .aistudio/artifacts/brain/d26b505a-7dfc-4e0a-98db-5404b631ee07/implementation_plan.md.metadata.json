@@ -1,0 +1,6 @@
+{
+  "summary": "Plan d'audit exhaustif et de correction chirurgicale des anomalies et mauvaises logiques du module Oracle Base (Déterministe & XAP) :\n- Restauration de l'isolation stricte des tirages dans tous les sous-modules et dashboards.\n- Refonte et harmonisation complète du module Monte-Carlo MCMC avec le pipeline déterministe et le contrat XAP.\n- Correction de l'adoption de scénarios dans la matrice multi-scénarios (mise à jour cohérente des explications XAP, de la confiance et des candidats).\n- Élimination des nombres magiques résiduels et conformité 100% déterministe AGENTS.md.\n- Extension de la couverture d'explicabilité XAP à l'ensemble du vivier de sélection et des orbitales candidates.",
+  "updatedAt": "2026-10-13T00:29:59.099448480Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

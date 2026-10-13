@@ -54,9 +54,10 @@ export function useAlgorithmSync() {
   const weights = useMemo(() => {
     const w: AlgoWeights = { ...globalWeights };
     const keys = Object.values(AlgoKey);
+    const uniformBaseline = 1.0 / (keys.length || 1);
     keys.forEach((key) => {
       if (w[key] === undefined) {
-        w[key] = 0.05; // Fallback baseline
+        w[key] = uniformBaseline;
       }
     });
     return w;

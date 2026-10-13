@@ -3,6 +3,7 @@ import { useNexusStore } from "../../store/useNexusStore";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { evaluateAlgoEmpiricalProof, computeChronologicalAlgoReinforcement, normalizeWeights } from "../../services/prediction/weightsManager";
 import { exportService } from "../../services/exportService";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import {
@@ -320,21 +321,23 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
   // ISOLATION TIRAGE : seul l'historique isolé du tirage actif est consulté. Sans
   // repli sur l'historique complet (qui mélangerait des tirages étrangers), comme
   // dans evaluateAlgoEmpiricalProof.
-  const hasMachineDataInHistory = useMemo(() => {
-    if (!history || history.length === 0) return false;
-    const isolated = history.filter((d) => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
-    return isolated.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+  const isolatedHistory = useMemo(() => {
+    return purifyHistoryForDraw(drawName, history);
   }, [history, drawName]);
+
+  const hasMachineDataInHistory = useMemo(() => {
+    return isolatedHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+  }, [isolatedHistory]);
 
   // Empirical Proofs & Standard Deviations evaluation on active draw history
   const empiricalProofs = useMemo(() => {
     try {
-      return evaluateAlgoEmpiricalProof(drawName, history);
+      return evaluateAlgoEmpiricalProof(drawName, isolatedHistory);
     } catch (e) {
       console.error("Error evaluating empirical proofs:", e);
       return {} as any;
     }
-  }, [drawName, history]);
+  }, [drawName, isolatedHistory]);
 
   // Normalized percentages of local weights
   const normalizedPercentages = useMemo(() => {
@@ -414,7 +417,7 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
   const handleAutoOptimize = () => {
     audioEngine.play("click");
     try {
-      const optimized = computeChronologicalAlgoReinforcement(drawName, history, localWeights as any);
+      const optimized = computeChronologicalAlgoReinforcement(drawName, isolatedHistory, localWeights as any);
       const newWeights: Record<string, number> = {};
       ALGO_REGISTRY.forEach((meta) => {
         if (lockedKeys[meta.key]) {

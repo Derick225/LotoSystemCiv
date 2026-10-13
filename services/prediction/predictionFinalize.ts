@@ -264,15 +264,17 @@ export const finalizePredictionPayload = async (
   });
 
   // Calcul des explications narratives XAP vectorielles déterministes (AGENTS.md)
+  // Couverture étendue : vecteur sélectionné + orbitales candidates pour l'inspection et les scénarios
+  const numbersToExplain = Array.from(new Set([...selection, ...(candidates || []).slice(0, 10)]));
   const xapExplanations = generateXAPNarratives(
-    selection,
+    numbersToExplain,
     scoresMap,
     shapMap,
     explainabilityRecord,
     features.machineTransferMap
   );
 
-  selection.forEach(num => {
+  numbersToExplain.forEach(num => {
     if (xapExplanations[num]) {
       if (!explainabilityRecord[num]) {
         explainabilityRecord[num] = {

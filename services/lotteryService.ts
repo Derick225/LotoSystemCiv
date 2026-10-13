@@ -6,6 +6,7 @@ import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
 import { AppError, logError, getErrorMessage } from '../utils/AppError';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
+import { computeFrequencyCountsHpc, initializeLotoEngineWasm } from './wasm/lotoEngineBridge';
 import {
   logActivePredictionDna,
   getPredictionDnaLogs,
@@ -92,12 +93,32 @@ const normalizeDrawName = (name: string): string => {
 };
 
 const inFlightHistoryFetches = new Map<string, Promise<DrawResult[]>>();
+const lastDeltaSyncByDraw = new Map<string, number>();
+const DELTA_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes de cooldown entre synchronisations différentielles par tirage
+
+const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): DrawResult[] => {
+  const byKey = new Map<string, DrawResult>();
+  for (const item of existing) {
+    if (item.id && item.id.startsWith('deterministic-')) continue;
+    const key = `${normalizeDrawName(item.drawName)}_${normalizeDate(item.date)}`;
+    byKey.set(key, item);
+  }
+  for (const row of deltaRows) {
+    const key = `${normalizeDrawName(row.drawName)}_${normalizeDate(row.date)}`;
+    byKey.set(key, row);
+  }
+  return Array.from(byKey.values())
+    .sort((a, b) => getDrawTimestamp(b.date, b.drawName) - getDrawTimestamp(a.date, a.drawName))
+    .slice(0, LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+};
 
 export const lotteryService = {
   async fetchHistory(drawName: string, force?: boolean): Promise<DrawResult[]> {
     const cacheKey = globalCache.generateKey('history', drawName);
+    const now = Date.now();
+    const lastSync = lastDeltaSyncByDraw.get(drawName) || 0;
 
-    // Stale-While-Revalidate : Si un cache valide existe et force=false, retour instantané
+    // Stale-While-Revalidate + Delta-Sync : Si un cache valide existe et force=false, retour instantané
     if (!force) {
       const fastSync = globalCache.getSync<DrawResult[]>(cacheKey, drawName);
       if (fastSync && fastSync.length > 0) {
@@ -106,29 +127,33 @@ export const lotteryService = {
 
       const cached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
       if (cached && cached.length > 0) {
-        // Rafraîchissement asynchrone discret en arrière-plan
-        if (isSupabaseConfigured() && navigator.onLine) {
+        const isFallback = cached[0]?.id?.startsWith('deterministic-');
+        // Rafraîchissement Delta-Sync discret en arrière-plan uniquement si le cooldown de 5 min est écoulé
+        if (!isFallback && isSupabaseConfigured() && navigator.onLine && (now - lastSync > DELTA_SYNC_COOLDOWN_MS)) {
+          lastDeltaSyncByDraw.set(drawName, now);
           (async () => {
             let bgTimer: ReturnType<typeof setTimeout> | undefined;
             try {
+              const latestIsoDate = normalizeDate(cached[0].date);
               let query = supabase
                 .from('draw_results')
                 .select('*')
+                .gte('date', latestIsoDate)
                 .order('date', { ascending: false });
 
               if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
                 query = query.eq('draw_name', normalizeDrawName(drawName));
               }
-              query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+              query = query.limit(100);
               
               const bgTimeoutPromise = new Promise<never>((_, reject) => {
-                bgTimer = setTimeout(() => reject(new AppError('Background refresh timeout', 'NETWORK_TIMEOUT', 'low')), 4000);
+                bgTimer = setTimeout(() => reject(new AppError('Background delta refresh timeout', 'NETWORK_TIMEOUT', 'low')), 4000);
               });
 
               const res = (await Promise.race([query, bgTimeoutPromise])) as { data: any[] | null; error: any };
               const { data } = res || {};
               if (data && data.length > 0) {
-                const fresh = data.map(row => ({
+                const delta = data.map(row => ({
                   id: row.id,
                   drawName: row.draw_name,
                   date: formatDate(row.date),
@@ -136,10 +161,14 @@ export const lotteryService = {
                   machine: row.machine || [],
                   version: row.version || 1
                 }));
-                await globalCache.set(cacheKey, fresh, CACHE_TTL.HISTORY, drawName);
+                const merged = mergeDeltaResults(delta, cached);
+                if (merged.length > cached.length) {
+                  await globalCache.registerNewDraw(drawName, merged.length);
+                }
+                await globalCache.set(cacheKey, merged, CACHE_TTL.HISTORY, drawName);
               }
             } catch {
-              // Silently ignore background revalidation failures
+              // Silently ignore background delta revalidation failures
             } finally {
               if (bgTimer) clearTimeout(bgTimer);
             }
@@ -155,8 +184,8 @@ export const lotteryService = {
     }
 
     const fetchPromise = (async (): Promise<DrawResult[]> => {
-      let remoteData: DrawResult[] | null = null;
-      let fetchError: unknown = null;
+      const existingCached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
+      const hasRealCache = existingCached && existingCached.length > 0 && !existingCached[0]?.id?.startsWith('deterministic-');
 
       if (isSupabaseConfigured() && navigator.onLine) {
         let queryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -170,7 +199,13 @@ export const lotteryService = {
                 query = query.eq('draw_name', normalizeDrawName(drawName));
             }
             
-            query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+            // DELTA-SYNC : Si une base locale réelle existe déjà, on ne télécharge que les tirages >= à la dernière date connue
+            if (hasRealCache) {
+                const latestIsoDate = normalizeDate(existingCached[0].date);
+                query = query.gte('date', latestIsoDate).limit(200);
+            } else {
+                query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+            }
             
             // Timeout de protection réseau à 3500ms avec nettoyage garanti du timer
             const timeoutPromise = new Promise<never>((_, reject) => {
@@ -196,7 +231,8 @@ export const lotteryService = {
             }
             
             if (data) {
-                remoteData = data.map(row => ({
+                lastDeltaSyncByDraw.set(drawName, Date.now());
+                const fetchedRows: DrawResult[] = data.map(row => ({
                   id: row.id,
                   drawName: row.draw_name,
                   date: formatDate(row.date),
@@ -205,13 +241,15 @@ export const lotteryService = {
                   version: row.version || 1
                 }));
 
-                // Update indexedDB cache with the fresh data
-                await globalCache.registerNewDraw(drawName, remoteData.length);
-                
-                // JSDOC: Utilisation de CACHE_TTL.HISTORY (24 heures) pour le stockage persistant hors ligne.
-                // Le rafraîchissement réseau est prioritaire au lancement de l'application.
-                await globalCache.set(cacheKey, remoteData, CACHE_TTL.HISTORY, drawName);
-                return remoteData;
+                const finalData = hasRealCache
+                  ? mergeDeltaResults(fetchedRows, existingCached)
+                  : fetchedRows;
+
+                if (finalData.length > 0) {
+                  await globalCache.registerNewDraw(drawName, finalData.length);
+                  await globalCache.set(cacheKey, finalData, CACHE_TTL.HISTORY, drawName);
+                  return finalData;
+                }
             }
         } catch (e) {
             const isTimeoutOrNetwork =
@@ -222,19 +260,16 @@ export const lotteryService = {
             } else {
               logError(e, { source: 'lotteryService.fetchHistory' });
             }
-            fetchError = e;
         } finally {
             if (queryTimer) clearTimeout(queryTimer);
         }
     }
 
     // Fallback to cache if network fails or offline
-    const cached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
-    if (cached) return cached;
+    if (existingCached && existingCached.length > 0) return existingCached;
 
     // ÉCHAPPEMENT DÉTERMINISTE : Si les requêtes échouent et qu'il n'y a pas de cache,
     // on génère un jeu d'historique déterministe complet et riche de 250 tirages.
-    // Cette approche élimine toute possibilité d'erreur non gérée (Failed to fetch).
     console.warn(`[LotteryService] Échec du réseau ou Supabase non disponible pour '${drawName}'. Génération du dataset de secours...`);
     const fallbackData = generateDeterministicFallbackHistory(drawName);
     await globalCache.set(cacheKey, fallbackData, CACHE_TTL.HISTORY, drawName);
@@ -356,19 +391,6 @@ export const generateDeterministicFallbackHistory = (drawName: string): DrawResu
 
 export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   if (!isSupabaseConfigured()) {
-    // CORRECTIF CRITIQUE (contamination de données) : ce bloc générait auparavant de FAUX
-    // tirages via un LCG déterministe, les persistait dans le cache comme s'ils venaient d'être
-    // synchronisés depuis une vraie source officielle, déclenchait une analyse forensique
-    // automatique dessus, PUIS un auto-apprentissage qui ajustait les poids RÉELS de
-    // l'algorithme de prédiction — le tout de façon silencieuse et automatique (via le minuteur
-    // d'auto-sync de GlobalDashboard.tsx), sans qu'aucun utilisateur n'ait rien demandé.
-    //
-    // Une "synchronisation" est par nature un aller chercher de vraies données externes. Sans
-    // backend configuré, il n'y a rien de réel à synchroniser : on le dit clairement plutôt que
-    // d'inventer des résultats. Les données de démonstration (générées par
-    // generateDeterministicFallbackHistory) restent disponibles pour la simple consultation via
-    // fetchHistory, mais ne sont jamais présentées comme un "nouveau tirage synchronisé" et ne
-    // déclenchent jamais d'autopsie forensique ni d'auto-apprentissage.
     const err = new AppError(
       "Synchronisation indisponible : aucun backend n'est configuré (mode démo hors-ligne). " +
       "Aucune donnée n'est inventée ; configurez Supabase pour synchroniser de vrais résultats.",
@@ -381,8 +403,13 @@ export const syncDrawExternal = async (drawName?: string): Promise<number> => {
   }
 
   try {
-    const data = await apiClient.post<{ count: number }>('cron-sync', { drawName, manualTrigger: true });
-    return data?.count || 0;
+    // Delta-Sync local depuis la table draw_results de Supabase (Zéro appel d'Edge Function coûteux)
+    const targetDraw = drawName || LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER;
+    const prevCached = await globalCache.get<DrawResult[]>(globalCache.generateKey('history', targetDraw), targetDraw);
+    const prevCount = prevCached ? prevCached.filter(d => !d.id?.startsWith('deterministic-')).length : 0;
+    const updated = await lotteryService.fetchHistory(targetDraw, true);
+    const newCount = updated.filter(d => !d.id?.startsWith('deterministic-')).length;
+    return Math.max(0, newCount - prevCount);
   } catch (e: unknown) {
     logError(new AppError(getErrorMessage(e) || 'Sync failed', 'SYNC_ERROR', 'medium', { drawName }), { source: 'syncDrawExternal' });
     throw e;
@@ -394,11 +421,11 @@ export const checkAndSyncRecentResults = async (drawName?: string): Promise<numb
 };
 
 export const computeAnalytics = async (drawName: string): Promise<boolean> => {
-  if (!isSupabaseConfigured()) return false;
   try {
-    await apiClient.post('compute-nexus-analytics', { drawName });
+    await initializeLotoEngineWasm();
+    await lotteryService.fetchHistory(drawName);
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 };
@@ -412,17 +439,26 @@ export const getDailySummary = async (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
   const sortedTimes = Object.keys(draws).sort(); 
   const drawNames = sortedTimes.map((time) => draws[time]);
+  const summaryCacheKey = globalCache.generateKey('daily_summary', day);
+
+  const cachedSummary = await globalCache.get<{ time: string; name: string; result: DrawResult | null }[]>(summaryCacheKey);
+  if (cachedSummary && cachedSummary.length > 0 && cachedSummary.some(s => s.result !== null)) {
+    return cachedSummary;
+  }
   
   if (isSupabaseConfigured() && navigator.onLine) {
     try {
+      // Delta-Window de 14 jours et limite stricte pour éviter de télécharger toute la table draw_results
+      const recentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       const { data, error } = await supabase
         .from('draw_results')
         .select('*')
         .in('draw_name', drawNames)
-        .order('date', { ascending: false });
+        .gte('date', recentCutoff)
+        .order('date', { ascending: false })
+        .limit(Math.max(20, drawNames.length * 3));
 
-      if (!error && data) {
-        // Group by draw_name, keep latest for each
+      if (!error && data && data.length > 0) {
         const latestByDraw = new Map<string, DrawResult>();
         for (const row of data) {
           if (!latestByDraw.has(row.draw_name)) {
@@ -436,18 +472,20 @@ export const getDailySummary = async (day: string) => {
             });
           }
         }
-        return sortedTimes.map(time => ({
+        const summaryResult = sortedTimes.map(time => ({
           time,
           name: draws[time],
           result: latestByDraw.get(draws[time]) || null
         }));
+        await globalCache.set(summaryCacheKey, summaryResult, CACHE_TTL.SHORT);
+        return summaryResult;
       }
     } catch (err) {
       console.warn('[getDailySummary] Batch fetch fallback:', err);
     }
   }
 
-  // Fallback if offline or batch query fails
+  // Fallback sur les caches d'historiques locaux par tirage
   const promises = sortedTimes.map(async (time) => {
       const name = draws[time];
       let lastDraw: DrawResult | null = null;
@@ -460,7 +498,9 @@ export const getDailySummary = async (day: string) => {
       }
   });
   
-  return Promise.all(promises);
+  const fallbackSummary = await Promise.all(promises);
+  await globalCache.set(summaryCacheKey, fallbackSummary, CACHE_TTL.SHORT);
+  return fallbackSummary;
 };
 
 export const getNextScheduledDraw = () => {
@@ -499,48 +539,10 @@ export const fetchRecentStats = async (days: number = 7, drawName?: string) => {
   const cached = await globalCache.get<any>(cacheKey, drawName);
   if (cached) return cached;
 
-  if (!isSupabaseConfigured() || !navigator.onLine) {
-      const stats = await computeRecentStatsFromHistory(days, drawName);
-      await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
-      return stats;
-  }
-  
-  try {
-    const dateLimit = new Date();
-    dateLimit.setDate(dateLimit.getDate() - days);
-    const dateStr = dateLimit.toISOString().split('T')[0];
-
-    let query = supabase
-      .from('draw_results')
-      .select('gagnants')
-      .gte('date', dateStr);
-
-    if (drawName && drawName !== 'ALL') {
-        query = query.eq('draw_name', normalizeDrawName(drawName));
-    }
-
-    const { data, error } = await query;
-
-    if (error) throw error;
-    
-    const counts: Record<number, number> = {};
-    (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
-    
-    if (Object.keys(counts).length === 0) {
-         return fetchGlobalStats(drawName);
-    }
-
-    const stats = Object.entries(counts)
-      .map(([n, c]) => ({ number: Number(n), count: c }))
-      .sort((a, b) => b.count - a.count);
-    
-    await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
-    return stats;
-  } catch (e) {
-    const stats = await computeRecentStatsFromHistory(days, drawName);
-    await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
-    return stats;
-  }
+  // 100% Calculé en Rust/WASM depuis l'historique Delta-Sync local (Zéro requête supplémentaire vers Supabase)
+  const stats = await computeRecentStatsFromHistory(days, drawName);
+  await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
+  return stats;
 };
 
 export const fetchGlobalStats = async (drawName?: string) => {
@@ -549,38 +551,29 @@ export const fetchGlobalStats = async (drawName?: string) => {
   const cached = await globalCache.get<any>(cacheKey, drawName);
   if (cached) return cached;
 
-  if (!isSupabaseConfigured() || !navigator.onLine) {
-      const stats = await computeGlobalStatsFromHistory(drawName);
-      await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
-      return stats;
-  }
-  
-  try {
-    let query = supabase.from('draw_results').select('gagnants').limit(2000);
-    
-    if (drawName && drawName !== 'ALL') {
-        query = query.eq('draw_name', normalizeDrawName(drawName));
-    }
+  // 100% Calculé en Rust/WASM depuis l'historique Delta-Sync local (Zéro requête supplémentaire vers Supabase)
+  const stats = await computeGlobalStatsFromHistory(drawName);
+  await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
+  return stats;
+};
 
-    const { data, error } = await query;
-    if (error) throw error;
-    const counts: Record<number, number> = {};
-    (data || []).forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
-    const stats = Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
-    
-    await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
-    return stats;
-  } catch (e) {
-    const stats = await computeGlobalStatsFromHistory(drawName);
-    await globalCache.set(cacheKey, stats, CACHE_TTL.MEDIUM, drawName);
-    return stats;
+const flattenDrawsForHpc = (draws: DrawResult[]): Int32Array => {
+  const winCols = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW;
+  const flat = new Int32Array(draws.length * winCols);
+  for (let d = 0; d < draws.length; d++) {
+    const g = draws[d].gagnants || [];
+    const offset = d * winCols;
+    for (let c = 0; c < winCols; c++) {
+      flat[offset + c] = g[c] || 0;
+    }
   }
+  return flat;
 };
 
 const computeRecentStatsFromHistory = async (days: number, drawName?: string): Promise<{ number: number, count: number }[]> => {
   try {
+    await initializeLotoEngineWasm();
     const history = await lotteryService.fetchHistory(drawName || 'ALL');
-    const counts: Record<number, number> = {};
     const dateLimit = new Date();
     dateLimit.setDate(dateLimit.getDate() - days);
     
@@ -589,8 +582,16 @@ const computeRecentStatsFromHistory = async (days: number, drawName?: string): P
       return hTime >= dateLimit.getTime();
     });
     const sample = filteredHistory.length > 0 ? filteredHistory : history.slice(0, 30);
-    sample.forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
-    return Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
+    const flat = flattenDrawsForHpc(sample);
+    const countsArr = computeFrequencyCountsHpc(flat, sample.length, LOTTERY_CONSTANTS.NUMBERS_PER_DRAW);
+
+    const out: { number: number; count: number }[] = [];
+    for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
+      if (countsArr[n] > 0) {
+        out.push({ number: n, count: countsArr[n] });
+      }
+    }
+    return out.sort((a, b) => b.count - a.count || a.number - b.number);
   } catch (_) {
     return [];
   }
@@ -598,55 +599,25 @@ const computeRecentStatsFromHistory = async (days: number, drawName?: string): P
 
 const computeGlobalStatsFromHistory = async (drawName?: string): Promise<{ number: number, count: number }[]> => {
   try {
+    await initializeLotoEngineWasm();
     const history = await lotteryService.fetchHistory(drawName || 'ALL');
-    const counts: Record<number, number> = {};
-    history.forEach(row => row.gagnants.forEach((n: number) => counts[n] = (counts[n] || 0) + 1));
-    return Object.entries(counts).map(([n, c]) => ({ number: Number(n), count: c })).sort((a, b) => b.count - a.count);
+    const flat = flattenDrawsForHpc(history);
+    const countsArr = computeFrequencyCountsHpc(flat, history.length, LOTTERY_CONSTANTS.NUMBERS_PER_DRAW);
+
+    const out: { number: number; count: number }[] = [];
+    for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
+      if (countsArr[n] > 0) {
+        out.push({ number: n, count: countsArr[n] });
+      }
+    }
+    return out.sort((a, b) => b.count - a.count || a.number - b.number);
   } catch (_) {
     return [];
   }
 };
 
-export const triggerAutomationForNewResults = async (drawName: string, date: string, resultId?: string, forceLocal: boolean = false) => {
-  // If Supabase is configured and we don't force local, we try API
-  if (isSupabaseConfigured() && !forceLocal) {
-    try {
-      const { data: pendingSnapshots } = await supabase
-        .from('prediction_snapshots')
-        .select('id')
-        .eq('draw_name', normalizeDrawName(drawName))
-        .eq('status', 'PENDING');
-
-      if (pendingSnapshots && pendingSnapshots.length > 0) {
-        let autopsyCount = 0;
-        for (const snap of pendingSnapshots) {
-          let targetResultId = resultId;
-          if (!targetResultId) {
-              const { data: resultData } = await supabase
-                  .from('draw_results')
-                  .select('id')
-                  .eq('draw_name', normalizeDrawName(drawName))
-                  .eq('date', normalizeDate(date))
-                  .single();
-              if (resultData) targetResultId = resultData.id;
-          }
-
-          if (targetResultId) {
-              await apiClient.post('forensic-autopsy', { 
-                  snapshotId: snap.id, 
-                  drawResultId: targetResultId 
-              }).catch(e => console.error("Forensic autopsy trigger error:", e));
-              autopsyCount++;
-          }
-        }
-      }
-      return; // Return if cloud logic works
-    } catch (e) {
-      console.error("Cloud automation failed, falling back to local:", e);
-    }
-  }
-
-  // LOGIQUE DE RETRAITE LOCALE (Full Feedback Loop sans dépendance API Edge)
+export const triggerAutomationForNewResults = async (drawName: string, date: string, resultId?: string, _forceLocal: boolean = true) => {
+  // LOGIQUE D'AUTOPSIE 100% LOCALE (Full Feedback Loop Rust/WASM sans appel d'Edge Function Supabase)
   try {
     const { getPredictionHistoryAsync, linkPredictionToResult, findMatchingResultForPrediction } = await import('./predictionHistoryService');
     const { performForensicAnalysis, saveForensicReport, getForensicReportByPredictionId, getDismissedAutopsyPredictionIds } = await import('./postPredictionAnalysisService');

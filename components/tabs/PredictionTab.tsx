@@ -157,12 +157,33 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const handleAdoptScenarioTicket = useCallback(
     (numbers: number[], scenarioName: string) => {
       if (!activePrediction) return;
+      const adoptedNums = [...numbers].sort((a, b) => a - b);
+      // Éviter les doublons entre vecteur adopté et orbitales secondaires
+      const remainingCandidates = (activePrediction.candidates || [])
+        .filter((c) => !adoptedNums.includes(c));
+
+      // Trouver le score de cohérence propre au scénario adopté
+      const matchingScenario = (activePrediction.simulationScenarios || []).find(
+        (s) => s.scenarioName === scenarioName || s.scenarioId === scenarioName
+      );
+      const scenarioConfidence =
+        typeof matchingScenario?.coherenceScore === "number" && Number.isFinite(matchingScenario.coherenceScore)
+          ? matchingScenario.coherenceScore
+          : activePrediction.confidence;
+
+      // Nettoyer l'analyse des mentions précédentes de scénario pour éviter l'accumulation
+      const baseAnalysis = (activePrediction.analysis || "")
+        .replace(/\s*\[Scénario Actif\s*:[^\]]+\]/g, "")
+        .trim();
+
       const updatedPrediction: Prediction = {
         ...activePrediction,
         drawName: activePrediction.drawName || drawName,
-        suggestedNumbers: [...numbers].sort((a, b) => a - b),
+        suggestedNumbers: adoptedNums,
+        candidates: remainingCandidates,
+        confidence: scenarioConfidence,
         scenarioName,
-        analysis: `${activePrediction.analysis} [Scénario Actif : ${scenarioName}]`,
+        analysis: `${baseAnalysis} [Scénario Actif : ${scenarioName}]`,
       };
       setLastPrediction(updatedPrediction);
     },

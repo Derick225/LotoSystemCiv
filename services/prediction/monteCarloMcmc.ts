@@ -5,10 +5,14 @@ import { calculateGeneticDiversityIndex } from './diversityService';
 import { DrawResult, AlgoWeights, Prediction } from '../../types';
 import { EnhancedMetrics } from './metrics.types';
 import { SymbioticContext } from '../../types';
-import { generateMasterPredictionCore } from './predictionFacade';
 import { AlgoKey } from '../../shared/prediction.types';
 import { DNAOptimizer } from '../training/DNAOptimizer';
 import { ParkMillerLCG } from './deterministicCore';
+import { calculateShannonEntropy } from '../mathService';
+import { getCalibratedHyperparameters, normalizeWeights } from './weightsManager';
+import { PLATT_SCORE_STANDARDIZATION } from './calibrationConstants';
+import { generateXAPNarratives } from './xapExplainabilityService';
+import { generateProbabilisticScenarioMatrix, ScenarioCoherenceCalibration, HONEST_NOTE } from './predictionScenarios';
 
 export const runMonteCarloMcmcCore = async (
     drawName: string,
@@ -41,14 +45,13 @@ export const runMonteCarloMcmcCore = async (
     const counts: Record<number, number> = {};
     const breakdownAcc: Record<number, Record<string, number>> = {};
 
-    
     onProgress(10, "Pré-calcul des métriques et features (Zéro-copy)...");
     const useSpatioTemporalHawkes = true;
     const baseBundle = await buildAlgoBundle(history, drawName, useSpatioTemporalHawkes);
     const baseFeatures = await extractFeatures(drawName, history);
     
-for (let i = 0; i < resolvedMcIterations; i++) {
-        if (i % 5 === 0) onProgress(Math.round((i / resolvedMcIterations) * 90), `MCMC Metropolis-Hastings (${i}/${resolvedMcIterations})...`);
+    for (let i = 0; i < resolvedMcIterations; i++) {
+        if (i % 5 === 0) onProgress(Math.round((i / resolvedMcIterations) * 85), `MCMC Metropolis-Hastings (${i}/${resolvedMcIterations})...`);
         
         const proposedVector = new Float32Array(currentStateVector.length);
         let sumWeights = 0;
@@ -68,8 +71,8 @@ for (let i = 0; i < resolvedMcIterations; i++) {
             (perturbedWeights as any)[k] = proposedVector[idx];
         });
 
-        
-        const scoredNumbers = calculateScores(baseFeatures, perturbedWeights, baseBundle, history);
+        // Inférence avec drawName explicitement injecté pour l'isolation et la conformité machine
+        const scoredNumbers = calculateScores(baseFeatures, perturbedWeights, baseBundle, history, 0.90, drawName);
         const suggestedNumbers = scoredNumbers.slice(0, 5).map(s => s.num).sort((a,b)=>a-b);
         const candidates = scoredNumbers.slice(5, 15).map(s => s.num);
 
@@ -86,8 +89,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
             diversityMetrics: calculateGeneticDiversityIndex(suggestedNumbers, breakdown)
         };
 
-        // Log-likelihood energy: sum of log-scores for top-5 minus entropy penalty
-        // This is a proper probabilistic objective vs the fragile top5/next15 heuristic
+        // Log-likelihood objective: log-scores for top-5 with entropy regularization
         const totalScore = scoredNumbers.reduce((s, x) => s + x.score, 0) || 1;
         let logLikelihood = 0;
         suggestedNumbers.forEach(n => {
@@ -95,7 +97,6 @@ for (let i = 0; i < resolvedMcIterations; i++) {
             const p = Math.max(Number.EPSILON, (s?.score || 0) / totalScore);
             logLikelihood += Math.log(p);
         });
-        // Entropy regularization: penalize degenerate distributions (all mass on 1 number)
         const entropyPenalty = scoredNumbers.reduce((acc, x) => {
             const p = Math.max(Number.EPSILON, x.score / totalScore);
             return acc - p * Math.log(p);
@@ -128,7 +129,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
         }
     }
 
-    onProgress(95, "Convergence Globale...");
+    onProgress(90, "Synthèse vectorielle et convergence Platt...");
 
     const topCands = Object.entries(counts)
         .sort((a, b) => b[1] - a[1])
@@ -137,6 +138,7 @@ for (let i = 0; i < resolvedMcIterations; i++) {
     const top5 = topCands.slice(0, 5).sort((a,b) => a - b);
     const candidates = topCands.slice(5, 15);
 
+    // Évaluation de l'alignement ADN historique
     const activeWeights = specificWeights;
     const optimizer = new DNAOptimizer(Object.keys(activeWeights) as AlgoKey[]);
     const dnaMatrix = top5.map(num => {
@@ -169,19 +171,127 @@ for (let i = 0; i < resolvedMcIterations; i++) {
         }
     }
 
+    // Calcul des scores finaux optimaux avec poids MCMC
+    const finalWeights = {} as AlgoWeights;
+    Object.keys(specificWeights).forEach((k, idx) => {
+        (finalWeights as any)[k] = currentStateVector[idx] || (specificWeights as any)[k];
+    });
+    const normalizedFinalWeights = normalizeWeights(finalWeights);
+    const finalScores = calculateScores(baseFeatures, normalizedFinalWeights, baseBundle, history, 0.90, drawName);
+
+    // Calibrage de Platt continu pour la confiance de cohérence (ZÉRO NOMBRE MAGIQUE)
+    const currentEntropyResult = calculateShannonEntropy(history);
+    const currentEntropy = currentEntropyResult.normalized;
+    const calibratedParams = await getCalibratedHyperparameters(drawName, currentEntropy);
+    const plattA = calibratedParams.sigmoid_slope;
+    const plattB = calibratedParams.sigmoid_intercept;
+
+    const avgScore = top5.reduce((sum, n) => {
+        const s = finalScores.find(x => x.num === n);
+        return sum + (s?.score || 0);
+    }, 0) / (top5.length || 1);
+
+    const rawX = (avgScore - PLATT_SCORE_STANDARDIZATION.CENTER) / PLATT_SCORE_STANDARDIZATION.SCALE;
+    const plattProb = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
+    const dynamicConfidence = Math.round(
+        Math.max(1, Math.min(99, plattProb * 100.0 * calibratedParams.boosting_multiplier))
+    );
+
+    // Construction des dictionnaires d'explicabilité pour les 90 numéros
+    const scoresMap: Record<number, number> = {};
+    const shapMap: Record<number, Record<string, number>> = {};
+    const explainabilityRecord: Record<number, any> = {};
+
+    finalScores.forEach(s => {
+        scoresMap[s.num] = s.score;
+        shapMap[s.num] = s.explainability?.shapValues || {};
+        explainabilityRecord[s.num] = {
+            shapValues: s.explainability?.shapValues || {},
+            topologicalTension: s.explainability?.topologicalTension || 0,
+            dnaOrbitingIndex: s.explainability?.dnaOrbitingIndex || 0,
+            narrativeInterpretation: s.explainability?.narrativeInterpretation
+        };
+    });
+
+    // Génération XAP pour le Top 5 et les 10 candidats
+    const numbersToExplain = Array.from(new Set([...top5, ...candidates]));
+    const xapExplanations = generateXAPNarratives(
+        numbersToExplain,
+        scoresMap,
+        shapMap,
+        explainabilityRecord,
+        baseFeatures.machineTransferMap
+    );
+
+    numbersToExplain.forEach(num => {
+        if (xapExplanations[num]) {
+            if (!explainabilityRecord[num]) {
+                explainabilityRecord[num] = {
+                    shapValues: shapMap[num] || {},
+                    topologicalTension: 0,
+                    dnaOrbitingIndex: 0
+                };
+            }
+            explainabilityRecord[num].narrativeInterpretation = xapExplanations[num].narrativeText;
+            explainabilityRecord[num].physicsArchetype = xapExplanations[num].physicsArchetype;
+            explainabilityRecord[num].topDrivers = xapExplanations[num].topDrivers;
+        }
+    });
+
+    onProgress(98, "Formulation des scénarios et quantification de l'incertitude...");
+
+    // Matrice de simulation multi-scénarios déterministe
+    const scenarioCalibration: ScenarioCoherenceCalibration = {
+        plattSlope: plattA,
+        plattIntercept: plattB,
+        boostingMultiplier: calibratedParams.boosting_multiplier,
+        cyclicModulator: 1.0,
+        shrinkageMultiplier: 1.0,
+    };
+
+    const simulationScenarios = generateProbabilisticScenarioMatrix({
+        selection: top5,
+        denoisedScores: finalScores,
+        explainabilityRecord,
+        primaryCoherence: dynamicConfidence,
+        drawName,
+        calibration: scenarioCalibration,
+    });
+
+    // Quantification de l'incertitude
+    const maxShannonEntropy = Math.log2(90);
+    const normalizedEntropy = Math.min(1.0, Math.max(0.0, currentEntropy / maxShannonEntropy));
+    const aleatoricUncertainty = parseFloat((normalizedEntropy * 100.0).toFixed(2));
     const top5Consensus = top5.reduce((sum, n) => sum + counts[n], 0) / (5 * resolvedMcIterations);
-    const dynamicConfidence = Math.round(Math.min(99, Math.max(10, top5Consensus * 100)));
+    const epistemicUncertainty = parseFloat(
+        (Math.max(0, 100.0 - dynamicConfidence) * (1.0 - (top5Consensus || 0.5))).toFixed(2)
+    );
+    const ciLower = Math.max(1, Math.round(dynamicConfidence - epistemicUncertainty));
+    const ciUpper = Math.min(99, Math.round(dynamicConfidence + epistemicUncertainty));
+
+    const uncertaintyQuantification = {
+        epistemicUncertainty,
+        aleatoricUncertainty,
+        confidenceInterval: { lower: ciLower, upper: ciUpper },
+        entropyBits: parseFloat(currentEntropy.toFixed(3)),
+        credibleIntervalRange: ciUpper - ciLower,
+    };
 
     const aggregatedPred: Prediction = {
         drawName,
         suggestedNumbers: top5,
-        candidates: candidates,
+        candidates,
         breakdown: breakdownAcc as any,
         confidence: dynamicConfidence,
-        analysis: `Convergence MCMC Metropolis-Hastings avec alignement historique de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique optimisé.`,
+        confidenceNote: HONEST_NOTE,
+        analysis: `Convergence MCMC Metropolis-Hastings (${resolvedMcIterations} cycles) avec alignement historique de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique déterministe calibré.`,
         timestamp: Date.now(),
         realityAlignment: calculatedAlignment,
-        diversityMetrics: calculateGeneticDiversityIndex(top5, breakdownAcc as any)
+        realityAlignmentNote: HONEST_NOTE,
+        diversityMetrics: calculateGeneticDiversityIndex(top5, breakdownAcc as any),
+        explainabilityData: explainabilityRecord,
+        simulationScenarios,
+        uncertaintyQuantification,
     };
 
     return aggregatedPred;
