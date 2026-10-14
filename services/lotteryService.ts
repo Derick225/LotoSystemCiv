@@ -118,18 +118,19 @@ export const lotteryService = {
     const now = Date.now();
     const lastSync = lastDeltaSyncByDraw.get(drawName) || 0;
 
-    // Stale-While-Revalidate + Delta-Sync : Si un cache valide existe et force=false, retour instantané
+    // Stale-While-Revalidate + Delta-Sync : Si un cache réel valide existe et force=false, retour instantané
     if (!force) {
       const fastSync = globalCache.getSync<DrawResult[]>(cacheKey, drawName);
-      if (fastSync && fastSync.length > 0) {
-        return fastSync;
+      const realFastSync = fastSync ? fastSync.filter(d => !d.id?.startsWith('deterministic-')) : null;
+      if (realFastSync && realFastSync.length > 0) {
+        return realFastSync;
       }
 
       const cached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
-      if (cached && cached.length > 0) {
-        const isFallback = cached[0]?.id?.startsWith('deterministic-');
+      const realCached = cached ? cached.filter(d => !d.id?.startsWith('deterministic-')) : null;
+      if (realCached && realCached.length > 0) {
         // Rafraîchissement Delta-Sync discret en arrière-plan uniquement si le cooldown de 5 min est écoulé
-        if (!isFallback && isSupabaseConfigured() && navigator.onLine && (now - lastSync > DELTA_SYNC_COOLDOWN_MS)) {
+        if (isSupabaseConfigured() && navigator.onLine && (now - lastSync > DELTA_SYNC_COOLDOWN_MS)) {
           lastDeltaSyncByDraw.set(drawName, now);
           (async () => {
             let bgTimer: ReturnType<typeof setTimeout> | undefined;
@@ -265,15 +266,17 @@ export const lotteryService = {
         }
     }
 
-    // Fallback to cache if network fails or offline
-    if (existingCached && existingCached.length > 0) return existingCached;
+    // Fallback to real cache if network fails or offline
+    if (existingCached && existingCached.length > 0) {
+      const realCached = existingCached.filter(d => !d.id?.startsWith('deterministic-'));
+      if (realCached.length > 0) return realCached;
+    }
 
-    // ÉCHAPPEMENT DÉTERMINISTE : Si les requêtes échouent et qu'il n'y a pas de cache,
-    // on génère un jeu d'historique déterministe complet et riche de 250 tirages.
-    console.warn(`[LotteryService] Échec du réseau ou Supabase non disponible pour '${drawName}'. Génération du dataset de secours...`);
-    const fallbackData = generateDeterministicFallbackHistory(drawName);
-    await globalCache.set(cacheKey, fallbackData, CACHE_TTL.HISTORY, drawName);
-    return fallbackData;
+    // ÉRADICATION TOTALE DES DONNÉES SIMULÉES : ZÉRO FAUX TIRAGE GÉNÉRÉ
+    // Si la synchronisation réseau échoue et qu'aucun tirage réel n'est en cache,
+    // on renvoie un tableau vide pour afficher l'état d'attente de synchronisation.
+    console.warn(`[LotteryService] Aucun tirage réel disponible pour '${drawName}' (mode hors-ligne ou base non synchronisée). Aucune donnée simulée n'est générée.`);
+    return [];
     })();
 
     inFlightHistoryFetches.set(inFlightKey, fetchPromise);

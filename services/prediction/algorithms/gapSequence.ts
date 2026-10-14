@@ -125,8 +125,8 @@ export const gapSequencePlugin: AlgorithmPlugin = {
     const prob = standardNormalCDF(z);
     const fatigueScore = z > 0 ? 1 - prob : prob;
     
-    // Pattern Resonance Score : Noyau de Gauss avec bande passante KDE dérivée de la séquence d'écarts
-    const bandwidth = calculateSilvermanBandwidth([meanGap, stdGap, expectedNextGap]);
+    // Pattern Resonance Score : Noyau de Gauss avec bande passante KDE de Silverman exacte dérivée de l'échantillon d'écarts
+    const bandwidth = 1.06 * Math.max(1.0, stdGap) * Math.pow(Math.max(2, numGaps), -0.2);
     const uResonance = (currentGap - expectedNextGap) / (bandwidth + Number.EPSILON);
     const patternResonanceScore = Math.exp(-0.5 * Math.pow(uResonance, 2));
     

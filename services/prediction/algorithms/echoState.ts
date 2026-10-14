@@ -170,8 +170,8 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
     }
 
     const rawScore = cache.scores[num] || 0;
-    // Robust normalization via IQR instead of max (resistant to outliers)
-    const allScores = cache.scores.slice(1).filter((s: number) => s > 0).sort((a: number, b: number) => a - b);
+    // Robust normalization via IQR across full domain [1..90]
+    const allScores = cache.scores.slice(1, 91).map((s: number) => Number(s) || 0).sort((a: number, b: number) => a - b);
     if (allScores.length === 0) return { score: 50, confidence: 0.5 };
 
     const q1 = allScores[Math.floor(allScores.length * 0.25)] || 0;

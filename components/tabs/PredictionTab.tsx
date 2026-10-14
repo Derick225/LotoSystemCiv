@@ -40,6 +40,7 @@ import {
   CheckCircle2,
   Lock,
   Layers,
+  ShieldAlert,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -63,6 +64,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
   const nexusLoading = useNexusStore((state) => state.loading);
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
+  const refreshData = useNexusStore((state) => state.refreshData);
 
   const [showCyberFlags, setShowCyberFlags] = useState(false);
   const [isTrainingDashboardOpen, setIsTrainingDashboardOpen] = useState(false);
@@ -374,27 +376,48 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-4">
-            <button
-              onClick={() => runInference()}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-md shadow-indigo-600/20 group cursor-pointer"
-            >
-              <Activity size={18} className="group-hover:animate-pulse" />
-              Lancer la génération
-            </button>
+          {/* Action Buttons & Strict Authentic Data Requirement */}
+          {activeHistory.length === 0 ? (
+            <div className="w-full max-w-md mx-auto mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-center space-y-3">
+              <div className="flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wider">
+                <ShieldAlert size={16} className="text-amber-500" />
+                <span>Tirages réels requis (0 en base)</span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                Règle de vérité terrain absolue : aucune prédiction n'est formulée sur des données synthétiques. Veuillez synchroniser des tirages officiels pour <strong>{drawName}</strong>.
+              </p>
+              <button
+                onClick={() => refreshData(drawName, true)}
+                className="w-full py-3.5 px-4 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs uppercase tracking-widest rounded-xl shadow-md shadow-amber-600/20 flex items-center justify-center gap-2 transition-all active:scale-95 cursor-pointer"
+              >
+                <RefreshCw size={14} />
+                <span>Synchroniser les tirages réels</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md mx-auto mb-4">
+              <button
+                onClick={() => runInference()}
+                disabled={isComputing}
+                className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-md shadow-indigo-600/20 group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Activity size={18} className="group-hover:animate-pulse" />
+                Lancer la génération
+              </button>
 
-            <button
-              onClick={runMonteCarlo}
-              className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group cursor-pointer"
-            >
-              <RefreshCw
-                size={18}
-                className="group-hover:rotate-180 transition-transform duration-500"
-              />
-              Monte Carlo
-            </button>
-          </div>
+              <button
+                onClick={runMonteCarlo}
+                disabled={isComputing}
+                className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-black dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100 text-white px-6 py-4 rounded-xl text-sm font-semibold uppercase tracking-wider transition-colors shadow-sm group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <RefreshCw
+                  size={18}
+                  className="group-hover:rotate-180 transition-transform duration-500"
+                />
+                Monte Carlo
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );

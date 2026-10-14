@@ -66,8 +66,9 @@ export const markovPlugin: AlgorithmPlugin = {
       return Math.abs(hash);
     };
     
-    // Initialisation déterministe des états de LCG pour chaque numéro
-    const baseSeed = getDeterministicSeed(drawName);
+    // Initialisation déterministe des états de LCG pour chaque numéro (seed canonique temporelle)
+    const seedInput = `${drawName}_${ctx.history[0]?.date || ''}_${ctx.history.length}`;
+    const baseSeed = getDeterministicSeed(seedInput);
     const lcgStates = new Uint32Array(domainSize + 1);
     for (let n = 1; n <= domainSize; n++) {
       let s = (baseSeed + n) % 2147483647;

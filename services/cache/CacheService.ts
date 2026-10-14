@@ -438,6 +438,87 @@ class CacheService {
     }
     return results;
   }
+
+  /**
+   * Purge automatique et complète de toutes les données simulées (zéro faux tirage).
+   * Élimine tout tirage dont l'identifiant commence par 'deterministic-' tant en mémoire (L1)
+   * que dans IndexedDB (L2).
+   */
+  public async purgeSyntheticDraws(): Promise<{ memoryPurged: number; idbPurged: number }> {
+    let memoryPurged = 0;
+    let idbPurged = 0;
+
+    // 1. Purge Mémoire (L1)
+    for (const [key, entry] of this.memoryCache.entries()) {
+      if (Array.isArray(entry.data)) {
+        const hasSynthetic = entry.data.some((d: any) => typeof d?.id === 'string' && d.id.startsWith('deterministic-'));
+        if (hasSynthetic) {
+          const filtered = entry.data.filter((d: any) => !(typeof d?.id === 'string' && d.id.startsWith('deterministic-')));
+          if (filtered.length === 0) {
+            this.memoryCache.delete(key);
+          } else {
+            entry.data = filtered;
+          }
+          memoryPurged++;
+        }
+      }
+    }
+
+    // 2. Purge IndexedDB (L2)
+    if (CACHE_FLAGS.ENABLE_IDB) {
+      try {
+        const allKeys = await idbKeys();
+        const stringKeys = allKeys.filter(k => typeof k === 'string') as string[];
+        if (stringKeys.length > 0) {
+          const { getMany, setMany, delMany } = await import('idb-keyval');
+          const values = await getMany(stringKeys);
+          const keysToDelete: string[] = [];
+          const entriesToUpdate: [string, any][] = [];
+
+          for (let i = 0; i < values.length; i++) {
+            const raw = values[i];
+            const k = stringKeys[i];
+            if (!raw) continue;
+
+            // Format standard CacheEntry ou tableau direct
+            const data = (raw as any)?.data ?? raw;
+            if (Array.isArray(data)) {
+              const hasSynthetic = data.some((d: any) => typeof d?.id === 'string' && d.id.startsWith('deterministic-'));
+              if (hasSynthetic) {
+                const filtered = data.filter((d: any) => !(typeof d?.id === 'string' && d.id.startsWith('deterministic-')));
+                if (filtered.length === 0) {
+                  keysToDelete.push(k);
+                } else {
+                  if ((raw as any)?.data) {
+                    (raw as any).data = filtered;
+                    entriesToUpdate.push([k, raw]);
+                  } else {
+                    entriesToUpdate.push([k, filtered]);
+                  }
+                }
+                idbPurged++;
+              }
+            }
+          }
+
+          if (keysToDelete.length > 0) {
+            await delMany(keysToDelete);
+          }
+          if (entriesToUpdate.length > 0) {
+            await setMany(entriesToUpdate);
+          }
+        }
+      } catch (e) {
+        console.warn("[CacheService] Erreur lors de la purge IDB des tirages synthétiques :", e);
+      }
+    }
+
+    if (memoryPurged > 0 || idbPurged > 0) {
+      console.log(`[CacheService] Purge des tirages simulés complétée : ${memoryPurged} clés mémoire, ${idbPurged} entrées IDB assainies.`);
+    }
+
+    return { memoryPurged, idbPurged };
+  }
 }
 
 export const globalCache = new CacheService();

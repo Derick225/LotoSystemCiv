@@ -1,6 +1,6 @@
 import { buildAlgoBundle } from './predictionFacade';
 import { extractFeatures } from './featureExtractor';
-import { calculateScores } from './scoringEngine';
+import { calculateScores, applyPCADenoising } from './scoringEngine';
 import { calculateGeneticDiversityIndex } from './diversityService';
 import { DrawResult, AlgoWeights, Prediction } from '../../types';
 import { EnhancedMetrics } from './metrics.types';
@@ -28,6 +28,10 @@ export const runMonteCarloMcmcCore = async (
     resolvedLearningRate: number,
     onProgress: (progress: number, message: string) => void
 ): Promise<Prediction> => {
+    if (!history || history.length === 0) {
+        throw new Error(`Calcul MCMC refusé pour '${drawName}' : aucun tirage réel n'est disponible en base.`);
+    }
+
     const lastDraw = history[0];
     const parsedTime = lastDraw?.date ? new Date(lastDraw.date).getTime() : NaN;
     const timestampDernierTirage = !isNaN(parsedTime) && parsedTime > 0 ? parsedTime : (history.length * 86400000 + (drawName.length * 1000));
@@ -176,8 +180,8 @@ export const runMonteCarloMcmcCore = async (
     Object.keys(specificWeights).forEach((k, idx) => {
         (finalWeights as any)[k] = currentStateVector[idx] || (specificWeights as any)[k];
     });
-    const normalizedFinalWeights = normalizeWeights(finalWeights);
-    const finalScores = calculateScores(baseFeatures, normalizedFinalWeights, baseBundle, history, 0.90, drawName);
+    const rawFinalScores = calculateScores(baseFeatures, normalizedFinalWeights, baseBundle, history, 0.90, drawName);
+    const finalScores = await applyPCADenoising(rawFinalScores, normalizedFinalWeights, baseBundle, 0.90);
 
     // Calibrage de Platt continu pour la confiance de cohérence (ZÉRO NOMBRE MAGIQUE)
     const currentEntropyResult = calculateShannonEntropy(history);

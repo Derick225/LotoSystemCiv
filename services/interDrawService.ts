@@ -1802,10 +1802,17 @@ export const calculateInterDrawMonthlyCoupling = (
     return { vector: defaultVector };
   }
 
-  // Récupération de l'historique du prédécesseur
+  // Récupération de l'historique réel du prédécesseur (Zéro faux tirage)
   const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
   const cachedPred = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
-  const predHistory = (cachedPred && cachedPred.length > 0) ? cachedPred : generateDeterministicFallbackHistory(relation.predecessor.name);
+  const realPredHistory = (cachedPred && cachedPred.length > 0)
+    ? cachedPred.filter(d => !d.id?.startsWith('deterministic-'))
+    : [];
+
+  if (realPredHistory.length === 0 || !history || history.length === 0) {
+    return { vector: defaultVector };
+  }
+  const predHistory = realPredHistory;
 
   const baseVector = calculateInterDrawVector(history, drawName, predHistory, primaryFamily.id);
 

@@ -117,6 +117,10 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
     { drawName: context.drawName, len: context.history.length },
     "[predictionScenarios] Scenario A : Dataset insuffisant pour une inférence complexe. Mode dégradé statistique continu utile."
   );
+  if (context.history.length === 0) {
+    throw new Error(`Inférence refusée pour '${context.drawName}' : aucun tirage réel n'est présent en base locale. Synchronisation requise.`);
+  }
+
   context.onProgress?.(100, "Dataset insuffisant. Génération d'une prédiction basée sur les fréquences de Laplace lissées.");
 
   const historyLength = context.history.length;

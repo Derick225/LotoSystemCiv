@@ -785,6 +785,11 @@ export const generateMasterPrediction = async (
     useCloudEngineOverride
   );
 
+  // ZÉRO DONNÉE SIMULÉE : Refus strict du calcul si aucun tirage réel n'est disponible
+  if (context.history.length === 0) {
+    throw new Error(`Inférence refusée pour '${context.drawName}' : aucun tirage réel n'est disponible en base locale. Synchronisation requise.`);
+  }
+
   // SCÉNARIO A — Dataset insuffisant (Moins de 12 tirages)
   if (context.history.length < 12) {
     return handleScenarioADegradedPrediction(context);
@@ -889,6 +894,10 @@ export const generateMasterPredictionCore = async (
     preloadedForensicReports
   );
   context.useSpatioTemporalHawkes = useSpatioTemporalHawkes;
+
+  if (context.history.length === 0) {
+    throw new Error(`Inférence refusée pour '${context.drawName}' : aucun tirage réel n'est disponible en base locale. Synchronisation requise.`);
+  }
 
   if (context.history.length < 12) {
     return handleScenarioADegradedPrediction(context);

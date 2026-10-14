@@ -170,20 +170,28 @@ export const useNexusStore = create<NexusState>()(
           );
         }
 
-        // Garbage Collection du cache différée HORS du chemin critique de démarrage : la GC lit
-        // toutes les clés/valeurs IndexedDB et bloquait le boot. On la planifie en idle (avec repli
-        // setTimeout) en fire-and-forget — elle n'a pas besoin de se terminer avant initialize().
+        // Purge automatique et immédiate des tirages simulés résiduels de la mémoire du store
+        const currentHist = get().history || [];
+        const cleanHist = currentHist.filter(d => !d.id?.startsWith('deterministic-'));
+        if (cleanHist.length !== currentHist.length) {
+          set({ history: cleanHist });
+        }
+
+        // Garbage Collection du cache et purge des tirages synthétiques
         const runGcWhenIdle = () => {
           import("../services/cache/CacheService")
-            .then(({ globalCache }) => globalCache.runGarbageCollection())
+            .then(({ globalCache }) => {
+              globalCache.purgeSyntheticDraws();
+              globalCache.runGarbageCollection();
+            })
             .catch((e) => console.warn("Garbage collection skipped:", e));
         };
         if (typeof window !== "undefined") {
           const ric = (window as unknown as {
             requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
           }).requestIdleCallback;
-          if (ric) ric(runGcWhenIdle, { timeout: 5000 });
-          else setTimeout(runGcWhenIdle, 3000);
+          if (ric) ric(runGcWhenIdle, { timeout: 2000 });
+          else setTimeout(runGcWhenIdle, 1000);
         }
 
         // Écouter l'hydratation cloud et les mises à jour de poids pour forcer le store à se synchroniser

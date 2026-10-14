@@ -20,8 +20,7 @@ import {
   computeContinuousInterDrawCoupling
 } from '../../interDrawService';
 import {
-  LOTTERY_CONSTANTS,
-  generateDeterministicFallbackHistory
+  LOTTERY_CONSTANTS
 } from '../../lotteryService';
 import { globalCache, CACHE_TTL } from '../../cache/CacheService';
 import { wasmMatrixEngine } from '../../wasm/wasmMatrixCore';
@@ -159,15 +158,15 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     // avec le rapport complet InterDrawReport généré par interDrawService.
     const canonicalCacheKey = globalCache.getInterDrawKey(family.id, normalizeDrawName(drawName), 'plugin');
 
-    // 1. Récupération de l'historique du prédécesseur direct au sein de la famille étanche
+    // 1. Récupération de l'historique réel du prédécesseur direct au sein de la famille étanche (Zéro faux tirage)
     const predName = relation.predecessor.name;
     const predHistoryKey = globalCache.generateKey('history', predName);
-    let predHistory = globalCache.getSync<any[]>(predHistoryKey, predName);
-    if (!predHistory || predHistory.length === 0) {
-      predHistory = generateDeterministicFallbackHistory(predName);
-    }
+    const cachedPred = globalCache.getSync<any[]>(predHistoryKey, predName);
+    const predHistory = (cachedPred && cachedPred.length > 0)
+      ? cachedPred.filter((d: any) => !d.id?.startsWith('deterministic-'))
+      : [];
 
-    const targetHistory = ctx.history || [];
+    const targetHistory = (ctx.history || []).filter((d: any) => !d.id?.startsWith('deterministic-'));
     if (targetHistory.length === 0 || predHistory.length === 0) {
       ctx.pluginCache[AlgoKey.INTER_DRAW_RESONANCE] = defaultCache;
       return;

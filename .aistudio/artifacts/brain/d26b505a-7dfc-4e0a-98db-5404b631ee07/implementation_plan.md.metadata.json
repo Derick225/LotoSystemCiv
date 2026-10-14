@@ -1,6 +1,6 @@
 {
-  "summary": "Plan d'audit exhaustif et de correction chirurgicale des anomalies et mauvaises logiques du module Oracle Base (Déterministe & XAP) :\n- Restauration de l'isolation stricte des tirages dans tous les sous-modules et dashboards.\n- Refonte et harmonisation complète du module Monte-Carlo MCMC avec le pipeline déterministe et le contrat XAP.\n- Correction de l'adoption de scénarios dans la matrice multi-scénarios (mise à jour cohérente des explications XAP, de la confiance et des candidats).\n- Élimination des nombres magiques résiduels et conformité 100% déterministe AGENTS.md.\n- Extension de la couverture d'explicabilité XAP à l'ensemble du vivier de sélection et des orbitales candidates.",
-  "updatedAt": "2026-10-13T00:29:59.099448480Z",
+  "summary": "Plan d'éradication complète des données simulées et de secours (Zéro Mock, Zéro Données Fictives) :\n- Suppression totale du générateur d'historique de secours synthétique (generateDeterministicFallbackHistory) et des tirages déterministes fabriqués.\n- Purge automatique de tout tirage fictif (id 'deterministic-*') présent dans IndexedDB et le cache local au démarrage.\n- Refonte de FluxHub pour afficher un état vide propre, précis et professionnel invitant à la synchronisation réelle lorsqu'aucun tirage authentique n'est disponible.\n- Verrouillage strict des moteurs d'inférence (Oracle Base, XAP, MCMC, métriques) : refus absolu de prédiction sur données fictives et exigence de données réelles authentiques.\n- Nettoyage des modules inter-tirages pour éliminer tout repli sur des historiques synthétiques.",
+  "updatedAt": "2026-10-14T10:03:17.942996798Z",
   "requestFeedback": true,
   "userFacing": true
 }

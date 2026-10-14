@@ -224,9 +224,14 @@ export const usePredictionGenerator = (drawName: string) => {
             showToast("Garde d'isolation active : Les données ne correspondent pas au tirage actif.", "error");
             return;
         }
+        if (activeHistory.length === 0) {
+            audioEngine.play('error');
+            showToast(`Calcul refusé : aucun tirage réel n'est disponible pour ${drawName}. Synchronisation requise.`, "error");
+            return;
+        }
         if (activeHistory.length < 5) {
             audioEngine.play('error');
-            showToast(`Historique insuffisant pour ${drawName} (${activeHistory.length}/5 tirages minimum requis).`, "error");
+            showToast(`Historique réel insuffisant pour ${drawName} (${activeHistory.length}/5 tirages réels minimum requis).`, "error");
             return;
         }
         audioEngine.play('loading');
@@ -312,9 +317,14 @@ export const usePredictionGenerator = (drawName: string) => {
             showToast("Garde d'isolation active : Les données ne correspondent pas au tirage actif.", "error");
             return;
         }
+        if (activeHistory.length === 0) {
+            audioEngine.play('error');
+            showToast(`Calcul refusé : aucun tirage réel n'est disponible pour ${drawName}. Synchronisation requise.`, "error");
+            return;
+        }
         if (activeHistory.length < 10) {
             audioEngine.play('error');
-            showToast(`Historique insuffisant pour le calcul MCMC (${activeHistory.length}/10 tirages minimum requis).`, "error");
+            showToast(`Historique réel insuffisant pour le calcul MCMC (${activeHistory.length}/10 tirages réels minimum requis).`, "error");
             return;
         }
         audioEngine.play('scan');

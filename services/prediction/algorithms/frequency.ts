@@ -14,7 +14,8 @@ export const frequencyPlugin: AlgorithmPlugin = {
    * Uses Number.EPSILON to guarantee division safety.
    */
   precompute(ctx) {
-    const values = Array.from(ctx.features.freqMap).slice(1).filter(v => v > 0);
+    const rawFreqs = Array.from(ctx.features.freqMap || []);
+    const values = rawFreqs.slice(1, 91).map(v => Number(v) || 0);
     let cacheVal;
     if (values.length === 0) {
       cacheVal = { median: 0, iqr: 1.0, sampleSize: 0 };

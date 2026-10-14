@@ -9,8 +9,9 @@ export const momentumPlugin: AlgorithmPlugin = {
   description: 'Fusion cinématique continue de la vélocité récente vs profonde (momentum) et de l\'accélération des cycles d\'apparition.',
   isStrictlyDeterministic: true,
   precompute(ctx) {
-    // 1. Momentum stats
-    const values = Array.from(ctx.features.momentumMap).slice(1).filter(v => v > 0);
+    // 1. Momentum stats (distribution complète sur l'ensemble du domaine [1..90])
+    const maxNum = ctx.features.freqMap?.length ? ctx.features.freqMap.length - 1 : 90;
+    const values = Array.from(ctx.features.momentumMap || []).slice(1, maxNum + 1).map(v => Number(v) || 0);
     const sorted = [...values].sort((a, b) => a - b);
     const n = sorted.length;
     const mid = Math.floor(n / 2);

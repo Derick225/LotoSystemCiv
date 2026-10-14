@@ -25,6 +25,8 @@ import {
   Sliders,
   Sparkles,
   Dna,
+  Database,
+  ShieldAlert,
 } from "lucide-react";
 import { ExportService } from "../../services/exportService";
 import { useToast } from "../ui/Toast";
@@ -414,6 +416,36 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
   }, []);
 
   if (loading && history.length === 0) return <ListSkeleton />;
+
+  if (purifiedHistory.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] w-full max-w-4xl mx-auto rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden px-6 py-16 text-center animate-fade-in my-6">
+        <div className="w-20 h-20 bg-indigo-50 dark:bg-indigo-950/50 rounded-3xl flex items-center justify-center border border-indigo-200 dark:border-indigo-800 mb-6 shadow-inner text-indigo-600 dark:text-indigo-400">
+          <Database size={36} />
+        </div>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-mono font-bold uppercase tracking-wider mb-3">
+          <ShieldAlert size={13} />
+          <span>Politique Vérité Terrain : Zéro Donnée Fictive</span>
+        </div>
+        <h3 className="text-2xl font-black text-slate-900 dark:text-white uppercase tracking-tight mb-2">
+          Aucun tirage réel en mémoire locale
+        </h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8 font-medium leading-relaxed">
+          Aucun tirage officiel n'a encore été synchronisé pour <strong className="text-slate-800 dark:text-slate-200">{currentDrawName || "ce tirage"}</strong>.
+          L'application n'injecte aucune donnée synthétique ou simulée.
+        </p>
+        <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-sm mx-auto">
+          <button
+            onClick={handleManualRefresh}
+            className="w-full sm:flex-1 py-3.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-widest rounded-2xl shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2.5 transition-all transform active:scale-95"
+          >
+            <RefreshCw size={15} />
+            <span>Synchroniser les tirages réels</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 md:space-y-6 animate-fade-in pb-12 w-full max-w-7xl mx-auto px-1 md:px-0">
