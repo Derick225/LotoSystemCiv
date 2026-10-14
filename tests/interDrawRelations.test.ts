@@ -117,8 +117,39 @@ describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCH
   });
 
   describe('Matrice d\'Interconnexion Continue (Graphe Complet All-to-All)', () => {
+    // Jeux de test locaux (exclusifs aux tests unitaires) : 12 semaines de tirages réels
+    // simulés avec report fort ([1..5] partagés) pour valider le discriminant de couplage.
+    const buildWeeklyNetworkHistories = (): Map<string, any[]> => {
+      const dayOffsetByDraw: Record<string, number> = {
+        'Monday Special': 0,
+        'Lucky Tuesday': 1,
+        'Midweek': 2,
+        'Fortune Thursday': 3,
+        'Friday Bonanza': 4,
+        'National': 5,
+      };
+      const anchorMonday = Date.UTC(2026, 0, 5); // 2026-01-05 = Lundi
+      const histories = new Map<string, any[]>();
+      for (const name of INTER_DRAW_NETWORKS.hebdomadaire.drawNames) {
+        const draws = [];
+        for (let w = 11; w >= 0; w--) {
+          const d = new Date(anchorMonday + (w * 7 + dayOffsetByDraw[name]) * 86400000);
+          draws.push({
+            id: `test_matrix_${name.replace(/\s+/g, '_')}_${d.toISOString().split('T')[0]}`,
+            drawName: name,
+            date: d.toISOString().split('T')[0],
+            gagnants: [1, 2, 3, 4, 5],
+            machine: [],
+            version: 1,
+          });
+        }
+        histories.set(name, draws);
+      }
+      return histories;
+    };
+
     it('génère un graphe complet sans seuil binaire pour le Réseau Hebdomadaire (6x6)', async () => {
-      const matrix = await generateNetworkInterconnectionMatrix('hebdomadaire');
+      const matrix = await generateNetworkInterconnectionMatrix('hebdomadaire', buildWeeklyNetworkHistories() as any);
       expect(matrix).toBeDefined();
       expect(matrix.networkId).toBe('hebdomadaire');
       expect(matrix.drawNames.length).toBe(6);
@@ -127,6 +158,19 @@ describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCH
         expect(c.weight).toBeGreaterThan(0);
         expect(c.weight).toBeLessThanOrEqual(1);
         expect(Number.isFinite(c.correlation)).toBe(true);
+      }
+    });
+
+    it('ne fabrique aucun signal de couplage sans historique réel (zéro fausse donnée)', async () => {
+      const { globalCache } = await import('../services/cache/CacheService');
+      await globalCache.delete(globalCache.getInterDrawKey('hebdomadaire', 'network', 'matrix'));
+      const emptyHistories = new Map<string, any[]>(
+        INTER_DRAW_NETWORKS.hebdomadaire.drawNames.map((name) => [name, []])
+      );
+      const matrix = await generateNetworkInterconnectionMatrix('hebdomadaire', emptyHistories as any);
+      expect(matrix.couplings.length).toBe(6 * 5); // Le graphe reste complet (structure)
+      for (const c of matrix.couplings) {
+        expect(c.weight).toBe(0); // Aucune donnée réelle ⇒ aucun poids inventé
       }
     });
 

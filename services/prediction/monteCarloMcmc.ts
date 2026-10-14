@@ -180,8 +180,8 @@ export const runMonteCarloMcmcCore = async (
     Object.keys(specificWeights).forEach((k, idx) => {
         (finalWeights as any)[k] = currentStateVector[idx] || (specificWeights as any)[k];
     });
-    const rawFinalScores = calculateScores(baseFeatures, normalizedFinalWeights, baseBundle, history, 0.90, drawName);
-    const finalScores = await applyPCADenoising(rawFinalScores, normalizedFinalWeights, baseBundle, 0.90);
+    const rawFinalScores = calculateScores(baseFeatures, normalizeWeights(finalWeights), baseBundle, history, 0.90, drawName);
+    const finalScores = await applyPCADenoising(rawFinalScores, normalizeWeights(finalWeights), baseBundle, 0.90);
 
     // Calibrage de Platt continu pour la confiance de cohérence (ZÉRO NOMBRE MAGIQUE)
     const currentEntropyResult = calculateShannonEntropy(history);

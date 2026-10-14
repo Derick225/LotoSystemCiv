@@ -67,7 +67,7 @@ export const gapSequencePlugin: AlgorithmPlugin = {
         
         if (seq.length < 2) {
             patternData[num] = {
-                currentGap, expectedNextGap: currentGap, lag1Autocorrelation: 0, meanGap: currentGap, stdGap: 1, hurstExponent: 0.5
+                currentGap, expectedNextGap: currentGap, lag1Autocorrelation: 0, meanGap: currentGap, stdGap: 1, hurstExponent: 0.5, numGaps: seq.length
             };
             continue;
         }

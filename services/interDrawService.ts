@@ -22,7 +22,6 @@ import { DrawResult } from '../types';
 import {
   lotteryService,
   LOTTERY_CONSTANTS,
-  generateDeterministicFallbackHistory,
   getDrawTimestamp
 } from './lotteryService';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
@@ -559,10 +558,10 @@ export const runBayesianResonanceEngine = (
       if (predDrawName && normalizeDrawName(otherDrawName) === normalizeDrawName(predDrawName)) continue;
 
       const sHistKey = globalCache.generateKey('history', otherDrawName);
-      let sHist = globalCache.getSync<any[]>(sHistKey, otherDrawName);
-      if (!sHist || sHist.length === 0) {
-        sHist = generateDeterministicFallbackHistory(otherDrawName);
-      }
+      const sHist = (globalCache.getSync<any[]>(sHistKey, otherDrawName) || []).filter(
+        (d: any) => !d?.id?.startsWith?.('deterministic-')
+      );
+      if (sHist.length === 0) continue;
 
       const coupling = computeContinuousInterDrawCoupling(sHist, syntheticTargetHistory as any);
       if (coupling.weight > 0.001) {
@@ -1460,11 +1459,16 @@ export const calculateInterDrawVector = (
     predHistory = predecessorHistory;
   } else {
     const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
-    const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
-    if (cachedPredHistory && cachedPredHistory.length > 0) {
+    const cachedPredHistory = (globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name) || [])
+      .filter(d => !d.id?.startsWith('deterministic-'));
+    if (cachedPredHistory.length > 0) {
       predHistory = cachedPredHistory;
     } else {
-      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+      // ZÉRO FAUSSE DONNÉE : sans historique réel du prédécesseur, le vecteur de report
+      // reste neutre et inopérant plutôt que d'inférer sur une base fictive.
+      console.warn(`[InterDrawService] Données prédécesseur non synchronisées pour '${relation.predecessor.name}' : vecteur inter-tirages neutre (aucune donnée simulée).`);
+      vec.fill(THEORETICAL_SINGLE_PROB);
+      return vec;
     }
   }
 
@@ -1576,11 +1580,13 @@ export const getInterDrawMorphologicalTarget = (
     predHistory = predecessorHistory;
   } else {
     const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
-    const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
-    if (cachedPredHistory && cachedPredHistory.length > 0) {
+    const cachedPredHistory = (globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name) || [])
+      .filter(d => !d.id?.startsWith('deterministic-'));
+    if (cachedPredHistory.length > 0) {
       predHistory = cachedPredHistory;
     } else {
-      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+      // ZÉRO FAUSSE DONNÉE : aucune cible morphologique sans prédécesseur réel synchronisé.
+      return null;
     }
   }
 
@@ -1655,11 +1661,13 @@ export const calculateHarmonicResonanceMap = (
     predHistory = predecessorHistory;
   } else {
     const predHistoryKey = globalCache.generateKey('history', relation.predecessor.name);
-    const cachedPredHistory = globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name);
-    if (cachedPredHistory && cachedPredHistory.length > 0) {
+    const cachedPredHistory = (globalCache.getSync<DrawResult[]>(predHistoryKey, relation.predecessor.name) || [])
+      .filter(d => !d.id?.startsWith('deterministic-'));
+    if (cachedPredHistory.length > 0) {
       predHistory = cachedPredHistory;
     } else {
-      predHistory = generateDeterministicFallbackHistory(relation.predecessor.name);
+      // ZÉRO FAUSSE DONNÉE : aucune cartographie harmonique sans prédécesseur réel synchronisé.
+      return null;
     }
   }
 

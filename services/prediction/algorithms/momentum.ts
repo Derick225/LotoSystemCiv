@@ -22,7 +22,6 @@ export const momentumPlugin: AlgorithmPlugin = {
 
     // 2. Adaptive window sizes derived from history length (no magic numbers)
     const T = ctx.history.length;
-    const maxNum = ctx.features.freqMap?.length ? ctx.features.freqMap.length - 1 : 90;
     // Recent window: ~sqrt(T) draws, capped at T/4 to avoid overlap with older window
     const recentLen = Math.max(3, Math.min(Math.round(Math.sqrt(T)), Math.floor(T / 4)));
     // Older window: next 2*recentLen draws for a stable baseline

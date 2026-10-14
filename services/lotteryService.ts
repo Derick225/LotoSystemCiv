@@ -135,7 +135,7 @@ export const lotteryService = {
           (async () => {
             let bgTimer: ReturnType<typeof setTimeout> | undefined;
             try {
-              const latestIsoDate = normalizeDate(cached[0].date);
+              const latestIsoDate = normalizeDate(realCached[0].date);
               let query = supabase
                 .from('draw_results')
                 .select('*')
@@ -146,7 +146,7 @@ export const lotteryService = {
                 query = query.eq('draw_name', normalizeDrawName(drawName));
               }
               query = query.limit(100);
-              
+
               const bgTimeoutPromise = new Promise<never>((_, reject) => {
                 bgTimer = setTimeout(() => reject(new AppError('Background delta refresh timeout', 'NETWORK_TIMEOUT', 'low')), 4000);
               });
@@ -162,8 +162,8 @@ export const lotteryService = {
                   machine: row.machine || [],
                   version: row.version || 1
                 }));
-                const merged = mergeDeltaResults(delta, cached);
-                if (merged.length > cached.length) {
+                const merged = mergeDeltaResults(delta, realCached);
+                if (merged.length > realCached.length) {
                   await globalCache.registerNewDraw(drawName, merged.length);
                 }
                 await globalCache.set(cacheKey, merged, CACHE_TTL.HISTORY, drawName);
@@ -175,7 +175,7 @@ export const lotteryService = {
             }
           })();
         }
-        return cached;
+        return realCached;
       }
     }
 
@@ -336,6 +336,12 @@ export const getDrawTimestamp = (dateStr: string, drawName?: string, explicitTim
     return getDrawFullTimestamp(dateStr, drawName, explicitTime);
 };
 
+/**
+ * @deprecated INTERDIT EN PRODUCTION (politique stricte de données réelles).
+ * Réservé exclusivement aux tests unitaires isolés. Toute invocation depuis le code
+ * applicatif viole le contrat « Zéro Fausse Donnée » : aucun tirage simulé ne doit
+ * jamais être fabriqué, affiché ou persisté hors contexte de test.
+ */
 export const generateDeterministicFallbackHistory = (drawName: string): DrawResult[] => {
   let hash = 0;
   for (let i = 0; i < drawName.length; i++) {

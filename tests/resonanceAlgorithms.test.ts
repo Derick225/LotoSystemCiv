@@ -5,9 +5,10 @@ import { algorithmRegistry } from '../services/prediction/algorithmRegistry';
 import { initCoreAlgorithms } from '../services/prediction/algorithms';
 import { AlgoKey } from '../shared/prediction.types';
 import { DrawResult } from '../types';
+import { globalCache, CACHE_TTL } from '../services/cache/CacheService';
 
 describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     initCoreAlgorithms();
   });
   // Historique synthétique réaliste 5/90 sur plusieurs mois
@@ -83,6 +84,24 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     statisticalBounds: { hurstExponent: 0.58 }
   };
 
+  // Amorçage honnête du cache L1 : historique du prédécesseur direct de Fortune
+  // (Premiere Heure, Mercredi 10:00) fourni explicitement au moteur, qui ne
+  // fabrique jamais un tirage manquant (politique zéro fausse donnée).
+  const seedPredecessorHistory = async () => {
+    const predHistory: DrawResult[] = mockHistory.map((d) => ({
+      ...d,
+      id: `pred_${d.id}`,
+      tirage: 'Premiere Heure',
+      drawName: 'Premiere Heure',
+    }));
+    await globalCache.set(
+      globalCache.generateKey('history', 'Premiere Heure'),
+      predHistory,
+      CACHE_TTL.HISTORY,
+      'Premiere Heure'
+    );
+  };
+
   describe('1. Algorithme inter_draw_resonance (Résonance Inter-Tirages)', () => {
     it('est conforme aux règles du registre et strictement déterministe', () => {
       expect(interDrawResonancePlugin.key).toBe(AlgoKey.INTER_DRAW_RESONANCE);
@@ -91,7 +110,8 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
       expect(interDrawResonancePlugin.stability).toBe('stable');
     });
 
-    it('génère des scores continus [0, 100] et des confidences [0, 1] sur les 90 numéros', () => {
+    it('génère des scores continus [0, 100] et des confidences [0, 1] sur les 90 numéros', async () => {
+      await seedPredecessorHistory();
       const ctx = { ...baseContext, pluginCache: {} };
       interDrawResonancePlugin.precompute(ctx);
 
@@ -122,7 +142,8 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
       }
     });
 
-    it('décompose le signal en 4 canaux continus et attribue les drapeaux harmoniques', () => {
+    it('décompose le signal en 4 canaux continus et attribue les drapeaux harmoniques', async () => {
+      await seedPredecessorHistory();
       const ctx = { ...baseContext, pluginCache: {} };
       interDrawResonancePlugin.precompute(ctx);
 

@@ -80,16 +80,22 @@ export interface ModelEvolutionLineage {
  */
 export const computeModelDnaFingerprint = (drawName: string, weights: AlgoWeights): string => {
   const sortedEntries = Object.entries(weights).sort(([k1], [k2]) => k1.localeCompare(k2));
-  let hash = 0;
   // L'empreinte identifie une configuration ADN (tirage + poids normalisés) : le timestamp
   // en est volontairement exclu pour que le dédoublonnage sur empreinte soit effectif —
   // une même configuration réenregistrée remplace sa version précédente au lieu de la dupliquer.
   const rawStr = `${drawName}::${sortedEntries.map(([k, v]) => `${k}:${(v || 0).toFixed(6)}`).join('|')}`;
-  for (let i = 0; i < rawStr.length; i++) {
-    hash = (hash << 5) - hash + rawStr.charCodeAt(i);
-    hash |= 0;
-  }
-  return `dna_${Math.abs(hash).toString(16)}`;
+  // Empreinte déterministe 64 bits (spéc. 16 hex) : double FNV-1a 32 bits à graines distinctes.
+  const fnv1a32 = (str: string, seed: number): number => {
+    let h = seed;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  };
+  const hi = fnv1a32(rawStr, 0x811c9dc5);
+  const lo = fnv1a32(`${rawStr}#64`, 0x01000193);
+  return `dna_${hi.toString(16).padStart(8, '0')}${lo.toString(16).padStart(8, '0')}`;
 };
 
 /**

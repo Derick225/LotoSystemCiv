@@ -466,10 +466,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       if (normalizeDrawName(otherDrawName) === normalizeDrawName(predName)) continue;
 
       const sHistKey = globalCache.generateKey('history', otherDrawName);
-      let sHist = globalCache.getSync<any[]>(sHistKey, otherDrawName);
-      if (!sHist || sHist.length === 0) {
-        sHist = generateDeterministicFallbackHistory(otherDrawName);
-      }
+      const sHist = (globalCache.getSync<any[]>(sHistKey, otherDrawName) || []).filter(
+        (d: any) => !d?.id?.startsWith?.('deterministic-')
+      );
+      if (sHist.length === 0) continue;
 
       const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory);
       if (coupling.weight > 0.001) {
