@@ -118,10 +118,34 @@ export const applyForensicAdjustments = async (
 
     if (report.nearMisses) {
       report.nearMisses.forEach(miss => {
-        const num = miss.actual;
-        if (num >= 1 && num <= 90) {
-          const distBoost = 1.0 / (Math.max(1, miss.distance) + Number.EPSILON);
-          proximityScores[num] = (proximityScores[num] || 0) + distBoost * ageDecay;
+        const actual = miss.actual;
+        if (actual >= 1 && actual <= 90) {
+          // Variance continue de l'erreur spatio-topologique dérivée de la distance observée
+          const sigma = Math.max(1.0, miss.distance);
+          const twoSigmaSq = 2.0 * sigma * sigma;
+          const numAlgos = Object.keys(AlgoKey).length || 1;
+
+          // Diffusion d'une onde Gaussienne continue sur le tore cyclique Z/90Z
+          for (let n = 1; n <= 90; n++) {
+            const rawDiff = Math.abs(n - actual);
+            const cyclicDist = Math.min(rawDiff, 90 - rawDiff);
+            const gaussianKernel = Math.exp(-(cyclicDist * cyclicDist) / twoSigmaSq);
+
+            // Seuil d'évanescence machine (1e-4) pour éliminer les résidus négligeables sans discontinuité perçue
+            if (gaussianKernel > 1e-4) {
+              const continuousBoost = gaussianKernel * ageDecay;
+              proximityScores[n] = (proximityScores[n] || 0) + continuousBoost;
+
+              // Si un algorithme précis est identifié à l'origine du quasi-succès (near-miss),
+              // modulation continue de ses poids sur les zones d'onde de résonance
+              if (miss.algo) {
+                const algoKey = miss.algo as AlgoKey;
+                if (!dynamicWeightModifiers[n]) dynamicWeightModifiers[n] = {};
+                dynamicWeightModifiers[n][algoKey] =
+                  (dynamicWeightModifiers[n][algoKey] || 0) + (continuousBoost / numAlgos);
+              }
+            }
+          }
         }
       });
     }

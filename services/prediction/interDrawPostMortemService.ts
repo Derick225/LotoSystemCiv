@@ -390,6 +390,19 @@ export const auditInterDrawPatternsPostMortem = (
 
   summaryDiagnosis += `Calibration Laplace optimale : α=${optimalLaplaceAlpha.toFixed(3)}.`;
 
+  // Rétro-injection continue en cache L1/L2 pour calibration bayésienne des prédictions futures (conforme AGENTS.md)
+  try {
+    const predSlug = relation.predecessor.name.toLowerCase().trim().replace(/[\s-]+/g, '_');
+    const laplaceCacheKey = globalCache.getInterDrawKey(
+      activeFamily.id,
+      drawName,
+      `optimal_laplace_${predSlug}`
+    );
+    globalCache.set(laplaceCacheKey, optimalLaplaceAlpha, 24 * 60 * 60 * 1000, drawName);
+  } catch (_cacheErr) {
+    // Non bloquant
+  }
+
   return {
     drawName,
     predecessorName: relation.predecessor.name,

@@ -330,4 +330,126 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     });
     expect(kalmanOpt.appliedWeights[AlgoKey.FREQUENCY]).toBeLessThan(0.5);
   });
+
+  it('valide la diffusion continue d’onde gaussienne des near-misses sur Z/90Z', async () => {
+    const { applyForensicAdjustments } = await import('../services/prediction/forensicAdjustments');
+    const mockReports: any[] = [
+      {
+        id: 'rep_1',
+        drawName: 'NATIONAL_GAUSS_TEST',
+        date: '22/01/2026',
+        nearMisses: [
+          { predicted: 15, actual: 16, distance: 1, algo: 'frequency' }
+        ],
+        missedOpportunities: [],
+        scoreDivergence: [],
+        matches: []
+      }
+    ];
+
+    const result = await applyForensicAdjustments(
+      'NATIONAL_GAUSS_TEST',
+      mockHistory,
+      { regime: 'NORMAL', hurst: 0.5, entropy: 0.5, volatility: 30, weylDiscrepancy: 0.1, chaosDimension: 1.5 },
+      false,
+      true,
+      mockReports,
+      {},
+      1.0,
+      1.0
+    );
+
+    // Le numéro gagnant 16 doit avoir la valeur maximale
+    const peak = result.proximityScores[16];
+    expect(peak).toBeGreaterThan(0);
+
+    // Les voisins circulaires immédiats 15 et 17 doivent avoir des valeurs positives mais inférieures au pic
+    const neighbor15 = result.proximityScores[15];
+    const neighbor17 = result.proximityScores[17];
+    expect(neighbor15).toBeGreaterThan(0);
+    expect(neighbor17).toBeGreaterThan(0);
+    expect(neighbor15).toBeLessThan(peak);
+    expect(neighbor17).toBeLessThan(peak);
+
+    // Symétrie gaussienne : distance 1 égale à gauche et à droite
+    expect(Math.abs(neighbor15 - neighbor17)).toBeLessThan(1e-6);
+
+    // Voisins à distance 2 doivent être inférieurs à distance 1
+    const dist2 = result.proximityScores[18];
+    expect(dist2).toBeLessThan(neighbor17);
+
+    // Le modulateur dynamique pour l'algo 'frequency' doit être renseigné
+    expect(result.dynamicWeightModifiers[16]?.frequency).toBeGreaterThan(0);
+  });
+
+  it('valide la rétro-injection bayésienne de l’alpha de Laplace post-mortem', async () => {
+    const { deriveRetrospectiveOptimalAlpha } = await import('../services/interDrawService');
+    const { globalCache } = await import('../services/cache/CacheService');
+
+    const paired = [
+      { predWinners: [1, 2, 3, 4, 5], targetWinners: [1, 10, 20, 30, 40] },
+      { predWinners: [2, 3, 4, 5, 6], targetWinners: [2, 11, 21, 31, 41] },
+      { predWinners: [3, 4, 5, 6, 7], targetWinners: [3, 12, 22, 32, 42] },
+      { predWinners: [4, 5, 6, 7, 8], targetWinners: [4, 13, 23, 33, 43] },
+      { predWinners: [5, 6, 7, 8, 9], targetWinners: [5, 14, 24, 34, 44] },
+      { predWinners: [6, 7, 8, 9, 10], targetWinners: [6, 15, 25, 35, 45] },
+      { predWinners: [7, 8, 9, 10, 11], targetWinners: [7, 16, 26, 36, 46] },
+    ];
+
+    // Calcul sans cache
+    const alphaBaseline = deriveRetrospectiveOptimalAlpha(paired, undefined, 'LUCKY TUESDAY', 'MONDAY SPECIAL');
+    expect(alphaBaseline).toBeDefined();
+    expect(alphaBaseline!).toBeGreaterThan(0);
+
+    // Injection dans le cache d'un alpha post-mortem étalonné (ex: 0.85)
+    const cacheKey = globalCache.getInterDrawKey('hebdomadaire', 'LUCKY TUESDAY', 'optimal_laplace_monday_special');
+    await globalCache.set(cacheKey, 0.85, 60000, 'LUCKY TUESDAY');
+
+    // Nouveau calcul avec fusion bayésienne continue
+    const alphaFused = deriveRetrospectiveOptimalAlpha(paired, undefined, 'LUCKY TUESDAY', 'MONDAY SPECIAL');
+    expect(alphaFused).toBeDefined();
+    // L'alpha fusionné doit être influencé vers 0.85
+    expect(alphaFused!).not.toEqual(alphaBaseline);
+  });
+
+  it('valide la robustesse 64-bit et la gestion des seeds dans le bridge WASM', async () => {
+    const { runAntColonyOptimizationHpc, solveCombinatorialAnnealingHpc } = await import(
+      '../services/wasm/lotoEngineBridge'
+    );
+
+    // Appel avec undefined, 0 ou NaN pour le seed : ne doit JAMAIS lever de RangeError
+    const resAco = runAntColonyOptimizationHpc({
+      flatHistory: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      numDraws: 2,
+      winCols: 5,
+      antsCount: 5,
+      generations: 2,
+      alpha: 1.0,
+      beta: 1.0,
+      rho: 0.1,
+      q0: 0.8,
+      seed: NaN as any, // Doit basculer vers le fallback sans crasher
+    });
+
+    expect(resAco).toBeDefined();
+    expect(resAco.bestNumbers).toHaveLength(5);
+
+    const scores = new Float64Array(91);
+    scores[1] = 10;
+    scores[2] = 20;
+    scores[3] = 30;
+    scores[4] = 40;
+    scores[5] = 50;
+
+    const resAnnealing = solveCombinatorialAnnealingHpc({
+      candidatePool: [1, 2, 3, 4, 5, 6, 7, 8],
+      scores91: scores,
+      affinityMatrix: new Float64Array(91 * 91),
+      deterministicSeed: undefined as any, // Doit basculer vers 123456789 sans crasher
+    });
+
+    expect(resAnnealing).toBeDefined();
+    expect(resAnnealing.best_combination).toHaveLength(5);
+  });
 });
+

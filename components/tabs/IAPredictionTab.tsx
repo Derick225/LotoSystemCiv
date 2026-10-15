@@ -566,9 +566,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   };
 
   const runAIPrediction = async () => {
-    if (!history || history.length < 5) {
+    const cleanHistory = purifyHistoryForDraw(drawName, history);
+    if (!cleanHistory || cleanHistory.length < 5) {
       showToast(
-        "Dataset historique insuffisant pour armer l'IA (Minimum 5 tirages requis).",
+        `Dataset historique insuffisant pour ${drawName} (Minimum 5 tirages réels isolés requis).`,
         "error",
       );
       return;
@@ -627,7 +628,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         hurst: hurstVal,
         entropyNorm: entropyVal / Math.log2(90),
         volatilityNorm: volatilityVal / 100.0,
-        historyDepth: history.length,
+        historyDepth: cleanHistory.length,
       });
 
       const hpcWeights: Record<string, number> = {};
@@ -654,7 +655,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
 
       const predictionData = await generateMasterPrediction(
         drawName,
-        history,
+        cleanHistory,
         temporalDepth,
         aiWeights as any,
         undefined,

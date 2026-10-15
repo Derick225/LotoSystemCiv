@@ -66,7 +66,8 @@ export function computeDeterministicCriticalThreshold(
   algoCount: number,
   entropy: number,
   variance: number,
-  domainSize: number = 90
+  domainSize: number = 90,
+  hurst?: number
 ): number {
   if (algoCount <= 0) return 0.035;
   // Si `variance` est mesurée sur le simplexe des probabilités (somme = 1, variance max Dirac = (D-1)/D^2),
@@ -85,25 +86,32 @@ export function computeDeterministicCriticalThreshold(
   const varianceRatio = Math.min(1.0, Math.max(0.0, variance / referenceVariance));
 
   // Tolérance critique dérivée de la dispersion d'ensemble (Loi des grands nombres ~ 1 / sqrt(K))
-  // et modulée continûment par l'entropie et la variance d'échantillonnage
+  // et modulée continûment par l'entropie, la variance et la persistance de Hurst
   const baseTolerance = 1.0 / Math.sqrt(algoCount);
   const entropyDamping = 0.12 + 0.08 * (1.0 - normalizedEntropy);
   const varianceCorrection = 0.5 * (1.0 + varianceRatio);
 
-  const threshold = baseTolerance * entropyDamping * varianceCorrection;
+  // Modulation continue selon l'exposant de Hurst (régime persistant vs anti-persistant)
+  const hurstFactor =
+    typeof hurst === 'number' && Number.isFinite(hurst)
+      ? 2.0 / (1.0 + Math.exp(-2.0 * (hurst - 0.5)))
+      : 1.0;
+
+  const threshold = baseTolerance * entropyDamping * varianceCorrection * hurstFactor;
   return parseFloat(Math.max(0.015, threshold).toFixed(4));
 }
 
 /**
  * Seuil de dérive critique déterministe d'un tirage, dérivé de l'entropie de Shannon
- * normalisée et de la variance des fréquences réelles de l'historique isolé.
+ * normalisée, de la variance des fréquences réelles de l'historique isolé et de l'exposant de Hurst.
  * Source unique de vérité partagée par le rapport d'audit ADN, le contrôleur
  * d'optimisation et les panneaux de calibration : le seuil affiché est exactement
  * celui appliqué par le moteur.
  */
 export function computeDrawCriticalThreshold(
   history: DrawResult[],
-  algoCount: number
+  algoCount: number,
+  hurst?: number
 ): { criticalThreshold: number; entropy: number; variance: number } {
   const domainSize = 90;
   // Référence théorique neutre sous distribution uniforme maximale (H/H_max = 1.0, variance sur simplexe = 0)
@@ -133,7 +141,8 @@ export function computeDrawCriticalThreshold(
       algoCount,
       entropyVal,
       varianceVal,
-      domainSize
+      domainSize,
+      hurst
     ),
     entropy: entropyVal,
     variance: varianceVal,

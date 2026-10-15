@@ -7,6 +7,7 @@ import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
 import {
   calculateStatisticalBounds,
   calculateTemporalDriftLearningRate,
+  detectGameRegime,
   TemporalDriftLearningRateResult,
 } from '../mathService';
 import { normalizeWeights, evaluateAlgoEmpiricalProof } from './weightsManager';
@@ -442,9 +443,17 @@ export const executeClosedLoopAutopsy = async (
     eta0,
     10
   );
+  // Régulation continue du gradient par l'exposant de Hurst et l'entropie de Shannon du régime
+  const regimeInfo = detectGameRegime(priorHistory);
+  // Modulation sigmoïdale différentiable selon la persistance de Hurst (centrée en 0.5) :
+  // Phi(H) = 2.0 / (1.0 + exp(-4.0 * (H - 0.5)))
+  const hurstModulator = 2.0 / (1.0 + Math.exp(-4.0 * (regimeInfo.hurst - 0.5)));
+  // Amortissement continu si l'entropie normalisée approche le bruit thermique pur (évite le surapprentissage stochastique)
+  const entropyDampener = Math.exp(-0.5 * Math.max(0, regimeInfo.entropy - 0.7));
+  const rawLearningRate = temporalDriftMetrics.learningRate * hurstModulator * entropyDampener;
   const learningRate = Math.max(
-    0.02,
-    Math.min(0.5, temporalDriftMetrics.learningRate)
+    0.01,
+    Math.min(0.5, rawLearningRate)
   );
 
   // 7.5. Matrice de Profil Cyclique & Exposant de Lyapunov
@@ -823,12 +832,13 @@ export const executeClosedLoopAutoAdjustment = async (
   const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
   const versionId = `v_autopsy_${drawDateSafe}`;
 
+  const priorRegime = detectGameRegime(priorHistory);
   const measuredHurst = Number.isFinite(autopsyReport.mathProofMetadata?.hurstExponent)
     ? autopsyReport.mathProofMetadata!.hurstExponent
-    : 0.5;
+    : priorRegime.hurst;
   const measuredShannon = Number.isFinite(autopsyReport.mathProofMetadata?.shannonEntropy)
     ? autopsyReport.mathProofMetadata!.shannonEntropy
-    : undefined;
+    : priorRegime.entropy;
 
   const performancePayload = {
     score: autopsyReport.calibrationAccuracy,

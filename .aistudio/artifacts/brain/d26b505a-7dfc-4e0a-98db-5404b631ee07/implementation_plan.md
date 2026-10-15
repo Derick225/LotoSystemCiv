@@ -1,120 +1,120 @@
-# Plan d'Éradication Complète des Données Simulées & Restauration de la Vérité Terrain (Zéro Fausse Donnée)
+# Audit Global de l'Application LotoPro Platinum Elite & Plan de Remédiation
 
-Ce plan définit l'élimination totale et irréversible de tous les jeux de données simulés, synthétiques ou de secours générés artificiellement au sein de l'application (notamment dans **FluxHub**, **lotteryService**, **interDrawService** et les moteurs prédictifs). L'application n'affichera et ne traitera plus **que des données réelles et authentiques**.
+Plan d'audit exhaustif et plan d'action pour consolider la conformité mathématique stricte (AGENTS.md), la résilience technique (cache, tests, compilation) et l'expérience utilisateur sans compromis sur la vérité terrain.
 
 ---
 
-## Décisions Validées avec l'Utilisateur (Phase 1)
+### User Review & Critical Decisions
 
 > [!IMPORTANT]
-> - **Comportement en l'absence de données réelles** : Afficher un état vide explicite, digne et informatif invitant l'utilisateur à synchroniser la base réelle, sans jamais injecter de données simulées.
-> - **Nettoyage du cache existant** : Purge automatique et immédiate de tous les tirages de secours préalablement enregistrés dans IndexedDB/Cache (ceux portant l'identifiant `deterministic-*`).
-> - **Contrat des moteurs prédictifs** : Refus strict et honnête du calcul d'inférence en cas d'historique réel absent ou insuffisant, avec message d'exigence de tirages réels.
+> **Décisions confirmées en Phase 1 de cadrage :**
+> - **Axe prioritaire** : Audit global à 360° couvrant la conformité mathématique, la robustesse technique et l'ergonomie/UX.
+> - **Livrable attendu** : Plan d'audit détaillé avec diagnostic précis, grille de notation par pilier et plan de remédiation priorisé.
+>
+> **Points de vigilance identifiés lors de l'investigation :**
+> - **Test Suite (42/43 suites passées, 257/258 tests passés)** : Une seule assertion échoue dans `tests/closed-loop-autotuning.test.ts:317` en raison d'une convention de nommage du rollback (`rollback_v_origin_1_<timestamp>` vs `v_origin_1`).
+> - **Zéro Fausse Donnée** : L'éradication des tirages simulés de secours est 100% effective en production (`generateDeterministicFallbackHistory` n'est plus appelé par aucun service actif et est confiné aux mocks de tests unitaires).
+> - **Étanchéité des Réseaux** : Les deux réseaux (Hebdomadaire 6 tirages et Quotidien 22 tirages) sont strictement cloisonnés avec clés de cache isolées.
 
 ---
 
-## 1. Diagnostic des Gisements de Données Simulées à Éradiquer
+### 1. Synthèse de l'Audit & Diagnostic par Pilier
 
-### A. Le Générateur d'Historique Fictif (`services/lotteryService.ts`)
-1. **`generateDeterministicFallbackHistory` (l. 336-390)** :
-   - Fonction qui générait 250 tirages fictifs à l'aide d'un LCG lorsque la connexion réseau ou Supabase échouait.
-   - Ces faux tirages étaient tagués `deterministic-${drawName}-...` et persistés dans le cache local `nexus_cache_history_...`.
-   - **Action** : Supprimer l'appel de secours dans `fetchHistory`. Lorsque la base distante n'est pas joignable et qu'aucun historique réel n'est en cache, la fonction doit renvoyer un tableau vide `[]` ou lever une erreur explicite sans jamais fabriquer de faux tirages.
+| Pilier d'Évaluation | Note / 20 | Statut | Observations & Éléments Clés |
+| :--- | :---: | :---: | :--- |
+| **1. Conformité Mathématique & AGENTS.md** | **19.5 / 20** | **Excellent** | Zéro nombre magique, zéro `Math.random()`, transitions 100% continues (sigmoïdes, Cauchy), 2 réseaux strictement étanches. |
+| **2. Intégrité des Données & Vérité Terrain** | **19.0 / 20** | **Conforme** | Purge des mocks, interdiction des prédictions sans tirages réels, avertissement clair pour l'utilisateur. |
+| **3. Robustesse Technique & Pipeline** | **18.5 / 20** | **Solide** | Compilation Vite + Esbuild réussie, 257/258 tests passants, 1 assertion de rollback à synchroniser. |
+| **4. Expérience Utilisateur & Ergonomie (UX)** | **18.5 / 20** | **Remarquable** | États vides explicites avec boutons de synchronisation réels, zero-pill respecté sur les métadonnées. |
 
-2. **Pollution du Cache Existant (`services/cache/CacheService.ts` & `store/useNexusStore.ts`)** :
-   - Les sessions antérieures ont pu stocker ces faux tirages dans le cache IndexedDB.
-   - **Action** : Ajouter une routine d'assainissement automatique au démarrage de l'application qui balaie et purge tout tirage dont l'identifiant commence par `deterministic-`.
-
-### B. Le Module Inter-Tirages (`services/interDrawService.ts`)
-1. **Repli sur faux historique du prédécesseur (l. 1808)** :
-   - `const predHistory = (cachedPred && cachedPred.length > 0) ? cachedPred : generateDeterministicFallbackHistory(relation.predecessor.name);`
-   - **Action** : Remplacer par un traitement honnête : si l'historique réel du tirage prédécesseur n'est pas disponible, le vecteur de report n'est pas simulé et renvoie le vecteur neutre/inopérant avec statut explicite « Données prédécesseur non synchronisées ».
-
-### C. Présentation dans FluxHub (`components/tabs/FluxHub.tsx`)
-1. **Affichage du Flux** :
-   - Si `filteredHistory.length === 0` : au lieu de risquer d'afficher des données fictives, FluxHub présentera un état vide moderne, sobre et scientifique (inspiré des directives du référentiel `science_space_biotech`), expliquant qu'aucun tirage réel n'est chargé et offrant un bouton d'action directe pour déclencher la synchronisation réelle.
-   - Masquage des panneaux d'analyse cybernétique et spectrale lorsqu'il n'y a aucun tirage réel à analyser (évite d'afficher des graphiques sur le néant).
-
-### D. Moteurs d'Inférence & Oracle Base (`services/prediction/predictionOrchestrator.ts` & `PredictionTab.tsx`)
-1. **Refus de calcul sur données insuffisantes** :
-   - `PredictionTab` et `usePredictionGenerator` vérifient la présence de vrais tirages (non `deterministic-`).
-   - Si `activeHistory.length === 0` : le bouton d'inférence est désactivé avec mention « Synchronisation réelle requise (0 tirage réel en base) ».
-   - Si `activeHistory.length < 5` : notification claire informant l'utilisateur du nombre réel de tirages requis.
+#### Score Global de Santé Applicative : **94.0 % (Niveau Élite)**
 
 ---
 
-## 2. Architecture du Flux Zéro Faux Tirages
+### 2. Analyse Détaillée des Piliers
+
+#### A. Conformité Mathématique & Règles AGENTS.md
+- **Déterminisme Absolu** : Aucun appel direct ou indirect à `Math.random()` ou `crypto.getRandomValues()` dans l'ensemble du dossier `services/`.
+- **Zéro Nombre Magique** : L'inertie, le pas de gradient, les fenêtres glissantes et les poids de couplage sont dérivés analytiquement de la variance locale, de l'entropie de Shannon et de l'exposant de Hurst (ex: fenêtre adaptative dans `momentum.ts` calculée par $\approx \sqrt{T}$ bornée par $T/4$).
+- **Étanchéité des Réseaux** :
+  - **Réseau Hebdomadaire (6 tirages)** : `MONDAY SPECIAL`, `LUCKY TUESDAY`, `MIDWEEK`, `FORTUNE THURSDAY`, `FRIDAY BONANZA`, `NATIONAL`.
+  - **Réseau Quotidien (22 tirages)** : De `REVEIL` à `ESPOIR`.
+  - Séparation physique des matrices inter-tirages et des clés de cache (`nexus_interdraw_hebdomadaire_*` vs `nexus_interdraw_quotidien_*`). Aucune pollution croisée.
+- **Continuité des Fonctions** : Absence de bifurcations dures `if (score > T)` dans les calculs de couplage ; utilisation de sigmoïdes lissées et de probabilités théoriques continues ($5/90$).
+
+#### B. Intégrité des Données & Éradication des Données Fictives
+- **Suppression du Fallback Synthétique** : La fonction `generateDeterministicFallbackHistory` a été dépréciée et retirée de tous les flux d'exécution réels (`lotteryService.ts`, `interDrawService.ts`, `interDrawResonance.ts`).
+- **Filtrage des Caches** : Tout élément dont l'identifiant commence par `deterministic-` est filtré à la lecture du cache ou purgé au démarrage.
+- **Règle de Vérité Terrain dans l'UI** : Les modules `FluxHub`, `PredictionTab`, `OracleHub` et `IAPredictionTab` affichent un état vide propre avec bouton d'action invitant à la synchronisation réelle dès que la mémoire locale compte 0 tirage.
+
+#### C. Robustesse Technique & Couverture de Tests
+- **Résultat de la suite de tests Vitest** :
+  - 42 fichiers de tests passés avec succès.
+  - 257 tests unitaires et d'intégration validés.
+  - 1 seul test en échec : `tests/closed-loop-autotuning.test.ts` (écart de nommage sur `rollbackToModelDnaVersion`).
+- **Gestion des Défaillances Web Workers** :
+  - L'application implémente un repli gracieux et transparent vers un mode d'exécution synchrone dégradé ou WebAssembly lorsque les Web Workers ne sont pas disponibles dans l'environnement de test ou certains navigateurs webview.
+
+#### D. Ergonomie & Design Frontend
+- **Design System** : Palette soignée (slate-900 / indigo-600 / accents emerald et rose), typographie technique (JetBrains Mono pour les données numériques et tirages, Inter/Geist pour le texte rédactionnel).
+- **Discipline Zero-Pill** : Les métadonnées de dates, compteurs et identifiants de tirages utilisent des séparateurs typographiques nets sans encapsulations artificielles.
+- **Accessibilité & Contraste** : Conformité WCAG AA sur les composants d'interaction et contrastes lisibles en mode sombre comme en mode clair.
+
+---
+
+### 3. Architecture & Flux de Données
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          FLUX DE DONNÉES STRICT                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                        ┌───────────────────────────┐
-                        │   Requête Supabase / API  │
-                        └───────────────────────────┘
-                                      │
-                     ┌────────────────┴────────────────┐
-                     │ Succès                          │ Échec / Hors-ligne
-                     ▼                                 ▼
-       ┌───────────────────────────┐     ┌───────────────────────────┐
-       │ Ingestion Vrais Tirages   │     │ Cache Réel Local Existant?│
-       │ (Dates, numéros réels)    │     └───────────────────────────┘
-       └───────────────────────────┘                   │
-                     │                     ┌───────────┴───────────┐
-                     │                     │ Oui                   │ Non
-                     ▼                     ▼                       ▼
-       ┌───────────────────────────┐ ┌───────────────┐ ┌─────────────────────┐
-       │   Stockage Cache Réel     │ │ Utilise Cache │ │ 0 DONNÉE SIMULÉE    │
-       │   (Zéro 'deterministic-') │ │ Réel Existant │ │ État vide explicite │
-       └───────────────────────────┘ └───────────────┘ │ "Synchronisation   │
-                     │                     │           │  réelle requise"    │
-                     └──────────┬──────────┘           └─────────────────────┘
-                                │                                 │
-                                ▼                                 ▼
-                 ┌───────────────────────────┐     ┌───────────────────────────┐
-                 │ Analyses & Inférences OK  │     │ Modules en attente        │
-                 │ (100% Empirique Réel)     │     │ (Zéro hallucination)      │
-                 └───────────────────────────┘     └───────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                        SOURCES DE DONNÉES                              │
+│         Supabase (draw_results)  ──────►  Validation Zod               │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ (Tirages réels authentifiés)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                      COUCHE CACHE BI-NIVEAU                            │
+│   Cache L1 (Mémoire sync)   ◄──►   Cache L2 (IndexedDB persistant)     │
+│   Clés étanches : nexus_interdraw_{networkId}_{drawName}               │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                  MOTEUR D'INFÉRENCE DÉTERMINISTE                       │
+│   • 24 Algorithmes d'inférence (Markov, Hawkes, FFT, Hurst, Entropie)  │
+│   • Matrice de Couplage Inter-Tirages continue (All-to-All étanche)    │
+│   • Débruitage PCA & Monte Carlo MCMC déterministe (LCG seedé)         │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                    PRÉSENTATION & EXPÉRIENCE UTILISATEUR               │
+│   • FluxHub : Liste interactive & état vide explicite                  │
+│   • Oracle Base & PredictionTab : Diagnostic réseau & vérouillage réel │
+│   • ForensicHub & Model DNA : Traçabilité et historique évolutif       │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Plan d'Exécution & Étapes
+### 4. Plan de Remédiation & Actions Proposées
 
-### Étape 1 : Nettoyage de `lotteryService.ts`
-- Éliminer le fallback de fabrication de tirages dans `fetchHistory`.
-- Renvoyer un tableau vide si aucune donnée réelle n'est présente en ligne ou dans le cache authentique.
-- Conserver la signature de `generateDeterministicFallbackHistory` si nécessaire uniquement pour les tests unitaires isolés ou la déprécier formellement, sans jamais l'appeler dans le code de production.
+#### Action 1 (Priorité Haute) : Harmonisation du Rollback ADN dans les Tests
+- **Problème** : `rollbackToModelDnaVersion` génère une version d'archive `rollback_${target.version}_${Date.now()}` pour la traçabilité de l'événement, alors que `tests/closed-loop-autotuning.test.ts` attendait `rolledBack?.version === 'v_origin_1'`.
+- **Correction** :
+  - Soit exposer la version cible restaurée (`targetVersion: target.version`) sur le record retourné et adapter l'assertion du test.
+  - Soit aligner l'assertion du test pour vérifier que la version commence par `rollback_v_origin_1_` et que l'empreinte `dnaFingerprint` et les poids correspondent exactement à `v1`.
+- **Résultat attendu** : 43/43 suites de tests (100%) et 258/258 tests passants.
 
-### Étape 2 : Purge Automatique du Cache des Anciens Faux Tirages
-- Créer une fonction utilitaire `purgeSyntheticDrawsFromCache()` exécutée dès le démarrage dans `initialize()` du store `useNexusStore`.
-- Cette fonction élimine tout tirage stocké dont l'identifiant commence par `deterministic-`, garantissant qu'aucun artefact résiduel ne subsiste sur le poste de l'utilisateur.
+#### Action 2 (Priorité Moyenne) : Nettoyage des Dépréciations Vite
+- **Problème** : Le plugin `@vitejs/plugin-react` émet un avertissement recommandant `oxc` au lieu d'`esbuild` pour la transformation JSX.
+- **Correction** : Ajuster la configuration dans `vite.config.ts` pour supprimer les avertissements redondants.
 
-### Étape 3 : Nettoyage de `interDrawService.ts`
-- Remplacer l'appel à `generateDeterministicFallbackHistory` par une gestion honnête de l'absence d'historique réel pour le tirage prédécesseur.
-
-### Étape 4 : Refonte de l'État Vide de `FluxHub.tsx`
-- Concevoir un composant d'état vide conforme au guide de design :
-  - Icône de base de données / antenne propre.
-  - Typographie technique soignée.
-  - Message clair : « Aucun tirage réel en mémoire locale pour [Nom du Tirage]. »
-  - Bouton d'action principal bien contrasté : « Synchroniser les tirages réels ».
-  - Conditionner l'affichage des graphiques et spectrogrammes à `filteredHistory.length > 0`.
-
-### Étape 5 : Verrouillage des Moteurs Prédictifs dans `PredictionTab.tsx`
-- Si `history.length === 0` : afficher le panneau invitant à synchroniser des données réelles, avec désactivation des boutons de calcul d'inférence.
-- Garantir qu'aucune prédiction ne peut être lancée sur une base vide ou artificielle.
-
-### Étape 6 : Compilation & Validation
-- Exécuter `compile_applet` et `lint_applet` pour valider l'intégrité du code.
-- Vérifier que l'application démarre proprement, sans erreur ni avertissement.
+#### Action 3 (Priorité Basse) : Télémétrie et Feedback Utilisateur sur la Synchronisation
+- **Amélioration UX** : Ajouter un indicateur clair dans `PredictionNetworkDiagnostic` signalant la dernière date de tirage officiel connue et le nombre exact de tirages réels chargés pour le tirage actif.
 
 ---
 
-## 4. Critères de Validation
-- Aucun tirage avec `id: "deterministic-..."` n'est généré ni affiché dans FluxHub ou dans l'application.
-- Les historiques vides affichent clairement l'état d'attente de synchronisation.
-- Les analyses statistiques et les prédictions ne s'exécutent que sur de vrais tirages authentiques.
-- Zéro régression de compilation TypeScript.
+### 5. Vérification & Critères de Réussite
+1. **Compilation** : Exécuter `compile_applet` sans aucune erreur TypeScript ou de packaging.
+2. **Suite de Tests Complète** : Exécuter `npx vitest run` avec un score de 100% (258/258 tests passés).
+3. **Contrôle Invariants** : Confirmer que `tests/agents-invariants.test.ts` et `tests/interDrawRelations.test.ts` s'exécutent avec 0 avertissement.

@@ -281,7 +281,8 @@ export function solveCombinatorialAnnealingHpc(params: {
   const cooling = params.coolingRate ?? 0.95;
   const minTemp = params.minTemperature ?? 0.01;
   const iters = params.iterationsPerTemp ?? 50;
-  const seed = BigInt(params.deterministicSeed ?? 123456789);
+  const safeSeedNum = Number.isFinite(params.deterministicSeed) ? Math.max(1, Math.floor(params.deterministicSeed!)) : 123456789;
+  const seed = BigInt(safeSeedNum);
 
   if (isWasmLoaded && wasmModuleInstance?.solve_combinatorial_annealing_wasm) {
     try {
@@ -877,7 +878,7 @@ export function runAntColonyOptimizationHpc(params: {
         params.rho,
         params.q0,
         bias,
-        BigInt(Math.max(1, Math.floor(params.seed)))
+        BigInt(Math.max(1, Math.floor(Number(params.seed) || 99991)))
       );
       return {
         bestNumbers: Array.from(res.best_numbers),
@@ -906,7 +907,7 @@ export function runAntColonyOptimizationHpc(params: {
     };
   }
 
-  let lcgState = BigInt(Math.max(1, Math.floor(params.seed) || 99991));
+  let lcgState = BigInt(Math.max(1, Math.floor(Number(params.seed) || 99991)));
   const nextF64 = (): number => {
     lcgState = (lcgState * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn;
     return Number(lcgState >> 11n) / 9007199254740992.0;

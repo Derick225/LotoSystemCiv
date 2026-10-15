@@ -322,12 +322,13 @@ export const rollbackToModelDnaVersion = async (
   // Créer un enregistrement de restauration
   const rollbackRecord = await recordModelDnaVersion({
     drawName,
-    version: `rollback_${target.version}_${Date.now()}`,
-    origin: 'MANUAL_CALIBRATION',
+    version: target.version,
+    origin: target.origin,
     weights: target.weights,
     performance: target.performance,
     regimeContext: target.regimeContext,
     causalAuditTrail: [
+      ...(target.causalAuditTrail || []),
       `Restauration déterministe vers la version ${target.version} (${target.dnaFingerprint})`,
     ],
   });

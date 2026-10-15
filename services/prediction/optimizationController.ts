@@ -114,7 +114,7 @@ export async function applyOptimizedWeights(
     criticalThreshold,
     entropy: entropyVal,
     variance: varianceVal,
-  } = computeDrawCriticalThreshold(history, algoCount);
+  } = computeDrawCriticalThreshold(history, algoCount, regimeContext?.hurst);
 
   // 4.a Lissage Kalman Adaptatif AVANT la garde de dérive critique (garantit que le filtre ne viole jamais le seuil critique)
   let candidateWeights: AlgoWeights = targetNormalized;

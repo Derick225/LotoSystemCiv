@@ -809,9 +809,28 @@ export const runBayesianResonanceEngine = (
  */
 export const deriveRetrospectiveOptimalAlpha = (
   pairedPairs: { predWinners: number[]; targetWinners: number[] }[],
-  predLaggedHistory?: number[][]
+  predLaggedHistory?: number[][],
+  targetDrawName?: string,
+  predecessorName?: string
 ): number | undefined => {
-  if (pairedPairs.length < 6) return undefined;
+  // Rétro-injection continue de l'Alpha post-mortem si archivé en cache (conforme AGENTS.md, zéro fuite)
+  let cachedPostMortemAlpha: number | null = null;
+  if (targetDrawName && predecessorName) {
+    const family = getPrimaryInterDrawFamily(targetDrawName);
+    if (family) {
+      const predSlug = predecessorName.toLowerCase().trim().replace(/[\s-]+/g, '_');
+      const cacheKey = globalCache.getInterDrawKey(
+        family.id,
+        targetDrawName,
+        `optimal_laplace_${predSlug}`
+      );
+      cachedPostMortemAlpha = globalCache.getSync<number>(cacheKey, targetDrawName);
+    }
+  }
+
+  if (pairedPairs.length < 6) {
+    return cachedPostMortemAlpha ?? undefined;
+  }
 
   const testPair = pairedPairs[0];
   const trainPairs = pairedPairs.slice(1);
@@ -845,10 +864,20 @@ export const deriveRetrospectiveOptimalAlpha = (
   const logLoss = logLossSum / 90.0;
   varP /= 90.0;
 
-  return Math.max(
+  const sampleDerivedAlpha = Math.max(
     1.0 / (1.0 + trainPairs.length),
     Math.min(1.5, (1.0 + Math.sqrt(varP)) / (1.0 + logLoss))
   );
+
+  // Fusion bayésienne continue entre la calibration post-mortem antérieure et la mesure empirique immédiate
+  if (typeof cachedPostMortemAlpha === 'number' && Number.isFinite(cachedPostMortemAlpha) && cachedPostMortemAlpha > 0) {
+    const n = trainPairs.length;
+    // Poids de shrinkage bayésien continu dérivé du volume d'échantillons n / (n + 10)
+    const weightSample = n / (n + 10.0);
+    return weightSample * sampleDerivedAlpha + (1.0 - weightSample) * cachedPostMortemAlpha;
+  }
+
+  return sampleDerivedAlpha;
 };
 
 /**
@@ -1089,7 +1118,7 @@ export const generateInterDrawReport = async (
   const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
 
   // 3. Exécution du moteur mathématique bayésien continu avec auto-calibration en boucle fermée
-  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, predLaggedHistory);
+  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, predLaggedHistory, targetDrawName, relation.predecessor.name);
   const engine = runBayesianResonanceEngine(pairedPairs, activePredNumbers, predLaggedHistory, retroAlpha, undefined, targetDrawName, relation.predecessor.name);
   const {
     sampleSize,
@@ -1343,8 +1372,8 @@ export const simulateInterDrawTransmission = async (
 
   const pairedPairs = alignConsecutiveDrawHistories(targetHistory, predHistory);
   const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
-  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, predLaggedHistory);
-  const engine = runBayesianResonanceEngine(pairedPairs, validNumbers, predLaggedHistory, retroAlpha);
+  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, predLaggedHistory, targetDrawName, relation.predecessor.name);
+  const engine = runBayesianResonanceEngine(pairedPairs, validNumbers, predLaggedHistory, retroAlpha, undefined, targetDrawName, relation.predecessor.name);
   const candidates = engine.scoredCandidates;
 
   const topNums = candidates.slice(0, 5).map(c => c.number);
@@ -1489,16 +1518,16 @@ export const calculateInterDrawVector = (
 
   // 1. Exécution du modèle bayésien continu initial avec auto-calibration
   const predLaggedHistory = predHistory.slice(0, 5).map(d => d.gagnants);
-  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, predLaggedHistory);
+  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, predLaggedHistory, drawName, relation.predecessor.name);
   const engine = runBayesianResonanceEngine(pairedPairs, lastWinners, predLaggedHistory, retroAlpha, undefined, drawName, relation.predecessor.name);
   for (let n = 1; n <= 90; n++) {
     vec[n] = engine.fullCandidateScores[n] || THEORETICAL_SINGLE_PROB;
   }
 
   // 2. Injection continue des métriques de Lift conditionnel des paires et de résonance de cascade (+-1, +-2)
-  // ZÉRO NOMBRE MAGIQUE : fonctions différentiables calculées à partir du Lift empirique, du PMI et de l'énergie de cascade.
-  const cooccReport = analyzeInterDrawCooccurrences(pairedPairs, lastWinners);
-  const patternReport = analyzeInterDrawPatterns(pairedPairs, lastWinners);
+  // ZÉRO NOMBRE MAGIQUE : fonctions différentiables calculées avec l'Alpha de Laplace optimal calibré
+  const cooccReport = analyzeInterDrawCooccurrences(pairedPairs, lastWinners, engine.laplaceAlpha);
+  const patternReport = analyzeInterDrawPatterns(pairedPairs, lastWinners, engine.laplaceAlpha);
 
   const cooccBoost = new Float32Array(91);
   if (cooccReport && cooccReport.topConditionedPairs) {
@@ -1597,7 +1626,8 @@ export const getInterDrawMorphologicalTarget = (
   const pairedPairs = alignConsecutiveDrawHistories(purified, predHistory);
   if (pairedPairs.length === 0) return null;
 
-  const patternReport = analyzeInterDrawPatterns(pairedPairs, lastWinners);
+  const retroAlpha = deriveRetrospectiveOptimalAlpha(pairedPairs, undefined, drawName, relation.predecessor.name);
+  const patternReport = analyzeInterDrawPatterns(pairedPairs, lastWinners, retroAlpha);
   if (!patternReport) return null;
 
   return {
