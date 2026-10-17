@@ -21,6 +21,8 @@ pub mod temporal_service;
 pub mod aco;
 pub mod neural_optimizer;
 pub mod delta_stats;
+pub mod in_memory_store;
+pub mod prediction_pipeline;
 
 use wasm_bindgen::prelude::*;
 

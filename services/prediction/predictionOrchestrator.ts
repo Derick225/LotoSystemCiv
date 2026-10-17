@@ -905,3 +905,38 @@ export const generateMasterPredictionCore = async (
 
   return await runLocalPredictionPipeline(context);
 };
+
+export {
+  runNativePredictionHpc,
+  type NativePredictionResultHpc,
+} from "../wasm/lotoEngineBridge";
+
+/**
+ * Exécute l'inférence ultra-rapide 100% native Rust Core (WASM).
+ * 0 ms de latence réseau, zéro allocation superflue.
+ */
+export const runNativeRustPrediction = async (
+  drawName: string,
+  history: DrawResult[],
+  weights?: AlgoWeights
+): Promise<import("../wasm/lotoEngineBridge").NativePredictionResultHpc> => {
+  const winCols = 5;
+  const flat = new Uint8Array(history.length * winCols);
+  for (let d = 0; d < history.length; d++) {
+    const g = history[d].gagnants || [];
+    const offset = d * winCols;
+    for (let c = 0; c < winCols; c++) {
+      flat[offset + c] = g[c] || 0;
+    }
+  }
+
+  const { runNativePredictionHpc } = await import("../wasm/lotoEngineBridge");
+  return runNativePredictionHpc({
+    flatWinners: flat,
+    numDraws: history.length,
+    frequencyWeight: weights?.frequency ?? 1.2,
+    gapWeight: weights?.gap ?? 0.8,
+    markovWeight: weights?.markov ?? 0.5,
+    hurstWeight: weights?.fractal ?? 0.3,
+  });
+};

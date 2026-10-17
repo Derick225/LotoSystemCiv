@@ -1,120 +1,99 @@
-# Audit Global de l'Application LotoPro Platinum Elite & Plan de Remédiation
+# Plan d'Amélioration Prédictive : Couplage Dynamique Inter-Tirages & Générateur Multi-Tickets Diversifiés
 
-Plan d'audit exhaustif et plan d'action pour consolider la conformité mathématique stricte (AGENTS.md), la résilience technique (cache, tests, compilation) et l'expérience utilisateur sans compromis sur la vérité terrain.
+## 1. Vision & Fondements Mathématiques
 
----
+Conformément à la charte **AGENTS.md** (zéro nombre magique, 100% déterministe, transitions différentiables $C^\infty$), cette amélioration exploite l'interconnexion stochastique entre tirages d'un même réseau afin de propulser la précision prédictive et de produire un portefeuille de **multi-tickets diversifiés**.
 
-### User Review & Critical Decisions
-
-> [!IMPORTANT]
-> **Décisions confirmées en Phase 1 de cadrage :**
-> - **Axe prioritaire** : Audit global à 360° couvrant la conformité mathématique, la robustesse technique et l'ergonomie/UX.
-> - **Livrable attendu** : Plan d'audit détaillé avec diagnostic précis, grille de notation par pilier et plan de remédiation priorisé.
->
-> **Points de vigilance identifiés lors de l'investigation :**
-> - **Test Suite (42/43 suites passées, 257/258 tests passés)** : Une seule assertion échoue dans `tests/closed-loop-autotuning.test.ts:317` en raison d'une convention de nommage du rollback (`rollback_v_origin_1_<timestamp>` vs `v_origin_1`).
-> - **Zéro Fausse Donnée** : L'éradication des tirages simulés de secours est 100% effective en production (`generateDeterministicFallbackHistory` n'est plus appelé par aucun service actif et est confiné aux mocks de tests unitaires).
-> - **Étanchéité des Réseaux** : Les deux réseaux (Hebdomadaire 6 tirages et Quotidien 22 tirages) sont strictement cloisonnés avec clés de cache isolées.
-
----
-
-### 1. Synthèse de l'Audit & Diagnostic par Pilier
-
-| Pilier d'Évaluation | Note / 20 | Statut | Observations & Éléments Clés |
-| :--- | :---: | :---: | :--- |
-| **1. Conformité Mathématique & AGENTS.md** | **19.5 / 20** | **Excellent** | Zéro nombre magique, zéro `Math.random()`, transitions 100% continues (sigmoïdes, Cauchy), 2 réseaux strictement étanches. |
-| **2. Intégrité des Données & Vérité Terrain** | **19.0 / 20** | **Conforme** | Purge des mocks, interdiction des prédictions sans tirages réels, avertissement clair pour l'utilisateur. |
-| **3. Robustesse Technique & Pipeline** | **18.5 / 20** | **Solide** | Compilation Vite + Esbuild réussie, 257/258 tests passants, 1 assertion de rollback à synchroniser. |
-| **4. Expérience Utilisateur & Ergonomie (UX)** | **18.5 / 20** | **Remarquable** | États vides explicites avec boutons de synchronisation réels, zero-pill respecté sur les métadonnées. |
-
-#### Score Global de Santé Applicative : **94.0 % (Niveau Élite)**
+### Les Deux Piliers Clés :
+1. **Couplage Dynamique Inter-Tirages & Effet Domino** :
+   - Les tirages ne sont pas traités comme des îles isolées : l'énergie cinétique du tirage prédécesseur (ex: tirage de la veille ou de la session précédente) se propage par advection et diffusion dans le réseau.
+   - Utilisation des algorithmes avancés de `crates/loto-engine/src/interdraw_dynamics.rs` :
+     - **Advection cinétique** & ondes de réverbération (effet domino).
+     - **Noyau de chaleur de graphe** ($e^{-tL}$, effet cascade).
+     - **Tenseur de cooccurrence conditionnelle** (`crates/loto-engine/src/cooccurrence.rs`).
+2. **Génération Multi-Tickets Diversifiés (Portefeuille Orthogonal)** :
+   - Remplacement de la génération d'un ticket unique par un portefeuille optimisé de $K$ tickets ($K \in [3, 6]$).
+   - Élimination stricte de la **monoculture** : chaque ticket cible un profil stochastique complémentaire via maximisation de la distance de Jaccard/Hamming entre combinaisons.
 
 ---
 
-### 2. Analyse Détaillée des Piliers
-
-#### A. Conformité Mathématique & Règles AGENTS.md
-- **Déterminisme Absolu** : Aucun appel direct ou indirect à `Math.random()` ou `crypto.getRandomValues()` dans l'ensemble du dossier `services/`.
-- **Zéro Nombre Magique** : L'inertie, le pas de gradient, les fenêtres glissantes et les poids de couplage sont dérivés analytiquement de la variance locale, de l'entropie de Shannon et de l'exposant de Hurst (ex: fenêtre adaptative dans `momentum.ts` calculée par $\approx \sqrt{T}$ bornée par $T/4$).
-- **Étanchéité des Réseaux** :
-  - **Réseau Hebdomadaire (6 tirages)** : `MONDAY SPECIAL`, `LUCKY TUESDAY`, `MIDWEEK`, `FORTUNE THURSDAY`, `FRIDAY BONANZA`, `NATIONAL`.
-  - **Réseau Quotidien (22 tirages)** : De `REVEIL` à `ESPOIR`.
-  - Séparation physique des matrices inter-tirages et des clés de cache (`nexus_interdraw_hebdomadaire_*` vs `nexus_interdraw_quotidien_*`). Aucune pollution croisée.
-- **Continuité des Fonctions** : Absence de bifurcations dures `if (score > T)` dans les calculs de couplage ; utilisation de sigmoïdes lissées et de probabilités théoriques continues ($5/90$).
-
-#### B. Intégrité des Données & Éradication des Données Fictives
-- **Suppression du Fallback Synthétique** : La fonction `generateDeterministicFallbackHistory` a été dépréciée et retirée de tous les flux d'exécution réels (`lotteryService.ts`, `interDrawService.ts`, `interDrawResonance.ts`).
-- **Filtrage des Caches** : Tout élément dont l'identifiant commence par `deterministic-` est filtré à la lecture du cache ou purgé au démarrage.
-- **Règle de Vérité Terrain dans l'UI** : Les modules `FluxHub`, `PredictionTab`, `OracleHub` et `IAPredictionTab` affichent un état vide propre avec bouton d'action invitant à la synchronisation réelle dès que la mémoire locale compte 0 tirage.
-
-#### C. Robustesse Technique & Couverture de Tests
-- **Résultat de la suite de tests Vitest** :
-  - 42 fichiers de tests passés avec succès.
-  - 257 tests unitaires et d'intégration validés.
-  - 1 seul test en échec : `tests/closed-loop-autotuning.test.ts` (écart de nommage sur `rollbackToModelDnaVersion`).
-- **Gestion des Défaillances Web Workers** :
-  - L'application implémente un repli gracieux et transparent vers un mode d'exécution synchrone dégradé ou WebAssembly lorsque les Web Workers ne sont pas disponibles dans l'environnement de test ou certains navigateurs webview.
-
-#### D. Ergonomie & Design Frontend
-- **Design System** : Palette soignée (slate-900 / indigo-600 / accents emerald et rose), typographie technique (JetBrains Mono pour les données numériques et tirages, Inter/Geist pour le texte rédactionnel).
-- **Discipline Zero-Pill** : Les métadonnées de dates, compteurs et identifiants de tirages utilisent des séparateurs typographiques nets sans encapsulations artificielles.
-- **Accessibilité & Contraste** : Conformité WCAG AA sur les composants d'interaction et contrastes lisibles en mode sombre comme en mode clair.
-
----
-
-### 3. Architecture & Flux de Données
+## 2. Architecture Technique & Flux de Données
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                        SOURCES DE DONNÉES                              │
-│         Supabase (draw_results)  ──────►  Validation Zod               │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ (Tirages réels authentifiés)
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                      COUCHE CACHE BI-NIVEAU                            │
-│   Cache L1 (Mémoire sync)   ◄──►   Cache L2 (IndexedDB persistant)     │
-│   Clés étanches : nexus_interdraw_{networkId}_{drawName}               │
-└───────────────────────────────────┬────────────────────────────────────┘
+│                        MOTEUR RUST CORE (WASM HPC)                     │
+│                                                                        │
+│   ┌───────────────────────────────────────────────────────────────┐    │
+│   │             In-Memory Store (Tirage N & Prédécesseur N-1)      │    │
+│   └───────────────────────────────┬───────────────────────────────┘    │
+│                                   │                                    │
+│   ┌───────────────────────────────▼───────────────────────────────┐    │
+│   │      Tenseur d'Advection Cinétique & Effet Domino             │    │
+│   │      (interdraw_dynamics.rs + cooccurrence.rs)                │    │
+│   │      • Matrice de transition continue lissée (Laplace)        │    │
+│   │      • Énergie de résonance inter-tirages                     │    │
+│   └───────────────────────────────┬───────────────────────────────┘    │
+│                                   │                                    │
+│   ┌───────────────────────────────▼───────────────────────────────┐    │
+│   │      Orchestrateur de Portefeuille Multi-Tickets (Rust)       │    │
+│   │      • Ticket 1 : Attracteur Primaire (Densité Max P_max)     │    │
+│   │      • Ticket 2 : Résonance Domino (Excitations Prédécesseur) │    │
+│   │      • Ticket 3 : Dispersion Entropique (Poisson / Outsiders) │    │
+│   │      • Ticket 4+ : Couverture Orthogonale (Max Distance J)   │    │
+│   └───────────────────────────────┬───────────────────────────────┘    │
+└───────────────────────────────────┼────────────────────────────────────┘
                                     │
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                  MOTEUR D'INFÉRENCE DÉTERMINISTE                       │
-│   • 24 Algorithmes d'inférence (Markov, Hawkes, FFT, Hurst, Entropie)  │
-│   • Matrice de Couplage Inter-Tirages continue (All-to-All étanche)    │
-│   • Débruitage PCA & Monte Carlo MCMC déterministe (LCG seedé)         │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                    PRÉSENTATION & EXPÉRIENCE UTILISATEUR               │
-│   • FluxHub : Liste interactive & état vide explicite                  │
-│   • Oracle Base & PredictionTab : Diagnostic réseau & vérouillage réel │
-│   • ForensicHub & Model DNA : Traçabilité et historique évolutif       │
+│                        FRONTEND REACT & VIZ (PWA)                      │
+│                                                                        │
+│   • Visualisation cinétique de l'Effet Domino (flux d'énergie N-1 ➔ N) │
+│   • Grille du Portefeuille Multi-Tickets avec badges de profil         │
+│   • Indicateur de Diversité de Shannon & Indice de Couverture Spatiale │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 4. Plan de Remédiation & Actions Proposées
+## 3. Plan d'Implémentation Détaillé
 
-#### Action 1 (Priorité Haute) : Harmonisation du Rollback ADN dans les Tests
-- **Problème** : `rollbackToModelDnaVersion` génère une version d'archive `rollback_${target.version}_${Date.now()}` pour la traçabilité de l'événement, alors que `tests/closed-loop-autotuning.test.ts` attendait `rolledBack?.version === 'v_origin_1'`.
-- **Correction** :
-  - Soit exposer la version cible restaurée (`targetVersion: target.version`) sur le record retourné et adapter l'assertion du test.
-  - Soit aligner l'assertion du test pour vérifier que la version commence par `rollback_v_origin_1_` et que l'empreinte `dnaFingerprint` et les poids correspondent exactement à `v1`.
-- **Résultat attendu** : 43/43 suites de tests (100%) et 258/258 tests passants.
+### Étape 1 : Extension du Moteur Rust Core (`crates/loto-engine`)
+- **Module `crates/loto-engine/src/interdraw_orchestrator.rs`** :
+  - Interconnexion entre `InMemoryDrawStore` et les routines de `interdraw_dynamics.rs`.
+  - Calcul de la matrice d'advection cinétique basée sur les masques binaires $u128$ des deux derniers tirages.
+  - Implémentation du sélecteur multi-tickets orthogonal :
+    - Algorithme de projection gloutonne déterministe avec pénalisation de recouvrement quadratique continue $\sum \lambda_{ij} \cdot \mathbf{1}_{\{i \cap j\}}$.
+  - Structure de retour `WasmMultiTicketPortfolio` :
+    - Liste des tickets générés (vecteurs de 5 numéros triés).
+    - Vecteur des profils stochastiques (`ATTRACTOR`, `DOMINO_RESONANCE`, `ENTROPY_DISPERSION`, `ORTHOGONAL_COVERAGE`).
+    - Métrique de diversité globale du portefeuille (entropie mutuelle et couverture totale de boules uniques).
 
-#### Action 2 (Priorité Moyenne) : Nettoyage des Dépréciations Vite
-- **Problème** : Le plugin `@vitejs/plugin-react` émet un avertissement recommandant `oxc` au lieu d'`esbuild` pour la transformation JSX.
-- **Correction** : Ajuster la configuration dans `vite.config.ts` pour supprimer les avertissements redondants.
+### Étape 2 : Câblage dans le Pont WebAssembly (`services/wasm/lotoEngineBridge.ts`)
+- Exposer la fonction `computeInterdrawDominoPortfolioHpc` :
+  - Prend en entrée l'historique du tirage cible et du tirage prédécesseur.
+  - Fallback mathématique déterministe $C^\infty$ synchrone en TypeScript pour les environnements de test / SSR.
 
-#### Action 3 (Priorité Basse) : Télémétrie et Feedback Utilisateur sur la Synchronisation
-- **Amélioration UX** : Ajouter un indicateur clair dans `PredictionNetworkDiagnostic` signalant la dernière date de tirage officiel connue et le nombre exact de tirages réels chargés pour le tirage actif.
+### Étape 3 : Intégration dans le Service de Prédiction (`predictionOrchestrator.ts`)
+- Intégrer l'appel au portefeuille domino dans le pipeline prédictif lorsque le tirage prédécesseur est disponible dans le même réseau (`weekly` ou `daily`).
+- Enrichir le type `Prediction` pour inclure le champ optionnel `multiTicketPortfolio`.
+
+### Étape 4 : Interface Utilisateur & Composants Visuels
+- Mettre à jour l'onglet Prédiction (`PredictionTab` / `TicketSummary`) pour afficher :
+  - Le sélecteur de vue : "Ticket Recommandé" ou "Portefeuille Multi-Tickets (Diversifié)".
+  - Carte de chaque ticket avec son badge de stratégie (Attracteur, Domino, Couverture).
+  - Indicateur de non-monoculture (distance de diversité $\ge 80\%$).
+
+### Étape 5 : Tests de Validation Mathématique & Non-Régression
+- Tests unitaires dans `tests/interdraw-domino-portfolio.test.ts` :
+  - Vérification de l'absence totale de duplication triviale entre tickets.
+  - Vérification du déterminisme absolu (mêmes historiques = mêmes tickets).
+  - Vérification de l'intégration Wasm et du fallback.
+- Validation des suites existantes (`rust-wasm-integration.test.ts`, `closed-loop-autotuning.test.ts`).
+- Contrôle de la qualité de compilation (`compile_applet` & `lint_applet`).
 
 ---
 
-### 5. Vérification & Critères de Réussite
-1. **Compilation** : Exécuter `compile_applet` sans aucune erreur TypeScript ou de packaging.
-2. **Suite de Tests Complète** : Exécuter `npx vitest run` avec un score de 100% (258/258 tests passés).
-3. **Contrôle Invariants** : Confirmer que `tests/agents-invariants.test.ts` et `tests/interDrawRelations.test.ts` s'exécutent avec 0 avertissement.
+## 4. Bénéfices Métier & Techniques
+1. **Élimination de la Monoculture** : Un utilisateur ne mise plus sur 5 numéros isolés mais sur un portefeuille équilibré couvrant 12 à 20 numéros distincts sans cannibalisation.
+2. **Prise en Compte de la Continuité Temporelle** : Les tirages d'une même semaine dialoguent mathématiquement via l'effet domino.
+3. **0 Latence Réseau & 0 Coût Supabase** : L'ensemble du calcul matriciel et combinatoire tourne en RAM locale (< 10 ms).

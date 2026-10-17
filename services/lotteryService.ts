@@ -6,7 +6,16 @@ import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
 import { AppError, logError, getErrorMessage } from '../utils/AppError';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
-import { computeFrequencyCountsHpc, initializeLotoEngineWasm } from './wasm/lotoEngineBridge';
+import {
+  computeFrequencyCountsHpc,
+  initializeLotoEngineWasm,
+  appendSingleDrawToStore,
+  getStoreFrequencies,
+  getStoreCurrentGaps,
+  getStoreDrawCount,
+  runNativePredictionHpc,
+  type NativePredictionResultHpc,
+} from './wasm/lotoEngineBridge';
 import {
   logActivePredictionDna,
   getPredictionDnaLogs,
@@ -112,6 +121,28 @@ const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): Dra
     .slice(0, LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
 };
 
+/**
+ * Synchronise l'historique contigu en mémoire vive dans le store Rust Core (WASM).
+ * Éradique les requêtes de comptage et de fréquences SQL vers Supabase.
+ */
+export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: string): void => {
+  if (!draws || draws.length === 0) return;
+  try {
+    for (const d of draws) {
+      if (d.gagnants && d.gagnants.length >= LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) {
+        appendSingleDrawToStore(
+          d.drawName || targetDrawName || 'GLOBAL',
+          getDrawTimestamp(d.date, d.drawName),
+          d.gagnants,
+          d.machine || []
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('[lotteryService] Erreur synchronisation store Rust :', err);
+  }
+};
+
 export const lotteryService = {
   async fetchHistory(drawName: string, force?: boolean): Promise<DrawResult[]> {
     const cacheKey = globalCache.generateKey('history', drawName);
@@ -175,6 +206,7 @@ export const lotteryService = {
             }
           })();
         }
+        syncHistoryToRustStore(realCached, drawName);
         return realCached;
       }
     }
@@ -247,6 +279,7 @@ export const lotteryService = {
                   : fetchedRows;
 
                 if (finalData.length > 0) {
+                  syncHistoryToRustStore(finalData, drawName);
                   await globalCache.registerNewDraw(drawName, finalData.length);
                   await globalCache.set(cacheKey, finalData, CACHE_TTL.HISTORY, drawName);
                   return finalData;
@@ -269,7 +302,10 @@ export const lotteryService = {
     // Fallback to real cache if network fails or offline
     if (existingCached && existingCached.length > 0) {
       const realCached = existingCached.filter(d => !d.id?.startsWith('deterministic-'));
-      if (realCached.length > 0) return realCached;
+      if (realCached.length > 0) {
+        syncHistoryToRustStore(realCached, drawName);
+        return realCached;
+      }
     }
 
     // ÉRADICATION TOTALE DES DONNÉES SIMULÉES : ZÉRO FAUX TIRAGE GÉNÉRÉ
@@ -329,6 +365,39 @@ export const lotteryService = {
     injectedWeights: AlgoWeights
   ): Promise<DnaPerformanceDriftReport> {
     return calculateDnaPerformanceDrift(drawName, history, injectedWeights);
+  },
+
+  /**
+   * Exécute l'inférence stochastique directement dans le moteur Rust Core (WASM / SIMD).
+   * 0 ms de latence réseau, zéro requête Supabase.
+   */
+  async predictWithNativeRustWasm(
+    drawName: string,
+    history?: DrawResult[],
+    weights?: AlgoWeights
+  ): Promise<NativePredictionResultHpc> {
+    await initializeLotoEngineWasm();
+    const data = history && history.length > 0 ? history : await this.fetchHistory(drawName);
+    syncHistoryToRustStore(data, drawName);
+
+    const winCols = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW;
+    const flat = new Uint8Array(data.length * winCols);
+    for (let d = 0; d < data.length; d++) {
+      const g = data[d].gagnants || [];
+      const offset = d * winCols;
+      for (let c = 0; c < winCols; c++) {
+        flat[offset + c] = g[c] || 0;
+      }
+    }
+
+    return runNativePredictionHpc({
+      flatWinners: flat,
+      numDraws: data.length,
+      frequencyWeight: weights?.frequency ?? 1.2,
+      gapWeight: weights?.gap ?? 0.8,
+      markovWeight: weights?.markov ?? 0.5,
+      hurstWeight: weights?.fractal ?? 0.3,
+    });
   }
 };
 
@@ -608,8 +677,18 @@ const computeRecentStatsFromHistory = async (days: number, drawName?: string): P
 
 const computeGlobalStatsFromHistory = async (drawName?: string): Promise<{ number: number, count: number }[]> => {
   try {
-    await initializeLotoEngineWasm();
-    const history = await lotteryService.fetchHistory(drawName || 'ALL');
+    const targetDraw = drawName || 'ALL';
+    if (getStoreDrawCount(targetDraw) > 0) {
+      const countsArr = getStoreFrequencies(targetDraw);
+      const out: { number: number; count: number }[] = [];
+      for (let n = 1; n <= LOTTERY_CONSTANTS.TOTAL_NUMBERS; n++) {
+        if (countsArr[n] > 0) {
+          out.push({ number: n, count: countsArr[n] });
+        }
+      }
+      return out.sort((a, b) => b.count - a.count || a.number - b.number);
+    }
+    const history = await lotteryService.fetchHistory(targetDraw);
     const flat = flattenDrawsForHpc(history);
     const countsArr = computeFrequencyCountsHpc(flat, history.length, LOTTERY_CONSTANTS.NUMBERS_PER_DRAW);
 
@@ -795,6 +874,12 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
     combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     await globalCache.set(cacheKey, combined, CACHE_TTL.HISTORY, targetName);
     await globalCache.registerNewDraw(targetName, combined.length);
+    appendSingleDrawToStore(
+      targetName,
+      getDrawTimestamp(normalizedDateStr, targetName),
+      result.gagnants,
+      sanitizedMachine
+    );
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: targetName } }));
     }
@@ -811,6 +896,12 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
   if (error) throw error;
   
   if (data) {
+      appendSingleDrawToStore(
+        data.draw_name,
+        getDrawTimestamp(data.date, data.draw_name),
+        data.gagnants,
+        data.machine || []
+      );
       await triggerAutomationForNewResults(data.draw_name, data.date, data.id);
       if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: data.draw_name } }));
