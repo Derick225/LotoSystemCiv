@@ -313,4 +313,23 @@ impl InMemoryDrawStore {
             vec![0; TOTAL_NUMBERS + 1]
         }
     }
+
+    /// Analyse préalable complète de l'historique d'un tirage (Entropie, Hurst, FFT, Régime)
+    #[wasm_bindgen]
+    pub fn analyze_draw(&self, draw_name: &str) -> Result<crate::core_prediction_engine::PriorAnalysisReport, JsValue> {
+        let norm = draw_name.trim().to_uppercase();
+        let timeline = self.timelines.get(&norm)
+            .ok_or_else(|| JsValue::from_str(&format!("Tirage '{}' absent du cache mémoire", draw_name)))?;
+        Ok(crate::core_prediction_engine::analyze_draw_timeline(timeline))
+    }
+
+    /// Génère un portefeuille de tickets diversifiés (100% calculé en RAM Wasm locale, zéro réseau)
+    #[wasm_bindgen]
+    pub fn generate_portfolio(&self, draw_name: &str, num_tickets: usize) -> Result<crate::core_prediction_engine::WasmPredictionPortfolio, JsValue> {
+        let norm = draw_name.trim().to_uppercase();
+        let timeline = self.timelines.get(&norm)
+            .ok_or_else(|| JsValue::from_str(&format!("Tirage '{}' absent du cache mémoire", draw_name)))?;
+        let prior = crate::core_prediction_engine::analyze_draw_timeline(timeline);
+        Ok(crate::core_prediction_engine::generate_multi_ticket_portfolio(timeline, &prior, num_tickets))
+    }
 }

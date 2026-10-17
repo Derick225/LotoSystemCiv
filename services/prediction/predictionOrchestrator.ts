@@ -908,7 +908,11 @@ export const generateMasterPredictionCore = async (
 
 export {
   runNativePredictionHpc,
+  analyzeDrawHistoryHpc,
+  generateDiversifiedPortfolioHpc,
   type NativePredictionResultHpc,
+  type PriorAnalysisReportHpc,
+  type PredictionPortfolioHpc,
 } from "../wasm/lotoEngineBridge";
 
 /**

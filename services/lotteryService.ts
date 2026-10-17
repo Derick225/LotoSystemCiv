@@ -14,7 +14,11 @@ import {
   getStoreCurrentGaps,
   getStoreDrawCount,
   runNativePredictionHpc,
+  analyzeDrawHistoryHpc,
+  generateDiversifiedPortfolioHpc,
   type NativePredictionResultHpc,
+  type PriorAnalysisReportHpc,
+  type PredictionPortfolioHpc,
 } from './wasm/lotoEngineBridge';
 import {
   logActivePredictionDna,
@@ -398,6 +402,26 @@ export const lotteryService = {
       markovWeight: weights?.markov ?? 0.5,
       hurstWeight: weights?.fractal ?? 0.3,
     });
+  },
+
+  /**
+   * Analyse préalable exhaustive en mémoire vive Rust (Hurst, FFT, Entropie, Régime).
+   * Calibre les indicateurs stochastiques fiables avant toute génération prédictive.
+   */
+  async analyzeDrawPrior(drawName: string): Promise<PriorAnalysisReportHpc> {
+    await initializeLotoEngineWasm();
+    await this.fetchHistory(drawName);
+    return analyzeDrawHistoryHpc(drawName);
+  },
+
+  /**
+   * Génère un portefeuille de tickets diversifiés (anti-monoculture) avec répulsion quadratique.
+   * 100% exécuté en RAM Wasm locale sans aucune requête réseau Supabase.
+   */
+  async generateDiversifiedPortfolio(drawName: string, numTickets: number = 5): Promise<PredictionPortfolioHpc> {
+    await initializeLotoEngineWasm();
+    await this.fetchHistory(drawName);
+    return generateDiversifiedPortfolioHpc(drawName, numTickets);
   }
 };
 

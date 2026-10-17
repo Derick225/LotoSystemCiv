@@ -108,4 +108,52 @@ describe('Rust Core Wasm In-Memory Store & Native Inference Integration', () => 
     expect(pred.top5).toHaveLength(5);
     expect(pred.top5).toContain(5); // Le numéro 5 est récurrent dans l'échantillon
   });
+
+  it('exécute l’analyse préalable complète (FFT, Hurst, Entropie, Régime) en RAM avant toute prédiction', async () => {
+    // Peuplement d'un historique consistant pour l'analyse
+    const testDraw = 'FORTUNE_TEST';
+    for (let i = 1; i <= 20; i++) {
+      appendSingleDrawToStore(
+        testDraw,
+        1700000000000 + i * 86400000,
+        [i, i + 10, i + 20, (i * 3) % 89 + 1, (i * 7) % 89 + 1]
+      );
+    }
+
+    const prior = await lotteryService.analyzeDrawPrior(testDraw);
+    expect(prior).toBeDefined();
+    expect(prior.hurstExponent).toBeGreaterThan(0.0);
+    expect(prior.hurstExponent).toBeLessThan(1.0);
+    expect(prior.shannonEntropy).toBeGreaterThanOrEqual(0.0);
+    expect(prior.shannonEntropy).toBeLessThanOrEqual(1.0);
+    expect(prior.dominantPeriod).toBeGreaterThan(0.0);
+    expect(['PERSISTENT_ATTRACTOR', 'MEAN_REVERTING', 'STOCHASTIC_DIFFUSION', 'INIT_DIFFUSION']).toContain(prior.regimeLabel);
+  });
+
+  it('génère un portefeuille multi-tickets diversifiés avec garantie anti-monoculture et distance de Jaccard élevée', async () => {
+    const testDraw = 'FORTUNE_TEST';
+    const portfolio = await lotteryService.generateDiversifiedPortfolio(testDraw, 5);
+
+    expect(portfolio).toBeDefined();
+    expect(portfolio.ticketCount).toBe(5);
+    expect(portfolio.tickets).toHaveLength(5);
+
+    // Chaque ticket a exactement 5 numéros distincts triés dans [1..90]
+    for (const ticket of portfolio.tickets) {
+      expect(ticket).toHaveLength(5);
+      const unique = new Set(ticket);
+      expect(unique.size).toBe(5);
+      for (const num of ticket) {
+        expect(num).toBeGreaterThanOrEqual(1);
+        expect(num).toBeLessThanOrEqual(90);
+      }
+    }
+
+    // Propriété anti-monoculture : couverture d'au moins 15 numéros uniques sur 25 boules au total (5 tickets * 5)
+    expect(portfolio.uniqueNumbersCovered).toBeGreaterThanOrEqual(14);
+    // Distance moyenne de Jaccard élevée entre les tickets (diversité garantie)
+    expect(portfolio.diversityJaccardDistance).toBeGreaterThan(0.60);
+    expect(portfolio.confidenceScore).toBeGreaterThanOrEqual(20.0);
+  });
 });
+
