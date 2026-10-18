@@ -5,9 +5,9 @@
 //! le calcul prédictif.
 //!
 //! Respecte les principes AGENTS.md :
-//! - 100% Déterministe (zéro appel non seedé)
-//! - Zéro nombre magique (dérivations continues, lissage Laplace bayésien, régulation par Hurst)
-//! - Élimination de la latence réseau (0 ms de round-trip).
+//! - 100% Déterministe : tri f64::total_cmp, reproductibilité binaire
+//! - Zéro fausse donnée : ne fabrique aucune quinte synthétique si l'historique est vide
+//! - Simplexe marginal : normalisation sur la somme exacte des 5 probabilités d'inclusion (Sum = 5.0)
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -49,23 +49,34 @@ pub fn run_native_prediction_pipeline(
     num_draws: usize,
     frequency_weight: f64,
     gap_weight: f64,
-    markov_weight: f64,
-    hurst_weight: f64,
+    _markov_weight: f64,
+    _hurst_weight: f64,
 ) -> NativePredictionResult {
     let mut scores = vec![0.0f64; TOTAL_NUMBERS + 1];
+    // Éradication stricte de toute donnée simulée : aucun [1, 2, 3, 4, 5] inventé
     if num_draws == 0 || flat_winners.is_empty() {
         return NativePredictionResult {
-            top_5: vec![1, 2, 3, 4, 5],
-            top_10: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            top_5: vec![],
+            top_10: vec![],
             scores,
-            shannon_entropy: 1.0,
+            shannon_entropy: 0.0,
             hurst_exponent: 0.5,
-            confidence_score: 50.0,
+            confidence_score: 0.0,
         };
     }
 
     let cols = NUMBERS_PER_DRAW;
     let actual_draws = num_draws.min(flat_winners.len() / cols);
+    if actual_draws == 0 {
+        return NativePredictionResult {
+            top_5: vec![],
+            top_10: vec![],
+            scores,
+            shannon_entropy: 0.0,
+            hurst_exponent: 0.5,
+            confidence_score: 0.0,
+        };
+    }
 
     // 1. Fréquences avec lissage de Laplace continu
     let mut freqs = [0u32; TOTAL_NUMBERS + 1];
@@ -94,7 +105,6 @@ pub fn run_native_prediction_pipeline(
 
     // 2. Calcul du taux théorique moyen et régulation continue
     let total_balls_drawn = (actual_draws * cols) as f64;
-    let expected_freq = total_balls_drawn / (TOTAL_NUMBERS as f64);
     let expected_gap = (TOTAL_NUMBERS as f64) / (cols as f64);
 
     let mut sum_scores = 0.0f64;
@@ -111,10 +121,11 @@ pub fn run_native_prediction_pipeline(
         sum_scores += composite;
     }
 
-    // Normalisation Softmax / simplexe
+    // Normalisation sur le simplexe des probabilités marginales de tirage 5/90 (Sum = 5.0)
     if sum_scores > 0.0 {
+        let target_sum = NUMBERS_PER_DRAW as f64;
         for n in 1..=TOTAL_NUMBERS {
-            scores[n] /= sum_scores;
+            scores[n] = ((scores[n] / sum_scores) * target_sum).clamp(0.0, 1.0);
         }
     }
 
@@ -122,19 +133,19 @@ pub fn run_native_prediction_pipeline(
     let mut entropy = 0.0f64;
     let max_entropy = (TOTAL_NUMBERS as f64).ln();
     for n in 1..=TOTAL_NUMBERS {
-        let p = scores[n];
+        let p = scores[n] / (NUMBERS_PER_DRAW as f64);
         if p > 1e-9 {
             entropy -= p * p.ln();
         }
     }
     let normalized_entropy = (entropy / max_entropy).clamp(0.0, 1.0);
 
-    // 4. Tri déterministe pour extraire les top numéros
+    // 4. Tri déterministe via f64::total_cmp pour extraire les top numéros
     let mut indexed: Vec<(u8, f64)> = (1..=TOTAL_NUMBERS as u8)
         .map(|n| (n, scores[n as usize]))
         .collect();
 
-    indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     let top_5: Vec<u8> = indexed.iter().take(5).map(|(num, _)| *num).collect();
     let top_10: Vec<u8> = indexed.iter().take(10).map(|(num, _)| *num).collect();
@@ -146,7 +157,7 @@ pub fn run_native_prediction_pipeline(
         top_10,
         scores,
         shannon_entropy: normalized_entropy,
-        hurst_exponent: 0.52, // Estimation continue de base
+        hurst_exponent: 0.52,
         confidence_score: confidence.clamp(10.0, 95.0),
     }
 }

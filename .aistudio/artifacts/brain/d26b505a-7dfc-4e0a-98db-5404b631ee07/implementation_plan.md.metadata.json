@@ -1,6 +1,6 @@
 {
-  "summary": "Plan d'amélioration prédictive de LotoPro Platinum Elite v12.0 : Couplage dynamique inter-tirages (effet domino, advection cinétique, noyau de chaleur) et génération automatique d'un portefeuille de multi-tickets diversifiés 100% déterministe en Rust Core Wasm.",
-  "updatedAt": "2026-10-17T08:07:45.188883365Z",
+  "summary": "Plan d'implémentation du Lot 3 : Calibration empirique out-of-fold de Platt, validation Walk-Forward rigoureuse sans fuite de données en Rust Wasm et restitution des indicateurs de fiabilité probabiliste dans l'UI.",
+  "updatedAt": "2026-10-18T07:40:04.031378912Z",
   "requestFeedback": true,
   "userFacing": true
 }

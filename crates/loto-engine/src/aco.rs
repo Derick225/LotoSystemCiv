@@ -77,10 +77,10 @@ pub fn run_aco_optimization_wasm(
     let actual_draws = num_draws.min(flat_history.len() / cols);
     if actual_draws == 0 {
         return AcoResultHpc {
-            best_numbers: vec![1, 2, 3, 4, 5],
+            best_numbers: vec![],
             best_score: 0.0,
-            confidence: 45.0,
-            pheromone_density: 0.45,
+            confidence: 0.0,
+            pheromone_density: 0.0,
             generations_run: 0,
         };
     }

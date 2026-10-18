@@ -29,7 +29,7 @@ serde_json = "1.0"
 wasm-bindgen-test = "0.3.42"
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = false
+wasm-opt = ["-O3"]
 
 [profile.release]
 # Optimisations d'exécution maximales pour WebAssembly (zéro garbage collector)

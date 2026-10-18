@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "supabase:login": "supabase login",
     "supabase:link": "supabase link",
-    "deploy:nexus": "bash ./scripts/deploy-nexus.sh"
+    "deploy:nexus": "bash ./scripts/deploy-nexus.sh",
+    "build:wasm": "wasm-pack build crates/loto-engine --target web --release"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

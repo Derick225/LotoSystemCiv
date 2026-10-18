@@ -710,6 +710,36 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                     </div>
                   )}
 
+                  {/* Calibration Walk-Forward & Brier Score (Lot 3) */}
+                  {activePrediction.walkForwardCalibration && (
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                          <ShieldCheck size={12} className="text-emerald-500" /> Brier Skill Score
+                        </span>
+                        <span className="text-xs font-mono font-black text-emerald-600 dark:text-emerald-400">
+                          {activePrediction.walkForwardCalibration.brierSkillScore > 0 ? "+" : ""}
+                          {(activePrediction.walkForwardCalibration.brierSkillScore * 100).toFixed(2)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-500 dark:text-slate-400">Brier Score Out-Of-Fold</span>
+                        <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                          {activePrediction.walkForwardCalibration.brierScore.toFixed(4)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-500 dark:text-slate-400">Fiabilité Empirique</span>
+                        <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          {activePrediction.walkForwardCalibration.empiricalReliabilityScore.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500 italic">
+                        {activePrediction.walkForwardCalibration.calibrationQualityLabel.replace(/_/g, ' ')}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Adaptive Continuous Hyperparameters */}
                   <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
                     <div className="flex justify-between items-center text-[11px]">

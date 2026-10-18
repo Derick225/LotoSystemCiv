@@ -805,20 +805,8 @@ export const generateMasterPrediction = async (
   return globalCache.getOrCompute(
     cacheKey,
     async () => {
-      // PHASE 1 — Cloud Complet
-      try {
-        const cloudResult = await tryCloudPrediction(context);
-        if (cloudResult) {
-          return cloudResult;
-        }
-      } catch (e) {
-        logger.warn(
-          { drawName: context.drawName, error: e instanceof Error ? e.message : String(e) },
-          "[predictionOrchestrator] Échec technique ou transport du Cloud complet. Basculement sur le Local complet."
-        );
-      }
-
-      // PHASE 2 — Local Complet
+      // PHASE 1 — Moteur Local 100% Client (Rust WASM / Web Worker)
+      // Conforme à l'architecture Supabase DB Pure (Zéro calcul distant)
       try {
         context.onProgress?.(25, "Lancement du pipeline Local Complet...");
         if (typeof Worker !== "undefined") {

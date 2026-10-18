@@ -56,6 +56,14 @@ impl WasmDominoResult {
     pub fn kinetic_dissipation_rate(&self) -> f64 {
         self.kinetic_dissipation_rate
     }
+
+    pub fn empty(gamma: f64) -> Self {
+        Self {
+            domino_energies: vec![0.0; 91],
+            lead_trigger_numbers: vec![],
+            kinetic_dissipation_rate: gamma,
+        }
+    }
 }
 
 #[wasm_bindgen]
@@ -410,4 +418,54 @@ fn mirror_number_fn(num: usize) -> usize {
         }
     }
     num
+}
+
+/// Calcule la corrélation continue de Pearson lissée C^∞ entre deux vecteurs de fréquences [1..=90]
+/// Respecte strictement AGENTS.md : Zéro nombre magique, zéro coupure binaire.
+/// Tout couple de tirages possède un poids continu dans ]0.0, 1.0[.
+pub fn continuous_pearson_coupling(freqs_a: &[u32], freqs_b: &[u32]) -> f64 {
+    let n = 90usize;
+    if freqs_a.len() <= n || freqs_b.len() <= n {
+        return 0.5; // État continu neutre
+    }
+
+    let mut sum_a = 0.0f64;
+    let mut sum_b = 0.0f64;
+    for i in 1..=n {
+        sum_a += freqs_a[i] as f64;
+        sum_b += freqs_b[i] as f64;
+    }
+    let mean_a = sum_a / (n as f64);
+    let mean_b = sum_b / (n as f64);
+
+    let mut num = 0.0f64;
+    let mut var_a = 0.0f64;
+    let mut var_b = 0.0f64;
+
+    for i in 1..=n {
+        let da = (freqs_a[i] as f64) - mean_a;
+        let db = (freqs_b[i] as f64) - mean_b;
+        num += da * db;
+        var_a += da * da;
+        var_b += db * db;
+    }
+
+    let denom = (var_a * var_b).sqrt();
+    let r = if denom > 1e-9 {
+        (num / denom).clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+
+    // Sigmoïde hyperbolique continue différentiable : projection vers (0.0, 1.0)
+    0.5 * (1.0 + (2.0 * r).tanh())
+}
+
+/// Export Wasm pour le calcul de couplage continu d'interconnexion
+#[wasm_bindgen]
+pub fn compute_continuous_interdraw_coupling_wasm(
+    freqs_a: &[u32],
+    freqs_b: &[u32],
+) -> f64 {
+    continuous_pearson_coupling(freqs_a, freqs_b)
 }

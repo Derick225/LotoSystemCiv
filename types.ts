@@ -170,6 +170,15 @@ export interface Prediction {
     entropyBits: number;
     credibleIntervalRange: number;
   };
+  walkForwardCalibration?: {
+    brierScore: number;
+    brierSkillScore: number;
+    plattAlpha: number;
+    plattBeta: number;
+    empiricalReliabilityScore: number;
+    evaluatedWindows: number;
+    calibrationQualityLabel: string;
+  };
   simulationScenarios?: SimulationScenarioItem[];
 }
 

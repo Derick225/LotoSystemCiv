@@ -14,6 +14,7 @@ import { STABILITY_POLYHARMONIC_WEIGHTS, REALITY_ALIGNMENT_WEIGHTS, PLATT_SCORE_
 import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { generateXAPNarratives } from "./xapExplainabilityService";
+import { computeWalkForwardCalibrationHpc } from "../wasm/lotoEngineBridge";
 
 const TICKET_SIZE = 5;
 
@@ -382,6 +383,8 @@ export const finalizePredictionPayload = async (
     dnaSieveMetrics,
   });
 
+  const walkForwardCalibration = computeWalkForwardCalibrationHpc(context.drawName, 15);
+
   return {
     drawName: context.drawName,
     suggestedNumbers: selection,
@@ -415,6 +418,7 @@ export const finalizePredictionPayload = async (
     },
     dnaSieve: dnaSieveMetrics,
     uncertaintyQuantification,
+    walkForwardCalibration,
     simulationScenarios,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,

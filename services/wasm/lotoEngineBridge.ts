@@ -1245,6 +1245,23 @@ export function computeFrequencyCountsHpc(
  */
 let wasmStoreInstance: any = null;
 
+/**
+ * Accesseur polymorphe sécurisé pour les propriétés / getters WebAssembly.
+ * Prévient les erreurs de type TypeError si wasm-bindgen expose un getter sous forme de propriété JS.
+ */
+export function readWasmField<T>(target: any, prop: string, fallback: T): T {
+  if (!target) return fallback;
+  try {
+    const val = target[prop];
+    if (typeof val === 'function') {
+      return val.call(target);
+    }
+    return val !== undefined && val !== null ? val : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 interface FallbackDraw {
   timestamp: number;
   winners: number[];
@@ -1257,6 +1274,7 @@ interface FallbackTimeline {
   frequencies: Int32Array;
   currentGaps: Int32Array;
   maxGaps: Int32Array;
+  seenDraws: Set<string>;
 }
 
 const fallbackStoreTimelines = new Map<string, FallbackTimeline>();
@@ -1273,6 +1291,17 @@ export function getOrCreateNativeStoreInstance(): any {
     return wasmStoreInstance;
   }
   return null;
+}
+
+export function clearStoreTimeline(drawName: string): void {
+  const normName = drawName.trim().toUpperCase();
+  const store = getOrCreateNativeStoreInstance();
+  if (store && typeof store.clear_draw === 'function') {
+    try {
+      store.clear_draw(normName);
+    } catch {}
+  }
+  fallbackStoreTimelines.delete(normName);
 }
 
 export function bootstrapStoreFromJson(jsonPayload: string): number {
@@ -1294,13 +1323,27 @@ export function bootstrapStoreFromJson(jsonPayload: string): number {
     for (const raw of rawList) {
       if (!raw || !Array.isArray(raw.gagnants) || raw.gagnants.length < 5) continue;
       const drawName = String(raw.tirage || raw.draw_name || 'GLOBAL').trim().toUpperCase();
-      appendSingleDrawToStore(
+      
+      let tsSec = 0;
+      if (typeof raw.timestamp === 'number') {
+        tsSec = raw.timestamp > 10_000_000_000 ? Math.floor(raw.timestamp / 1000) : raw.timestamp;
+      } else if (typeof raw.date === 'string') {
+        const parts = raw.date.includes('-') ? raw.date.split('-') : raw.date.split('/');
+        if (parts.length === 3) {
+          const y = parseInt(parts[0], 10) || 2026;
+          const m = parseInt(parts[1], 10) || 1;
+          const d = parseInt(parts[2], 10) || 1;
+          tsSec = Math.floor(new Date(y, m - 1, d).getTime() / 1000);
+        }
+      }
+
+      const inserted = appendSingleDrawToStore(
         drawName,
-        Date.now(),
+        tsSec,
         raw.gagnants.slice(0, 5),
         Array.isArray(raw.machine) ? raw.machine.slice(0, 5) : []
       );
-      count++;
+      if (inserted) count++;
     }
     return count;
   } catch (err) {
@@ -1316,12 +1359,15 @@ export function appendSingleDrawToStore(
   machine: number[] = []
 ): boolean {
   const normName = drawName.trim().toUpperCase();
+  // Normalisation stricte de l'horodatage en secondes POSIX
+  const tsSec = timestamp > 10_000_000_000 ? Math.floor(timestamp / 1000) : Math.floor(timestamp);
+
   const store = getOrCreateNativeStoreInstance();
   if (store && typeof store.append_single_draw === 'function') {
     try {
       return store.append_single_draw(
         normName,
-        BigInt(Math.floor(timestamp) || 0),
+        BigInt(tsSec || 0),
         new Uint8Array(winners.slice(0, 5)),
         new Uint8Array(machine.slice(0, 5))
       );
@@ -1338,6 +1384,7 @@ export function appendSingleDrawToStore(
       frequencies: new Int32Array(91),
       currentGaps: new Int32Array(91),
       maxGaps: new Int32Array(91),
+      seenDraws: new Set<string>(),
     };
     fallbackStoreTimelines.set(normName, timeline);
   }
@@ -1349,8 +1396,15 @@ export function appendSingleDrawToStore(
     }
   }
 
+  // Dédoublonnage strict par clé composite déterministe
+  const compositeKey = `${tsSec}_${mask.toString()}`;
+  if (timeline.seenDraws.has(compositeKey)) {
+    return false; // Idempotence garantie : déjà présent, no-op
+  }
+  timeline.seenDraws.add(compositeKey);
+
   timeline.history.push({
-    timestamp,
+    timestamp: tsSec,
     winners: [...winners].sort((a, b) => a - b),
     machine: [...machine].sort((a, b) => a - b),
     mask,
@@ -1463,14 +1517,25 @@ export function runNativePredictionHpc(params: {
         mw,
         hw
       );
-      return {
-        top5: Array.from(res.top_5()),
-        top10: Array.from(res.top_10()),
-        scores: new Float64Array(res.scores()),
-        shannonEntropy: res.shannon_entropy,
-        hurstExponent: res.hurst_exponent,
-        confidenceScore: res.confidence_score,
-      };
+      if (res) {
+        const top5Raw = readWasmField<number[]>(res, 'top_5', []);
+        const top10Raw = readWasmField<number[]>(res, 'top_10', []);
+        const scoresRaw = readWasmField<Float64Array>(res, 'scores', new Float64Array(91));
+        const entropy = readWasmField<number>(res, 'shannon_entropy', 1.0);
+        const hurst = readWasmField<number>(res, 'hurst_exponent', 0.5);
+        const conf = readWasmField<number>(res, 'confidence_score', 0.0);
+
+        if (top5Raw && top5Raw.length > 0) {
+          return {
+            top5: Array.from(top5Raw),
+            top10: Array.from(top10Raw),
+            scores: new Float64Array(scoresRaw),
+            shannonEntropy: entropy,
+            hurstExponent: hurst,
+            confidenceScore: conf,
+          };
+        }
+      }
     } catch (e) {
       console.error('[LOTO-ENGINE] Erreur WASM Native Prediction, passage au fallback :', e);
     }
@@ -1479,14 +1544,15 @@ export function runNativePredictionHpc(params: {
   // Fallback déterministe vectorisé pur
   const scores = new Float64Array(91);
   const actualDraws = Math.min(params.numDraws, Math.floor(flat.length / 5));
+  // Éradication stricte des quintes synthétiques sur historique vide
   if (actualDraws === 0) {
     return {
-      top5: [1, 2, 3, 4, 5],
-      top10: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      top5: [],
+      top10: [],
       scores,
-      shannonEntropy: 1.0,
+      shannonEntropy: 0.0,
       hurstExponent: 0.5,
-      confidenceScore: 50.0,
+      confidenceScore: 0.0,
     };
   }
 
@@ -1524,14 +1590,17 @@ export function runNativePredictionHpc(params: {
     sumScores += composite;
   }
 
+  // Normalisation sur le simplexe des probabilités marginales de tirage sans remise 5/90 (Sum = 5.0)
   if (sumScores > 0) {
-    for (let n = 1; n <= 90; n++) scores[n] /= sumScores;
+    for (let n = 1; n <= 90; n++) {
+      scores[n] = Math.min(1.0, (scores[n] / sumScores) * 5.0);
+    }
   }
 
   let entropy = 0.0;
   const maxEntropy = Math.log(90.0);
   for (let n = 1; n <= 90; n++) {
-    const p = scores[n];
+    const p = scores[n] / 5.0;
     if (p > 1e-9) entropy -= p * Math.log(p);
   }
   const normalizedEntropy = Math.max(0.0, Math.min(1.0, entropy / maxEntropy));
@@ -1589,12 +1658,12 @@ export function analyzeDrawHistoryHpc(drawName: string): PriorAnalysisReportHpc 
       const rep = store.analyze_draw(normName);
       if (rep) {
         return {
-          shannonEntropy: rep.shannon_entropy,
-          hurstExponent: rep.hurst_exponent,
-          dominantPeriod: rep.dominant_period,
-          spectralEnergy: rep.spectral_energy,
-          thermalVolatility: rep.thermal_volatility,
-          regimeLabel: rep.regime_label(),
+          shannonEntropy: readWasmField<number>(rep, 'shannon_entropy', 1.0),
+          hurstExponent: readWasmField<number>(rep, 'hurst_exponent', 0.5),
+          dominantPeriod: readWasmField<number>(rep, 'dominant_period', 18.0),
+          spectralEnergy: readWasmField<number>(rep, 'spectral_energy', 0.0),
+          thermalVolatility: readWasmField<number>(rep, 'thermal_volatility', 1.0),
+          regimeLabel: readWasmField<string>(rep, 'regime_label', 'INIT_DIFFUSION'),
         };
       }
     } catch (e) {
@@ -1681,22 +1750,30 @@ export function generateDiversifiedPortfolioHpc(
     try {
       const port = store.generate_portfolio(normName, kTickets);
       if (port) {
-        const flatTickets: number[] = Array.from(port.tickets_flat() as Iterable<number>);
-        const tickets: number[][] = [];
-        for (let i = 0; i < port.ticket_count; i++) {
-          tickets.push(flatTickets.slice(i * 5, (i + 1) * 5));
+        const rawFlat = readWasmField<any>(port, 'tickets_flat', []);
+        const flatTickets: number[] = Array.from(rawFlat as Iterable<number>);
+        const rawStrat = readWasmField<any>(port, 'strategies', []);
+        const strategies: string[] = Array.from(rawStrat as Iterable<string>);
+        const rawScores = readWasmField<any>(port, 'scores_flat', new Float64Array(91));
+        const ticketCount = readWasmField<number>(port, 'ticket_count', 0);
+
+        if (flatTickets.length >= 5 && ticketCount > 0) {
+          const tickets: number[][] = [];
+          for (let i = 0; i < ticketCount; i++) {
+            tickets.push(flatTickets.slice(i * 5, (i + 1) * 5));
+          }
+          return {
+            tickets,
+            strategies,
+            scores: new Float64Array(rawScores as ArrayLike<number>),
+            ticketCount,
+            uniqueNumbersCovered: readWasmField<number>(port, 'unique_numbers_covered', 0),
+            diversityJaccardDistance: readWasmField<number>(port, 'diversity_jaccard_distance', 0.8),
+            shannonEntropy: readWasmField<number>(port, 'shannon_entropy', 1.0),
+            hurstExponent: readWasmField<number>(port, 'hurst_exponent', 0.5),
+            confidenceScore: readWasmField<number>(port, 'confidence_score', 0.0),
+          };
         }
-        return {
-          tickets,
-          strategies: Array.from(port.strategies() as Iterable<string>),
-          scores: new Float64Array(port.scores_flat() as ArrayLike<number>),
-          ticketCount: port.ticket_count,
-          uniqueNumbersCovered: port.unique_numbers_covered,
-          diversityJaccardDistance: port.diversity_jaccard_distance,
-          shannonEntropy: port.shannon_entropy,
-          hurstExponent: port.hurst_exponent,
-          confidenceScore: port.confidence_score,
-        };
       }
     } catch (e) {
       console.warn('[LOTO-ENGINE] Erreur generate_portfolio WASM, passage au fallback :', e);
@@ -1709,6 +1786,10 @@ export function generateDiversifiedPortfolioHpc(
   const gaps = getStoreCurrentGaps(drawName);
   const drawCount = getStoreDrawCount(drawName);
 
+  if (drawCount < 5) {
+    throw new Error(`INSUFFICIENT_HISTORY: historique insuffisant pour ${drawName} (minimum 5 requis)`);
+  }
+
   const baseScores = new Float64Array(91);
   const totalBalls = Math.max(1, drawCount * 5);
   const expectedGap = 90.0 / 5.0;
@@ -1718,6 +1799,15 @@ export function generateDiversifiedPortfolioHpc(
     const gRatio = gaps[n] / expectedGap;
     const gScore = Math.tanh(Math.min(3.0, gRatio) / 3.0);
     baseScores[n] = fScore * 45.0 + gScore * 1.5;
+  }
+
+  // Normalisation sur le simplexe marginal de 5 boules (Sum = 5.0)
+  let sumB = 0;
+  for (let n = 1; n <= 90; n++) sumB += baseScores[n];
+  if (sumB > 0) {
+    for (let n = 1; n <= 90; n++) {
+      baseScores[n] = Math.min(1.0, (baseScores[n] / sumB) * 5.0);
+    }
   }
 
   const tickets: number[][] = [];
@@ -1768,6 +1858,355 @@ export function generateDiversifiedPortfolioHpc(
     confidenceScore: Math.min(95.0, 50.0 + 35.0 * (1.0 - prior.shannonEntropy) + 8.2),
   };
 }
+
+/**
+ * 12. Identification du Réseau Hermétique (AGENTS.md)
+ * Associe chaque tirage à son réseau ('hebdomadaire' vs 'quotidien').
+ */
+export function getStoreNetworkId(drawName: string): 'hebdomadaire' | 'quotidien' {
+  const normName = drawName.trim().toUpperCase();
+  const store = getOrCreateNativeStoreInstance();
+  if (store && typeof store.get_network_id === 'function') {
+    try {
+      const net = store.get_network_id(normName);
+      if (net === 'hebdomadaire' || net === 'quotidien') {
+        return net;
+      }
+    } catch {}
+  }
+  return (normName.includes('NATIONAL') || normName.includes('MIDWEEK'))
+    ? 'hebdomadaire'
+    : 'quotidien';
+}
+
+/**
+ * Génère la clé de cache isolée strictement conforme à AGENTS.md :
+ * nexus_interdraw_${networkId}_${drawName}
+ */
+export function getInterDrawCacheKey(drawName: string, subKey?: string): string {
+  const normName = drawName.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const networkId = getStoreNetworkId(drawName);
+  return `nexus_interdraw_${networkId}_${normName}${subKey ? `_${subKey}` : ''}`;
+}
+
+/**
+ * 13. Couplage Continu d'Interconnexion Inter-Tirages (Rust Core HPC)
+ * Mesure la dépendance statistique continue entre deux tirages du même réseau.
+ * Zéro seuil binaire, zéro coupure brutale : poids continu dans ]0.0, 1.0[.
+ */
+export function computeInterDrawCouplingHpc(drawA: string, drawB: string): number {
+  const normA = drawA.trim().toUpperCase();
+  const normB = drawB.trim().toUpperCase();
+  const store = getOrCreateNativeStoreInstance();
+
+  if (store && typeof store.compute_interdraw_coupling === 'function') {
+    try {
+      const w = store.compute_interdraw_coupling(normA, normB);
+      if (typeof w === 'number' && Number.isFinite(w)) {
+        return Math.max(0.001, Math.min(0.999, w));
+      }
+    } catch {}
+  }
+
+  // Fallback déterministe C^∞
+  const freqsA = getStoreFrequencies(normA);
+  const freqsB = getStoreFrequencies(normB);
+
+  let sumA = 0;
+  let sumB = 0;
+  for (let i = 1; i <= 90; i++) {
+    sumA += freqsA[i];
+    sumB += freqsB[i];
+  }
+  const meanA = sumA / 90.0;
+  const meanB = sumB / 90.0;
+
+  let num = 0;
+  let varA = 0;
+  let varB = 0;
+  for (let i = 1; i <= 90; i++) {
+    const da = freqsA[i] - meanA;
+    const db = freqsB[i] - meanB;
+    num += da * db;
+    varA += da * da;
+    varB += db * db;
+  }
+  const den = Math.sqrt(varA * varB);
+  const r = den > 1e-9 ? Math.max(-1.0, Math.min(1.0, num / den)) : 0.0;
+  return 0.5 * (1.0 + Math.tanh(2.0 * r));
+}
+
+export interface NetworkDominoResultHpc {
+  dominoEnergies: Float64Array;
+  leadTriggerNumbers: number[];
+  kineticDissipationRate: number;
+}
+
+/**
+ * 14. Effet Domino & Advection Cinétique Déterministe en RAM (Rust Core HPC)
+ * Propage l'énergie cinétique le long des tirages récents du réseau.
+ */
+export function computeNetworkDominoHpc(
+  drawName: string,
+  dampingGamma: number = 0.5
+): NetworkDominoResultHpc {
+  const normName = drawName.trim().toUpperCase();
+  const gamma = Math.max(0.05, Math.min(2.0, dampingGamma));
+  const store = getOrCreateNativeStoreInstance();
+
+  if (store && typeof store.compute_network_domino_wasm === 'function') {
+    try {
+      const res = store.compute_network_domino_wasm(normName, gamma);
+      if (res) {
+        const energies = readWasmField<Float64Array>(res, 'domino_energies', new Float64Array(91));
+        const triggers = readWasmField<number[]>(res, 'lead_trigger_numbers', []);
+        const rate = readWasmField<number>(res, 'kinetic_dissipation_rate', gamma);
+        return {
+          dominoEnergies: new Float64Array(energies),
+          leadTriggerNumbers: Array.from(triggers),
+          kineticDissipationRate: rate,
+        };
+      }
+    } catch {}
+  }
+
+  // Fallback déterministe C^∞
+  const timeline = fallbackStoreTimelines.get(normName);
+  const history = timeline?.history || [];
+  const maxDraws = Math.min(history.length, 30);
+  const dominoEnergies = new Float64Array(91);
+
+  if (maxDraws === 0) {
+    return {
+      dominoEnergies,
+      leadTriggerNumbers: [],
+      kineticDissipationRate: gamma,
+    };
+  }
+
+  for (let d = 0; d < maxDraws; d++) {
+    const lag = d + 1;
+    const attenuation = Math.exp(-gamma * lag * 0.25);
+    const draw = history[history.length - 1 - d];
+    for (const num of draw.winners) {
+      if (num >= 1 && num <= 90) {
+        dominoEnergies[num] += 10.0 * attenuation;
+        // Miroir diacritique
+        if (num >= 10 && num <= 90) {
+          const mir = (num % 10) * 10 + Math.floor(num / 10);
+          if (mir >= 1 && mir <= 90 && mir !== num) {
+            dominoEnergies[mir] += 4.5 * attenuation;
+          }
+        }
+        // Complémentaire 91
+        const comp = 91 - num;
+        if (comp >= 1 && comp <= 90 && comp !== num) {
+          dominoEnergies[comp] += 4.0 * attenuation;
+        }
+      }
+    }
+  }
+
+  // Normalisation sigmoïde continue sur [0, 100]
+  const indexed: { n: number; e: number }[] = [];
+  for (let n = 1; n <= 90; n++) {
+    const raw = dominoEnergies[n];
+    const score = 100.0 / (1.0 + Math.exp(-0.15 * (raw - 8.0)));
+    dominoEnergies[n] = Math.round(score * 100.0) / 100.0;
+    indexed.push({ n, e: dominoEnergies[n] });
+  }
+
+  indexed.sort((a, b) => b.e - a.e || a.n - b.n);
+  const leadTriggerNumbers = indexed.slice(0, 5).map(x => x.n);
+
+  return {
+    dominoEnergies,
+    leadTriggerNumbers,
+    kineticDissipationRate: gamma,
+  };
+}
+
+export interface CalibrationReportHpc {
+  brierScore: number;
+  brierSkillScore: number;
+  plattAlpha: number;
+  plattBeta: number;
+  empiricalReliabilityScore: number;
+  evaluatedWindows: number;
+  calibrationQualityLabel: string;
+}
+
+const UNIFORM_BRIER_BENCHMARK = (5.0 * 85.0) / (90.0 * 90.0);
+
+/**
+ * 15. Calibration Empirique Out-Of-Fold & Validation Walk-Forward (Rust Core HPC)
+ * Mesure l'erreur de Brier rétrospective sans fuite de données et calibre les probabilités.
+ */
+export function computeWalkForwardCalibrationHpc(
+  drawName: string,
+  windowSize: number = 15
+): CalibrationReportHpc {
+  const normName = drawName.trim().toUpperCase();
+  const wSize = Math.max(4, Math.min(30, windowSize));
+  const store = getOrCreateNativeStoreInstance();
+
+  if (store && typeof store.compute_walk_forward_calibration === 'function') {
+    try {
+      const rep = store.compute_walk_forward_calibration(normName, wSize);
+      if (rep) {
+        return {
+          brierScore: readWasmField<number>(rep, 'brier_score', UNIFORM_BRIER_BENCHMARK),
+          brierSkillScore: readWasmField<number>(rep, 'brier_skill_score', 0.0),
+          plattAlpha: readWasmField<number>(rep, 'platt_alpha', 1.0),
+          plattBeta: readWasmField<number>(rep, 'platt_beta', 0.0),
+          empiricalReliabilityScore: readWasmField<number>(rep, 'empirical_reliability_score', 50.0),
+          evaluatedWindows: readWasmField<number>(rep, 'evaluated_windows', 0),
+          calibrationQualityLabel: readWasmField<string>(rep, 'calibration_quality_label', 'DIFFUSION_EQUIPROBABLE_NEUTRE'),
+        };
+      }
+    } catch {}
+  }
+
+  // Fallback déterministe C^∞
+  const timeline = fallbackStoreTimelines.get(normName);
+  const history = timeline?.history || [];
+  const totalDraws = history.length;
+
+  if (totalDraws < 8) {
+    return {
+      brierScore: UNIFORM_BRIER_BENCHMARK,
+      brierSkillScore: 0.0,
+      plattAlpha: 1.0,
+      plattBeta: 0.0,
+      empiricalReliabilityScore: 50.0,
+      evaluatedWindows: 0,
+      calibrationQualityLabel: 'HISTORIQUE_INSUFFISANT',
+    };
+  }
+
+  const evalWindow = Math.min(wSize, totalDraws - 4);
+  const startIdx = totalDraws - evalWindow;
+  let totalBrier = 0.0;
+  let totalHits = 0;
+  let numSamples = 0;
+
+  let sumRaw = 0.0;
+  let sumTarget = 0.0;
+  let sumRawSq = 0.0;
+  let sumProd = 0.0;
+  let totalPairs = 0;
+
+  for (let t = startIdx; t < totalDraws; t++) {
+    const training = history.slice(0, t);
+    const target = history[t];
+    const nTrain = training.length;
+
+    const freqs = new Int32Array(91);
+    const gaps = new Int32Array(91);
+    const lastSeen = new Uint8Array(91);
+
+    for (let d = 0; d < nTrain; d++) {
+      const draw = training[nTrain - 1 - d];
+      for (const w of draw.winners) {
+        if (w >= 1 && w <= 90) {
+          freqs[w]++;
+          if (!lastSeen[w]) {
+            gaps[w] = d;
+            lastSeen[w] = 1;
+          }
+        }
+      }
+    }
+    for (let n = 1; n <= 90; n++) {
+      if (!lastSeen[n]) gaps[n] = nTrain;
+    }
+
+    const totalBalls = nTrain * 5;
+    const expectedGap = 90.0 / 5.0;
+    const scores = new Float64Array(91);
+    let sumScores = 0.0;
+
+    for (let n = 1; n <= 90; n++) {
+      const fScore = (freqs[n] + 1.0) / (totalBalls + 90.0);
+      const gRatio = gaps[n] / expectedGap;
+      const gScore = Math.tanh(Math.min(3.0, gRatio) / 3.0);
+      const composite = fScore * 45.0 + gScore * 1.5;
+      scores[n] = composite;
+      sumScores += composite;
+    }
+
+    // Projection simplexe marginal Sum = 5.0
+    if (sumScores > 0) {
+      for (let n = 1; n <= 90; n++) {
+        scores[n] = Math.min(1.0, (scores[n] / sumScores) * 5.0);
+      }
+    }
+
+    let windowBrier = 0.0;
+    const targetSet = new Set(target.winners);
+
+    for (let n = 1; n <= 90; n++) {
+      const y = targetSet.has(n) ? 1.0 : 0.0;
+      const p = scores[n];
+      const err = p - y;
+      windowBrier += err * err;
+
+      sumRaw += p;
+      sumTarget += y;
+      sumRawSq += p * p;
+      sumProd += p * y;
+      totalPairs++;
+    }
+
+    // Hit rate top 5
+    const indexed: { n: number; s: number }[] = [];
+    for (let n = 1; n <= 90; n++) indexed.push({ n, s: scores[n] });
+    indexed.sort((a, b) => b.s - a.s || a.n - b.n);
+
+    for (let i = 0; i < 5; i++) {
+      if (targetSet.has(indexed[i].n)) totalHits++;
+    }
+
+    totalBrier += windowBrier / 90.0;
+    numSamples++;
+  }
+
+  const meanBrier = numSamples > 0 ? totalBrier / numSamples : UNIFORM_BRIER_BENCHMARK;
+  const brierSkillScore = Math.max(-1.0, Math.min(1.0, 1.0 - (meanBrier / UNIFORM_BRIER_BENCHMARK)));
+
+  let plattAlpha = 1.0;
+  let plattBeta = 0.0;
+  if (totalPairs > 10) {
+    const nF = totalPairs;
+    const meanX = sumRaw / nF;
+    const meanY = sumTarget / nF;
+    const cov = sumProd - nF * meanX * meanY;
+    const varX = sumRawSq - nF * meanX * meanX;
+    plattAlpha = varX > 1e-9 ? Math.max(0.5, Math.min(3.0, cov / varX)) : 1.0;
+    plattBeta = Math.max(-2.0, Math.min(2.0, meanY - plattAlpha * meanX));
+  }
+
+  const baseSkill = brierSkillScore * 50.0 + 50.0;
+  const avgHits = numSamples > 0 ? totalHits / numSamples : 0.0;
+  const reliability = Math.max(10.0, Math.min(98.0, baseSkill * 0.7 + avgHits * 30.0));
+
+  const qualityLabel = brierSkillScore > 0.08
+    ? 'HAUTE_CALIBRATION_EMPIRIQUE'
+    : brierSkillScore > 0.01
+    ? 'CALIBRATION_STOCHASTIQUE_STABLE'
+    : 'DIFFUSION_EQUIPROBABLE_NEUTRE';
+
+  return {
+    brierScore: Math.round(meanBrier * 10000.0) / 10000.0,
+    brierSkillScore: Math.round(brierSkillScore * 10000.0) / 10000.0,
+    plattAlpha: Math.round(plattAlpha * 1000.0) / 1000.0,
+    plattBeta: Math.round(plattBeta * 1000.0) / 1000.0,
+    empiricalReliabilityScore: Math.round(reliability * 10.0) / 10.0,
+    evaluatedWindows: numSamples,
+    calibrationQualityLabel: qualityLabel,
+  };
+}
+
 
 
 

@@ -125,23 +125,45 @@ const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): Dra
     .slice(0, LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
 };
 
+const lastSyncedFingerprintByDraw = new Map<string, string>();
+
 /**
  * Synchronise l'historique contigu en mémoire vive dans le store Rust Core (WASM).
- * Éradique les requêtes de comptage et de fréquences SQL vers Supabase.
+ * Applique :
+ * 1. Un contrôle d'idempotence strict par empreinte (zéro ré-injection cumulative).
+ * 2. Un tri chronologique ascendant (flèche du temps) pour que history.last() soit le plus récent.
+ * 3. La conversion en secondes POSIX des horodatages.
  */
 export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: string): void => {
   if (!draws || draws.length === 0) return;
+  const drawKey = (targetDrawName || 'GLOBAL').trim().toUpperCase();
+
+  // Empreinte d'idempotence basée sur la longueur et les bornes temporelles
+  const newest = draws[0];
+  const oldest = draws[draws.length - 1];
+  const fingerprint = `${draws.length}_${newest?.date || ''}_${oldest?.date || ''}`;
+
+  if (lastSyncedFingerprintByDraw.get(drawKey) === fingerprint) {
+    return; // Déjà synchronisé, no-op strict
+  }
+
   try {
-    for (const d of draws) {
+    // Inversion chronologique stricte : du plus ancien au plus récent
+    const chronological = [...draws].reverse();
+
+    for (const d of chronological) {
       if (d.gagnants && d.gagnants.length >= LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) {
+        const tsMs = getDrawTimestamp(d.date, d.drawName || targetDrawName);
+        const tsSec = Math.floor(tsMs / 1000); // Secondes POSIX
         appendSingleDrawToStore(
           d.drawName || targetDrawName || 'GLOBAL',
-          getDrawTimestamp(d.date, d.drawName),
+          tsSec,
           d.gagnants,
           d.machine || []
         );
       }
     }
+    lastSyncedFingerprintByDraw.set(drawKey, fingerprint);
   } catch (err) {
     console.warn('[lotteryService] Erreur synchronisation store Rust :', err);
   }
@@ -897,10 +919,10 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
     const combined = [newEntry, ...existing.filter(e => normalizeDate(e.date) !== normalizedDateStr)];
     combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     await globalCache.set(cacheKey, combined, CACHE_TTL.HISTORY, targetName);
-    await globalCache.registerNewDraw(targetName, combined.length);
+    lastSyncedFingerprintByDraw.delete(targetName.trim().toUpperCase());
     appendSingleDrawToStore(
       targetName,
-      getDrawTimestamp(normalizedDateStr, targetName),
+      Math.floor(getDrawTimestamp(normalizedDateStr, targetName) / 1000),
       result.gagnants,
       sanitizedMachine
     );
@@ -920,9 +942,10 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
   if (error) throw error;
   
   if (data) {
+      lastSyncedFingerprintByDraw.delete(data.draw_name.trim().toUpperCase());
       appendSingleDrawToStore(
         data.draw_name,
-        getDrawTimestamp(data.date, data.draw_name),
+        Math.floor(getDrawTimestamp(data.date, data.draw_name) / 1000),
         data.gagnants,
         data.machine || []
       );

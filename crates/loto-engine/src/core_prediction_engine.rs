@@ -5,8 +5,9 @@
 //!
 //! Conforme à AGENTS.md :
 //! - Zéro nombre magique : paramètres dérivés des variances et métriques d'information
-//! - 100% Déterministe : aucun générateur pseudo-aléatoire non seedé
-//! - Zéro appel externe : fonctionne exclusivement en RAM contiguë locale
+//! - 100% Déterministe : tri f64::total_cmp, aucun PRNG non seedé
+//! - Zéro fausse donnée : refuse l'inférence (Err typée) si le dataset est vide ou insuffisant
+//! - Simplexe marginal : Somme des probabilités d'inclusion marginales = 5.0
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -40,7 +41,7 @@ impl PriorAnalysisReport {
 pub struct WasmPredictionPortfolio {
     tickets_flat: Vec<u8>,       // K * 5 numéros
     strategies: Vec<String>,     // Stratégie pour chaque ticket
-    scores_flat: Vec<f64>,       // 91 scores globaux
+    scores_flat: Vec<f64>,       // 91 scores globaux normalisés (Sum = 5.0)
     pub ticket_count: usize,
     pub unique_numbers_covered: usize,
     pub diversity_jaccard_distance: f64,
@@ -153,13 +154,18 @@ pub fn analyze_draw_timeline(timeline: &DrawTimeline) -> PriorAnalysisReport {
 }
 
 /// Moteur de génération stochastique du portefeuille multi-tickets
+/// Refuse l'inférence sur dataset insuffisant (politique stricte Zéro Fausse Donnée).
 pub fn generate_multi_ticket_portfolio(
     timeline: &DrawTimeline,
     prior: &PriorAnalysisReport,
     requested_tickets: usize,
-) -> WasmPredictionPortfolio {
-    let k_tickets = requested_tickets.clamp(1, 8);
+) -> Result<WasmPredictionPortfolio, String> {
     let history_len = timeline.history.len();
+    if history_len < 5 {
+        return Err("INSUFFICIENT_HISTORY: minimum 5 tirages réels requis pour inférence".to_string());
+    }
+
+    let k_tickets = requested_tickets.clamp(1, 8);
 
     // 1. Scoring initial multi-facteurs pour les 90 numéros
     let mut base_scores = vec![0.0f64; TOTAL_NUMBERS + 1];
@@ -175,9 +181,7 @@ pub fn generate_multi_ticket_portfolio(
         let gap_ratio = (timeline.stats.current_gaps[n] as f64) / expected_gap;
         let g_score = (gap_ratio.min(3.0) / 3.0).tanh();
 
-        // Facteur 3 : Modulation par le régime de Hurst
-        // Si persistant (H > 0.5), favoriser les numéros chauds récents
-        // Si anti-persistant (H < 0.5), favoriser les retards
+        // Facteur 3 : Modulation continue par le régime de Hurst
         let persistence_weight = (prior.hurst_exponent - 0.5) * 2.0; // [-1.0..+1.0]
         let h_score = if persistence_weight > 0.0 {
             f_score * persistence_weight
@@ -185,13 +189,12 @@ pub fn generate_multi_ticket_portfolio(
             g_score * (-persistence_weight)
         };
 
-        // Facteur 4 : Résonance domino du dernier tirage (advection)
+        // Facteur 4 : Résonance domino du dernier tirage (advection cinétique locale)
         let mut domino_boost = 0.0f64;
         if let Some(ld) = last_draw {
             for &w in &ld.winners {
                 let dist = ((n as i32) - (w as i32)).abs();
                 if dist == 1 || dist == 9 || dist == 10 {
-                    // Voisinage spatial et modulaire sur la grille 5/90
                     domino_boost += 0.15;
                 }
             }
@@ -201,15 +204,16 @@ pub fn generate_multi_ticket_portfolio(
         base_scores[n] = score.max(0.001);
     }
 
-    // Normalisation des scores bruts
+    // Normalisation sur le simplexe marginal d'inclusion 5/90 : Sum(p_n) = 5.0
     let sum_scores: f64 = base_scores.iter().sum();
     if sum_scores > 0.0 {
+        let target_sum = NUMBERS_PER_DRAW as f64;
         for n in 1..=TOTAL_NUMBERS {
-            base_scores[n] /= sum_scores;
+            base_scores[n] = ((base_scores[n] / sum_scores) * target_sum).clamp(0.0, 1.0);
         }
     }
 
-    // 2. Génération orthogonale des K tickets (Pénalisation quadratique d'overlap)
+    // 2. Génération orthogonale des K tickets (Pénalisation continue d'overlap)
     let mut chosen_tickets: Vec<Vec<u8>> = Vec::with_capacity(k_tickets);
     let mut strategies: Vec<String> = Vec::with_capacity(k_tickets);
     let mut selection_counts = [0u32; TOTAL_NUMBERS + 1];
@@ -228,8 +232,7 @@ pub fn generate_multi_ticket_portfolio(
     for t in 0..k_tickets {
         let mut penalized_scores = base_scores.clone();
 
-        // Répulsion continue exponentielle pour les numéros déjà sélectionnés dans d'autres tickets
-        // Permet une couverture large sans cannibalisation
+        // Répulsion continue exponentielle pour les numéros déjà sélectionnés
         let repulsion_gamma = 0.85f64;
         for n in 1..=TOTAL_NUMBERS {
             let count = selection_counts[n];
@@ -237,23 +240,22 @@ pub fn generate_multi_ticket_portfolio(
                 penalized_scores[n] *= (-repulsion_gamma * (count as f64)).exp();
             }
 
-            // Biais spécifique selon la stratégie du ticket
             match t {
                 1 => {
-                    // Ticket Domino : favorise les numéros proches du dernier tirage
+                    // Ticket Domino : favorise les résonances du dernier tirage
                     if let Some(ld) = last_draw {
                         if ld.contains_number(n as u8) {
-                            penalized_scores[n] *= 0.6; // Ne pas cloner tel quel le tirage précédent
+                            penalized_scores[n] *= 0.6; // Évite la duplication stricte
                         }
                     }
                 }
                 2 => {
-                    // Ticket Poisson : favorise les forts retards
+                    // Ticket Poisson : favorise les retards structurels
                     let gap_ratio = (timeline.stats.current_gaps[n] as f64) / expected_gap;
                     penalized_scores[n] *= 1.0 + (gap_ratio.min(2.5) * 0.4);
                 }
                 3 => {
-                    // Ticket Spectral : favorise la régularité périodique
+                    // Ticket Spectral : synchronisation sur la phase cyclique
                     let mod_period = (n as f64 % prior.dominant_period).sin().abs();
                     penalized_scores[n] *= 1.0 + (mod_period * 0.3);
                 }
@@ -261,11 +263,11 @@ pub fn generate_multi_ticket_portfolio(
             }
         }
 
-        // Sélection des 5 meilleurs numéros pour ce ticket
+        // Sélection des 5 meilleurs numéros avec tri déterministe total_cmp
         let mut indexed: Vec<(u8, f64)> = (1..=TOTAL_NUMBERS as u8)
             .map(|n| (n, penalized_scores[n as usize]))
             .collect();
-        indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        indexed.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
         let mut ticket: Vec<u8> = indexed.iter().take(NUMBERS_PER_DRAW).map(|(num, _)| *num).collect();
         ticket.sort_unstable();
@@ -278,10 +280,9 @@ pub fn generate_multi_ticket_portfolio(
         strategies.push(strategy_names[t % strategy_names.len()].to_string());
     }
 
-    // 3. Calcul des métriques de diversité du portefeuille
+    // 3. Calcul des métriques de diversité et de distance de Jaccard réelle
     let unique_covered: usize = selection_counts.iter().skip(1).filter(|&&c| c > 0).count();
 
-    // Distance moyenne de Jaccard entre paires de tickets
     let mut total_jaccard = 0.0f64;
     let mut pair_count = 0usize;
     for i in 0..chosen_tickets.len() {
@@ -314,7 +315,7 @@ pub fn generate_multi_ticket_portfolio(
         flat_tickets.extend_from_slice(&t);
     }
 
-    WasmPredictionPortfolio {
+    Ok(WasmPredictionPortfolio {
         tickets_flat: flat_tickets,
         strategies,
         scores_flat: base_scores,
@@ -324,5 +325,5 @@ pub fn generate_multi_ticket_portfolio(
         shannon_entropy: prior.shannon_entropy,
         hurst_exponent: prior.hurst_exponent,
         confidence_score: confidence,
-    }
+    })
 }

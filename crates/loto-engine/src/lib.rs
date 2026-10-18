@@ -24,6 +24,7 @@ pub mod delta_stats;
 pub mod in_memory_store;
 pub mod prediction_pipeline;
 pub mod core_prediction_engine;
+pub mod calibration;
 
 use wasm_bindgen::prelude::*;
 
