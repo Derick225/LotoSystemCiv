@@ -1,106 +1,98 @@
-# Plan d'Implémentation : Calibration Empirique Out-Of-Fold, Validation Walk-Forward & Restitution UI (Lot 3)
+# Plan d'Implémentation : Stacking Dense des 18 Canaux & Tableau Analytique de Calibration
 
-## 1. Contexte & Objectifs Scientifiques
+## 1. Contexte & Diagnostic Analytique
 
-Après l'assainissement du store (Lot 1) et le déploiement du couplage inter-tirages / effet domino 100% Wasm (Lot 2), le **Lot 3** franchit une étape déterminante dans la rigueur statistique de **LotoPro Platinum Elite v12.0** :
+L'audit approfondi du moteur de prédiction (`scoringEngine.ts`, `weightsManager.ts`, `loto-core/src/stacking.rs`) et des données historiques a mis en évidence trois leviers majeurs d'optimisation mathématique et logicielle :
 
-1. **Sortir des scores heuristiques pour des probabilités calibrées out-of-fold** :
-   - Les scores bruts ne garantissent pas que 70% de confiance équivaut à 70% de présence empirique.
-   - Application d'une **calibration logistique de Platt continue** ($P(y=1|s) = \frac{1}{1 + \exp(-(\alpha s + \beta))}$) ajustée exclusivement sur des prédictions passées *out-of-fold* (zéro fuite de données d'apprentissage).
-   - Projection stricte sur le simplexe marginal sans remise : $\sum_{i=1}^{90} p_i = 5.0$.
-
-2. **Validation Walk-Forward en Mémoire Vive (Rust Core)** :
-   - Simulation rétrospective glissante : entraînement sur $t < T$, inférence sur $T$, répétée sur les $W$ derniers tirages réels.
-   - Calcul des métriques empiriques objectives : **Brier Score** ($\frac{1}{90} \sum (p_i - y_i)^2$), log-loss et gain d'information par rapport à la distribution uniforme de référence.
-
-3. **Restitution des Métriques de Fiabilité dans l'Interface Utilisateur** :
-   - Affichage transparent dans l'écran de prédiction :
-     - Score de Brier calibré (mesure d'erreur quadratique réelle).
-     - Indice de calibration empirique (régime sous-calibré, bien calibré ou hyper-tendu).
-     - Intervalle de confiance probabiliste dérivé des tests passés out-of-fold.
+1. **Agrégation Linéaire sous-optimale vs Stacking Log-Linéaire** : L'agrégation actuelle réalise une combinaison convexe directe $S_n = \sum_k w_k s_{k,n}$. Or, pour des variables stochastiques binaires indépendantes à saturation marginale (tirage 5 sur 90 sans remise), la théorie de l'information impose une combinaison log-linéaire continue dans l'espace des log-cotes :
+   $$\text{logit}(p_n) = \sum_{k=1}^{18} w_k \cdot \text{logit}(s_{k,n}) + \beta_0$$
+   suivie d'une projection sur le simplexe marginal $\sum_{n=1}^{90} p_n = 5.0$.
+2. **Poids Statiques vs Poids Dérivés du Simplexe OOF (Out-Of-Fold)** : Le moteur Rust Wasm expose déjà la primitive haute performance `stack_channel_weights_wasm`, minimisant la log-loss out-of-sample avec régularisation $L_2$ par Descente de Gradient Exponentielle (EG). Ce méta-modèle doit être intégré directement dans la passe nominale d'inférence.
+3. **Absence de Restitution Visuelle de la Fiabilité Empirique** : L'utilisateur ne dispose pas encore dans l'interface de prédiction d'un tableau synthétique mesurant objectivement la supériorité statistique par rapport au hasard (Brier Skill Score, calibration de Platt, ECE).
 
 ---
 
-## 2. Architecture & Invariants Techniques
+## 2. Décisions Validées & Directives Architecturales
+
+> [!IMPORTANT]
+> Conformément aux orientations confirmées par l'utilisateur :
+> - **Axe Algorithmique** : Stacking dense des 18 canaux avec simplexe bayésien (optimisation continue $L_2$, élimination de la colinéarité, projection sur simplexe $\sum p_n = 5.0$).
+> - **Exposition UI** : Tableau analytique avancé intégrant le Brier Score ($BS$), le Brier Skill Score ($BSS$), l'Expected Calibration Error ($ECE$) et la répartition continue des poids du simplexe.
+> - **Discipline Visuelle (frontend-design / saas_dashboard.md)** : Zéro pill statique, chiffres tabulaires monospace (`font-mono`, `tabular-nums`), contrastes WCAG AA, densité compacte, hiérarchie éditoriale soignée.
+
+---
+
+## 3. Architecture Technique du Système
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   MOTEUR RUST DE CALIBRATION EMPIRIQUE                 │
+│              PIPELINE DE PRÉDICTION & CALIBRATION STACKING             │
 │                                                                        │
-│   1. Fenêtrage Walk-Forward glissant (Sur historique contigu en RAM)   │
-│      ├── T_start .. T_eval (Fenêtre glissante W tirages)               │
-│      └── Zéro fuite de données : évaluation stricte sur tirage T       │
-│                                                                        │
-│   2. Ajustement différentiable des paramètres de Platt (alpha, beta)   │
-│      └── Descente de gradient continue (Zéro constante arbitraire)     │
-│      └── Calcul du Brier Score empirique moyen                         │
-│                                                                        │
-│   3. Projection finale sur le simplexe marginal (Sum p_i = 5.0)        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                      PONT TYPESCRIPT / WASM BRIDGE                     │
-│                                                                        │
-│   • computeWalkForwardCalibrationHpc(drawName, windowSize)             │
-│   • Structure typée CalibrationReportHpc :                             │
-│     - brierScore, brierSkillScore, plattAlpha, plattBeta               │
-│     - empiricalReliabilityScore, outOfFoldHitRate                      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                      INTERFACE UTILISATEUR (REACT)                     │
-│                                                                        │
-│   • Badge de calibration scientifique & jauge de fiabilité            │
-│   • Décomposition du Brier Score vs benchmark aléatoire                │
-│   • Intégration fluide dans la fiche de prédiction existante           │
+│   [18 CANAUX DE SCORING ANALYTIQUE]                                    │
+│   ├── Fréquentiel / Écarts / Spectre / Markov / Bayes                 │
+│   ├── Momentum / Affinité / Spatial / Temporel / Fractale               │
+│   ├── Shadow / Réseau / Echo State / Dérivé / Cadence / Tendance       │
+│   └── Machine Transfer / Inter-Draw Resonance (Miroirs/Compléments)    │
+│                           │                                            │
+│                           ▼ (Sorties brutes s_{k,n})                   │
+│   [MÉTA-MODÈLE STACKING RUST WASM (stack_channels_l2)]                 │
+│   ├── Décorrélation Matricielle Instantanée                            │
+│   ├── Optimisation Exponentiated Gradient (EG) sur Simplexe            │
+│   └── Régularisation L2 entropique lambda = 1/(S·K)                    │
+│                           │                                            │
+│                           ▼                                            │
+│   [CALIBRATION DE PLATT & PROJECTION SIMPLEXE]                         │
+│   ├── Logit squashing & Softmax Normalisé : Sum(p_n) = 5.0            │
+│   └── Calcul OOF : Brier Score, BSS vs Référence (0.0525), ECE         │
+│                           │                                            │
+│                           ▼                                            │
+│   [TABLEAU ANALYTIQUE DE PRÉDICTION & CALIBRATION (UI)]                │
+│   ├── Brier Skill Score (BSS) en direct avec indicateur de gain réel   │
+│   ├── Distribution des 18 poids optimisés du simplexe                  │
+│   └── Courbe de calibration décile par décile                          │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 3. Plan d'Exécution Détaillé
+## 4. Plan d'Exécution Détaillé
 
-### Étape 1 : Moteur Rust de Calibration & Walk-Forward (`crates/loto-engine/src/calibration.rs`)
-- **Structure `WalkForwardReport`** :
-  - `brier_score: f64` (cible < 0.051 qui est le benchmark d'équiprobabilité 5/90).
-  - `brier_skill_score: f64` (gain relatif vs référence).
-  - `platt_alpha: f64`, `platt_beta: f64`.
-  - `calibration_quality_label: String`.
-- **Régression de Platt continue** :
-  - Minimisation de la log-perte sur les paires $(s_n, y_n)$ des tirages out-of-fold.
-  - Déterminisme absolu, pas de nombre magique.
-- **Export WebAssembly** :
-  - `run_walk_forward_calibration_wasm` et intégration dans `in_memory_store.rs`.
+### Étape 1 : Consolidation & Câblage du Stacking Log-Linéaire dans l'Orchestrateur
+- **Fichiers** : `services/prediction/scoringEngine.ts`, `services/prediction/predictionOrchestrator.ts`, `services/wasm/lotoEngineBridge.ts`.
+- Intégrer l'optimisation des poids de stacking via `stack_channel_weights_wasm` lors de la passe d'inférence nominale.
+- Assurer le fallback déterministe en TypeScript pur en cas d'absence d'historique étendu ou de tirages minimaux ($S < 8$).
+- Garantir le strict respect de la contrainte marginale $\sum_{n=1}^{90} p_n = 5.0$ et l'isolation hermétique des tirages (zéro fuite de données temporelles).
 
-### Étape 2 : Pont TypeScript & Cache Isolé (`services/wasm/lotoEngineBridge.ts`)
-- Encapsulation des résultats dans `CalibrationReportHpc`.
-- Méthode synchrone/asynchrone ultra-rapide (< 10 ms pour 30 fenêtres Walk-Forward).
-- Cache déterministe avec clé isolée `nexus_calibration_${networkId}_${drawName}`.
+### Étape 2 : Enrichissement des Métriques de Calibration OOF dans la Passerelle Bridge
+- **Fichiers** : `services/wasm/lotoEngineBridge.ts`, `crates/loto-engine/src/calibration.rs`.
+- Étendre `CalibrationReportHpc` pour transmettre les métriques complètes de `WalkForwardReport` :
+  - `brierScore` : Score moyen quadratique.
+  - `brierSkillScore` : Gain relatif $1 - \frac{BS}{BS_{\text{ref}}}$ (où $BS_{\text{ref}} \approx 0.05247$).
+  - `plattAlpha` & `plattBeta` : Coefficients de calibration affine.
+  - `ece` : Expected Calibration Error.
+  - `logLoss` : Perte logarithmique out-of-fold.
+  - `channelWeights` : Vecteur des 18 poids optimisés sur le simplexe.
 
-### Étape 3 : Intégration dans le Pipeline de Prédiction (`predictionOrchestrator.ts`)
-- Application de la calibration aux scores de sortie du pipeline natif.
-- Enrichissement du payload de prédiction avec les métriques empiriques de calibration.
+### Étape 3 : Création du Tableau Analytique Avancé de Calibration dans l'UI
+- **Fichier** : `components/prediction/PredictiveCalibrationAnalyticsDashboard.tsx`.
+- Intégration dans `PredictionTab.tsx` sous forme d'un volet d'évaluation analytique :
+  - **Panneau de Synthèse Statistique** : Cartes à élévation unique affichant le Brier Score, le BSS, l'ECE et le nombre de fenêtres Walk-Forward évaluées en chiffres monospace tabulaires.
+  - **Inspecteur des 18 Canaux du Simplexe** : Tableau haute densité classant les canaux actifs par poids effectif et contribution marginale.
+  - **Jauge de Fiabilité Empirique** : Évaluation visuelle de la convergence du méta-modèle sans badge superflu ni pill statique.
 
-### Étape 4 : Affichage des Métriques de Fiabilité dans l'UI
-- Enrichir le composant de visualisation de prédiction avec un panneau compact et élégant :
-  - Brier Skill Score (comparaison au hasard pur).
-  - Qualité de calibration (indice de fiabilité empirique certifié).
-  - Zéro jargon obscur : infobulles claires explicitant la méthode Walk-Forward out-of-fold.
-
-### Étape 5 : Tests de Contrat & Validation Mathématique
-- Création du banc de test `tests/walk-forward-calibration-contract.test.ts` :
-  - Vérifier l'absence de fuite temporelle (résultats strictement inchangés par les tirages futurs).
-  - Vérifier que le Brier Score de prédictions parfaites tend vers 0.
-  - Vérifier la somme marginale calibrée ($\sum p_i = 5.0$).
-- Validation complète `lint_applet` et `compile_applet`.
+### Étape 4 : Validation Mathématique, Tests de Contrat & Build
+- Création du banc de test `tests/predictive-stacking-calibration.test.ts` :
+  - Validation de la convergence du simplexe bayésien ($\sum w_k = 1.0, w_k \ge 0$).
+  - Validation de la projection marginale ($\sum_{n=1}^{90} p_n = 5.0$).
+  - Validation du calcul objectif du Brier Skill Score comparé à l'équiprobabilité.
+- Contrôle de non-régression global (`npx vitest run`).
+- Validation TypeScript stricte (`npm run lint` / `tsc --noEmit`) et compilation de production (`npm run build`).
 
 ---
 
-## 4. Critères d'Acceptation & Livrables
-1. **Calibration de Platt continue** opérationnelle en Rust Wasm sans fuite de données.
-2. **Brier Skill Score** calculé et restitué pour chaque tirage analysé.
-3. **Composant UI élégant** affichant la fiabilité probabiliste calibrée.
-4. **100% des tests unitaires et de contrat validés**.
-5. **Compilation TypeScript et build Vite réussis sans avertissement**.
+## 5. Critères d'Acceptation & Livrables
+
+1. **Stacking 18 Canaux Opérationnel** : Les poids sont optimisés déterministement sur les sorties out-of-fold via le gradient exponentiel régularisé $L_2$.
+2. **Tableau Analytique Déployé dans l'Interface** : Affichage clair, précis et lisible des scores Brier, BSS et ECE avec conformité design `3_saas_dashboard.md`.
+3. **Conformité Mathématique AGENTS.md** : Zéro nombre magique, zéro aléatoire, transitions différentiables $C^\infty$.
+4. **100% de Succès aux Tests** et compilation de production sans avertissement.

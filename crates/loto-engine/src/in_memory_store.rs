@@ -582,4 +582,26 @@ impl InMemoryDrawStore {
             timeline.rebuild_seen_index();
         }
     }
+
+    /// Analyse bivariée des dyades croisées et matrice de transition entre tirage source et cible
+    #[wasm_bindgen]
+    pub fn compute_bivariate_dyads_wasm(
+        &self,
+        source_draw: &str,
+        target_draw: &str,
+        min_z_score: f64,
+    ) -> Result<crate::interdraw_matrix::WasmBivariateReport, JsValue> {
+        let norm_src = source_draw.trim().to_uppercase();
+        let norm_tgt = target_draw.trim().to_uppercase();
+        let ts = self.timelines.get(&norm_src)
+            .ok_or_else(|| JsValue::from_str(&format!("Tirage source '{}' absent du cache", source_draw)))?;
+        let tt = self.timelines.get(&norm_tgt)
+            .ok_or_else(|| JsValue::from_str(&format!("Tirage cible '{}' absent du cache", target_draw)))?;
+
+        Ok(crate::interdraw_matrix::compute_bivariate_dyads_and_matrix(
+            &ts.history,
+            &tt.history,
+            min_z_score,
+        ))
+    }
 }

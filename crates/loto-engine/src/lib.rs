@@ -27,6 +27,7 @@ pub mod core_prediction_engine;
 pub mod calibration;
 pub mod scoring;
 pub mod validation;
+pub mod interdraw_matrix;
 
 // Noyau mathématique pur (crate `loto-core`, sans wasm-bindgen).
 pub use loto_core::{combinatorics, hyperparams, stacking};

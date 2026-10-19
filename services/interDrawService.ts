@@ -25,8 +25,13 @@ import {
   getDrawTimestamp
 } from './lotteryService';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
-import { wasmMatrixEngine } from './wasm/wasmMatrixCore';
-import { computeCrossHawkesKernelHpc, computeRobustHurstHpc } from './wasm/lotoEngineBridge';
+import {
+  computeCrossHawkesKernelHpc,
+  computeRobustHurstHpc,
+  computeBivariateCrossDyadsHpc,
+  BivariateDyadsReportHpc,
+  InterDrawCrossDyadHpc
+} from './wasm/lotoEngineBridge';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import {
   computeInterDrawComplexDynamics,
@@ -183,9 +188,11 @@ export interface InterDrawReport {
   cooccurrenceMetrics?: InterDrawCooccurrenceReport;
   patternMetrics?: InterDrawPatternReport;
   complexDynamics?: InterDrawComplexDynamicsReport;
+  bivariateHpcReport?: BivariateDyadsReportHpc;
   generationTimestamp: number;
 }
 
+export type { BivariateDyadsReportHpc, InterDrawCrossDyadHpc };
 export { getMirrorNumber, getComplement90 };
 
 /**
@@ -1284,6 +1291,17 @@ export const generateInterDrawReport = async (
     console.error('[INTER-DRAW] Erreur calcul complexDynamics :', e);
   }
 
+  // 9. Dyades Croisées & Matrice de Transition Bivariée 90x90 (Moteur Rust WASM HPC)
+  let bivariateHpcReport: BivariateDyadsReportHpc | undefined = undefined;
+  try {
+    const predName = relation.predecessor?.name || '';
+    if (predName) {
+      bivariateHpcReport = computeBivariateCrossDyadsHpc(predName, targetDrawName, 0.0);
+    }
+  } catch (e) {
+    console.warn('[INTER-DRAW] Erreur calcul bivariateHpcReport :', e);
+  }
+
   const report: InterDrawReport = {
     targetDraw: targetDrawName,
     family: activeFamily,
@@ -1325,6 +1343,7 @@ export const generateInterDrawReport = async (
     cooccurrenceMetrics,
     patternMetrics,
     complexDynamics,
+    bivariateHpcReport,
     generationTimestamp: Date.now()
   };
 

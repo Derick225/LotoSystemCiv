@@ -105,7 +105,8 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
   const [report, setReport] = useState<InterDrawReport | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
-  const [subView, setSubView] = useState<'OVERVIEW' | 'NETWORK_MATRIX' | 'DYNAMICS' | 'COOCCURRENCES' | 'PATTERNS' | 'SIMULATOR'>('OVERVIEW');
+  const [subView, setSubView] = useState<'NETWORK_MATRIX' | 'DYNAMICS' | 'CROSS_DYADS' | 'SIMULATOR'>('NETWORK_MATRIX');
+  const [matrixSubMode, setMatrixSubMode] = useState<'FLUX_TRANSMISSION' | 'GRAPHE_MATRICE'>('FLUX_TRANSMISSION');
 
   const loadReport = useCallback(async (forcedTarget: string, famId: InterDrawFamilyId, forceRefresh: boolean = false) => {
     setLoading(true);
@@ -376,36 +377,81 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
         </div>
       </div>
 
-      {/* 2. SUB-NAVIGATION : VUE GLOBALE / COOCCURRENCES / PATTERNS / SIMULATEUR */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        <button
-          onClick={() => {
-            audioEngine.play("click");
-            setSubView('OVERVIEW');
-          }}
-          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            subView === 'OVERVIEW'
-              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
-              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
-          }`}
-        >
-          <Sparkles size={14} className={subView === 'OVERVIEW' ? 'animate-pulse' : 'text-amber-500'} />
-          <span>Vue d'Ensemble & Inférence</span>
-        </button>
+      {/* SYNTHÈSE DYNAMIQUE INTER-TIRAGES DU RÉSEAU */}
+      {report && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="p-3.5 bg-white/80 dark:bg-slate-900/80 rounded-2xl border border-indigo-500/20 backdrop-blur-xl shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 text-[9px] font-black uppercase tracking-wider">
+              <span>Couplage Réseau W̄</span>
+              <Network size={12} className="text-indigo-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-base font-black font-mono text-indigo-600 dark:text-indigo-400">
+                {report.networkMatrix ? (report.networkMatrix.meanNetworkCoupling * 100).toFixed(1) : "0.0"}%
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">température</span>
+            </div>
+          </div>
 
+          <div className="p-3.5 bg-white/80 dark:bg-slate-900/80 rounded-2xl border border-amber-500/20 backdrop-blur-xl shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 text-[9px] font-black uppercase tracking-wider">
+              <span>Advection Domino</span>
+              <Activity size={12} className="text-amber-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-base font-black font-mono text-amber-600 dark:text-amber-400">
+                {report.complexDynamics?.domino
+                  ? `${report.complexDynamics.domino.kineticVelocity.toFixed(2)}v`
+                  : `${report.carryOverLift.toFixed(2)}x`}
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">cinétique</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-white/80 dark:bg-slate-900/80 rounded-2xl border border-emerald-500/20 backdrop-blur-xl shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 text-[9px] font-black uppercase tracking-wider">
+              <span>Dyades Actives</span>
+              <Layers size={12} className="text-emerald-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-base font-black font-mono text-emerald-600 dark:text-emerald-400">
+                {report.bivariateHpcReport
+                  ? report.bivariateHpcReport.dyads.filter(d => report.predecessorResult?.gagnants?.includes(d.sourceNumber)).length
+                  : report.cooccurrenceMetrics?.activeCrossDyads.length || 0}
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">détectées</span>
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-white/80 dark:bg-slate-900/80 rounded-2xl border border-sky-500/20 backdrop-blur-xl shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 text-[9px] font-black uppercase tracking-wider">
+              <span>Moteur Inter-Tirages</span>
+              <ShieldCheck size={12} className="text-sky-500" />
+            </div>
+            <div className="mt-1 flex items-baseline gap-1">
+              <span className="text-xs font-black font-mono text-sky-600 dark:text-sky-400 uppercase">
+                {hpcStatus.isReady ? "RUST WASM HPC" : "100% Client"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4 PILIERS MÉTIERS : NAVIGATION */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
         <button
           onClick={() => {
             audioEngine.play("click");
             setSubView('NETWORK_MATRIX');
           }}
-          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
             subView === 'NETWORK_MATRIX'
               ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
               : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
           }`}
         >
           <Network size={14} className={subView === 'NETWORK_MATRIX' ? 'animate-pulse' : 'text-indigo-400'} />
-          <span>Matrice Réseau (Graphe Complet)</span>
+          <span>[PILIER 1] Matrice Réseau & Spectre</span>
           {report?.networkMatrix && (
             <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-[9px] font-mono font-bold">
               {report.networkMatrix.drawNames.length}x{report.networkMatrix.drawNames.length}
@@ -418,14 +464,14 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
             audioEngine.play("click");
             setSubView('DYNAMICS');
           }}
-          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
             subView === 'DYNAMICS'
               ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
               : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
           }`}
         >
           <Activity size={14} className={subView === 'DYNAMICS' ? 'animate-pulse text-amber-400' : 'text-sky-400'} />
-          <span>Dynamiques Complexes (Domino & Cascade)</span>
+          <span>[PILIER 2] Dynamiques Physiques & Cinétique</span>
           <span className="px-1.5 py-0.2 rounded-full bg-sky-500/20 text-sky-700 dark:text-sky-300 text-[9px] font-mono font-bold">
             4 Phénomènes
           </span>
@@ -434,38 +480,18 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
         <button
           onClick={() => {
             audioEngine.play("click");
-            setSubView('COOCCURRENCES');
+            setSubView('CROSS_DYADS');
           }}
-          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            subView === 'COOCCURRENCES'
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+            subView === 'CROSS_DYADS'
               ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
               : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
           }`}
         >
-          <Zap size={14} className={subView === 'COOCCURRENCES' ? 'animate-pulse' : 'text-amber-500'} />
-          <span>Détecteur de Cooccurrences</span>
-          {report?.cooccurrenceMetrics && (
-            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[9px] font-mono font-bold">
-              {report.cooccurrenceMetrics.topConditionedPairs.length} paires
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => {
-            audioEngine.play("click");
-            setSubView('PATTERNS');
-          }}
-          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
-            subView === 'PATTERNS'
-              ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
-              : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
-          }`}
-        >
-          <Network size={14} className={subView === 'PATTERNS' ? 'animate-pulse' : 'text-purple-500'} />
-          <span>Détecteur de Patterns Structurels</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-700 dark:text-purple-300 text-[9px] font-mono font-bold">
-            5 Modules
+          <Layers size={14} className={subView === 'CROSS_DYADS' ? 'animate-pulse' : 'text-emerald-500'} />
+          <span>[PILIER 3] Dyades Croisées & Invariants</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-[9px] font-mono font-bold">
+            {report?.bivariateHpcReport?.dyads.length || report?.cooccurrenceMetrics?.topConditionedPairs.length || 0} dyades
           </span>
         </button>
 
@@ -474,14 +500,14 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
             audioEngine.play("click");
             setSubView('SIMULATOR');
           }}
-          className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+          className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
             subView === 'SIMULATOR'
               ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 scale-102"
               : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
           }`}
         >
           <Sliders size={14} className={subView === 'SIMULATOR' ? 'animate-pulse' : 'text-indigo-400'} />
-          <span>Simulateur Stochastique</span>
+          <span>[PILIER 4] Simulateur de Transmission</span>
         </button>
       </div>
 
@@ -494,9 +520,60 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
         </div>
       ) : report ? (
         <>
-          {subView === 'OVERVIEW' && (
-            <>
-              {/* 3. FLUX TRIPTYQUE : PRÉDÉCESSEUR -> CIBLE -> SUCCESSEUR */}
+          {subView === 'NETWORK_MATRIX' && (
+            <div className="space-y-6">
+              {/* Sélecteur de mode Pilier 1 : Flux Séquentiel vs Graphe Complet */}
+              <div className="flex items-center justify-between bg-white/80 dark:bg-slate-900/80 p-2 rounded-2xl border border-indigo-500/20 dark:border-indigo-500/10 backdrop-blur-xl shadow-sm">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setMatrixSubMode('FLUX_TRANSMISSION');
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 ${
+                      matrixSubMode === 'FLUX_TRANSMISSION'
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Sparkles size={13} />
+                    <span>Flux Séquentiel & Attracteurs</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setMatrixSubMode('GRAPHE_MATRICE');
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 ${
+                      matrixSubMode === 'GRAPHE_MATRICE'
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                  >
+                    <Network size={13} />
+                    <span>Topologie & Graphe Complet N×N</span>
+                    {report?.networkMatrix && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-[9px] font-mono font-bold">
+                        {report.networkMatrix.drawNames.length}×{report.networkMatrix.drawNames.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+                <span className="text-[10px] text-indigo-500 font-mono font-bold hidden md:inline-block px-2">
+                  Pilier 1 : Matrice Réseau & Spectre
+                </span>
+              </div>
+
+              {matrixSubMode === 'GRAPHE_MATRICE' ? (
+                <InterDrawNetworkMatrixView
+                  networkMatrix={report.networkMatrix}
+                  networkId={report.networkId || (activeFamily.id as any)}
+                  targetDraw={report.targetDraw}
+                  onSelectDraw={onSelectDraw}
+                />
+              ) : (
+                <>
+                  {/* 3. FLUX TRIPTYQUE : PRÉDÉCESSEUR -> CIBLE -> SUCCESSEUR */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* CARTE PRÉDÉCESSEUR */}
             <div className="p-5 bg-white/80 dark:bg-slate-900/80 rounded-3xl border border-amber-500/30 dark:border-amber-500/20 shadow-lg relative overflow-hidden flex flex-col justify-between">
@@ -755,11 +832,11 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               <button
                 onClick={() => {
                   audioEngine.play("click");
-                  setSubView('COOCCURRENCES');
+                  setSubView('CROSS_DYADS');
                 }}
                 className="w-full py-2 px-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-1.5 cursor-pointer border border-amber-500/20"
               >
-                <span>Explorer le Détecteur de Cooccurrences</span>
+                <span>Explorer le Détecteur de Dyades & Cooccurrences</span>
                 <ArrowRight size={13} />
               </button>
             </div>
@@ -807,11 +884,11 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               <button
                 onClick={() => {
                   audioEngine.play("click");
-                  setSubView('PATTERNS');
+                  setSubView('CROSS_DYADS');
                 }}
                 className="w-full py-2 px-3 bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-1.5 cursor-pointer border border-purple-500/20"
               >
-                <span>Explorer le Détecteur de Patterns</span>
+                <span>Explorer les Invariants Structurels</span>
                 <ArrowRight size={13} />
               </button>
             </div>
@@ -1332,20 +1409,12 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               </div>
             )}
           </div>
-            </>
+                </>
+              )}
+            </div>
           )}
 
-          {/* VUE DÉDIÉE MATRICE DU RÉSEAU (GRAPHE COMPLET ALL-TO-ALL) */}
-          {subView === 'NETWORK_MATRIX' && (
-            <InterDrawNetworkMatrixView
-              networkMatrix={report.networkMatrix}
-              networkId={report.networkId || (activeFamily.id as any)}
-              targetDraw={report.targetDraw}
-              onSelectDraw={onSelectDraw}
-            />
-          )}
-
-          {/* VUE DÉDIÉE DYNAMIQUES COMPLEXES (DOMINO, PAPILLON, CASCADE & RÉACTION EN CHAÎNE) */}
+          {/* PILIER 2 : DYNAMIQUES PHYSIQUES & CINÉTIQUE */}
           {subView === 'DYNAMICS' && (
             <InterDrawDynamicsView
               dynamics={report.complexDynamics}
@@ -1355,27 +1424,22 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               onSelectDraw={onSelectDraw}
             />
           )}
+
+          {/* PILIER 3 : DYADES CROISÉES & INVARIANTS STATISTIQUES (FUSION UNIFIÉE) */}
+          {subView === 'CROSS_DYADS' && (
+            <InterDrawCooccurrenceView
+              cooccurrences={report.cooccurrenceMetrics}
+              patterns={report.patternMetrics}
+              bivariateHpcReport={report.bivariateHpcReport}
+              targetDraw={report.targetDraw}
+              predecessorName={report.predecessor?.name || 'Prédécesseur'}
+              predecessorNumbers={report.predecessorResult?.gagnants || []}
+            />
+          )}
         </>
       ) : null}
 
-      {/* VUES DÉDIÉES COOCCURRENCES ET PATTERNS */}
-      {report && subView === 'COOCCURRENCES' && (
-        <InterDrawCooccurrenceView
-          cooccurrences={report.cooccurrenceMetrics}
-          targetDraw={report.targetDraw}
-          predecessorName={report.predecessor?.name || 'Prédécesseur'}
-          predecessorNumbers={report.predecessorResult?.gagnants || []}
-        />
-      )}
-
-      {report && subView === 'PATTERNS' && (
-        <InterDrawPatternView
-          patterns={report.patternMetrics}
-          targetDraw={report.targetDraw}
-          predecessorName={report.predecessor?.name || 'Prédécesseur'}
-          predecessorNumbers={report.predecessorResult?.gagnants || []}
-        />
-      )}
+      {/* PILIER 4 : SIMULATEUR DE TRANSMISSION & PROJECTION */}
 
       {report && subView === 'SIMULATOR' && (
         <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-6">

@@ -2475,6 +2475,146 @@ export function computeWalkForwardCalibrationHpc(
   };
 }
 
+export interface InterDrawCrossDyadHpc {
+  sourceNumber: number;
+  targetNumber: number;
+  occurrences: number;
+  expectedOccurrences: number;
+  zScore: number;
+  lift: number;
+  significanceScore: number;
+}
 
+export interface BivariateDyadsReportHpc {
+  dyads: InterDrawCrossDyadHpc[];
+  transitionMatrix: Float64Array;
+  totalPairedDraws: number;
+  meanCouplingZ: number;
+}
 
+/**
+ * 16. Dyades Croisées & Matrice de Transition Bivariée (Rust Core HPC)
+ * Calcule les transitions directes avec filtrage statistique rigoureux par z-score (AGENTS.md).
+ */
+export function computeBivariateCrossDyadsHpc(
+  sourceDraw: string,
+  targetDraw: string,
+  minZScore: number = 0.0
+): BivariateDyadsReportHpc {
+  const normSrc = sourceDraw.trim().toUpperCase();
+  const normTgt = targetDraw.trim().toUpperCase();
+  const store = getOrCreateNativeStoreInstance();
 
+  if (store && typeof store.compute_bivariate_dyads_wasm === 'function') {
+    try {
+      const rep = store.compute_bivariate_dyads_wasm(normSrc, normTgt, minZScore);
+      if (rep) {
+        const count = readWasmField<number>(rep, 'dyads_count', 0);
+        const dyads: InterDrawCrossDyadHpc[] = [];
+        for (let i = 0; i < count; i++) {
+          const d = rep.get_dyad(i);
+          if (d) {
+            dyads.push({
+              sourceNumber: readWasmField<number>(d, 'source_number', 0),
+              targetNumber: readWasmField<number>(d, 'target_number', 0),
+              occurrences: readWasmField<number>(d, 'occurrences', 0),
+              expectedOccurrences: readWasmField<number>(d, 'expected_occurrences', 0.0),
+              zScore: readWasmField<number>(d, 'z_score', 0.0),
+              lift: readWasmField<number>(d, 'lift', 1.0),
+              significanceScore: readWasmField<number>(d, 'significance_score', 50.0),
+            });
+          }
+        }
+
+        const rawMatrix = readWasmField<Float64Array>(rep, 'transition_matrix_flat', new Float64Array(90 * 90));
+        return {
+          dyads,
+          transitionMatrix: new Float64Array(rawMatrix),
+          totalPairedDraws: readWasmField<number>(rep, 'total_paired_draws', 0),
+          meanCouplingZ: readWasmField<number>(rep, 'mean_coupling_z', 0.0),
+        };
+      }
+    } catch (e) {
+      console.warn('[LOTO-ENGINE] Erreur WASM compute_bivariate_dyads, passage au fallback :', e);
+    }
+  }
+
+  // Fallback déterministe C^∞
+  const timeSrc = fallbackStoreTimelines.get(normSrc);
+  const timeTgt = fallbackStoreTimelines.get(normTgt);
+  const histSrc = timeSrc?.history || [];
+  const histTgt = timeTgt?.history || [];
+  const nPairs = Math.min(histSrc.length, histTgt.length);
+  const matrix = new Float64Array(90 * 90);
+
+  if (nPairs < 2) {
+    return {
+      dyads: [],
+      transitionMatrix: matrix,
+      totalPairedDraws: 0,
+      meanCouplingZ: 0.0,
+    };
+  }
+
+  const counts = new Uint32Array(90 * 90);
+  const srcFreqs = new Uint32Array(91);
+
+  for (let i = 0; i < nPairs; i++) {
+    const sDraw = histSrc[i];
+    const tDraw = histTgt[i];
+    for (const s of sDraw.winners) {
+      if (s >= 1 && s <= 90) {
+        srcFreqs[s]++;
+        for (const t of tDraw.winners) {
+          if (t >= 1 && t <= 90) {
+            counts[(s - 1) * 90 + (t - 1)]++;
+          }
+        }
+      }
+    }
+  }
+
+  const pJoint = (5.0 / 90.0) * (5.0 / 90.0);
+  const expected = nPairs * pJoint;
+  const variance = nPairs * pJoint * (1.0 - pJoint);
+  const stdDev = Math.max(1e-9, Math.sqrt(variance));
+
+  const dyads: InterDrawCrossDyadHpc[] = [];
+  let sumZ = 0.0;
+
+  for (let s = 1; s <= 90; s++) {
+    const sCount = srcFreqs[s];
+    const row = (s - 1) * 90;
+    for (let t = 1; t <= 90; t++) {
+      const o = counts[row + (t - 1)];
+      const pTrans = (o + 1.0) / (sCount + 18.0);
+      matrix[row + (t - 1)] = pTrans;
+
+      const z = (o - expected) / stdDev;
+      sumZ += z;
+      const lift = expected > 0 ? o / expected : 1.0;
+      const sig = 100.0 / (1.0 + Math.exp(-1.2 * z));
+
+      if (z >= minZScore) {
+        dyads.push({
+          sourceNumber: s,
+          targetNumber: t,
+          occurrences: o,
+          expectedOccurrences: Math.round(expected * 1000) / 1000,
+          zScore: Math.round(z * 1000) / 1000,
+          lift: Math.round(lift * 100) / 100,
+          significanceScore: Math.round(sig * 10) / 10,
+        });
+      }
+    }
+  }
+
+  dyads.sort((a, b) => b.zScore - a.zScore || a.sourceNumber - b.sourceNumber);
+
+  return {
+    dyads,
+    transitionMatrix: matrix,
+    totalPairedDraws: nPairs,
+    meanCouplingZ: Math.round((sumZ / 8100.0) * 1000) / 1000,
+  };
+}
