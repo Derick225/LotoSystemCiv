@@ -12,6 +12,7 @@ import { resolveWeightsWithExpertBiasDecay } from "./expertBiasService";
 import { logger } from "../../utils/logger";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { parseDateSafely } from "../../utils/dateUtils";
+import { deriveSeedFromHistory } from "../../utils/deterministicSeed";
 import { drawHasMachineNumbers } from "../../constants";
 
 export interface ScoredNumber {
@@ -168,7 +169,7 @@ export const calculateScores = (
     weights: { ...weights },
     algoWeights: { ...weights },
     statisticalBounds: advancedMetrics.statisticalBounds || { median: 0, q1: 0, q3: 0, variance: 0, kurtosis: 0, skewness: 0, shannonEntropy: 0, hurstExponent: 0.5 },
-    deterministicSeed: history.length > 0 ? parseDateSafely(history[0].date).getTime() : 1234567890,
+    deterministicSeed: deriveSeedFromHistory(history),
     maxFreq: Math.max(1, ...Array.from(features.freqMap || [])),
     maxMarkov: Math.max(0.001, ...Array.from(features.markovMap || [])),
     maxMachineTransfer: Math.max(0.001, ...Array.from(features.machineTransferMap || []))

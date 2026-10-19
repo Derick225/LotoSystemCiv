@@ -1,6 +1,5 @@
 import { DrawResult, AlgoWeights, Prediction } from "../types";
 import { generateMasterPrediction } from "./predictionEngine";
-import { useNexusStore } from "../store/useNexusStore";
 import { analyzeForManipulation } from "./forensicAuditService";
 import { AlgoKey } from "../shared/prediction.types";
 import { getPayoutMultiplier, drawHasMachineNumbers } from "../constants";
@@ -152,6 +151,13 @@ function calculateCalibratedProbabilities(
   return p;
 }
 
+export interface BacktestRuntimeOptions {
+  /** Profondeur temporelle du contexte de prédiction (explicite, jamais lue depuis un store global). */
+  temporalDepth?: number;
+  isForensicOptimized?: boolean;
+  useSpatioTemporalHawkes?: boolean;
+}
+
 export class BacktestingFramework {
 
   /**
@@ -166,7 +172,8 @@ export class BacktestingFramework {
     initialBankroll: number = 50000,
     unitBet: number = 200,
     onProgress?: (percent: number) => void,
-    payoutModel: string = "LEGACY"
+    payoutModel: string = "LEGACY",
+    runtimeOptions: BacktestRuntimeOptions = {}
   ): Promise<Record<string, WalkForwardMetric>> {
     const cleanHistory = purifyHistoryForDraw(drawName, history);
     if (!cleanHistory || cleanHistory.length < depth + 10) {
@@ -237,10 +244,9 @@ export class BacktestingFramework {
       calibrationHits[s.name] = results[s.name].calibrationCurve.map(() => ({ totalInBin: 0, drawsInBin: 0 }));
     });
 
-    const storeState = useNexusStore?.getState?.();
-    const isForensicOptimized = storeState?.isForensicOptimized ?? false;
-    const useSpatioTemporalHawkes = storeState?.useSpatioTemporalHawkes ?? false;
-    const temporalDepth = storeState?.temporalDepth ?? 100;
+    const isForensicOptimized = runtimeOptions.isForensicOptimized ?? false;
+    const useSpatioTemporalHawkes = runtimeOptions.useSpatioTemporalHawkes ?? false;
+    const temporalDepth = Math.max(depth + 10, runtimeOptions.temporalDepth ?? cleanHistory.length);
 
     // Execute Walk-Forward iterations
     for (let i = 0; i < testingWindow.length; i++) {
@@ -297,7 +303,8 @@ export class BacktestingFramework {
               isForensicOptimized,
               undefined,
               undefined,
-              useSpatioTemporalHawkes
+              useSpatioTemporalHawkes,
+              false
             );
             selection = predictRes.suggestedNumbers;
             probabilities = calculateCalibratedProbabilities(predictRes, s.weights);

@@ -8,11 +8,16 @@ import {
   computeCrossHawkesKernelHpc,
   solveCombinatorialAnnealingHpc,
   computeMarkovTransitionHpc,
-  computeTopologicalLyapunovHpc
+  computeTopologicalLyapunovHpc,
+  getWasmFallbackCount,
+  resetWasmFallbackCount,
+  getEngineVersion,
+  getAbiHash
 } from '../services/wasm/lotoEngineBridge';
 
 describe('Rust WASM Native Execution Suite', () => {
   beforeAll(async () => {
+    resetWasmFallbackCount();
     const initialized = await initializeLotoEngineWasm();
     expect(initialized).toBe(true);
   });
@@ -20,6 +25,16 @@ describe('Rust WASM Native Execution Suite', () => {
   it('should successfully initialize the native Rust WebAssembly module', () => {
     expect(isLotoEngineWasmReady()).toBe(true);
     expect(getHpcEngineMode()).toBe('RUST_WASM');
+    expect(getWasmFallbackCount()).toBe(0);
+  });
+
+  it('should expose non-empty engine version and ABI hash', () => {
+    const version = getEngineVersion();
+    const hash = getAbiHash();
+    expect(typeof version).toBe('string');
+    expect(version.length).toBeGreaterThan(0);
+    expect(typeof hash).toBe('string');
+    expect(hash.length).toBeGreaterThan(0);
   });
 
   it('should compute Hurst exponent at native Rust speed with mathematical bounds [0, 1]', () => {

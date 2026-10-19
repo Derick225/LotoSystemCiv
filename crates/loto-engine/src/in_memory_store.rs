@@ -12,7 +12,7 @@
 //! - Normalisation des horodatages POSIX en secondes (u64).
 //! - Zéro allocation dynamique lors de l'inférence.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen::prelude::*;
 
@@ -151,7 +151,7 @@ impl CompactDraw {
 }
 
 /// Registre d'état statistique précalculé en O(1) maintenu au fil de l'eau
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct IncrementalStats {
     /// Fréquences totales d'apparition [1..=90]
     pub frequencies: [u32; TOTAL_NUMBERS + 1],
@@ -171,6 +171,54 @@ impl Default for IncrementalStats {
             max_gaps: [0; TOTAL_NUMBERS + 1],
             total_draws: 0,
         }
+    }
+}
+
+// Serde ne fournit pas d'implémentation pour les tableaux de plus de 32 éléments :
+// sérialisation manuelle sous forme de slices (format JSON inchangé).
+impl Serialize for IncrementalStats {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("IncrementalStats", 4)?;
+        state.serialize_field("frequencies", &self.frequencies[..])?;
+        state.serialize_field("current_gaps", &self.current_gaps[..])?;
+        state.serialize_field("max_gaps", &self.max_gaps[..])?;
+        state.serialize_field("total_draws", &self.total_draws)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for IncrementalStats {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error as DeError;
+
+        #[derive(Deserialize)]
+        struct Repr {
+            frequencies: Vec<u32>,
+            current_gaps: Vec<u32>,
+            max_gaps: Vec<u32>,
+            total_draws: usize,
+        }
+
+        fn to_array<const N: usize>(values: Vec<u32>, field: &str) -> Result<[u32; N], String> {
+            if values.len() != N {
+                return Err(format!(
+                    "IncrementalStats.{field}: {} valeurs reçues, {N} attendues",
+                    values.len()
+                ));
+            }
+            let mut out = [0u32; N];
+            out.copy_from_slice(&values);
+            Ok(out)
+        }
+
+        let repr = Repr::deserialize(deserializer)?;
+        Ok(Self {
+            frequencies: to_array(repr.frequencies, "frequencies").map_err(DeError::custom)?,
+            current_gaps: to_array(repr.current_gaps, "current_gaps").map_err(DeError::custom)?,
+            max_gaps: to_array(repr.max_gaps, "max_gaps").map_err(DeError::custom)?,
+            total_draws: repr.total_draws,
+        })
     }
 }
 
@@ -241,6 +289,17 @@ impl DrawTimeline {
         self.history.clear();
         self.seen_draws.clear();
         self.stats = IncrementalStats::default();
+    }
+
+    /// Reconstruit l'index de dédoublonnage `seen_draws` à partir de l'historique existant.
+    /// Indispensable après désérialisation car `seen_draws` porte `#[serde(skip)]`
+    /// et serait vide, cassant silencieusement le dédoublonnage O(1).
+    pub fn rebuild_seen_index(&mut self) {
+        self.seen_draws.clear();
+        self.seen_draws.reserve(self.history.len());
+        for draw in &self.history {
+            self.seen_draws.insert(draw.composite_key());
+        }
     }
 }
 
@@ -502,5 +561,25 @@ impl InMemoryDrawStore {
 
         crate::calibration::evaluate_walk_forward_calibration(timeline, window_size)
             .map_err(|e| JsValue::from_str(&e))
+    }
+
+    /// Réinitialise complètement un tirage puis recharge en bloc avec tri chronologique et dédoublonnage.
+    /// API explicite clear + bulk_load pour synchronisation robuste sans cumul.
+    #[wasm_bindgen]
+    pub fn clear_and_reload(&mut self, json_payload: &str, draw_name: &str) -> Result<usize, JsValue> {
+        let norm = draw_name.trim().to_uppercase();
+        if let Some(timeline) = self.timelines.get_mut(&norm) {
+            timeline.clear();
+        }
+        self.bootstrap_json(json_payload)
+    }
+
+    /// Reconstruit les index de dédoublonnage de toutes les timelines.
+    /// À appeler après toute désérialisation pour restaurer l'invariant `seen_draws`.
+    #[wasm_bindgen]
+    pub fn rebuild_all_seen_indexes(&mut self) {
+        for timeline in self.timelines.values_mut() {
+            timeline.rebuild_seen_index();
+        }
     }
 }

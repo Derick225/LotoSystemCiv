@@ -1,0 +1,22 @@
+[package]
+name = "loto-core"
+version = "1.0.0"
+edition = "2021"
+description = "Noyau mathématique pur et déterministe du moteur LotoSystemCiv (sans wasm-bindgen)"
+license = "MIT"
+
+[lib]
+name = "loto_core"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]
+serde_json = "1.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "core_math"
+harness = false

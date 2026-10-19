@@ -236,42 +236,39 @@ pub fn compute_domino_advection_wasm(
         };
     }
 
-    // Propagation de l'énergie cinétique le long de la chaîne séquentielle
+    // Propagation de l'énergie cinétique le long de la chaîne séquentielle.
+    // Aucun artefact numérologique (miroir, complément 91) : seule l'impulsion
+    // directe des numéros réellement sortis subsiste, atténuée par le lag.
     for d in 0..max_draws {
         let lag = (d + 1) as f64;
-        let lag_attenuation = (-gamma * lag * 0.25).exp();
+        let lag_attenuation = (-gamma * lag).exp();
 
         for col in 0..win_cols {
             let num = history_flat[d * win_cols + col] as usize;
             if num >= 1 && num <= 90 {
-                // Impulsion directe
-                domino_energies[num] += 10.0 * lag_attenuation;
-
-                // Réverbération harmonique miroir diacritique
-                let mir = mirror_number_fn(num);
-                if mir >= 1 && mir <= 90 && mir != num {
-                    domino_energies[mir] += 4.5 * lag_attenuation;
-                }
-
-                // Réverbération onde complémentaire 91
-                let comp = 91 - num;
-                if comp >= 1 && comp <= 90 && comp != num {
-                    domino_energies[comp] += 4.0 * lag_attenuation;
-                }
+                domino_energies[num] += lag_attenuation;
             }
         }
     }
 
-    // Normalisation sigmoïde continue des énergies sur [0, 100]
+    // Normalisation sigmoïde continue des énergies sur [0, 100] :
+    // seuil = moyenne empirique, pente = inverse de l'écart-type observé.
+    let mean_energy = domino_energies[1..=90].iter().sum::<f64>() / 90.0;
+    let variance_energy = domino_energies[1..=90]
+        .iter()
+        .map(|e| (e - mean_energy).powi(2))
+        .sum::<f64>()
+        / 90.0;
+    let std_energy = variance_energy.sqrt().max(f64::EPSILON);
     let mut indexed_energies: Vec<(usize, f64)> = Vec::with_capacity(90);
     for n in 1..=90 {
-        let raw = domino_energies[n];
-        let sigmoid_val = 100.0 / (1.0 + (-0.15 * (raw - 8.0)).exp());
+        let z = (domino_energies[n] - mean_energy) / std_energy;
+        let sigmoid_val = 100.0 / (1.0 + (-z).exp());
         domino_energies[n] = (sigmoid_val * 100.0).round() / 100.0;
         indexed_energies.push((n, domino_energies[n]));
     }
 
-    indexed_energies.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed_energies.sort_by(|a, b| b.1.total_cmp(&a.1));
     let lead_trigger_numbers: Vec<i32> = indexed_energies.iter().take(5).map(|(n, _)| *n as i32).collect();
 
     WasmDominoResult {
@@ -396,7 +393,7 @@ pub fn compute_chain_reaction_resonance_wasm(
         critical_indexed.push((n, spectrum[n]));
     }
 
-    critical_indexed.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    critical_indexed.sort_by(|a, b| b.1.total_cmp(&a.1));
     let avalanche_critical_numbers: Vec<i32> = critical_indexed.iter().take(5).map(|(n, _)| *n as i32).collect();
 
     WasmChainReactionResult {
@@ -405,19 +402,6 @@ pub fn compute_chain_reaction_resonance_wasm(
         max_constructive_amplitude: max_amp,
         percolation_density: (total_crit_density / 90.0 * 100.0).round() / 100.0,
     }
-}
-
-/// Fonction utilitaire de miroir diacritique déterministe
-fn mirror_number_fn(num: usize) -> usize {
-    if num >= 10 && num <= 90 {
-        let tens = num / 10;
-        let units = num % 10;
-        let inv = units * 10 + tens;
-        if inv >= 1 && inv <= 90 {
-            return inv;
-        }
-    }
-    num
 }
 
 /// Calcule la corrélation continue de Pearson lissée C^∞ entre deux vecteurs de fréquences [1..=90]

@@ -28,6 +28,7 @@ import {
   CyclicPhaseProfileResult,
 } from './dynamicProfileMatrix';
 import { parseDateSafely } from '../../utils/dateUtils';
+import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 import { generateProbabilisticScenarioMatrix } from './predictionScenarios';
 import {
   extractMathProofMetadata,
@@ -288,7 +289,7 @@ export const executeClosedLoopAutopsy = async (
     weights: { ...normalizedCurrent },
     algoWeights: { ...normalizedCurrent },
     statisticalBounds: bounds,
-    deterministicSeed: parseDateSafely(targetDraw.date).getTime(),
+    deterministicSeed: deriveSeedFromHistory(priorHistory),
     drawName,
     pluginCache: {},
   };

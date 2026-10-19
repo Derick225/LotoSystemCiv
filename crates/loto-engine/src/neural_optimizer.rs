@@ -10,19 +10,6 @@ use wasm_bindgen::prelude::*;
 
 const DOMAIN_SIZE: usize = 90;
 
-#[inline]
-fn mirror_number(n: i32) -> i32 {
-    if n >= 10 && n <= 90 {
-        let tens = n / 10;
-        let units = n % 10;
-        let inv = units * 10 + tens;
-        if inv >= 1 && inv <= 90 {
-            return inv;
-        }
-    }
-    n
-}
-
 #[wasm_bindgen]
 pub struct ClosedLoopAutopsyResultHpc {
     updated_weights: Vec<f64>,
@@ -60,11 +47,11 @@ pub fn compute_closed_loop_autopsy_wasm(
         if actual_winners.contains(&pred) {
             exact_hits += 1;
         } else {
-            let mir = mirror_number(pred);
-            let comp = 91 - pred;
+            // Distance métrique stricte sur la variété spatiale : voisin physique direct (|act - pred| == 1)
+            // Élimination des artefacts numérologiques non fondés (miroir, complément 91) selon AGENTS.md
             let is_near = actual_winners
                 .iter()
-                .any(|&act| (act - pred).abs() == 1 || act == mir || act == comp);
+                .any(|&act| (act - pred).abs() == 1);
             if is_near {
                 near_misses += 1;
             }

@@ -13,7 +13,8 @@
     "supabase:login": "supabase login",
     "supabase:link": "supabase link",
     "deploy:nexus": "bash ./scripts/deploy-nexus.sh",
-    "build:wasm": "wasm-pack build crates/loto-engine --target web --release"
+    "build:wasm": "wasm-pack build crates/loto-engine --target web --release && tsx scripts/copy-wasm.ts",
+    "verify:wasm": "tsx scripts/verify-wasm-abi.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

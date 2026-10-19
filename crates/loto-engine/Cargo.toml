@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
+loto-core = { path = "../loto-core" }
 wasm-bindgen = "0.2.92"
 js-sys = "0.3.69"
 web-sys = { version = "0.3.69", features = ["console"] }
@@ -28,8 +29,17 @@ serde_json = "1.0"
 [dev-dependencies]
 wasm-bindgen-test = "0.3.42"
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "engine_benches"
+harness = false
+
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O3"]
+# --all-features : le binaire wasm-opt embarqué (binaryen 117) doit accepter
+# les instructions bulk-memory émises par rustc récent.
+wasm-opt = ["-O3", "--all-features"]
 
 [profile.release]
 # Optimisations d'exécution maximales pour WebAssembly (zéro garbage collector)

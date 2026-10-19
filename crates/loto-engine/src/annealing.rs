@@ -1,4 +1,5 @@
 use wasm_bindgen::prelude::*;
+use crate::hyperparams::{annealing_weights, softplus, AnnealingWeights};
 
 const DRAW_SIZE: usize = 5;
 const DOMAIN_SIZE: usize = 90;
@@ -59,18 +60,21 @@ impl AnnealingOptimizationResult {
 }
 
 /// Calcule l'énergie globale d'une combinaison de 5 numéros de façon continue et différentiable.
-/// 
+///
 /// Intègre :
 /// - Les scores de base pré-calculés des numéros (terme négatif d'énergie)
 /// - L'affinité de co-occurrence pairwise issue de la matrice aplatie (91x91)
-/// - La régularité de parité (pénalité continue quadratique sur l'écart à l'équilibre 2 ou 3 pairs)
-/// - La dispersion des décades (pénalité de concentration)
-/// - L'amplitude continue (dispersion max - min)
+///   pondérée par le rapport des écarts-types scores/affinité (hyperparams)
+/// - La régularité de parité (pénalité quadratique normalisée par E[dev²] = 0.875 exact)
+/// - La dispersion des décades (seuil dérivé des statistiques d'ordre : E[range]/2)
+/// - L'amplitude continue (softplus sur l'écart, seuil dérivé des données)
+/// - Les consécutifs excessifs (softplus au-dessus de l'espérance exacte 20/90)
 #[inline]
 fn calculate_combo_energy(
     combo: &[i32; DRAW_SIZE],
     scores_91: &[f64],
     affinity_matrix_91x91: &[f64],
+    w: &AnnealingWeights,
 ) -> f64 {
     let mut energy = 0.0f64;
 
@@ -82,7 +86,7 @@ fn calculate_combo_energy(
         }
     }
 
-    // 2. Affinité pairwise de co-occurrence
+    // 2. Affinité pairwise de co-occurrence (poids dérivé du rapport sigma_scores/sigma_affinité)
     let mut pairwise_affinity = 0.0f64;
     for i in 0..DRAW_SIZE {
         let n1 = combo[i] as usize;
@@ -95,16 +99,16 @@ fn calculate_combo_energy(
             }
         }
     }
-    energy -= pairwise_affinity * 1.5;
+    energy -= pairwise_affinity * w.affinity;
 
     // 3. Pénalité continue de Parité (Distribution idéale 2 ou 3 pairs sur 5)
     let even_count = combo.iter().filter(|&&n| n % 2 == 0).count() as f64;
     let parity_deviation = (even_count - 2.5).abs() - 0.5;
     if parity_deviation > 0.0 {
-        energy += parity_deviation * parity_deviation * 25.0;
+        energy += parity_deviation * parity_deviation * w.parity;
     }
 
-    // 4. Pénalité d'amplitude (Écart max - min)
+    // 4. Pénalité d'amplitude (Écart max - min), seuil = E[range uniforme]/2 dérivé des données
     let mut min_val = combo[0];
     let mut max_val = combo[0];
     for &n in &combo[1..] {
@@ -112,24 +116,18 @@ fn calculate_combo_energy(
         if n > max_val { max_val = n; }
     }
     let spread = (max_val - min_val) as f64;
-    // Pénalisation continue sigmoïdale si l'amplitude est trop resserrée (< 30) ou extrême
-    if spread < 30.0 {
-        let diff = 30.0 - spread;
-        energy += diff * diff * 0.5;
-    }
+    energy += softplus(w.spread_threshold - spread) * w.spread;
 
-    // 5. Pénalité de consécutifs excessifs
+    // 5. Pénalité continue de consécutifs excessifs (au-dessus de l'espérance exacte 20/90)
     let mut sorted = *combo;
     sorted.sort_unstable();
-    let mut consecutive_count = 0.0;
+    let mut consecutive_count = 0.0f64;
     for i in 0..(DRAW_SIZE - 1) {
         if sorted[i + 1] - sorted[i] == 1 {
             consecutive_count += 1.0;
         }
     }
-    if consecutive_count > 1.0 {
-        energy += (consecutive_count - 1.0) * 40.0;
-    }
+    energy += softplus(consecutive_count - w.expected_consecutive) * w.consecutive;
 
     energy
 }
@@ -162,13 +160,16 @@ pub fn solve_combinatorial_annealing_wasm(
 
     let mut rng = LcgRng::new(deterministic_seed);
 
+    // Coefficients d'énergie dérivés de l'échelle réelle des scores et des espérances combinatoires
+    let weights = annealing_weights(scores_91, affinity_matrix);
+
     // Initialisation : sélection des 5 premiers candidats uniques
     let mut current_combo = [0i32; DRAW_SIZE];
     for i in 0..DRAW_SIZE {
         current_combo[i] = candidate_pool[i];
     }
 
-    let mut current_energy = calculate_combo_energy(&current_combo, scores_91, affinity_matrix);
+    let mut current_energy = calculate_combo_energy(&current_combo, scores_91, affinity_matrix, &weights);
     let mut best_combo = current_combo;
     let mut best_energy = current_energy;
 
@@ -196,7 +197,7 @@ pub fn solve_combinatorial_annealing_wasm(
 
             proposed_combo[swap_slot] = new_cand;
 
-            let proposed_energy = calculate_combo_energy(&proposed_combo, scores_91, affinity_matrix);
+            let proposed_energy = calculate_combo_energy(&proposed_combo, scores_91, affinity_matrix, &weights);
             let delta_energy = proposed_energy - current_energy;
 
             // Critère de Metropolis : acceptation systématique si amélioration,

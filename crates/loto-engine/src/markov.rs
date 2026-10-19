@@ -42,13 +42,24 @@ pub fn compute_markov_transition_matrix_wasm(
         }
     }
 
+    // Shrinkage de Dirichlet dérivé des données : alpha = nombre moyen de transitions
+    // par cellule = total_transitions / num_states^2. Matrice creuse => alpha faible,
+    // prior uniforme stabilisateur sans noyer le signal empirique.
+    let mut total_transitions = 0.0f64;
+    for i in 0..num_states {
+        total_transitions += state_counts[i];
+    }
+    let alpha = (total_transitions / ((num_states * num_states) as f64).max(1.0)).max(1e-6);
+
     // Normalisation des probabilités conditionnelles de transition P(N_{t+1} | N_t)
+    // avec lissage de Dirichlet : P = (count + alpha) / (row_total + alpha * num_states)
     for i in 0..num_states {
         let count = state_counts[i];
-        if count > 0.0 {
+        let denom = count + alpha * (num_states as f64);
+        if denom > 0.0 {
             let offset = i * num_states;
             for j in 0..num_states {
-                matrix[offset + j] /= count;
+                matrix[offset + j] = (matrix[offset + j] + alpha) / denom;
             }
         }
     }

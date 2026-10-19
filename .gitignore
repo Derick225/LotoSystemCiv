@@ -102,3 +102,6 @@ lerna-debug.log
 dist
 dist-ssr
 *.local
+
+# Rust build artifacts
+crates/*/target/

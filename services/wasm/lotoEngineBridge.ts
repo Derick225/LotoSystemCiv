@@ -99,6 +99,45 @@ export function getHpcEngineMode(): 'RUST_WASM' | 'SIMD_FALLBACK' {
   return isWasmLoaded ? 'RUST_WASM' : 'SIMD_FALLBACK';
 }
 
+let wasmFallbackCount = 0;
+
+export function getWasmFallbackCount(): number {
+  return wasmFallbackCount;
+}
+
+export function resetWasmFallbackCount(): void {
+  wasmFallbackCount = 0;
+}
+
+export function recordWasmFallback(context?: string, error?: unknown): void {
+  wasmFallbackCount++;
+  if (context) {
+    console.warn(`[LOTO-ENGINE FALLBACK #${wasmFallbackCount}] ${context}`, error);
+  }
+}
+
+export function getEngineVersion(): string {
+  if (isWasmLoaded && typeof wasmModuleInstance?.engine_version === 'function') {
+    try {
+      return wasmModuleInstance.engine_version();
+    } catch {
+      // fallback
+    }
+  }
+  return '12.0.0-source';
+}
+
+export function getAbiHash(): string {
+  if (isWasmLoaded && typeof wasmModuleInstance?.abi_hash === 'function') {
+    try {
+      return wasmModuleInstance.abi_hash();
+    } catch {
+      // fallback
+    }
+  }
+  return 'e3b0c44298fc1c14';
+}
+
 /**
  * Calcul de l'Exposant de Hurst Robuste (HPC Rust WASM ou Fallback Déterministe)
  */
@@ -1304,12 +1343,18 @@ export function clearStoreTimeline(drawName: string): void {
   fallbackStoreTimelines.delete(normName);
 }
 
+export function clearAndReloadStore(jsonPayload: string, drawName: string): number {
+  clearStoreTimeline(drawName);
+  return bootstrapStoreFromJson(jsonPayload);
+}
+
 export function bootstrapStoreFromJson(jsonPayload: string): number {
   const store = getOrCreateNativeStoreInstance();
   if (store && typeof store.bootstrap_json === 'function') {
     try {
       return store.bootstrap_json(jsonPayload);
     } catch (e) {
+      recordWasmFallback('bootstrap_json', e);
       console.warn('[LOTO-ENGINE] Erreur bootstrap WASM store, passage au fallback JS :', e);
     }
   }
@@ -1537,6 +1582,7 @@ export function runNativePredictionHpc(params: {
         }
       }
     } catch (e) {
+      recordWasmFallback('run_native_prediction_pipeline', e);
       console.error('[LOTO-ENGINE] Erreur WASM Native Prediction, passage au fallback :', e);
     }
   }
@@ -1590,10 +1636,18 @@ export function runNativePredictionHpc(params: {
     sumScores += composite;
   }
 
-  // Normalisation sur le simplexe des probabilités marginales de tirage sans remise 5/90 (Sum = 5.0)
+  // Normalisation sur le simplexe des probabilités marginales de tirage sans remise 5/90 (Sum = 5.0, p_i in [0, 1])
   if (sumScores > 0) {
     for (let n = 1; n <= 90; n++) {
-      scores[n] = Math.min(1.0, (scores[n] / sumScores) * 5.0);
+      scores[n] = Math.min(1.0, Math.max(0.0, (scores[n] / sumScores) * 5.0));
+    }
+    let clampedSum = 0;
+    for (let n = 1; n <= 90; n++) clampedSum += scores[n];
+    if (clampedSum > 0 && Math.abs(clampedSum - 5.0) > 1e-6) {
+      const renormalize = 5.0 / clampedSum;
+      for (let n = 1; n <= 90; n++) {
+        scores[n] = Math.min(1.0, Math.max(0.0, scores[n] * renormalize));
+      }
     }
   }
 
@@ -1605,6 +1659,16 @@ export function runNativePredictionHpc(params: {
   }
   const normalizedEntropy = Math.max(0.0, Math.min(1.0, entropy / maxEntropy));
 
+  // Calcul de l'Exposant de Hurst R/S adaptatif sur le signal d'énergie des tirages
+  const energySignal = new Float64Array(actualDraws);
+  for (let d = 0; d < actualDraws; d++) {
+    const offset = d * 5;
+    let sumW = 0;
+    for (let c = 0; c < 5; c++) sumW += flat[offset + c];
+    energySignal[actualDraws - 1 - d] = sumW;
+  }
+  const hurst = computeRobustHurstHpc(energySignal);
+
   const indexed: { n: number; s: number }[] = [];
   for (let n = 1; n <= 90; n++) {
     indexed.push({ n, s: scores[n] });
@@ -1613,14 +1677,28 @@ export function runNativePredictionHpc(params: {
 
   const top5 = indexed.slice(0, 5).map(x => x.n);
   const top10 = indexed.slice(0, 10).map(x => x.n);
-  const confidence = Math.max(10.0, Math.min(95.0, 50.0 + 35.0 * (1.0 - normalizedEntropy)));
+
+  // Confiance continue différentiable C^∞ combinatoire :
+  // - Baseline théorique exacte : P(Hit >= 1) dans un tirage 5/90 = 1 - C(85,5)/C(90,5)
+  //   calculée par coefficients binomiaux exacts — zéro constante en dur
+  // - Saturation d'échantillon w_N = 1 - exp(-actualDraws / 90)
+  // - Gain d'information Shannon I = 1 - normalizedEntropy
+  // - Écart au bruit brownien d_H = 2 * |hurst - 0.5|
+  const pHitBase = hypergeometricTail(1, 5, 5, 90) * 100.0;
+  const sampleSaturation = 1.0 - Math.exp(-actualDraws / 90.0);
+  const infoDivergence = 1.0 - normalizedEntropy;
+  const hurstDivergence = Math.abs(hurst - 0.5) * 2.0;
+  const confidence = Math.max(
+    10.0,
+    Math.min(95.0, pHitBase + (95.0 - pHitBase) * sampleSaturation * (0.7 * infoDivergence + 0.3 * hurstDivergence))
+  );
 
   return {
     top5,
     top10,
     scores,
     shannonEntropy: normalizedEntropy,
-    hurstExponent: 0.52,
+    hurstExponent: hurst,
     confidenceScore: confidence,
   };
 }
@@ -1644,6 +1722,136 @@ export interface PredictionPortfolioHpc {
   shannonEntropy: number;
   hurstExponent: number;
   confidenceScore: number;
+  predictionMode?: 'CALIBRATED' | 'UNIFORM_RANDOM' | 'INSUFFICIENT_HISTORY';
+}
+
+type PredictionMode = 'CALIBRATED' | 'UNIFORM_RANDOM' | 'INSUFFICIENT_HISTORY';
+
+/** Normalise le mode déclaré par le moteur Rust (transparence Skill Gate) */
+function normalizePredictionMode(raw: unknown): PredictionMode {
+  return raw === 'UNIFORM_RANDOM' || raw === 'INSUFFICIENT_HISTORY' ? raw : 'CALIBRATED';
+}
+
+/** Hachage FNV-1a 64-bit (BigInt) — seed déterministe miroir du moteur Rust */
+function fnv1a64(bytes: ArrayLike<number>): number {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let i = 0; i < bytes.length; i++) {
+    hash = (hash ^ BigInt(bytes[i] & 0xff)) & mask;
+    hash = (hash * prime) & mask;
+  }
+  // Réduction en entier signé 53 bits compatible Number
+  return Number(hash % (1n << 53n));
+}
+
+/** LCG déterministe 64-bit (miroir TS de combinatorics::DeterministicLcg) */
+function createDeterministicLcg(seed: number): () => number {
+  let state = seed === 0 ? 0x9e3779b9 : seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 636413622) + 1442695041) >>> 0;
+    return state / 4294967296;
+  };
+}
+
+/** Coefficient binomial exact par produit multiplicatif (n <= 90, aucun débordement f64) */
+function binomialExact(n: number, k: number): number {
+  if (k > n) return 0;
+  k = Math.min(k, n - k);
+  let result = 1;
+  for (let i = 0; i < k; i++) {
+    result = (result * (n - i)) / (i + 1);
+  }
+  return Math.round(result);
+}
+
+/** Queue hypergéométrique exacte P(X >= minHits) pour un ticket 5/90 */
+function hypergeometricTail(minHits: number, ticketSize: number, winners: number, pool: number): number {
+  const total = binomialExact(pool, ticketSize);
+  let favorable = 0;
+  const iMax = Math.min(ticketSize, winners);
+  for (let i = minHits; i <= iMax; i++) {
+    favorable += binomialExact(winners, i) * binomialExact(pool - winners, ticketSize - i);
+  }
+  return favorable / total;
+}
+
+/** Référence Brier d'un tirage uniforme 5/90 : (5*85)/90² (constante combinatoire exacte) */
+const UNIFORM_BRIER_REFERENCE = (5 * 85) / (90 * 90);
+
+/**
+ * Skill Gate fallback honnête : mini Walk-Forward Brier Skill Score déterministe
+ * calculé sur l'historique JS. Si BSS ≤ 0, le canal n'a pas de valeur prédictive
+ * démontrée et la génération uniforme doit être préférée (affichée clairement).
+ */
+function computeFallbackSkillGate(drawName: string): number {
+  const normName = drawName.trim().toUpperCase();
+  const timeline = fallbackStoreTimelines.get(normName);
+  const history = timeline?.history || [];
+  const len = history.length;
+  if (len < 8) return 0;
+
+  const startT = Math.max(5, len - 20);
+  let totalBrier = 0;
+  let samples = 0;
+
+  for (let t = startT; t < len; t++) {
+    const freqs = new Int32Array(91);
+    const gaps = new Int32Array(91);
+    const lastSeen = new Uint8Array(91);
+    for (let d = t - 1; d >= 0; d--) {
+      for (const w of history[d].winners) {
+        if (w >= 1 && w <= 90) {
+          freqs[w]++;
+          if (!lastSeen[w]) {
+            gaps[w] = t - 1 - d;
+            lastSeen[w] = 1;
+          }
+        }
+      }
+    }
+    for (let n = 1; n <= 90; n++) {
+      if (!lastSeen[n]) gaps[n] = t;
+    }
+    const totalBalls = t * 5;
+    const scores = new Float64Array(91);
+    let sum = 0;
+    for (let n = 1; n <= 90; n++) {
+      const f = (freqs[n] + 1.0) / (totalBalls + 90.0);
+      const g = Math.tanh(Math.min(3.0, gaps[n] / 18.0) / 3.0);
+      scores[n] = f * 90.0 * 0.5 + g * 0.5;
+      sum += scores[n];
+    }
+    let brier = 0;
+    if (sum > 0) {
+      for (let n = 1; n <= 90; n++) {
+        const p = Math.min(1.0, Math.max(0.0, (scores[n] / sum) * 5.0));
+        const y = history[t].winners.includes(n) ? 1 : 0;
+        brier += (p - y) * (p - y);
+      }
+    }
+    totalBrier += brier / 90;
+    samples++;
+  }
+
+  if (samples === 0) return 0;
+  const meanBrier = totalBrier / samples;
+  return Math.max(-1, Math.min(1, 1 - meanBrier / UNIFORM_BRIER_REFERENCE));
+}
+
+/** P(X >= 3) d'une somme de 5 Bernoulli hétérogènes (Poisson-binomiale exacte, DP) */
+function poissonBinomialGe3(probs: number[]): number {
+  let dp = [1, 0, 0, 0, 0, 0];
+  for (const raw of probs) {
+    const p = Math.min(1, Math.max(0, raw));
+    const next = [0, 0, 0, 0, 0, 0];
+    for (let k = 0; k <= 5; k++) {
+      next[k] += dp[k] * (1 - p);
+      if (k > 0) next[k] += dp[k - 1] * p;
+    }
+    dp = next;
+  }
+  return dp[3] + dp[4] + dp[5];
 }
 
 /**
@@ -1667,6 +1875,7 @@ export function analyzeDrawHistoryHpc(drawName: string): PriorAnalysisReportHpc 
         };
       }
     } catch (e) {
+      recordWasmFallback('analyze_draw', e);
       console.warn('[LOTO-ENGINE] Erreur analyze_draw WASM, passage au fallback :', e);
     }
   }
@@ -1772,10 +1981,13 @@ export function generateDiversifiedPortfolioHpc(
             shannonEntropy: readWasmField<number>(port, 'shannon_entropy', 1.0),
             hurstExponent: readWasmField<number>(port, 'hurst_exponent', 0.5),
             confidenceScore: readWasmField<number>(port, 'confidence_score', 0.0),
+            // Mode honnête déclaré par le moteur Rust (Skill Gate BSS ≤ 0 => UNIFORM_RANDOM)
+            predictionMode: normalizePredictionMode(readWasmField<string>(port, 'prediction_mode', 'CALIBRATED')),
           };
         }
       }
     } catch (e) {
+      recordWasmFallback('generate_portfolio', e);
       console.warn('[LOTO-ENGINE] Erreur generate_portfolio WASM, passage au fallback :', e);
     }
   }
@@ -1798,7 +2010,8 @@ export function generateDiversifiedPortfolioHpc(
     const fScore = (freqs[n] + 1.0) / (totalBalls + 90.0);
     const gRatio = gaps[n] / expectedGap;
     const gScore = Math.tanh(Math.min(3.0, gRatio) / 3.0);
-    baseScores[n] = fScore * 45.0 + gScore * 1.5;
+    // Poids 0.5/0.5 identiques au moteur Rust (l'échelle absolue est absorbée par le simplexe)
+    baseScores[n] = fScore * 90.0 * 0.5 + gScore * 0.5;
   }
 
   // Normalisation sur le simplexe marginal de 5 boules (Sum = 5.0)
@@ -1810,35 +2023,55 @@ export function generateDiversifiedPortfolioHpc(
     }
   }
 
-  const tickets: number[][] = [];
-  const strategies = [
-    'ATTRACTEUR_CENTRAL',
-    'RESONANCE_DOMINO',
-    'POISSON_OUTSIDERS',
-    'PHASE_SPECTRALE_FFT',
-    'EQUILIBRE_THERMODYNAMIQUE',
-  ];
+  // 1. Skill Gate fallback honnête : BSS Walk-Forward déterministe
+  const fallbackBss = computeFallbackSkillGate(drawName);
+  const useUniformMode = fallbackBss <= 0;
+
+  let tickets: number[][] = [];
   const selectionCounts = new Int32Array(91);
 
-  for (let t = 0; t < kTickets; t++) {
-    const penalized = new Float64Array(baseScores);
-    for (let n = 1; n <= 90; n++) {
-      if (selectionCounts[n] > 0) {
-        penalized[n] *= Math.exp(-0.85 * selectionCounts[n]);
-      }
-      if (t === 2) {
-        // Boost Poisson pour le ticket outsiders
-        penalized[n] *= 1.0 + Math.min(2.5, gaps[n] / expectedGap) * 0.4;
-      }
+  if (useUniformMode) {
+    // Génération uniforme déclarée : LCG seedé par FNV-1a de l'historique réel
+    const timeline = fallbackStoreTimelines.get(normName);
+    const seedBytes: number[] = [];
+    for (const d of timeline?.history || []) {
+      for (const w of d.winners) seedBytes.push(w);
     }
+    const rng = createDeterministicLcg(fnv1a64(seedBytes));
+    for (let t = 0; t < kTickets; t++) {
+      const pool = Array.from({ length: 90 }, (_, i) => i + 1);
+      for (let i = 0; i < 5; i++) {
+        const j = i + Math.floor(rng() * (90 - i));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+      }
+      const ticket = pool.slice(0, 5).sort((a, b) => a - b);
+      for (const n of ticket) selectionCounts[n]++;
+      tickets.push(ticket);
+    }
+    for (let n = 1; n <= 90; n++) baseScores[n] = 5.0 / 90.0;
+  } else {
+    // Répulsion dérivée de la pression de sélection : gamma = clamp(K*5/90, 0.05, 0.98)
+    const gamma = Math.max(0.05, Math.min(0.98, (kTickets * 5) / 90));
+    for (let t = 0; t < kTickets; t++) {
+      const penalized = new Float64Array(baseScores);
+      for (let n = 1; n <= 90; n++) {
+        if (selectionCounts[n] > 0) {
+          penalized[n] *= Math.exp(-gamma * selectionCounts[n]);
+        }
+        if (t === 2) {
+          // Boost Poisson pour le ticket outsiders (amplitude dérivée du poids du canal écart)
+          penalized[n] *= 1.0 + (Math.min(2.5, gaps[n] / expectedGap) / 2.5);
+        }
+      }
 
-    const indexed: { n: number; s: number }[] = [];
-    for (let n = 1; n <= 90; n++) indexed.push({ n, s: penalized[n] });
-    indexed.sort((a, b) => b.s - a.s || a.n - b.n);
+      const indexed: { n: number; s: number }[] = [];
+      for (let n = 1; n <= 90; n++) indexed.push({ n, s: penalized[n] });
+      indexed.sort((a, b) => b.s - a.s || a.n - b.n);
 
-    const ticket = indexed.slice(0, 5).map(x => x.n).sort((a, b) => a - b);
-    for (const n of ticket) selectionCounts[n]++;
-    tickets.push(ticket);
+      const ticket = indexed.slice(0, 5).map(x => x.n).sort((a, b) => a - b);
+      for (const n of ticket) selectionCounts[n]++;
+      tickets.push(ticket);
+    }
   }
 
   let uniqueCovered = 0;
@@ -1846,16 +2079,51 @@ export function generateDiversifiedPortfolioHpc(
     if (selectionCounts[n] > 0) uniqueCovered++;
   }
 
+  // Calcul de la distance de Jaccard moyenne réelle inter-tickets (diversité empirique)
+  let totalJaccard = 0;
+  let pairCount = 0;
+  for (let i = 0; i < tickets.length; i++) {
+    for (let j = i + 1; j < tickets.length; j++) {
+      const t1 = tickets[i];
+      const t2 = tickets[j];
+      let common = 0;
+      for (const n1 of t1) {
+        if (t2.includes(n1)) common++;
+      }
+      const unionLen = 10 - common;
+      totalJaccard += 1.0 - (common / unionLen);
+      pairCount++;
+    }
+  }
+  const avgJaccard = pairCount > 0 ? totalJaccard / pairCount : 1.0;
+
+  // 2. Objectif de portefeuille explicite : P(au moins un ticket >= 3 bons numéros)
+  //    Probabilité par ticket : hypergéométrique exacte en mode uniforme,
+  //    Poisson-binomiale exacte sur les marginales en mode calibré.
+  let survival = 1.0;
+  for (const ticket of tickets) {
+    const pGe3 = useUniformMode
+      ? hypergeometricTail(3, 5, 5, 90)
+      : poissonBinomialGe3(ticket.map(num => baseScores[num]));
+    survival *= 1.0 - pGe3;
+  }
+  const confidence = Math.max(0, Math.min(100, (1.0 - survival) * 100.0));
+
   return {
     tickets,
-    strategies: strategies.slice(0, kTickets),
+    strategies: tickets.map((_, t) =>
+      useUniformMode
+        ? 'UNIFORM_RANDOM_LCG'
+        : ['ATTRACTEUR_CENTRAL', 'RESONANCE_DOMINO', 'POISSON_OUTSIDERS', 'PHASE_SPECTRALE_FFT', 'EQUILIBRE_THERMODYNAMIQUE'][t % 5]
+    ),
     scores: baseScores,
     ticketCount: kTickets,
     uniqueNumbersCovered: uniqueCovered,
-    diversityJaccardDistance: 0.82,
+    diversityJaccardDistance: avgJaccard,
     shannonEntropy: prior.shannonEntropy,
     hurstExponent: prior.hurstExponent,
-    confidenceScore: Math.min(95.0, 50.0 + 35.0 * (1.0 - prior.shannonEntropy) + 8.2),
+    confidenceScore: confidence,
+    predictionMode: useUniformMode ? 'UNIFORM_RANDOM' : 'CALIBRATED',
   };
 }
 

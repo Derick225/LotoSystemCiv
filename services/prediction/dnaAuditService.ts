@@ -11,6 +11,7 @@ import { computeAdvancedMetrics } from './advancedMetricsCalculator';
 import { extractFeatures } from './featureExtractor';
 import { logger } from '../../utils/logger';
 import { drawHasMachineNumbers } from '../../constants';
+import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 
 export type AlgorithmDriftStatus = 'ALIGNED' | 'WEIGHT_DRIFT' | 'CACHE_STALE' | 'DESYNCHRONIZED';
 
@@ -357,7 +358,7 @@ export const synchronizeAlgorithmsToDnaReference = async (
     weights: { ...normalized },
     algoWeights: { ...normalized },
     statisticalBounds: bounds,
-    deterministicSeed: pureHistory.length > 0 ? new Date(pureHistory[0].date).getTime() : 1234567890,
+    deterministicSeed: deriveSeedFromHistory(pureHistory),
     drawName,
     pluginCache: {}
   };

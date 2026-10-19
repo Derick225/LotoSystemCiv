@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
-use crate::in_memory_store::{CompactDraw, TOTAL_NUMBERS, NUMBERS_PER_DRAW};
+use crate::in_memory_store::{TOTAL_NUMBERS, NUMBERS_PER_DRAW};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[wasm_bindgen]
@@ -103,31 +103,19 @@ pub fn run_native_prediction_pipeline(
         }
     }
 
-    // 2. Calcul du taux théorique moyen et régulation continue
+    // 2. Scoring factorisé via le module unifié (Laplace + Poisson + projection simplexe)
     let total_balls_drawn = (actual_draws * cols) as f64;
-    let expected_gap = (TOTAL_NUMBERS as f64) / (cols as f64);
 
-    let mut sum_scores = 0.0f64;
     for n in 1..=TOTAL_NUMBERS {
-        // Fréquence lissée bayésienne
-        let f_score = (freqs[n] as f64 + 1.0) / (total_balls_drawn + (TOTAL_NUMBERS as f64));
-        // Ratio de Poisson continu pour l'écart (fonction différentiable tanh)
-        let gap_ratio = (current_gaps[n] as f64) / expected_gap;
-        let g_score = (gap_ratio.min(3.0) / 3.0).tanh();
-
-        // Combinaison tensorielle pondérée
-        let composite = frequency_weight * f_score * 90.0 + gap_weight * g_score;
-        scores[n] = composite;
-        sum_scores += composite;
+        scores[n] = crate::scoring::compute_bayesian_poisson_score(
+            freqs[n],
+            current_gaps[n],
+            total_balls_drawn,
+            frequency_weight,
+            gap_weight,
+        );
     }
-
-    // Normalisation sur le simplexe des probabilités marginales de tirage 5/90 (Sum = 5.0)
-    if sum_scores > 0.0 {
-        let target_sum = NUMBERS_PER_DRAW as f64;
-        for n in 1..=TOTAL_NUMBERS {
-            scores[n] = ((scores[n] / sum_scores) * target_sum).clamp(0.0, 1.0);
-        }
-    }
+    crate::scoring::project_to_marginal_simplex(&mut scores, NUMBERS_PER_DRAW as f64);
 
     // 3. Calcul de l'Entropie de Shannon normalisée
     let mut entropy = 0.0f64;
@@ -140,7 +128,17 @@ pub fn run_native_prediction_pipeline(
     }
     let normalized_entropy = (entropy / max_entropy).clamp(0.0, 1.0);
 
-    // 4. Tri déterministe via f64::total_cmp pour extraire les top numéros
+    // 4. Calcul de l'Exposant de Hurst R/S adaptatif sur le signal d'énergie des tirages
+    let sample_size = actual_draws.min(256);
+    let mut energy_signal: Vec<f64> = Vec::with_capacity(sample_size);
+    for d in (0..actual_draws).rev().take(sample_size) {
+        let offset = d * cols;
+        let sum_w: f64 = (0..cols).map(|c| flat_winners[offset + c] as f64).sum();
+        energy_signal.push(sum_w);
+    }
+    let hurst = crate::hurst::compute_robust_hurst_wasm(&energy_signal);
+
+    // 5. Tri déterministe via f64::total_cmp pour extraire les top numéros
     let mut indexed: Vec<(u8, f64)> = (1..=TOTAL_NUMBERS as u8)
         .map(|n| (n, scores[n as usize]))
         .collect();
@@ -150,14 +148,24 @@ pub fn run_native_prediction_pipeline(
     let top_5: Vec<u8> = indexed.iter().take(5).map(|(num, _)| *num).collect();
     let top_10: Vec<u8> = indexed.iter().take(10).map(|(num, _)| *num).collect();
 
-    let confidence = 50.0 + 35.0 * (1.0 - normalized_entropy);
+    // 6. Confiance continue différentiable C^∞ :
+    // - Baseline théorique combinatoire exacte : P(Hit >= 1) dans un tirage 5/90
+    //   calculée par coefficients binomiaux exacts (hypergéométrique) — zéro constante en dur
+    // - Poids de saturation d'échantillon w_N = 1 - exp(-actual_draws / TOTAL_NUMBERS)
+    // - Gain d'information Shannon I = 1.0 - normalized_entropy
+    // - Écart au bruit brownien d_H = 2.0 * |hurst - 0.5|
+    let p_hit_base = crate::combinatorics::ticket_prob_at_least_one() * 100.0;
+    let sample_saturation = 1.0 - (-(actual_draws as f64) / (TOTAL_NUMBERS as f64)).exp();
+    let info_divergence = 1.0 - normalized_entropy;
+    let hurst_divergence = (hurst - 0.5).abs() * 2.0;
+    let confidence = p_hit_base + (95.0 - p_hit_base) * sample_saturation * (0.7 * info_divergence + 0.3 * hurst_divergence);
 
     NativePredictionResult {
         top_5,
         top_10,
         scores,
         shannon_entropy: normalized_entropy,
-        hurst_exponent: 0.52,
+        hurst_exponent: hurst,
         confidence_score: confidence.clamp(10.0, 95.0),
     }
 }

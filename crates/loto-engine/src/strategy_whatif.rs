@@ -126,7 +126,7 @@ pub fn run_monte_carlo_whatif_hpc(
         }
         let std_dev = (var_sum / (iterations as f64)).sqrt();
 
-        single_ball.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        single_ball.sort_by(|a, b| a.total_cmp(b));
         let p5_idx = ((iterations as f64) * 0.05).floor() as usize;
         let p95_idx = (((iterations as f64) * 0.95).floor() as usize).min(iterations - 1);
 
@@ -142,7 +142,7 @@ pub fn run_monte_carlo_whatif_hpc(
         });
     }
 
-    ball_stats.sort_by(|a, b| b.mean_score.partial_cmp(&a.mean_score).unwrap_or(std::cmp::Ordering::Equal));
+    ball_stats.sort_by(|a, b| b.mean_score.total_cmp(&a.mean_score));
 
     MonteCarloReportHpc { stats: ball_stats }
 }

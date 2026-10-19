@@ -7,6 +7,7 @@ import { computeAdvancedMetrics } from '../prediction/predictionOrchestrator';
 import { algorithmRegistry, AlgorithmContext } from '../prediction/algorithmRegistry';
 import { calculateStatisticalBounds } from '../mathService';
 import { normalizeWeights } from '../prediction/weightsManager';
+import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 
 export interface GeneAuditMetric {
   key: AlgoKey;
@@ -129,7 +130,7 @@ export const runGenomicAudit = async (
       weights: { ...currentWeights },
       algoWeights: { ...currentWeights },
       statisticalBounds: bounds,
-      deterministicSeed: new Date(targetDraw.date).getTime(),
+      deterministicSeed: deriveSeedFromHistory(subHistory),
       drawName,
       pluginCache: {},
     };

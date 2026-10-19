@@ -153,7 +153,14 @@ describe('Rust Core Wasm In-Memory Store & Native Inference Integration', () => 
     expect(portfolio.uniqueNumbersCovered).toBeGreaterThanOrEqual(14);
     // Distance moyenne de Jaccard élevée entre les tickets (diversité garantie)
     expect(portfolio.diversityJaccardDistance).toBeGreaterThan(0.60);
-    expect(portfolio.confidenceScore).toBeGreaterThanOrEqual(20.0);
+    // Objectif explicite : P(au moins un ticket ≥ 3 bons numéros), en pourcentage.
+    expect(portfolio.confidenceScore).toBeGreaterThan(0);
+    expect(portfolio.confidenceScore).toBeLessThanOrEqual(100);
+    // Sans skill démontré (Skill Gate BSS ≤ 0), le portefeuille est uniforme et la
+    // probabilité honnête reste celle du hasard pur (~0.41 % pour 5 tickets).
+    if (portfolio.predictionMode === 'UNIFORM_RANDOM') {
+      expect(portfolio.confidenceScore).toBeLessThan(1.0);
+    }
   });
 });
 

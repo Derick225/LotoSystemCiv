@@ -4,6 +4,7 @@ import type { DrawResult } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { EnhancedMetrics } from '../prediction/metrics.types';
 import { calculateStatisticalBounds } from '../mathService';
+import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 import { 
     calculatePoissonScores, 
     calculateBayesianScore, 
@@ -67,9 +68,7 @@ export const buildTensorMatrix = async (
     
     const statisticalBounds = calculateStatisticalBounds(pastContext);
 
-    const deterministicSeed = pastContext.length > 0 
-      ? pastContext[0].gagnants.reduce((a,b)=>a+b, 0) * pastContext.length 
-      : 12345;
+    const deterministicSeed = deriveSeedFromHistory(pastContext);
 
     const context: AlgorithmContext = {
       features,

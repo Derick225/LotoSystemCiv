@@ -128,6 +128,17 @@ const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): Dra
 const lastSyncedFingerprintByDraw = new Map<string, string>();
 
 /**
+ * Réinitialise l'empreinte de synchronisation du store Rust pour forcer un rechargement
+ */
+export const clearHistorySyncFingerprint = (targetDrawName?: string): void => {
+  if (targetDrawName) {
+    lastSyncedFingerprintByDraw.delete(targetDrawName.trim().toUpperCase());
+  } else {
+    lastSyncedFingerprintByDraw.clear();
+  }
+};
+
+/**
  * Synchronise l'historique contigu en mémoire vive dans le store Rust Core (WASM).
  * Applique :
  * 1. Un contrôle d'idempotence strict par empreinte (zéro ré-injection cumulative).
@@ -138,10 +149,10 @@ export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: str
   if (!draws || draws.length === 0) return;
   const drawKey = (targetDrawName || 'GLOBAL').trim().toUpperCase();
 
-  // Empreinte d'idempotence basée sur la longueur et les bornes temporelles
+  // Empreinte d'idempotence robuste basée sur le drawKey, la cardinalité et les signatures des bornes
   const newest = draws[0];
   const oldest = draws[draws.length - 1];
-  const fingerprint = `${draws.length}_${newest?.date || ''}_${oldest?.date || ''}`;
+  const fingerprint = `${drawKey}:${draws.length}:${newest?.date || ''}:${newest?.gagnants?.join(',') || ''}:${oldest?.date || ''}:${oldest?.gagnants?.join(',') || ''}`;
 
   if (lastSyncedFingerprintByDraw.get(drawKey) === fingerprint) {
     return; // Déjà synchronisé, no-op strict

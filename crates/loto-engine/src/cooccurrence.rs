@@ -46,7 +46,7 @@ fn pair_index(t1: usize, t2: usize) -> usize {
 }
 
 /// Analyse tensorielle haute performance des cooccurrences inter-tirages en WebAssembly
-/// 
+///
 /// Calcule en mémoire continue contiguë :
 /// - La matrice complète des dyades (91 x 91)
 /// - Le dénombrement inconditionnel des 4005 paires cibles
@@ -59,6 +59,25 @@ pub fn compute_cooccurrence_tensor_wasm(
     win_cols: usize,
     active_pred_numbers: &[i32],
 ) -> CooccurrenceTensorResult {
+    let (target_pair_hits, conditioned_pair_hits, dyad_matrix, total_pairs_evaluated) =
+        compute_cooccurrence_counts(pred_draws_flat, target_draws_flat, num_draws, win_cols, active_pred_numbers);
+
+    CooccurrenceTensorResult {
+        target_pair_hits,
+        conditioned_pair_hits,
+        dyad_matrix,
+        total_pairs_evaluated,
+    }
+}
+
+/// Cœur de calcul partagé entre le tenseur de comptages bruts et le PMI lissé
+fn compute_cooccurrence_counts(
+    pred_draws_flat: &[i32],
+    target_draws_flat: &[i32],
+    num_draws: usize,
+    win_cols: usize,
+    active_pred_numbers: &[i32],
+) -> (Vec<i32>, Vec<i32>, Vec<i32>, usize) {
     let mut target_pair_hits = vec![0i32; PAIRS_COUNT];
     let mut conditioned_pair_hits = vec![0i32; PAIRS_COUNT];
     let mut dyad_matrix = vec![0i32; 91 * 91];
@@ -121,10 +140,53 @@ pub fn compute_cooccurrence_tensor_wasm(
         }
     }
 
-    CooccurrenceTensorResult {
-        target_pair_hits,
-        conditioned_pair_hits,
-        dyad_matrix,
-        total_pairs_evaluated,
+    (target_pair_hits, conditioned_pair_hits, dyad_matrix, total_pairs_evaluated)
+}
+
+/// PMI (Pointwise Mutual Information) lissé de Laplace pour les 4005 paires.
+///
+/// Remplace les comptages bruts par une mesure d'association normalisée :
+/// PMI(i,j) = ln[ P_smoothed(i,j) / (P_smoothed(i) * P_smoothed(j)) ]
+/// avec lissage alpha = nombre moyen de paires par cellule (dérivé des données).
+#[wasm_bindgen]
+pub fn compute_pair_pmi_wasm(
+    pred_draws_flat: &[i32],
+    target_draws_flat: &[i32],
+    num_draws: usize,
+    win_cols: usize,
+    active_pred_numbers: &[i32],
+) -> Vec<f64> {
+    let (target_pair_hits, _conditioned, dyad_matrix, total_pairs_evaluated) =
+        compute_cooccurrence_counts(pred_draws_flat, target_draws_flat, num_draws, win_cols, active_pred_numbers);
+
+    // Degrés marginaux depuis la matrice des dyades (symétrisation ordre i->j / j->i)
+    let mut degrees = [0.0f64; 91];
+    for i in 1..=90usize {
+        let row = i * 91;
+        for j in 1..=90usize {
+            let v = dyad_matrix.get(row + j).copied().unwrap_or(0) as f64;
+            degrees[i] += v;
+        }
     }
+
+    let total_pairs = (total_pairs_evaluated.max(1)) as f64;
+    let num_cells = PAIRS_COUNT as f64;
+    // Lissage de Laplace : intensité moyenne observée par cellule
+    let alpha = (total_pairs / num_cells).max(1e-3);
+
+    let mut pmi = vec![0.0f64; PAIRS_COUNT];
+    let mut idx = 0usize;
+    for t1 in 1..=90usize {
+        for t2 in (t1 + 1)..=90usize {
+            let count = target_pair_hits.get(idx).copied().unwrap_or(0) as f64;
+            let p_ij = (count + alpha) / (total_pairs + alpha * num_cells);
+            let p_i = (degrees[t1] + alpha * 89.0) / (2.0 * total_pairs + alpha * 90.0 * 89.0);
+            let p_j = (degrees[t2] + alpha * 89.0) / (2.0 * total_pairs + alpha * 90.0 * 89.0);
+            let denom = (p_i * p_j).max(1e-12);
+            pmi[idx] = (p_ij / denom).ln();
+            idx += 1;
+        }
+    }
+
+    pmi
 }

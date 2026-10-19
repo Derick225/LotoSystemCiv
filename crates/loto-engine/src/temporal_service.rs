@@ -143,7 +143,7 @@ pub fn compute_cyclic_candidates_hpc(
         });
     }
 
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
 
     CyclicBatchReportHpc { candidates }
 }
