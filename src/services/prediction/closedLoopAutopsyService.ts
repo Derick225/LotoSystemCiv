@@ -38,6 +38,19 @@ import {
   auditInterDrawPatternsPostMortem,
   InterDrawPostMortemAudit,
 } from './interDrawPostMortemService';
+import {
+  computeChannelAttribution,
+  ChannelCounterfactualImpact,
+} from './channelAttributionService';
+import {
+  computeEce,
+  conformalInterval,
+  coverageFromSampleSize,
+  deriveEceBinCount,
+  fitMonotoneCalibrator,
+  looEceAfterCalibration,
+  ConformalInterval,
+} from './onlineCalibrationService';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -99,6 +112,10 @@ export interface ClosedLoopAutopsyReport {
   bestPerformingScenario?: ScenarioPostMortemEvaluation;
   mathProofMetadata?: MathematicalProofMetadata;
   interDrawAudit?: InterDrawPostMortemAudit;
+  /** Attribution causale par contrefactuel continu : ablation + réallocation par canal */
+  channelAttribution?: ChannelCounterfactualImpact[];
+  /** Échantillon brut de calibration : marginales prédites (index n−1 ↔ numéro n) et issues */
+  calibrationSample?: { probabilities: number[]; outcomes: number[] };
 }
 
 /**
@@ -434,6 +451,18 @@ export const executeClosedLoopAutopsy = async (
     )
   );
 
+  // 6.5 Attribution causale par contrefactuel continu (AGENTS.md : zéro seuil binaire,
+  // 100% déterministe). Mesure ce que chaque canal a réellement causé au résultat
+  // d'ensemble — au-delà de l'attribution descriptive sur les gagnants.
+  const channelAttribution = computeChannelAttribution({
+    channelKeys: validKeys,
+    algoScores,
+    weights: normalizedCurrent,
+    actualWinners,
+    top5Predicted,
+    labels: LABELS_MAP as Record<string, string>,
+  });
+
   // 7. Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
   // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q)) avec η0 = 1 / sqrt(K_active)
   const activeAlgoCount =
@@ -644,6 +673,21 @@ export const executeClosedLoopAutopsy = async (
   }
   summaryRemark += `Taux d'apprentissage η(t) = ${(learningRate * 100).toFixed(2)}% (Résistance dérive: ${(temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%). `;
   summaryRemark += `Gènes leaders sur ce tirage : ${algoGradients.slice(0, 3).map((g) => g.label).join(', ')}.`;
+  const topCausalChannel = channelAttribution[0];
+  if (topCausalChannel) {
+    summaryRemark += ` Moteur causal dominant : ${topCausalChannel.label} (importance ${(topCausalChannel.causalImportanceScore * 100).toFixed(1)}%, Δhits ablation ${topCausalChannel.deltaHitsTop5Ablation >= 0 ? '+' : ''}${topCausalChannel.deltaHitsTop5Ablation}).`;
+  }
+  const mostHarmfulChannel = channelAttribution.reduce<ChannelCounterfactualImpact | null>(
+    (acc, impact) =>
+      impact.deltaHitsTop5Ablation < 0 &&
+      (acc === null || impact.deltaHitsTop5Ablation < acc.deltaHitsTop5Ablation)
+        ? impact
+        : acc,
+    null
+  );
+  if (mostHarmfulChannel) {
+    summaryRemark += ` Canal contrefactuellement préjudiciable : ${mostHarmfulChannel.label} (son ablation aurait gagné ${-mostHarmfulChannel.deltaHitsTop5Ablation} hit(s)).`;
+  }
 
   const mathProofMetadata = extractMathProofMetadata({
     history: priorHistory,
@@ -685,6 +729,11 @@ export const executeClosedLoopAutopsy = async (
     bestPerformingScenario,
     mathProofMetadata,
     interDrawAudit,
+    channelAttribution,
+    calibrationSample: {
+      probabilities: Array.from({ length: 90 }, (_, i) => probEnsemble[i + 1]),
+      outcomes: Array.from({ length: 90 }, (_, i) => (actualWinnersSet.has(i + 1) ? 1 : 0)),
+    },
   };
 };
 
@@ -951,6 +1000,27 @@ export const executeClosedLoopAutoAdjustment = async (
   };
 };
 
+export interface AggregatedChannelAttribution {
+  key: string;
+  label: string;
+  meanDeltaHitsTop5Ablation: number;
+  meanDeltaBrierAblation: number;
+  meanCausalImportanceScore: number;
+}
+
+export interface OnlineCalibrationSummary {
+  /** ECE brute pooled sur les échantillons du lot (avant calibration) */
+  eceBefore: number;
+  /** ECE post-calibration monotone, évaluée honnêtement leave-one-out par tirage */
+  eceAfterLoo: number;
+  /** Nombre de blocs monotone du calibrateur ajusté sur tout le lot */
+  monotoneBlockCount: number;
+  sampleSize: number;
+  /** Intervalle conforme distribution-free sur le nombre de hits du prochain tirage */
+  conformal: ConformalInterval;
+  narrative: string;
+}
+
 export interface BatchClosedLoopAutopsyResult {
   drawName: string;
   batchSize: number;
@@ -960,6 +1030,8 @@ export interface BatchClosedLoopAutopsyResult {
   totalDirectHitsTop10: number;
   totalNearMisses: number;
   aggregatedGradients: AlgoGradientBreakdown[];
+  aggregatedChannelAttribution: AggregatedChannelAttribution[];
+  onlineCalibration?: OnlineCalibrationSummary;
   recommendedWeights: AlgoWeights;
   reports: ClosedLoopAutopsyReport[];
 }
@@ -983,10 +1055,13 @@ export const executeBatchClosedLoopAutopsy = async (
   const reports: ClosedLoopAutopsyReport[] = [];
   const validKeys = Object.values(AlgoKey);
   const gradientSums: Record<string, number> = {};
-  const attributionSums: Record<string, number> = {};
+  const winnerAttributionSums: Record<string, number> = {};
+  const attributionSums: Record<string, { hits: number; brier: number; importance: number }> = {};
+  const attributionLabels: Record<string, string> = {};
   validKeys.forEach((k) => {
     gradientSums[k] = 0;
-    attributionSums[k] = 0;
+    winnerAttributionSums[k] = 0;
+    attributionSums[k] = { hits: 0, brier: 0, importance: 0 };
   });
 
   let sumCalibration = 0;
@@ -1031,8 +1106,16 @@ export const executeBatchClosedLoopAutopsy = async (
 
       rep.algoGradients.forEach((g) => {
         gradientSums[g.key] = (gradientSums[g.key] || 0) + g.gradient;
-        attributionSums[g.key] =
-          (attributionSums[g.key] || 0) + g.attributionToWinners;
+        winnerAttributionSums[g.key] =
+          (winnerAttributionSums[g.key] || 0) + g.attributionToWinners;
+      });
+      rep.channelAttribution?.forEach((impact) => {
+        const acc = attributionSums[impact.key] ?? { hits: 0, brier: 0, importance: 0 };
+        acc.hits += impact.deltaHitsTop5Ablation;
+        acc.brier += impact.deltaBrierAblation;
+        acc.importance += impact.causalImportanceScore;
+        attributionSums[impact.key] = acc;
+        attributionLabels[impact.key] = impact.label;
       });
     } catch (e) {
       console.warn(`[Batch Autopsy] Tirage ${i} ignoré :`, e);
@@ -1068,7 +1151,7 @@ export const executeBatchClosedLoopAutopsy = async (
 
   const aggregatedGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
     const meanGrad = (gradientSums[key] || 0) / effectiveCount;
-    const meanAttr = (attributionSums[key] || 0) / effectiveCount;
+    const meanAttr = (winnerAttributionSums[key] || 0) / effectiveCount;
     const currentW = Number.isFinite(currentNormalized[key])
       ? currentNormalized[key]
       : 0;
@@ -1118,6 +1201,24 @@ export const executeBatchClosedLoopAutopsy = async (
 
   aggregatedGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
 
+  const aggregatedChannelAttribution: AggregatedChannelAttribution[] = validKeys
+    .map((key) => {
+      const acc = attributionSums[key] ?? { hits: 0, brier: 0, importance: 0 };
+      return {
+        key,
+        label: attributionLabels[key] || key,
+        meanDeltaHitsTop5Ablation: parseFloat((acc.hits / effectiveCount).toFixed(4)),
+        meanDeltaBrierAblation: parseFloat((acc.brier / effectiveCount).toFixed(6)),
+        meanCausalImportanceScore: parseFloat((acc.importance / effectiveCount).toFixed(6)),
+      };
+    })
+    .sort((a, b) => {
+      if (b.meanCausalImportanceScore !== a.meanCausalImportanceScore) {
+        return b.meanCausalImportanceScore - a.meanCausalImportanceScore;
+      }
+      return a.key.localeCompare(b.key);
+    });
+
   return {
     drawName,
     batchSize: effectiveCount,
@@ -1127,6 +1228,7 @@ export const executeBatchClosedLoopAutopsy = async (
     totalDirectHitsTop10: totalHitsTop10,
     totalNearMisses,
     aggregatedGradients,
+    aggregatedChannelAttribution,
     recommendedWeights,
     reports,
   };
