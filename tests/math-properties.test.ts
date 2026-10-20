@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
-import { mean } from '../services/mathCore';
-import { variance, binomialUpperTail, benjaminiHochberg } from '../utils/mathUtils';
+import { mean } from '../src/services/mathCore';
+import { variance, binomialUpperTail, benjaminiHochberg } from '../src/utils/mathUtils';
 
 // Simple pearson correlation implementation for tests
 const pearsonCorrelation = (x: number[], y: number[]) => {

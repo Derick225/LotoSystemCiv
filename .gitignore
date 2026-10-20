@@ -88,6 +88,7 @@ lerna-debug.log
 .tern-project
 
 # Editor directories and files
+.aistudio/
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -105,3 +106,4 @@ dist-ssr
 
 # Rust build artifacts
 crates/*/target/
+supabase/.temp/

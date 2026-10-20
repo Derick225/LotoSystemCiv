@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { fnv1a64To53 } from '../utils/deterministicSeed';
+import { fnv1a64To53 } from '../src/utils/deterministicSeed';
 
 interface Fixture {
   epsilon: number;

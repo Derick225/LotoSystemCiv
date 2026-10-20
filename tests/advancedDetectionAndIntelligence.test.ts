@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { computeOrthogonalUniquenessWeights, ScoredNumber } from '../services/prediction/scoringEngine';
-import { computeSubAlgorithmDivergenceCorrelations } from '../services/prediction/algorithmDivergenceCorrelationService';
-import { initializeKalmanState, updateWeightsWithKalmanFilter } from '../services/prediction/kalmanWeightsFilter';
-import { driftDetector } from '../services/prediction/conceptDriftDetector';
+import { computeOrthogonalUniquenessWeights, ScoredNumber } from '../src/services/prediction/scoringEngine';
+import { computeSubAlgorithmDivergenceCorrelations } from '../src/services/prediction/algorithmDivergenceCorrelationService';
+import { initializeKalmanState, updateWeightsWithKalmanFilter } from '../src/services/prediction/kalmanWeightsFilter';
+import { driftDetector } from '../src/services/prediction/conceptDriftDetector';
 import {
   computeAdaptiveOutsiderQuota,
   computeConformalCandidateSet,
-} from '../services/prediction/combinationGenerator';
-import { AlgoKey } from '../shared/prediction.types';
-import { DrawResult, AlgoWeights } from '../types';
-import { getDefaultWeights } from '../services/prediction/weightsManager';
+} from '../src/services/prediction/combinationGenerator';
+import { AlgoKey } from '../src/shared/prediction.types';
+import { DrawResult, AlgoWeights } from '../src/types';
+import { getDefaultWeights } from '../src/services/prediction/weightsManager';
 
 function buildDeterministicHistory(drawName: string, count: number): DrawResult[] {
   const results: DrawResult[] = [];

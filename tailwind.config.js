@@ -2,16 +2,7 @@
 export default {
   content: [
     "./index.html",
-    "./App.tsx",
-    "./index.tsx",
-    "./constants.ts",
-    "./components/**/*.{js,ts,jsx,tsx}",
-    "./hooks/**/*.{js,ts,jsx,tsx}",
-    "./services/**/*.{js,ts,jsx,tsx}",
-    "./shared/**/*.{js,ts,jsx,tsx}",
-    "./store/**/*.{js,ts,jsx,tsx}",
-    "./types/**/*.{js,ts,jsx,tsx}",
-    "./utils/**/*.{js,ts,jsx,tsx}",
+    "./src/**/*.{ts,tsx}",
   ],
   darkMode: 'class',
   theme: {

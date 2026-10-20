@@ -6,7 +6,7 @@ import {
   computeMarkovTransitionHpc,
   solveCombinatorialAnnealingHpc,
   computeTopologicalLyapunovHpc,
-} from '../services/wasm/lotoEngineBridge';
+} from '../src/services/wasm/lotoEngineBridge';
 
 describe('LotoEngine HPC Bridge & Fallbacks', () => {
   it('calcule un exposant de Hurst déterministe et cohérent', () => {

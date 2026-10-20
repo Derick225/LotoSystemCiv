@@ -3,14 +3,14 @@ import {
   initializeLotoEngineWasm,
   isLotoEngineWasmReady,
   getHpcEngineMode
-} from '../services/wasm/lotoEngineBridge';
+} from '../src/services/wasm/lotoEngineBridge';
 import {
   buildPredictionRequestContext,
   runLocalPredictionPipeline
-} from '../services/prediction/predictionOrchestrator';
-import { DrawResult } from '../types';
-import { INTER_DRAW_FAMILIES, getPrimaryInterDrawFamily } from '../constants';
-import { globalCache } from '../services/cache/CacheService';
+} from '../src/services/prediction/predictionOrchestrator';
+import { DrawResult } from '../src/types';
+import { INTER_DRAW_FAMILIES, getPrimaryInterDrawFamily } from '../src/constants';
+import { globalCache } from '../src/services/cache/CacheService';
 
 describe('Validation de Bout en Bout LONACI (10H, 13H, 16H, 19H55) & Recuit Simulé HPC', () => {
   beforeAll(async () => {

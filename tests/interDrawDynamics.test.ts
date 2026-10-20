@@ -4,17 +4,17 @@ import {
   computeDominoAdvectionHpc,
   computeButterflyLyapunovHpc,
   computeChainReactionResonanceHpc
-} from '../services/wasm/lotoEngineBridge';
+} from '../src/services/wasm/lotoEngineBridge';
 import {
   computeInterDrawComplexDynamics,
   InterDrawComplexDynamicsReport
-} from '../services/interDrawDynamicsService';
+} from '../src/services/interDrawDynamicsService';
 import {
   generateInterDrawReport,
   generateNetworkInterconnectionMatrix
-} from '../services/interDrawService';
-import { generateDeterministicFallbackHistory } from '../services/lotteryService';
-import { INTER_DRAW_NETWORKS } from '../constants';
+} from '../src/services/interDrawService';
+import { generateDeterministicFallbackHistory } from '../src/services/lotteryService';
+import { INTER_DRAW_NETWORKS } from '../src/constants';
 
 describe('DYNAMIQUES COMPLEXES INTER-TIRAGES SELON AGENTS.md', () => {
   const mockHistTarget = generateDeterministicFallbackHistory('Fortune');

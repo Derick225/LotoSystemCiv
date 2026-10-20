@@ -4,8 +4,8 @@ import {
   appendSingleDrawToStore,
   clearStoreTimeline,
   getStoreDrawCount,
-} from '../services/wasm/lotoEngineBridge';
-import { DrawResult } from '../types';
+} from '../src/services/wasm/lotoEngineBridge';
+import { DrawResult } from '../src/types';
 
 describe('Lot 3 : Empirical Out-Of-Fold Calibration & Walk-Forward Contract Tests', () => {
   const TEST_DRAW = 'TEST_WALK_FORWARD_DRAW';

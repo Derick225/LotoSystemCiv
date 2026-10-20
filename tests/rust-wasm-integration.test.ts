@@ -6,8 +6,8 @@ import {
   getStoreCurrentGaps,
   getStoreDrawCount,
   runNativePredictionHpc,
-} from '../services/wasm/lotoEngineBridge';
-import { lotteryService } from '../services/lotteryService';
+} from '../src/services/wasm/lotoEngineBridge';
+import { lotteryService } from '../src/services/lotteryService';
 
 describe('Rust Core Wasm In-Memory Store & Native Inference Integration', () => {
   it('amorce (bootstrap) correctement l’historique des tirages en mémoire contiguë depuis un payload JSON', () => {

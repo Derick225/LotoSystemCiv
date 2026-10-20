@@ -43,7 +43,7 @@ export async function initializeLotoEngineWasm(): Promise<boolean> {
     try {
       // Import dynamique du module compilé par wasm-pack (target web)
       // @ts-ignore - Le module compilé réside dans le dossier pkg après `wasm-pack build --target web`
-      const wasm = await import('../../crates/loto-engine/pkg/loto_engine.js').catch(() => null);
+      const wasm = await import('../../../crates/loto-engine/pkg/loto_engine.js').catch(() => null);
 
       if (wasm && typeof wasm.default === 'function') {
         if (typeof window !== 'undefined') {

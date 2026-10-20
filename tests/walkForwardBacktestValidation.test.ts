@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { runBacktestTraining } from '../services/backtest/service';
-import { denoiseFeaturesKernelPCA } from '../services/mathCore';
-import { applyPCADenoising, ScoredNumber } from '../services/prediction/scoringEngine';
-import { computeContinuousKellyAllocation } from '../components/KellyCalculator';
-import { AlgoKey, AlgoWeights } from '../shared/prediction.types';
-import { DrawResult } from '../types';
+import { runBacktestTraining } from '../src/services/backtest/service';
+import { denoiseFeaturesKernelPCA } from '../src/services/mathCore';
+import { applyPCADenoising, ScoredNumber } from '../src/services/prediction/scoringEngine';
+import { computeContinuousKellyAllocation } from '../src/components/KellyCalculator';
+import { AlgoKey, AlgoWeights } from '../src/shared/prediction.types';
+import { DrawResult } from '../src/types';
 
 /**
  * Générateur déterministe d'historique réaliste avec structure de co-occurrence et persistance

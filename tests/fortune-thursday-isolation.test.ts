@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { isDrawWithoutMachine } from '../constants';
-import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { generateDeterministicFallbackHistory } from '../services/lotteryService';
-import { calculateMachineTransferReport } from '../services/prediction/machineTransferService';
-import { DrawResult } from '../types';
+import { isDrawWithoutMachine } from '../src/constants';
+import { purifyHistoryForDraw } from '../src/utils/arrayUtils';
+import { generateDeterministicFallbackHistory } from '../src/services/lotteryService';
+import { calculateMachineTransferReport } from '../src/services/prediction/machineTransferService';
+import { DrawResult } from '../src/types';
 
 describe('Fortune Thursday vs Fortune Strict Isolation', () => {
   it('distinguishes between Fortune and Fortune Thursday regarding machine numbers support', () => {

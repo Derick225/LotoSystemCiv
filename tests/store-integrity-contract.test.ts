@@ -9,9 +9,9 @@ import {
   analyzeDrawHistoryHpc,
   generateDiversifiedPortfolioHpc,
   readWasmField,
-} from '../services/wasm/lotoEngineBridge';
-import { syncHistoryToRustStore } from '../services/lotteryService';
-import { DrawResult } from '../types';
+} from '../src/services/wasm/lotoEngineBridge';
+import { syncHistoryToRustStore } from '../src/services/lotteryService';
+import { DrawResult } from '../src/types';
 
 describe('Store Integrity & Probability Contract Tests', () => {
   const TEST_DRAW = 'TEST_NATIONAL_INTEGRITY';

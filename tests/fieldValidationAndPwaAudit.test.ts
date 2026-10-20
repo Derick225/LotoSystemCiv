@@ -6,21 +6,21 @@ import {
   solveCombinatorialAnnealingHpc,
   computeMarkovTransitionHpc,
   computeTopologicalLyapunovHpc
-} from '../services/wasm/lotoEngineBridge';
-import { globalCache, CACHE_CONFIG } from '../services/cache/CacheService';
-import { generateCombination } from '../services/prediction/combinationGenerator';
-import { ScoredNumber } from '../services/prediction/scoringEngine';
-import { FALLBACK_CALIBRATION } from '../shared/prediction.types';
-import { INTER_DRAW_FAMILIES } from '../constants';
+} from '../src/services/wasm/lotoEngineBridge';
+import { globalCache, CACHE_CONFIG } from '../src/services/cache/CacheService';
+import { generateCombination } from '../src/services/prediction/combinationGenerator';
+import { ScoredNumber } from '../src/services/prediction/scoringEngine';
+import { FALLBACK_CALIBRATION } from '../src/shared/prediction.types';
+import { INTER_DRAW_FAMILIES } from '../src/constants';
 import {
   buildSpatialDistanceMatrix,
   computeWassersteinSoftLoss,
   computeDynamicLearningRate,
   predictMultiHeadModel,
   computeIntegratedGradients
-} from '../services/training/multiHeadNeuralCore';
-import { offlineQueueService } from '../services/offlineQueueService';
-import { AlgoKey } from '../shared/prediction.types';
+} from '../src/services/training/multiHeadNeuralCore';
+import { offlineQueueService } from '../src/services/offlineQueueService';
+import { AlgoKey } from '../src/shared/prediction.types';
 
 describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
   beforeAll(async () => {

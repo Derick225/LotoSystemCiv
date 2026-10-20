@@ -3,10 +3,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { globalCache } from '../services/cache/CacheService';
-import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { INTER_DRAW_NETWORKS, normalizeDrawName } from '../constants';
-import type { InterDrawNetworkId } from '../constants';
+import { globalCache } from '../src/services/cache/CacheService';
+import { purifyHistoryForDraw } from '../src/utils/arrayUtils';
+import { INTER_DRAW_NETWORKS, normalizeDrawName } from '../src/constants';
+import type { InterDrawNetworkId } from '../src/constants';
 
 /**
  * TESTS-GARDIENS DES INVARIANTS AGENTS.md
@@ -16,7 +16,7 @@ import type { InterDrawNetworkId } from '../constants';
  * - Invariant #2 : Zéro hasard dans le moteur d'inférence (100% déterministe)
  */
 
-const SERVICES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'services');
+const SERVICES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'services');
 
 describe('Invariant #5 — Isolation des clés de cache inter-tirages (AGENTS.md)', () => {
   it('encode networkId ET drawName dans le format canonique nexus_interdraw_${networkId}_${drawName}', () => {

@@ -1,8 +1,8 @@
 
 import { describe, it, expect } from 'vitest';
-import { calculateACValue, calculateMean, calculateStandardDeviation } from '../services/mathService';
-import { calculateSpatialHotSpots } from '../services/advancedMathService';
-import type { DrawResult } from '../types';
+import { calculateACValue, calculateMean, calculateStandardDeviation } from '../src/services/mathService';
+import { calculateSpatialHotSpots } from '../src/services/advancedMathService';
+import type { DrawResult } from '../src/types';
 
 describe('Math Service', () => {
     it('AC Value - Simple Sequence', () => {

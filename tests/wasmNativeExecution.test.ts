@@ -13,7 +13,7 @@ import {
   resetWasmFallbackCount,
   getEngineVersion,
   getAbiHash
-} from '../services/wasm/lotoEngineBridge';
+} from '../src/services/wasm/lotoEngineBridge';
 
 describe('Rust WASM Native Execution Suite', () => {
   beforeAll(async () => {

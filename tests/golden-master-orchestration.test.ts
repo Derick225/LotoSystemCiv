@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { runOrchestrationPipeline } from '../services/orchestrationService';
-import type { DrawResult } from '../types';
+import { runOrchestrationPipeline } from '../src/services/orchestrationService';
+import type { DrawResult } from '../src/types';
 
 /**
  * GOLDEN MASTER (recommandation #1)

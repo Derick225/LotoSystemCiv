@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { generateCombination } from '../services/prediction/combinationGenerator';
-import { analyzeForManipulation } from '../services/forensicAuditService';
-import { ConceptDriftDetector } from '../services/prediction/conceptDriftDetector';
-import { FALLBACK_CALIBRATION } from '../shared/prediction.types';
-import { DrawResult } from '../types';
-import { AlgoKey } from '../shared/prediction.types';
+import { generateCombination } from '../src/services/prediction/combinationGenerator';
+import { analyzeForManipulation } from '../src/services/forensicAuditService';
+import { ConceptDriftDetector } from '../src/services/prediction/conceptDriftDetector';
+import { FALLBACK_CALIBRATION } from '../src/shared/prediction.types';
+import { DrawResult } from '../src/types';
+import { AlgoKey } from '../src/shared/prediction.types';
 
 describe('Intégration HPC Extensions (Annealing Combinatoire & Lyapunov Topologique)', () => {
   it('generateCombination : Génération avec seed HPC de recuit simulé', async () => {

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateAdversarialSurvival } from '../services/prediction/adversarialProxy';
-import { generatePlatinumPredictionCore } from '../services/metaAnalystService';
-import { DrawResult } from '../types';
-import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../shared/prediction.types';
+import { evaluateAdversarialSurvival } from '../src/services/prediction/adversarialProxy';
+import { generatePlatinumPredictionCore } from '../src/services/metaAnalystService';
+import { DrawResult } from '../src/types';
+import { DEFAULT_ALGO_WEIGHTS, AlgoKey } from '../src/shared/prediction.types';
 
 describe('Zeta Adversarial & Adversarial Survival Logic', () => {
     const mockHistory: DrawResult[] = [

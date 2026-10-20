@@ -5,9 +5,9 @@ import {
   computeNormalizedWassersteinDistance,
   allocateHamiltonHareQuotas,
   GapBinId,
-} from '../services/prediction/gapRangeSequenceService';
-import { gapRangeSequencePlugin } from '../services/prediction/algorithms/gapRangeSequence';
-import { DrawResult } from '../types';
+} from '../src/services/prediction/gapRangeSequenceService';
+import { gapRangeSequencePlugin } from '../src/services/prediction/algorithms/gapRangeSequence';
+import { DrawResult } from '../src/types';
 
 function buildDeterministicHistory(totalDraws = 75, drawName = 'National'): DrawResult[] {
   const chronological: DrawResult[] = [];

@@ -3,7 +3,7 @@ import {
   runDeterministicInertiaBacktest,
   INERTIA_DAMPING_DOMAIN,
   DEFAULT_INERTIA_CALIBRATION,
-} from '../services/prediction/systemInertiaEngine';
+} from '../src/services/prediction/systemInertiaEngine';
 
 /**
  * GARDE-FOU DU BALAYAGE ζ (Rétro-Audit d'Inertie)

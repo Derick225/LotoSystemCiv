@@ -2,19 +2,19 @@ import { describe, it, expect } from 'vitest';
 import {
   runBayesianResonanceEngine,
   deriveRetrospectiveOptimalAlpha,
-} from '../services/interDrawService';
+} from '../src/services/interDrawService';
 import {
   analyzeInterDrawCooccurrences,
-} from '../services/interDrawPatternService';
+} from '../src/services/interDrawPatternService';
 import {
   calculateDnaSieveWeights,
-} from '../services/temporalAnalysisService';
+} from '../src/services/temporalAnalysisService';
 import {
   computeCooccurrenceTensorHpc,
   computeCrossHawkesKernelHpc,
   computeRobustHurstHpc,
-} from '../services/wasm/lotoEngineBridge';
-import { DrawResult } from '../types';
+} from '../src/services/wasm/lotoEngineBridge';
+import { DrawResult } from '../src/types';
 
 describe('Vérification & Validation des 4 Recommandations Mathématiques', () => {
   const mockPairedPairs = [

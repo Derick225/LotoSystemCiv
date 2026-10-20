@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { interDrawResonancePlugin } from '../services/prediction/algorithms/interDrawResonance';
-import { interMonthlyResonancePlugin } from '../services/prediction/algorithms/interMonthlyResonance';
-import { algorithmRegistry, AlgorithmContext } from '../services/prediction/algorithmRegistry';
-import { initCoreAlgorithms } from '../services/prediction/algorithms';
-import { AlgoKey } from '../shared/prediction.types';
-import { DrawResult } from '../types';
-import { globalCache, CACHE_TTL } from '../services/cache/CacheService';
-import { createAlgorithmTestContext } from '../services/prediction/algorithms/testFixtures';
-import { getDefaultWeights } from '../services/prediction/weightsManager';
+import { interDrawResonancePlugin } from '../src/services/prediction/algorithms/interDrawResonance';
+import { interMonthlyResonancePlugin } from '../src/services/prediction/algorithms/interMonthlyResonance';
+import { algorithmRegistry, AlgorithmContext } from '../src/services/prediction/algorithmRegistry';
+import { initCoreAlgorithms } from '../src/services/prediction/algorithms';
+import { AlgoKey } from '../src/shared/prediction.types';
+import { DrawResult } from '../src/types';
+import { globalCache, CACHE_TTL } from '../src/services/cache/CacheService';
+import { createAlgorithmTestContext } from '../src/services/prediction/algorithms/testFixtures';
+import { getDefaultWeights } from '../src/services/prediction/weightsManager';
 
 describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
   beforeAll(async () => {

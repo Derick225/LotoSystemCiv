@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import type { DrawResult } from '../types';
+import type { DrawResult } from '../src/types';
 import {
   calculateAnomalyScores,
   calculateBayesianScore,
@@ -13,8 +13,8 @@ import {
   calculateSpatialHotSpots,
   calculateTemporalScores,
   calculateAiIntuition,
-} from '../services/advancedMathService';
-import { fnv1a64To53 } from '../utils/deterministicSeed';
+} from '../src/services/advancedMathService';
+import { fnv1a64To53 } from '../src/utils/deterministicSeed';
 
 const DOMAIN = 90;
 const TICKET = 5;

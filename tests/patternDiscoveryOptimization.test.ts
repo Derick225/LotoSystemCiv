@@ -3,8 +3,8 @@ import {
   patternDiscoveryService,
   computeExactCycleUnionProbability,
   computeExactSameDrawCycleProbability,
-} from '../services/prediction/patternDiscoveryService';
-import { DrawResult } from '../types';
+} from '../src/services/prediction/patternDiscoveryService';
+import { DrawResult } from '../src/types';
 
 describe('Optimisation Sous-Onglet Motifs Répétitifs (Détection, Raisonnement & Sélection)', () => {
   it('1. calcule exactement la probabilité d’inclusion-exclusion d’union de cycle sans inflation artificielle', () => {

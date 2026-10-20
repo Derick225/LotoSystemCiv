@@ -1,5 +1,5 @@
 import { expect, test, describe } from 'vitest';
-import { lcgGlobalRandom, initializeLcgForDraw } from '../utils/mathUtils';
+import { lcgGlobalRandom, initializeLcgForDraw } from '../src/utils/mathUtils';
 
 describe('MathCore Determinism & Continuity', () => {
     test('LCG Random is 100% Deterministic', () => {

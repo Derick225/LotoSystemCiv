@@ -7,7 +7,7 @@ import {
   getDrawNetworkId,
   areDrawsInSameNetwork,
   normalizeDrawName
-} from '../constants';
+} from '../src/constants';
 import {
   getMirrorNumber,
   getComplement90,
@@ -15,7 +15,7 @@ import {
   calculateInterDrawVector,
   generateNetworkInterconnectionMatrix,
   computeContinuousInterDrawCoupling
-} from '../services/interDrawService';
+} from '../src/services/interDrawService';
 
 describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCHES', () => {
   it('doit contenir exactement les 2 réseaux fermés et étanches exigés par AGENTS.md', () => {
@@ -162,7 +162,7 @@ describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCH
     });
 
     it('ne fabrique aucun signal de couplage sans historique réel (zéro fausse donnée)', async () => {
-      const { globalCache } = await import('../services/cache/CacheService');
+      const { globalCache } = await import('../src/services/cache/CacheService');
       await globalCache.delete(globalCache.getInterDrawKey('hebdomadaire', 'network', 'matrix'));
       const emptyHistories = new Map<string, any[]>(
         INTER_DRAW_NETWORKS.hebdomadaire.drawNames.map((name) => [name, []])

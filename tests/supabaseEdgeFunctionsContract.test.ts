@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { apiClient } from '../core/api/apiClient';
-import { supabase } from '../services/supabaseClient';
-import { AppError } from '../utils/AppError';
-import type { Prediction } from '../types';
+import { apiClient } from '../src/core/api/apiClient';
+import { supabase } from '../src/services/supabaseClient';
+import { AppError } from '../src/utils/AppError';
+import type { Prediction } from '../src/types';
 
 // Mock supabase client
-vi.mock('../services/supabaseClient', () => ({
+vi.mock('../src/services/supabaseClient', () => ({
   supabase: {
     functions: {
       invoke: vi.fn(),

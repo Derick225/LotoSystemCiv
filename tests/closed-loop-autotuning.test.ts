@@ -2,15 +2,15 @@ import { describe, it, expect } from 'vitest';
 import {
   executeClosedLoopAutopsy,
   executeClosedLoopAutoAdjustment,
-} from '../services/prediction/closedLoopAutopsyService';
+} from '../src/services/prediction/closedLoopAutopsyService';
 import {
   getModelEvolutionLineage,
-} from '../services/prediction/modelDnaKnowledgeBase';
-import { getAlgoWeights } from '../services/prediction/weightsManager';
-import { autoTuneModelDnaFromAutopsyReport, runForensicAutopsy } from '../services/postPredictionAnalysisService';
-import { DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
-import type { AlgoKey as AlgoKeyType } from '../shared/prediction.types';
-import { DrawResult } from '../types';
+} from '../src/services/prediction/modelDnaKnowledgeBase';
+import { getAlgoWeights } from '../src/services/prediction/weightsManager';
+import { autoTuneModelDnaFromAutopsyReport, runForensicAutopsy } from '../src/services/postPredictionAnalysisService';
+import { DEFAULT_ALGO_WEIGHTS } from '../src/shared/prediction.types';
+import type { AlgoKey as AlgoKeyType } from '../src/shared/prediction.types';
+import { DrawResult } from '../src/types';
 
 describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro-SGD ➔ Version ADN)', () => {
   const drawName = 'NATIONAL_TEST';
@@ -124,8 +124,8 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
   });
 
   it('préserve strictement les poids nuls (canaux retirés et MACHINE_TRANSFER sans machine) et garantit la garde de preuve', async () => {
-    const { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } = await import('../shared/prediction.types');
-    const { projectWeightsWithProofGuard } = await import('../services/prediction/closedLoopAutopsyService');
+    const { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } = await import('../src/shared/prediction.types');
+    const { projectWeightsWithProofGuard } = await import('../src/services/prediction/closedLoopAutopsyService');
 
     const noMachineHistory: DrawResult[] = mockHistory.map((d) => ({
       ...d,
@@ -206,7 +206,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
 
   it('n’invente jamais d’historique synthétique lors de l’audit inter-tirages si le prédécesseur est absent', async () => {
     const { auditInterDrawPatternsPostMortem } = await import(
-      '../services/prediction/interDrawPostMortemService'
+      '../src/services/prediction/interDrawPostMortemService'
     );
 
     const singleDrawOnlyHistory: DrawResult[] = mockHistory.map((d) => ({
@@ -235,12 +235,12 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     const {
       computeFastHistoricalFeatures,
       runNeuralSelfOptimization,
-    } = await import('../services/prediction/neuralSelfOptimizationService');
+    } = await import('../src/services/prediction/neuralSelfOptimizationService');
     const {
       applyExpertBiasesToWeights,
       analyzeUnderperformingSubAlgos,
-    } = await import('../services/prediction/expertBiasService');
-    const { AlgoKey } = await import('../shared/prediction.types');
+    } = await import('../src/services/prediction/expertBiasService');
+    const { AlgoKey } = await import('../src/shared/prediction.types');
 
     const longHistory: DrawResult[] = Array.from({ length: 18 }, (_, idx) => ({
       id: `${idx + 1}`,
@@ -300,8 +300,8 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     const {
       recordModelDnaVersion,
       rollbackToModelDnaVersion,
-    } = await import('../services/prediction/modelDnaKnowledgeBase');
-    const { applyOptimizedWeights } = await import('../services/prediction/optimizationController');
+    } = await import('../src/services/prediction/modelDnaKnowledgeBase');
+    const { applyOptimizedWeights } = await import('../src/services/prediction/optimizationController');
 
     const v1 = await recordModelDnaVersion({
       drawName: 'ROLLBACK_TEST_DRAW',
@@ -333,7 +333,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
   });
 
   it('valide la diffusion continue d’onde gaussienne des near-misses sur Z/90Z', async () => {
-    const { applyForensicAdjustments } = await import('../services/prediction/forensicAdjustments');
+    const { applyForensicAdjustments } = await import('../src/services/prediction/forensicAdjustments');
     const mockReports: any[] = [
       {
         id: 'rep_1',
@@ -384,8 +384,8 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
   });
 
   it('valide la rétro-injection bayésienne de l’alpha de Laplace post-mortem', async () => {
-    const { deriveRetrospectiveOptimalAlpha } = await import('../services/interDrawService');
-    const { globalCache } = await import('../services/cache/CacheService');
+    const { deriveRetrospectiveOptimalAlpha } = await import('../src/services/interDrawService');
+    const { globalCache } = await import('../src/services/cache/CacheService');
 
     const paired = [
       { predWinners: [1, 2, 3, 4, 5], targetWinners: [1, 10, 20, 30, 40] },
@@ -415,7 +415,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
 
   it('valide la robustesse 64-bit et la gestion des seeds dans le bridge WASM', async () => {
     const { runAntColonyOptimizationHpc, solveCombinatorialAnnealingHpc } = await import(
-      '../services/wasm/lotoEngineBridge'
+      '../src/services/wasm/lotoEngineBridge'
     );
 
     // Appel avec undefined, 0 ou NaN pour le seed : ne doit JAMAIS lever de RangeError

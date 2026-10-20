@@ -5,13 +5,13 @@ import {
   appendSingleDrawToStore,
   clearStoreTimeline,
   getStoreDrawCount
-} from '../services/wasm/lotoEngineBridge';
-import { globalCache } from '../services/cache/CacheService';
-import { generateInterDrawReport } from '../services/interDrawService';
+} from '../src/services/wasm/lotoEngineBridge';
+import { globalCache } from '../src/services/cache/CacheService';
+import { generateInterDrawReport } from '../src/services/interDrawService';
 import {
   INTER_DRAW_NETWORKS,
   normalizeDrawName
-} from '../constants';
+} from '../src/constants';
 
 describe('CONTRAT D ARCHITECTURE 4 PILIERS & MOTEUR RUST WASM : FLUX INTER-TIRAGES', () => {
   beforeEach(() => {

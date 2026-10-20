@@ -6,9 +6,9 @@ import {
   computeNetworkDominoHpc,
   appendSingleDrawToStore,
   clearStoreTimeline,
-} from '../services/wasm/lotoEngineBridge';
-import { runNativeRustPrediction } from '../services/prediction/predictionOrchestrator';
-import { DrawResult } from '../types';
+} from '../src/services/wasm/lotoEngineBridge';
+import { runNativeRustPrediction } from '../src/services/prediction/predictionOrchestrator';
+import { DrawResult } from '../src/types';
 
 describe('Lot 2 : Interdraw Dynamics, Domino Effect & 100% Local Wasm Contract Tests', () => {
   const HEBDO_DRAW_1 = 'NATIONAL';

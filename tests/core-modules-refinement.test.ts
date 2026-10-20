@@ -1,21 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { calculateFusion } from '../services/fusionService';
-import { runForensicAutopsy } from '../services/postPredictionAnalysisService';
-import { getTunedHyperparameters, saveTunedHyperparameters } from '../services/prediction/hyperParameterTuner';
+import { calculateFusion } from '../src/services/fusionService';
+import { runForensicAutopsy } from '../src/services/postPredictionAnalysisService';
+import { getTunedHyperparameters, saveTunedHyperparameters } from '../src/services/prediction/hyperParameterTuner';
 import {
   computeModelDnaFingerprint,
   extractSpecializations,
   recordModelDnaVersion,
   getModelEvolutionLineage
-} from '../services/prediction/modelDnaKnowledgeBase';
+} from '../src/services/prediction/modelDnaKnowledgeBase';
 import {
   calculateHistoricalPerformance,
   calculateExtendedHistoricalPerformance,
   queryPredictionHistoryIndexed
-} from '../services/predictionHistoryService';
-import { evaluatePredictionStability } from '../services/prediction/predictionFinalize';
-import { AlgoKey, AlgoWeights, DrawResult, Prediction, PredictionHistoryItem, ScoreBreakdown } from '../types';
-import { getDefaultWeights } from '../services/prediction/weightsManager';
+} from '../src/services/predictionHistoryService';
+import { evaluatePredictionStability } from '../src/services/prediction/predictionFinalize';
+import { AlgoKey, AlgoWeights, DrawResult, Prediction, PredictionHistoryItem, ScoreBreakdown } from '../src/types';
+import { getDefaultWeights } from '../src/services/prediction/weightsManager';
 
 const createWeights = (overrides: Partial<AlgoWeights>): AlgoWeights => {
   const weights = getDefaultWeights();
