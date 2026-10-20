@@ -10,7 +10,7 @@ import {
 import { globalCache, CACHE_CONFIG } from '../services/cache/CacheService';
 import { generateCombination } from '../services/prediction/combinationGenerator';
 import { ScoredNumber } from '../services/prediction/scoringEngine';
-import { EmpiricalCalibration } from '../types';
+import { FALLBACK_CALIBRATION } from '../shared/prediction.types';
 import { INTER_DRAW_FAMILIES } from '../constants';
 import {
   buildSpatialDistanceMatrix,
@@ -72,13 +72,7 @@ describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
   });
 
   describe('2. Validation de Terrain E2E sur les Tirages Réels LONACI (10H, 13H, 16H, 19H55)', () => {
-    const calibration: EmpiricalCalibration = {
-      varianceFactor: 1.05,
-      frequencyDecay: 0.95,
-      dispersionThreshold: 15.0,
-      confidenceScalar: 0.88,
-      lastOptimized: '2026-09-23T00:00:00Z',
-    };
+    const calibration = FALLBACK_CALIBRATION;
 
     const testDraws = [
       { slot: '10:00 (10H)', name: 'Reveil', seed: 11, lastDraw: [7, 14, 21, 28, 35] },
@@ -96,20 +90,18 @@ describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
           scoredNumbers.push({
             num: n,
             score,
-            confidence: 0.85,
             breakdown: {
-              frequence: score * 0.4,
-              ecart: score * 0.3,
-              cycle: score * 0.3,
-            } as any
+              [AlgoKey.FREQUENCY]: score * 0.4,
+              [AlgoKey.GAPS]: score * 0.3,
+              [AlgoKey.TEMPORAL]: score * 0.3,
+            }
           });
         }
         // Trier par score décroissant comme en production
         scoredNumbers.sort((a, b) => b.score - a.score);
 
-        const affinityMap: Record<number, Record<number, number>> = {};
+        const affinityMap: Float32Array[] = Array.from({ length: 91 }, () => new Float32Array(91));
         for (let i = 1; i <= 90; i++) {
-          affinityMap[i] = {};
           for (let j = 1; j <= 90; j++) {
             if (i !== j && (i + j) % 7 === 0) {
               affinityMap[i][j] = 0.65;
@@ -262,4 +254,3 @@ describe('Validation de Terrain & Audit des Caches PWA / HPC', () => {
     });
   });
 });
-

@@ -39,11 +39,11 @@ describe('forensicAuditService', () => {
         // Generate valid history
         const historyArbitrary = fc.array(
             drawArbitrary.map(nums => ({
-                id: `audit_test_${Date.now()}`,
-                date: new Date().toISOString(),
+                id: 'audit_test',
+                date: '2026-01-01',
                 gagnants: nums,
-                machine: 1,
-                draw_name: 'TEST'
+                machine: [],
+                drawName: 'TEST'
             })),
             { minLength: 10, maxLength: 100 }
         );
@@ -75,8 +75,8 @@ describe('forensicAuditService', () => {
                 id: `id-${i}`,
                 date: new Date().toISOString(),
                 gagnants: [1, 2, 3, 4, 5].map(n => (n + i) % 90 + 1),
-                machine: 1,
-                draw_name: 'TEST'
+                machine: [],
+                drawName: 'TEST'
             }));
         };
 
@@ -145,8 +145,8 @@ describe('forensicAuditService', () => {
                 id: `id-${i}`,
                 date: new Date().toISOString(),
                 gagnants: [1, 2, 3, 4, 5].map(n => (n + i) % 90 + 1),
-                machine: 1,
-                draw_name: 'TEST'
+                machine: [],
+                drawName: 'TEST'
             }));
             
             const start = performance.now();

@@ -1,3 +1,10 @@
+export * from "./weightsManager";
+export * from "./featureExtractor";
+export * from "./scoringEngine";
+export * from "./combinationGenerator";
+export * from "./diversityService";
+export * from "./ticketAnalysisService";
+export * from "./gapRangeSequenceService";
 export { buildAlgoBundle, applyDeterministicMicroSgd, TUNING } from "./microSgd";
 export { applyForensicAdjustments, resolveForensicAdjustments } from "./forensicAdjustments";
 export {

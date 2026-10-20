@@ -654,8 +654,11 @@ export const generateCombination = async (
         candidates = allCandidatesPool.filter(c => !combo.includes(c));
       }
 
-      // Optimisation: Restreindre aux meilleurs candidats pertinents pour éviter O(N^2) complet
-      const searchPool = candidates.slice(0, Math.min(30, candidates.length));
+      // Taille du pool de recherche dérivée de la géométrie du problème :
+      // sqrt(DOMAIN_SIZE × DRAW_SIZE) ≈ 21 candidats couvrent statistiquement
+      // la zone de score élevé sans coût O(N²) complet.
+      const GREEDY_SEARCH_POOL_SIZE = Math.round(Math.sqrt(DOMAIN_SIZE * DRAW_SIZE));
+      const searchPool = candidates.slice(0, Math.min(GREEDY_SEARCH_POOL_SIZE, candidates.length));
 
       for (const candidate of searchPool) {
         const proposed = [...combo, candidate];

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { gapTrendPlugin } from './gapTrend';
-import { AlgorithmContext } from '../algorithmRegistry';
 import { AlgoKey } from '../../../shared/prediction.types';
 import { DrawResult } from '../../../types';
+import { createAlgorithmTestContext } from './testFixtures';
 
 describe('Algorithm - Gap Trend Projector', () => {
   it('should behave as a stable, deterministic plugin matching type structures', () => {
@@ -35,26 +35,16 @@ describe('Algorithm - Gap Trend Projector', () => {
         date: `2026-01-${String(idx + 1).padStart(2, '0')}`,
         gagnants: winners,
         machine: [],
-        draw_name: 'TEST',
+        drawName: 'TEST',
       };
     });
 
-    const gapsMap: Record<number, number> = {};
+    const gapsMap = new Int32Array(91);
     for (let i = 1; i <= 90; i++) {
       gapsMap[i] = 13; // simulated current open gap of 13 for all numbers
     }
 
-    const ctx: AlgorithmContext = {
-      history,
-      features: {
-        gapsMap,
-        freqMap: Array(91).fill(1),
-      },
-      statisticalBounds: {
-        hurstExponent: 0.5,
-      },
-      pluginCache: {},
-    };
+    const ctx = createAlgorithmTestContext(history, gapsMap, new Float32Array(91).fill(1));
 
     gapTrendPlugin.precompute(ctx);
 
@@ -91,21 +81,15 @@ describe('Algorithm - Gap Trend Projector', () => {
         date: `2026-01-${String(idx + 1).padStart(2, '0')}`,
         gagnants: winners,
         machine: [],
-        draw_name: 'TEST',
+        drawName: 'TEST',
       };
     });
 
-    const ctx: AlgorithmContext = {
+    const ctx = createAlgorithmTestContext(
       history,
-      features: {
-        gapsMap: Array(91).fill(10),
-        freqMap: Array(91).fill(1),
-      },
-      statisticalBounds: {
-        hurstExponent: 0.5,
-      },
-      pluginCache: {},
-    };
+      new Int32Array(91).fill(10),
+      new Float32Array(91).fill(1),
+    );
 
     gapTrendPlugin.precompute(ctx);
 

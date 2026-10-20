@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runBacktestTraining } from '../services/backtestService';
+import { runBacktestTraining } from '../services/backtest/service';
 import { denoiseFeaturesKernelPCA } from '../services/mathCore';
 import { applyPCADenoising, ScoredNumber } from '../services/prediction/scoringEngine';
 import { computeContinuousKellyAllocation } from '../components/KellyCalculator';
@@ -78,7 +78,8 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
       expect(report.mrr).toBeGreaterThanOrEqual(0);
       expect(report.ndcg).toBeGreaterThanOrEqual(0);
       expect(report.stabilityScore).toBeGreaterThan(0);
-      expect(report.confidence_intervals.avgHits).toHaveLength(2);
+      expect(report.confidence_intervals).toBeDefined();
+      expect(report.confidence_intervals?.avgHits).toHaveLength(2);
 
       // Espérance hypergéométrique théorique du hasard pur : E = 5 * 5 / 90 = 0.2778
       const randomExpectation = 25 / 90;

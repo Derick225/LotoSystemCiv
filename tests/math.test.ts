@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { calculateACValue, calculateMean, calculateStandardDeviation } from '../services/mathService';
 import { calculateSpatialHotSpots } from '../services/advancedMathService';
+import type { DrawResult } from '../types';
 
 describe('Math Service', () => {
     it('AC Value - Simple Sequence', () => {
@@ -27,7 +28,7 @@ describe('Math Service', () => {
 
 describe('Advanced Math Service', () => {
     it('Spatial HotSpots - Basic Grid', () => {
-        const mockDraw = { id: '1', date: '2023-01-01', gagnants: [1, 2, 3, 4, 5], machine: 1, draw_name: 'TEST' };
+        const mockDraw: DrawResult = { id: '1', date: '2023-01-01', gagnants: [1, 2, 3, 4, 5], machine: [], drawName: 'TEST' };
         const history: DrawResult[] = Array(20).fill(mockDraw);
         
         const hotSpots = calculateSpatialHotSpots(history);

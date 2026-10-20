@@ -3,7 +3,7 @@ import {
   runSurvivalSimulation,
   BacktestReport,
   BettingStrategy,
-} from "../../../services/backtestingEngine";
+} from "../../../services/backtest/engine";
 import {
   Play,
   RefreshCw,

@@ -696,7 +696,8 @@ const runLocalPredictionViaWorker = async (
             activePredictionWorker = null;
           }
           reject(new Error("Timeout du Web Worker de prédiction locale"));
-        }, 75000);
+        // Timeout adaptatif : base 30s + 100ms par tirage, plafonné à 90s
+        }, Math.min(90000, 30000 + context.history.length * 100));
 
         pendingWorkerTasks.set(taskId, {
           resolve,

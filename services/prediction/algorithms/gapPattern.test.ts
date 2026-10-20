@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { gapPatternPlugin } from './gapPattern';
-import { AlgorithmContext } from '../algorithmRegistry';
 import { AlgoKey } from '../../../shared/prediction.types';
 import { DrawResult } from '../../../types';
+import { createAlgorithmTestContext } from './testFixtures';
 
 describe('Algorithm - Gap Pattern (AR(1))', () => {
   it('should behave as a stable, deterministic plugin matching type structures', () => {
@@ -14,21 +14,11 @@ describe('Algorithm - Gap Pattern (AR(1))', () => {
   it('should gracefully return neutral fallback when history is insufficient', () => {
     // Under 3 gaps (meaning < 4 draws), it must handle lack of history gracefully
     const history: DrawResult[] = [
-      { id: '1', date: '2026-01-01', gagnants: [5, 12, 18, 45, 88], machine: [], draw_name: 'TEST' },
-      { id: '2', date: '2026-01-02', gagnants: [5, 14, 20, 46, 89], machine: [], draw_name: 'TEST' },
+      { id: '1', date: '2026-01-01', gagnants: [5, 12, 18, 45, 88], machine: [], drawName: 'TEST' },
+      { id: '2', date: '2026-01-02', gagnants: [5, 14, 20, 46, 89], machine: [], drawName: 'TEST' },
     ];
 
-    const ctx: AlgorithmContext = {
-      history,
-      features: {
-        gapsMap: {},
-        freqMap: [],
-      },
-      statisticalBounds: {
-        hurstExponent: 0.5,
-      },
-      pluginCache: {},
-    };
+    const ctx = createAlgorithmTestContext(history);
 
     // Precompute
     gapPatternPlugin.precompute(ctx);
@@ -68,21 +58,13 @@ describe('Algorithm - Gap Pattern (AR(1))', () => {
         date: `2026-01-${idx + 1}`,
         gagnants: isAppearance ? [5, 10, 20, 30, 40] : [1, 2, 3, 4, 6],
         machine: [],
-        draw_name: 'TEST',
+        drawName: 'TEST',
       };
     });
 
-    const ctx: AlgorithmContext = {
-      history,
-      features: {
-        gapsMap: { '5': 5 },
-        freqMap: [],
-      },
-      statisticalBounds: {
-        hurstExponent: 0.5,
-      },
-      pluginCache: {},
-    };
+    const gapsMap = new Int32Array(91);
+    gapsMap[5] = 5;
+    const ctx = createAlgorithmTestContext(history, gapsMap);
 
     gapPatternPlugin.precompute(ctx);
 

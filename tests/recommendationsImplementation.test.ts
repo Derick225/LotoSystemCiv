@@ -85,7 +85,7 @@ describe('Vérification & Validation des 4 Recommandations Mathématiques', () =
       mockHistory.push({
         id: `draw-${i}`,
         date: `2026-01-${(i + 1).toString().padStart(2, '0')}`,
-        nom_tirage: 'Reveil',
+        drawName: 'Reveil',
         gagnants: [(i % 15) + 1, (i % 15) + 2, (i % 15) + 3, (i % 15) + 4, (i % 15) + 5],
         machine: [(i % 15) + 6, (i % 15) + 7, (i % 15) + 8, (i % 15) + 9, (i % 15) + 10],
       });

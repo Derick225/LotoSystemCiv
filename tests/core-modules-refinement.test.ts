@@ -14,7 +14,14 @@ import {
   queryPredictionHistoryIndexed
 } from '../services/predictionHistoryService';
 import { evaluatePredictionStability } from '../services/prediction/predictionFinalize';
-import { AlgoKey, DrawResult, Prediction, PredictionHistoryItem, ScoreBreakdown } from '../types';
+import { AlgoKey, AlgoWeights, DrawResult, Prediction, PredictionHistoryItem, ScoreBreakdown } from '../types';
+import { getDefaultWeights } from '../services/prediction/weightsManager';
+
+const createWeights = (overrides: Partial<AlgoWeights>): AlgoWeights => {
+  const weights = getDefaultWeights();
+  for (const key of Object.values(AlgoKey)) weights[key] = 0;
+  return { ...weights, ...overrides };
+};
 
 /**
  * Décomposition spectrale déterministe d'une prédiction réelle : chaque canal note les 90
@@ -47,9 +54,9 @@ const buildPredictionBreakdown = (predictedNumbers: number[]): Record<number, Sc
 describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Refinements)', () => {
   // Mock history 5/90
   const mockHistory: DrawResult[] = [
-    { id: '1', date: '01/01/2026', tirage: 'TEST_A', gagnants: [10, 20, 30, 40, 50], machine: [1, 2, 3, 4, 5] },
-    { id: '2', date: '08/01/2026', tirage: 'TEST_A', gagnants: [12, 22, 32, 42, 52], machine: [6, 7, 8, 9, 11] },
-    { id: '3', date: '15/01/2026', tirage: 'TEST_A', gagnants: [10, 25, 30, 45, 60], machine: [15, 16, 17, 18, 19] },
+    { id: '1', date: '01/01/2026', drawName: 'TEST_A', gagnants: [10, 20, 30, 40, 50], machine: [1, 2, 3, 4, 5] },
+    { id: '2', date: '08/01/2026', drawName: 'TEST_A', gagnants: [12, 22, 32, 42, 52], machine: [6, 7, 8, 9, 11] },
+    { id: '3', date: '15/01/2026', drawName: 'TEST_A', gagnants: [10, 25, 30, 45, 60], machine: [15, 16, 17, 18, 19] },
   ];
 
   describe('1. Couche de Fusion & Réduction de Redondance (fusionService)', () => {
@@ -71,7 +78,7 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
         breakdown: {},
         timestamp: Date.now(),
       };
-      const weights = { frequency: 0.3, gap: 0.2, momentum: 0.2, spectral: 0.3 };
+      const weights = { ...getDefaultWeights(), frequency: 0.3, gap: 0.2, momentum: 0.2, spectral: 0.3 };
 
       const result = calculateFusion(mockHistory, stats, spectral, lastPred, weights);
 
@@ -152,9 +159,10 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
       const draw2 = 'LOTO_TEST_BETA';
 
       const customParams1 = {
+        ...(await getTunedHyperparameters(draw1)),
         hawkesDecay: 0.28,
         gapVelocityWeight: 1.25,
-        learningRateSGD: 0.008,
+        sgdLearningRate: 0.008,
       };
 
       saveTunedHyperparameters(draw1, customParams1);
@@ -171,7 +179,12 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
 
   describe('4. Base de Connaissances ADN des Modèles (modelDnaKnowledgeBase)', () => {
     it('calcule une empreinte ADN 100% reproductible et extrait les spécialisations', () => {
-      const weights = { frequency: 0.35, gapTrend: 0.25, bayes: 0.20, markov: 0.20 };
+      const weights = createWeights({
+        [AlgoKey.FREQUENCY]: 0.35,
+        [AlgoKey.GAP_TREND]: 0.25,
+        [AlgoKey.BAYES]: 0.20,
+        [AlgoKey.MARKOV]: 0.20,
+      });
 
       const fp1 = computeModelDnaFingerprint('TEST_DRAW', weights);
       const fp2 = computeModelDnaFingerprint('TEST_DRAW', weights);
@@ -188,7 +201,12 @@ describe('Vérification et Validation des Modules Refondus (AGENTS.md & Core Ref
     });
 
     it('enregistre une version et extrait la lignée évolutive avec indice de stabilité continu', async () => {
-      const weights = { frequency: 0.3, gapTrend: 0.3, bayes: 0.2, markov: 0.2 };
+      const weights = createWeights({
+        [AlgoKey.FREQUENCY]: 0.3,
+        [AlgoKey.GAP_TREND]: 0.3,
+        [AlgoKey.BAYES]: 0.2,
+        [AlgoKey.MARKOV]: 0.2,
+      });
       await recordModelDnaVersion({
         drawName: 'TEST_EVOLUTION',
         version: 'v_test_1',

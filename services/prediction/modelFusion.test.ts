@@ -18,7 +18,7 @@ describe('Model Fusion & ADN Knowledge Base Integration', () => {
       ((idx * 13 + 45) % 90) + 1,
       ((idx * 17 + 67) % 90) + 1,
     ],
-    machine: 'M1',
+    machine: [],
   }));
 
   const mockSpectral: SpectralMetric[] = Array.from({ length: 90 }, (_, i) => ({
@@ -27,6 +27,7 @@ describe('Model Fusion & ADN Knowledge Base Integration', () => {
     amplitude: 0.5,
     phase: 0.2,
     spectralPower: 0.8,
+    energy: 0.8,
   }));
 
   describe('Tripartite Fusion Calculation & Determinism', () => {

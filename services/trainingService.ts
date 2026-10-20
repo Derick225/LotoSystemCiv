@@ -4,7 +4,7 @@ import {
   saveAlgoWeights,
   getAlgoWeights,
   hashWeights,
-} from "./predictionEngine";
+} from "./prediction/predictionFacade";
 import { useNexusStore } from "../store/useNexusStore";
 import { detectGameRegime } from "./mathService";
 import type {
@@ -15,7 +15,7 @@ import type {
 import { logger } from "../utils/logger";
 import { AlgoKey } from "../shared/prediction.types";
 import { normalizeWeights } from "./prediction/weightsManager";
-import { runBacktestTraining as runBacktestTrainingCore } from "./backtestService";
+import { runBacktestTraining as runBacktestTrainingCore } from "./backtest/service";
 import { globalCache, CACHE_TTL } from "./cache/CacheService";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 

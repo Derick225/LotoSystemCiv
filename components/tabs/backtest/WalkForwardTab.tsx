@@ -3,8 +3,8 @@ import {
   BacktestingFramework,
   WalkForwardMetric,
   MonteCarloResult,
-} from "../../../services/backtestingFramework";
-import { BettingStrategy } from "../../../services/backtestingEngine";
+} from "../../../services/backtest/framework";
+import { BettingStrategy } from "../../../services/backtest/engine";
 import {
   Play,
   RefreshCw,

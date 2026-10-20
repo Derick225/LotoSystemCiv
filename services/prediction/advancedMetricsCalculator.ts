@@ -10,10 +10,13 @@ import {
 } from "../advancedMathService";
 import { calculateSpatioTemporalHawkes } from "../../utils/engine/hawkesEngine";
 import { calculateDnaSieveWeights } from "../temporalAnalysisService";
+import { deriveSeedFromHistory } from "../../utils/deterministicSeed";
 
 export const DEFAULT_HAWKES_DECAY = 0.15;
 
 const metricsCache = new Map<string, EnhancedMetrics>();
+// LRU limit augmentée : le SGD avec K=15 génère jusqu'à 15 clés distinctes par tirage
+const METRICS_CACHE_MAX_SIZE = 200;
 
 /**
  * Calcul parallèle et mémoïsé des métriques algorithmiques avancées.
@@ -26,7 +29,13 @@ export const computeAdvancedMetrics = async (
   useSpatioTemporalHawkes: boolean = false,
   metrics?: EnhancedMetrics,
 ): Promise<EnhancedMetrics> => {
-  const cacheKey = `${drawName}_${localHistoryContext.length}_${useSpatioTemporalHawkes}_${localHistoryContext[0]?.date || 'nodate'}_${(localHistoryContext[0]?.gagnants || []).join('-')}`;
+  const cacheHistory = useSpatioTemporalHawkes
+    ? localHistoryContext.map((draw) => ({
+        date: `${draw.date ?? ""}|${(draw.machine || []).join(",")}`,
+        gagnants: draw.gagnants,
+      }))
+    : localHistoryContext;
+  const cacheKey = `${drawName}_${localHistoryContext.length}_${useSpatioTemporalHawkes}_${deriveSeedFromHistory(cacheHistory)}`;
   if (!metrics && Object.keys(hyperparameters).length === 0) {
     const cached = metricsCache.get(cacheKey);
     if (cached) return cached;
@@ -97,9 +106,10 @@ export const computeAdvancedMetrics = async (
   };
 
   if (!metrics && Object.keys(hyperparameters).length === 0) {
-    if (metricsCache.size > 50) {
-      const firstKey = metricsCache.keys().next().value;
-      if (firstKey) metricsCache.delete(firstKey);
+    if (metricsCache.size >= METRICS_CACHE_MAX_SIZE) {
+      // Suppression des 10 entrées les plus anciennes (batch eviction plus efficace que 1 par 1)
+      const keysToDelete = Array.from(metricsCache.keys()).slice(0, 10);
+      keysToDelete.forEach(k => metricsCache.delete(k));
     }
     metricsCache.set(cacheKey, result);
   }

@@ -7,7 +7,7 @@ import {
   saveAlgoWeights,
   getAlgoWeights,
   getStrategyName,
-} from "../../services/predictionEngine";
+} from "../../services/prediction/predictionFacade";
 import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
 import { computeDrawCriticalThreshold } from "../../services/prediction/dnaAuditService";
 import { runBayesianOptimization } from "../../services/bayesianOptimizer";

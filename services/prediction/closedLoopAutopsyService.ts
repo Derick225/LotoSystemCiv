@@ -472,6 +472,11 @@ export const executeClosedLoopAutopsy = async (
     for (let i = 1; i <= 90; i++) sumScore += scores[i];
     const meanScore = sumScore / 90.0;
 
+    // Écart-type robuste de l'algo sur les 90 numéros (normalisation du gradient)
+    let sumSqDev = 0;
+    for (let i = 1; i <= 90; i++) sumSqDev += Math.pow(scores[i] - meanScore, 2);
+    const stdScore = Math.sqrt(sumSqDev / 90.0) || 1e-6;
+
     // Attribution mesurée exclusivement sur les gagnants réels (zéro dilution par miroirs/voisins)
     let attributionWinners = 0;
     actualWinners.forEach((w) => {
@@ -479,8 +484,9 @@ export const executeClosedLoopAutopsy = async (
     });
     const avgWinnerScore = attributionWinners / K;
 
-    // Gradient différentiel : gain relatif sur les gagnants vs moyenne sur les 90 boules
-    const signalGain = avgWinnerScore - meanScore;
+    // Gradient z-scoré : normalise par l'écart-type de l'algo pour éviter que les algos
+    // à forte variance dominent artificiellement le gradient (biais de variance).
+    const signalGain = (avgWinnerScore - meanScore) / stdScore;
     const gradient = -signalGain; // Négatif si le gène a distingué les gagnants au-dessus de sa moyenne
 
     // Modulation continue selon la phase cyclique du jeu
@@ -989,9 +995,26 @@ export const executeBatchClosedLoopAutopsy = async (
   let totalHitsTop10 = 0;
   let totalNearMisses = 0;
 
+  // Mémoïser features + métriques entre les passes pour éviter O(depth) recalculs redondants
+  // sur des sous-historiques qui se chevauchent massivement.
+  const featuresCache = new Map<number, Awaited<ReturnType<typeof extractFeatures>>>();
+  const metricsCache = new Map<number, Awaited<ReturnType<typeof computeAdvancedMetrics>>>();
+
   for (let i = 0; i < depth; i++) {
     onProgress?.(i + 1, depth);
     try {
+      // Pré-calculer et mettre en cache features + métriques pour ce sous-historique
+      const subHistory = history.slice(i + 1);
+      const subKey = subHistory.length;
+      if (!featuresCache.has(subKey)) {
+        const [feats, mets] = await Promise.all([
+          extractFeatures(drawName, subHistory),
+          computeAdvancedMetrics(subHistory, drawName, {}, false, undefined),
+        ]);
+        featuresCache.set(subKey, feats);
+        metricsCache.set(subKey, mets);
+      }
+
       const rep = await executeClosedLoopAutopsy(
         drawName,
         i,

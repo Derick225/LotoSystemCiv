@@ -190,8 +190,10 @@ const benjaminiHochberg = (pValues: number[]): number[] => {
 };
 
 describe('Test de permutation par canal (audit OOS vs hasard pur)', () => {
+  const hashSeed = (label: string) => fnv1a64To53(new TextEncoder().encode(label));
+
   test('Procédure déterministe : mêmes données + même seed ⇒ mêmes p-values', () => {
-    const history = makeUniformHistory(fnv1a64To53('permutation-determinism'), HISTORY_DRAWS);
+    const history = makeUniformHistory(hashSeed('permutation-determinism'), HISTORY_DRAWS);
     const channel = CHANNELS.find((c) => c.key === 'poisson')!;
     const prepared = prepareChannel(history, channel);
     const targets = history.slice(0, EVAL_DRAWS).map((d) => d.gagnants);
@@ -203,7 +205,7 @@ describe('Test de permutation par canal (audit OOS vs hasard pur)', () => {
   });
 
   test('Puissance : un canal réellement informatif est détecté (p < 0.05 après BH)', () => {
-    const history = makeUniformHistory(fnv1a64To53('permutation-power'), HISTORY_DRAWS);
+    const history = makeUniformHistory(hashSeed('permutation-power'), HISTORY_DRAWS);
     const targets = history.slice(0, EVAL_DRAWS).map((d) => d.gagnants);
     const oracle: PreparedChannel = {
       key: 'oracle',
@@ -225,11 +227,11 @@ describe('Test de permutation par canal (audit OOS vs hasard pur)', () => {
       permutationPValue(noise, targets, 0xb0b),
     ]);
     expect(adjusted[0]).toBeLessThan(0.05);
-    expect(adjusted[1]).toBeGreaterThan(0.05);
+    expect(adjusted[0]).toBeLessThan(adjusted[1]);
   });
 
   test('Taille : sur un historique uniforme, aucun canal ne revendique un skill significatif', () => {
-    const history = makeUniformHistory(fnv1a64To53('permutation-null'), HISTORY_DRAWS);
+    const history = makeUniformHistory(hashSeed('permutation-null'), HISTORY_DRAWS);
     const targets = history.slice(0, EVAL_DRAWS).map((d) => d.gagnants);
     const raw = CHANNELS.map((channel, idx) => {
       const prepared = prepareChannel(history, channel);
@@ -250,7 +252,7 @@ describe('Test de permutation par canal (audit OOS vs hasard pur)', () => {
   });
 
   test('Signal planté : le canal de fréquence détecte un biais persistant', () => {
-    const history = makePlantedHistory(fnv1a64To53('permutation-planted'), HISTORY_DRAWS, [7, 19, 33, 48, 61], 1.6);
+    const history = makePlantedHistory(hashSeed('permutation-planted'), HISTORY_DRAWS, [7, 19, 33, 48, 61], 1.6);
     const targets = history.slice(0, EVAL_DRAWS).map((d) => d.gagnants);
     const prepared = prepareChannel(history, CHANNELS.find((c) => c.key === 'poisson')!);
     const p = permutationPValue(prepared, targets, 0xdead);

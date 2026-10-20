@@ -152,7 +152,7 @@ describe('Math Properties & Invariants', () => {
         });
 
         it('should never flag a p-value under H0 as more significant than the raw p-value', () => {
-            const pValues = { a: 0.9, b: 0.4, c: 0.05, d: 0.01 };
+            const pValues: Record<string, number> = { a: 0.9, b: 0.4, c: 0.05, d: 0.01 };
             const q = benjaminiHochberg(pValues);
             Object.keys(pValues).forEach((key) => {
                 expect(q[key]).toBeGreaterThanOrEqual(pValues[key] - 1e-12);

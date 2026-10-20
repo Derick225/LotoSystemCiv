@@ -149,8 +149,12 @@ export const calculateCyclicPhaseProfileMatrix = (
   }
 
   // 6. Modificateurs Algorithmiques Individuels Log-Scalaires (Strictement conditionnés par la preuve empirique)
-  const drawName = history[0]?.drawName || 'default';
-  const proofMap = evaluateAlgoEmpiricalProof(drawName, history);
+  // Guard : si drawName est absent ou générique, on utilise le nom du premier tirage de l'historique
+  // pour éviter une clé de cache "undefined_..." qui provoquerait des collisions entre tirages.
+  const resolvedDrawName = (history[0]?.drawName && history[0].drawName !== 'all')
+    ? history[0].drawName
+    : 'default';
+  const proofMap = evaluateAlgoEmpiricalProof(resolvedDrawName, history);
   const algoWeightModifiers: Partial<Record<AlgoKey, number>> = {};
   
   const applyProofConstrainedModifier = (key: AlgoKey, rawDelta: number) => {

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { gapCadencePlugin } from './gapCadence';
-import { AlgorithmContext } from '../algorithmRegistry';
 import { AlgoKey } from '../../../shared/prediction.types';
 import { DrawResult } from '../../../types';
+import { createAlgorithmTestContext } from './testFixtures';
 
 describe('Algorithm - Gap Cadence', () => {
   it('should behave as a stable, deterministic plugin matching type structures', () => {
@@ -28,26 +28,16 @@ describe('Algorithm - Gap Cadence', () => {
         date: `2026-01-${idx + 1}`,
         gagnants: winners,
         machine: [],
-        draw_name: 'TEST',
+        drawName: 'TEST',
       };
     });
 
-    const gapsMap: Record<number, number> = {};
+    const gapsMap = new Int32Array(91);
     for (let i = 1; i <= 90; i++) {
       gapsMap[i] = 12; // simulated current gap of 12 for all numbers
     }
 
-    const ctx: AlgorithmContext = {
-      history,
-      features: {
-        gapsMap,
-        freqMap: Array(91).fill(1), // simulated frequency map
-      },
-      statisticalBounds: {
-        hurstExponent: 0.5,
-      },
-      pluginCache: {},
-    };
+    const ctx = createAlgorithmTestContext(history, gapsMap, new Float32Array(91).fill(1));
 
     gapCadencePlugin.precompute(ctx);
 

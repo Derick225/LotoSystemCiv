@@ -13,10 +13,6 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "baseUrl": ".",
-    "paths": {
-    },
-
     /* Linting */
     "strict": true,
     "noUnusedLocals": false,
@@ -25,5 +21,5 @@
     "types": ["vite/client", "vite-plugin-pwa/client", "vite-plugin-pwa/info"]
   },
   "include": ["."],
-  "exclude": ["supabase", "node_modules", "dist", "**/*.test.ts", "**/*.spec.ts", "services/orchestrationService.test.ts"]
+  "exclude": ["supabase", "node_modules", "dist"]
 }

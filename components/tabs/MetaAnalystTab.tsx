@@ -5,7 +5,7 @@ import {
   getPlatinumHistory,
 } from "../../services/metaAnalystService";
 import { savePredictionToHistory } from "../../services/predictionHistoryService";
-import { HYPERGEOMETRIC_5_90 } from "../../services/backtestingFramework";
+import { HYPERGEOMETRIC_5_90 } from "../../services/backtest/framework";
 import { binomialUpperTail, benjaminiHochberg } from "../../utils/mathUtils";
 import { saveTicket } from "../../services/userPreferencesService";
 import { useNexusStore } from "../../store/useNexusStore";

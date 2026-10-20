@@ -55,6 +55,24 @@ describe('Concept Drift Detector', () => {
         });
     });
 
+    describe('Sequential structural drift', () => {
+        it('keeps a full recent window and detects a sustained distribution change', () => {
+            const history = Array.from({ length: 40 }, (_, index) => ({
+                drawName: 'STRUCTURAL_DRIFT_TEST',
+                gagnants: index < 20
+                    ? [46, 47, 48, 49, 50]
+                    : [1, 2, 3, 4, 5],
+            }));
+
+            const result = detector.evaluateStructuralDrift(history, 'STRUCTURAL_DRIFT_TEST');
+
+            expect(result.driftDetected).toBe(true);
+            expect(result.driftIndex).toBeDefined();
+            expect(result.driftIndex).toBeGreaterThanOrEqual(15);
+            expect(result.driftIndex).toBeLessThanOrEqual(25);
+        });
+    });
+
     describe('Performance Drift Risk Estimation', () => {
         it('should flag high performance drift risk if recent success collapse occurs', () => {
             const result = detector.evaluatePerformanceDriftRisk(

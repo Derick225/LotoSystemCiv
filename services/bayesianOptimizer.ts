@@ -1,6 +1,6 @@
 import { AlgoWeights } from '../shared/prediction.types';
 import { fetchResults } from './lotteryService';
-import { getAlgoWeights } from './predictionEngine';
+import { getAlgoWeights } from './prediction/predictionFacade';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { getBayesianMemoryAsync, saveBayesianMemoryAsync } from './prediction/bayesianMemory';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';

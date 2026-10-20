@@ -8,7 +8,7 @@ import {
   normalizeWeights,
   getAlgoWeights,
   evaluateAlgoEmpiricalProof,
-} from "../../services/predictionEngine";
+} from "../../services/prediction/predictionFacade";
 import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
 import { LOTTERY_CONSTANTS } from "../../services/lotteryService";
 import { useNexusStore } from "../../store/useNexusStore";

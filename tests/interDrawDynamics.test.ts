@@ -17,8 +17,8 @@ import { generateDeterministicFallbackHistory } from '../services/lotteryService
 import { INTER_DRAW_NETWORKS } from '../constants';
 
 describe('DYNAMIQUES COMPLEXES INTER-TIRAGES SELON AGENTS.md', () => {
-  const mockHistTarget = generateDeterministicFallbackHistory('Fortune', 30);
-  const mockHistPred = generateDeterministicFallbackHistory('Premiere Heure', 30);
+  const mockHistTarget = generateDeterministicFallbackHistory('Fortune');
+  const mockHistPred = generateDeterministicFallbackHistory('Premiere Heure');
 
   describe('1. Invariants Mathématiques & Déterminisme Absolu (AGENTS.md)', () => {
     it('doit être 100% déterministe et reproductible au bit près', async () => {

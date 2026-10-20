@@ -2,7 +2,7 @@
 import type { Prediction, LearningSession, PredictionHistoryItem, OrchestrationPattern, PredictionFeedback, PatternType, DrawResult } from '../types';
 import { syncPredictions, syncLearningSessions, syncPredictionSnapshots } from './syncService';
 import { supabase } from './supabaseClient';
-import { getAlgoWeights } from './predictionEngine';
+import { getAlgoWeights } from './prediction/predictionFacade';
 import { ALL_DRAWS } from '../constants';
 import { get, set, del, keys } from "idb-keyval";
 import { EnhancedMetrics } from './prediction/metrics.types';

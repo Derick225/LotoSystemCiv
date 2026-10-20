@@ -45,7 +45,7 @@ import { audioEngine } from "../../utils/audioEngine";
 import { useToast } from "../ui/Toast";
 import { AlgoWeights, PlatinumScenario } from "../../types";
 import { ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
-import { normalizeWeights } from "../../services/predictionEngine";
+import { normalizeWeights } from "../../services/prediction/predictionFacade";
 import {
   ResponsiveContainer,
   RadarChart,

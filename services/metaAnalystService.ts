@@ -1,7 +1,7 @@
 import { PlatinumResult, DrawResult, SymbioticContext, PlatinumScenario, PlatinumAudit, Prediction, PlatinumUserOptions, ForensicReport } from '../types';
 import { get, set } from 'idb-keyval';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { getAlgoWeights } from './predictionEngine';
+import { getAlgoWeights } from './prediction/predictionFacade';
 import { generateMasterPredictionCore } from './prediction/predictionFacade';
 import { useNexusStore } from '../store/useNexusStore';
 import { extractFeatures } from './prediction/featureExtractor';

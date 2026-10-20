@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
 import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from "../../shared/prediction.types";
-import { generateMasterPrediction, getAlgoWeights } from "../../services/predictionEngine";
+import { generateMasterPrediction, getAlgoWeights } from "../../services/prediction/predictionFacade";
 
 /**
  * Famille "Écart" telle que réellement mesurée par la matrice de corrélation ci-dessous.

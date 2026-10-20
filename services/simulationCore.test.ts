@@ -1,8 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runSimulationCore } from './simulationCore';
-import * as predictionEngine from './predictionEngine';
+import * as predictionEngine from './prediction/predictionFacade';
 import { DrawResult } from '../types';
 import { AlgoWeights } from '../types';
+import { getDefaultWeights } from './prediction/weightsManager';
 
 describe('SimulationCore - Zéro Interférence & Stabilité', () => {
   it('doit garantir une isolation stricte (Zéro Interférence) en ne passant que l\'historique passé à l\'oracle', async () => {
@@ -13,6 +14,8 @@ describe('SimulationCore - Zéro Interférence & Stabilité', () => {
         candidates: [1, 2, 3, 4, 5, 6, 7],
         breakdown: {},
         confidence: 80,
+        analysis: 'test',
+        timestamp: 0,
       });
 
     // Création d'un historique fictif ordonné du plus récent (0) au plus ancien (9)
@@ -24,7 +27,7 @@ describe('SimulationCore - Zéro Interférence & Stabilité', () => {
       machine: [],
     }));
 
-    const mockWeights: AlgoWeights = {};
+    const mockWeights: AlgoWeights = getDefaultWeights();
 
     // Exécuter la simulation avec une profondeur de 3 (évaluant les index 0, 1, 2 = les 3 plus récents)
     await runSimulationCore({

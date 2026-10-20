@@ -697,9 +697,10 @@ export const evaluateAlgoEmpiricalProof = (
     };
   });
 
-  if (algoEmpiricalProofCache.size > 100) {
-    const firstKey = algoEmpiricalProofCache.keys().next().value;
-    if (firstKey) algoEmpiricalProofCache.delete(firstKey);
+  // Limite augmentée à 500 : le SGD avec K=15 génère jusqu'à 15 clés par tirage actif
+  if (algoEmpiricalProofCache.size >= 500) {
+    const keysToDelete = Array.from(algoEmpiricalProofCache.keys()).slice(0, 50);
+    keysToDelete.forEach(k => algoEmpiricalProofCache.delete(k));
   }
   algoEmpiricalProofCache.set(cacheKey, result);
 

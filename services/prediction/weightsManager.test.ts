@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeWeights, getDefaultWeights } from './weightsManager';
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
+import type { AlgoWeights } from '../../shared/prediction.types';
+
+const createWeights = (overrides: Partial<AlgoWeights>): AlgoWeights => ({
+    ...Object.fromEntries(Object.values(AlgoKey).map((key) => [key, 0])),
+    ...overrides,
+}) as AlgoWeights;
 
 describe('Weights Manager & Algorithm Configuration', () => {
     
@@ -37,13 +43,13 @@ describe('Weights Manager & Algorithm Configuration', () => {
 
     describe('Runtime Normalization (L1 Norm) & Anti-dominance', () => {
         it('should normalize weights and cap any algorithm to dynamic ceiling (0.50 here)', () => {
-            const mockWeights = {
+            const mockWeights = createWeights({
                 [AlgoKey.FREQUENCY]: 10,
                 [AlgoKey.GAPS]: 5,
                 [AlgoKey.MARKOV]: 5,
-                [AlgoKey.POISSON]: 1,
+                [AlgoKey.BAYES]: 1,
                 [AlgoKey.SPECTRAL]: 1 // added enough to allow sum to 1.0
-            };
+            });
             
             const normalized = normalizeWeights(mockWeights);
             
@@ -58,10 +64,10 @@ describe('Weights Manager & Algorithm Configuration', () => {
         });
 
         it('should handle zero or negative weights gracefully by falling back', () => {
-            const mockWeights = {
+            const mockWeights = createWeights({
                 [AlgoKey.FREQUENCY]: -5,
                 [AlgoKey.GAPS]: 0,
-            };
+            });
             
             const normalized = normalizeWeights(mockWeights);
             const sum = Object.values(normalized).reduce((a: number, b: number) => a + (b || 0), 0) as number;
@@ -70,16 +76,16 @@ describe('Weights Manager & Algorithm Configuration', () => {
         });
         
         it('should normalize large relative weights correctly', () => {
-             const mockWeights = {
+             const mockWeights = createWeights({
                 [AlgoKey.FREQUENCY]: 1000,
                 [AlgoKey.GAPS]: 1,
                 [AlgoKey.MARKOV]: 1,
-                [AlgoKey.POISSON]: 1
-            };
+                [AlgoKey.BAYES]: 1
+            });
             
             const normalized = normalizeWeights(mockWeights);
-            // numAlgos = 4 => theoretical = 0.25 => ceiling = 0.50
-            expect(normalized[AlgoKey.FREQUENCY]).toBeCloseTo(0.50);
+                const dynamicCeiling = Math.min(0.50, 2.0 / Math.sqrt(Object.values(AlgoKey).length));
+                expect(normalized[AlgoKey.FREQUENCY]).toBeCloseTo(dynamicCeiling);
             
             // With 4 keys, max sum is 1.20, so 1.0 is possible
             const sum = Object.values(normalized).reduce((a: number, b: number) => a + (b || 0), 0) as number;

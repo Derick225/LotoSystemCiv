@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { calculateScores } from './scoringEngine';
+import { applyPCADenoising, calculateScores } from './scoringEngine';
+import { createStabilityPerturbedWeights } from './predictionFinalize';
 import { AlgoWeights, AlgoKey } from '../../shared/prediction.types';
 import { ExtractedFeatures } from './featureExtractor';
 import { EnhancedMetrics } from './metrics.types';
@@ -15,7 +16,8 @@ describe('Scoring Engine', () => {
         momentumMap: new Float32Array(91).map(() => 1.2),
         machineTransferMap: new Float32Array(91).map(() => 0.15),
         shadowProbabilityMap: new Float32Array(91).map(() => 0.08),
-        networkCorrelationMap: new Float32Array(91).map(() => 0.22)
+        networkCorrelationMap: new Float32Array(91).map(() => 0.22),
+        interDrawMap: new Float32Array(91).map(() => 0.05),
     };
 
     // 2. Initialisation des poids
@@ -66,6 +68,9 @@ describe('Scoring Engine', () => {
         expect(first.num).toBeLessThanOrEqual(90);
         expect(typeof first.score).toBe('number');
         expect(first.breakdown).toBeDefined();
+        const shapTotal = Object.values(first.explainability?.shapValues || {})
+            .reduce((sum, contribution) => sum + contribution, 0);
+        expect(shapTotal).toBeCloseTo(first.score, 8);
     });
 
     it('should maintain determinism and reproducibility with the same inputs', () => {
@@ -73,5 +78,26 @@ describe('Scoring Engine', () => {
         const run2 = calculateScores(mockFeatures, mockWeights, mockMetrics, mockHistory);
 
         expect(run1).toEqual(run2);
+    });
+
+    it('keeps sensitivity perturbations distinct after weight normalization', () => {
+        const perturbed = createStabilityPerturbedWeights(mockWeights);
+        const changedWeights = Object.keys(mockWeights).some(
+            (key) => Math.abs(perturbed[key as AlgoKey] - mockWeights[key as AlgoKey]) > Number.EPSILON
+        );
+
+        expect(changedWeights).toBe(true);
+        expect(Object.values(perturbed).reduce((sum, weight) => sum + weight, 0)).toBeCloseTo(1, 8);
+    });
+
+    it('keeps normalized SHAP contributions summing to the displayed score after denoising', async () => {
+        const scores = calculateScores(mockFeatures, mockWeights, mockMetrics, mockHistory);
+        const denoised = await applyPCADenoising(scores, mockWeights, mockMetrics);
+
+        for (const scored of denoised) {
+            const shapTotal = Object.values(scored.explainability?.shapValues || {})
+                .reduce((sum, contribution) => sum + contribution, 0);
+            expect(shapTotal).toBeCloseTo(scored.score, 8);
+        }
     });
 });

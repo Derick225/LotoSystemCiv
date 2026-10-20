@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useRef, useEffect, useDeferredValue } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
-import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights, generateEmpiricalCalibration } from '../services/predictionEngine';
+import { generateMasterPrediction, getStrategyName, getAlgoWeights, normalizeWeights, generateEmpiricalCalibration } from '../services/prediction/predictionFacade';
 import { savePredictionToHistory, getLatestPredictionForDraw } from '../services/predictionHistoryService';
 import { calculateShannonEntropy, detectGameRegime, calculateVolatility } from '../services/mathService';
 import { getLocalForensicReports } from '../services/postPredictionAnalysisService';

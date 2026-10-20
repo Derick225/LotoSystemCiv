@@ -176,12 +176,12 @@ describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCH
 
     it('calcule le couplage continu avec une fonction sigmoïde différentiable', () => {
       const mockHistA = [
-        { date: '2026-03-01', draw_name: 'Reveil', gagnants: [1, 2, 3, 4, 5], machine: [] },
-        { date: '2026-02-22', draw_name: 'Reveil', gagnants: [11, 12, 13, 14, 15], machine: [] }
+        { id: 'wake-1', date: '2026-03-01', drawName: 'Reveil', gagnants: [1, 2, 3, 4, 5], machine: [] },
+        { id: 'wake-2', date: '2026-02-22', drawName: 'Reveil', gagnants: [11, 12, 13, 14, 15], machine: [] }
       ];
       const mockHistB = [
-        { date: '2026-03-01', draw_name: 'Etoile', gagnants: [1, 2, 30, 40, 50], machine: [] },
-        { date: '2026-02-22', draw_name: 'Etoile', gagnants: [11, 22, 33, 44, 55], machine: [] }
+        { id: 'star-1', date: '2026-03-01', drawName: 'Etoile', gagnants: [1, 2, 30, 40, 50], machine: [] },
+        { id: 'star-2', date: '2026-02-22', drawName: 'Etoile', gagnants: [11, 22, 33, 44, 55], machine: [] }
       ];
 
       const coupling = computeContinuousInterDrawCoupling(mockHistA, mockHistB);
@@ -250,13 +250,13 @@ describe('CADRE DES RELATIONS INTER-TIRAGES SELON AGENTS.md : 2 RÉSEAUX ÉTANCH
   describe('Vecteur de Transition Inter-Tirages (calculateInterDrawVector)', () => {
     it('polarise les scores sur les numéros du tirage prédécesseur et non sur le tirage cible lui-même', () => {
       const targetHistory = [
-        { date: '2026-03-01', draw_name: 'Fortune', gagnants: [7, 70, 81, 84, 83], machine: [] },
-        { date: '2026-02-22', draw_name: 'Fortune', gagnants: [7, 70, 81, 84, 83], machine: [] }
+        { id: 'fortune-1', date: '2026-03-01', drawName: 'Fortune', gagnants: [7, 70, 81, 84, 83], machine: [] },
+        { id: 'fortune-2', date: '2026-02-22', drawName: 'Fortune', gagnants: [7, 70, 81, 84, 83], machine: [] }
       ];
 
       const predecessorHistory = [
-        { date: '2026-02-28', draw_name: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] },
-        { date: '2026-02-21', draw_name: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] }
+        { id: 'emergence-1', date: '2026-02-28', drawName: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] },
+        { id: 'emergence-2', date: '2026-02-21', drawName: 'Emergence', gagnants: [7, 14, 21, 28, 35], machine: [] }
       ];
 
       const vector = calculateInterDrawVector(targetHistory, 'Fortune', predecessorHistory);

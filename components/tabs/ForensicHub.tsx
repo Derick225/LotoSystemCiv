@@ -71,7 +71,7 @@ import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { generateLearningSession, applyForensicAdjustments } from "../../services/forensicTrainingBridge";
-import { generateMasterPrediction } from "../../services/predictionEngine";
+import { generateMasterPrediction } from "../../services/prediction/predictionFacade";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 type ForensicTab = "audits" | "closedloop" | "dna_drift" | "matrices_entropy" | "timemachine";

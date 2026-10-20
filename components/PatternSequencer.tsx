@@ -6,7 +6,7 @@ import { useNexusStore } from "../store/useNexusStore";
 import {
   analyzeTicketStrength,
   calculateGeneticDiversityIndex,
-} from "../services/predictionEngine";
+} from "../services/prediction/predictionFacade";
 
 import { saveTicket } from "../services/userPreferencesService";
 import { useToast } from "./ui/Toast";

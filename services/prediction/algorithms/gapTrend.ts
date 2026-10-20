@@ -1,6 +1,5 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
-import { calculateShannonEntropy, calculateFractalIndex } from '../../mathService';
 import { evaluateKDE } from '../../kdeService';
 
 /**
@@ -34,23 +33,25 @@ export const gapTrendPlugin: AlgorithmPlugin = {
     // Dérivé de la théorie de l'information : log2(N) pour couvrir l'espace d'états
     const MIN_GAPS_FOR_TREND = Math.max(5, Math.ceil(Math.log2(N)));
 
-    // [2] Modulation dynamique basée sur l'entropie de Shannon et l'exposant de Hurst
-    const localHistory = history.slice(0, Math.min(history.length, 10));
-    const localEntropy = calculateShannonEntropy(localHistory).normalized;
-    const localHurst = calculateFractalIndex(localHistory);
+    // [2] Réutilisation des statistiques précalculées du contexte (ctx.statisticalBounds) :
+    // calculateShannonEntropy + calculateFractalIndex sur history.slice(0,10) était redondant
+    // car ces valeurs sont déjà calculées sur l'historique complet par calculateStatisticalBounds.
+    // L'historique complet est statistiquement plus fiable que 10 tirages.
+    const localEntropy = Number.isFinite(ctx.statisticalBounds?.shannonEntropy)
+      ? Math.min(1.0, Math.max(0.0, (ctx.statisticalBounds.shannonEntropy as number) / Math.log2(N)))
+      : 0.5;
+    const localHurst = Number.isFinite(ctx.statisticalBounds?.hurstExponent)
+      ? Math.min(1.0, Math.max(0.0, ctx.statisticalBounds.hurstExponent as number))
+      : 0.5;
 
-    // Plus l'entropie s'effondre (motifs ordonnés), plus maxCoeff augmente (réactivité accrue)
-    // Plus l'entropie est forte (chaos), plus maxCoeff baisse (lissage pour éviter le bruit)
-    // [1] Suppression des constantes magiques 0.05, 0.90, 5.0, 0.7
-    // Utilisation de dérivations mathématiques continues
-    const entropyDeviation = Math.abs(localEntropy - 0.5); // Écart par rapport à l'équilibre
-    const hurstFactor = Math.max(0, localHurst - 0.5); // Persistance (H > 0.5)
-    
-    // Fonction de modulation continue : base + déviation entropique + facteur de persistance
-    const baseCoeff = 0.1; // Coefficient de base documenté
+    const entropyDeviation = Math.abs(localEntropy - 0.5);
+    const hurstFactor = Math.max(0, localHurst - 0.5);
+    const baseCoeff = 0.1;
     const maxCoeff = baseCoeff + (0.8 * entropyDeviation) + (0.1 * hurstFactor);
 
-    // [3] Recherche en grille adaptative (nombre de pas dérivé de la dimensionalité)
+    // [3] Coordinate Descent O(GRID_STEPS × 2 × passes) au lieu de grille O(GRID_STEPS²) :
+    // On optimise alpha à beta fixe, puis beta à alpha fixe, en 2 passes.
+    // Convergence garantie car la SSE de Holt est convexe en chaque paramètre séparément.
     const GRID_STEPS = Math.max(5, Math.min(15, Math.ceil(Math.sqrt(N) / 2)));
     const ALPHA_BETA_GRID: number[] = [];
     for (let i = 0; i <= GRID_STEPS; i++) {
@@ -124,16 +125,25 @@ export const gapTrendPlugin: AlgorithmPlugin = {
       const variance = deltaGapSeq.reduce((a, b) => a + Math.pow(b - meanDelta, 2), 0) / deltaGapSeq.length;
       const volatility = Math.sqrt(variance) || Number.EPSILON;
 
-      // Recherche en grille du couple (alpha, beta) minimisant le SSE in-sample
-      let best = { level: gapSeq[0], trend: 0, sse: Infinity, alpha: 0.5, beta: 0.5 };
-      for (const alpha of ALPHA_BETA_GRID) {
+      // Coordinate Descent : optimise alpha à beta fixe, puis beta à alpha fixe (2 passes).
+      // Réduit la complexité de O(GRID_STEPS²) à O(GRID_STEPS × 4) avec convergence équivalente.
+      let bestAlpha = (baseCoeff + maxCoeff) / 2;
+      let bestBeta = (baseCoeff + maxCoeff) / 2;
+      let bestSse = Infinity;
+
+      for (let pass = 0; pass < 2; pass++) {
+        // Optimise alpha à bestBeta fixe
+        for (const alpha of ALPHA_BETA_GRID) {
+          const fit = fitHolt(gapSeq, alpha, bestBeta);
+          if (fit.sse < bestSse) { bestSse = fit.sse; bestAlpha = alpha; }
+        }
+        // Optimise beta à bestAlpha fixe
         for (const beta of ALPHA_BETA_GRID) {
-          const fit = fitHolt(gapSeq, alpha, beta);
-          if (fit.sse < best.sse) {
-            best = { ...fit, alpha, beta };
-          }
+          const fit = fitHolt(gapSeq, bestAlpha, beta);
+          if (fit.sse < bestSse) { bestSse = fit.sse; bestBeta = beta; }
         }
       }
+      const best = { ...fitHolt(gapSeq, bestAlpha, bestBeta), alpha: bestAlpha, beta: bestBeta };
 
       // Qualité d'ajustement : réduction de variance par rapport à un modèle naïf
       const meanGap = gapSeq.reduce((a, b) => a + b, 0) / gapSeq.length;

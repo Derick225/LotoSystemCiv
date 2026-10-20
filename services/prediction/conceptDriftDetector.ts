@@ -307,32 +307,68 @@ export class ConceptDriftDetector {
         const klStream: number[] = [];
         const klIndices: number[] = [];
 
+        // Mise à jour incrémentale des compteurs : la fenêtre reste de taille W et la baseline
+        // cumule tous les tirages antérieurs, sans rescanner l'historique à chaque étape.
+        const freqWindow = new Float64Array(91);
+        const freqBaseline = new Float64Array(91);
+        let sumWindow = 0;
+        let sumBaseline = 0;
+        const updateFrequencies = (
+          frequencies: Float64Array,
+          winners: number[],
+          direction: 1 | -1,
+        ): number => {
+          let updatedCount = 0;
+          winners.forEach((n) => {
+            if (n >= 1 && n <= 90) {
+              frequencies[n] += direction;
+              updatedCount += direction;
+            }
+          });
+          return updatedCount;
+        };
+
+        // Pour t = W, la fenêtre récente vaut [1, W] et la baseline [0].
+        sumBaseline += updateFrequencies(
+          freqBaseline,
+          chronologicalHistory[0].gagnants,
+          1,
+        );
+        for (let t = 1; t < W; t++) {
+          sumWindow += updateFrequencies(
+            freqWindow,
+            chronologicalHistory[t].gagnants,
+            1,
+          );
+        }
+
         for (let t = W; t < N_chrono; t++) {
-            const recentSlice = chronologicalHistory.slice(t - W + 1, t + 1);
-            const baselineSlice = chronologicalHistory.slice(0, t - W + 1);
-            if (baselineSlice.length < 5) continue;
+          if (t > W) {
+            const leavingDraw = chronologicalHistory[t - W];
+            sumBaseline += updateFrequencies(freqBaseline, leavingDraw.gagnants, 1);
+            sumWindow += updateFrequencies(freqWindow, leavingDraw.gagnants, -1);
+          }
+          // Ajouter le tirage entrant dans la fenêtre
+          sumWindow += updateFrequencies(
+            freqWindow,
+            chronologicalHistory[t].gagnants,
+            1,
+          );
+          if (sumWindow <= 0 || sumBaseline <= 0) continue;
 
-            const freqR = new Float64Array(91);
-            const freqB = new Float64Array(91);
+          // Normalisation temporaire pour le calcul JS + Wasserstein
+          const normW = new Float64Array(91);
+          const normB = new Float64Array(91);
+          for (let i = 1; i <= 90; i++) {
+            normW[i] = freqWindow[i] / sumWindow;
+            normB[i] = freqBaseline[i] / sumBaseline;
+          }
 
-            recentSlice.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freqR[n]++; }));
-            baselineSlice.forEach(d => d.gagnants.forEach(n => { if (n >= 1 && n <= 90) freqB[n]++; }));
-
-            let sumR_t = 0, sumB_t = 0;
-            for (let i = 1; i <= 90; i++) {
-                sumR_t += freqR[i];
-                sumB_t += freqB[i];
-            }
-            for (let i = 1; i <= 90; i++) {
-                freqR[i] /= (sumR_t || 1);
-                freqB[i] /= (sumB_t || 1);
-            }
-
-            const jsStep = this.computeJensenShannonDivergence(freqR, freqB);
-            const wStep = this.computeCircularWassersteinDistance(freqR, freqB);
-            klStream.push(0.5 * (jsStep + wStep));
-            // Indice original inversé correspondant dans purifiedHistory (0 est le plus récent)
-            klIndices.push(N_chrono - 1 - t);
+          const jsStep = this.computeJensenShannonDivergence(normW, normB);
+          const wStep = this.computeCircularWassersteinDistance(normW, normB);
+          klStream.push(0.5 * (jsStep + wStep));
+          // Indice original inversé correspondant dans purifiedHistory (0 est le plus récent)
+          klIndices.push(N_chrono - 1 - t);
         }
 
         const phResult = this.detectDriftPageHinkley(klStream);

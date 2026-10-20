@@ -3,7 +3,7 @@ import { useNexusStore } from "../../store/useNexusStore";
 import {
   runAlternativeRealitiesSimulation,
   BacktestReport,
-} from "../../services/backtestingEngine";
+} from "../../services/backtest/engine";
 import {
   ResponsiveContainer,
   AreaChart,

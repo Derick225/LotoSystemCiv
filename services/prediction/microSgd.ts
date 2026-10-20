@@ -77,12 +77,33 @@ export const applyDeterministicMicroSgd = async (
     return adjustedWeights;
   }
 
-  const K = Math.min(5, history.length - 1);
+  // K adaptatif : plus de tirages de validation = gradient moins bruité.
+  // Borne haute à 15 pour éviter un coût O(K × 60 × 90) prohibitif.
+  const K = Math.min(15, Math.max(5, Math.floor(Math.sqrt(history.length))), history.length - 1);
   if (K <= 0) return adjustedWeights;
 
   const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
   const safeEntropy = (typeof entropyValue === 'number' && !isNaN(entropyValue)) ? entropyValue : 0.5;
   const eta = baseEta * (1.0 - Math.pow(safeEntropy, 2.0));
+
+  // Preuve empirique calculée UNE SEULE FOIS sur history.slice(K) — le sous-ensemble stable
+  // antérieur à toutes les K cibles SGD. Calculer proofMap à l'intérieur de la boucle sur
+  // chaque subHistory différent coûtait O(K × evalDepth × 90) sans gain de précision :
+  // la preuve est une propriété structurelle de l'algorithme sur le tirage, pas une quantité
+  // qui change à chaque pas de gradient. history.slice(K) est strictement causal (aucune
+  // des K cibles n'y figure) et fournit le plus grand échantillon disponible pour l'estimation.
+  const stableProofHistory = history.slice(K);
+  const proofMap = stableProofHistory.length >= 5
+    ? evaluateAlgoEmpiricalProof(drawName, stableProofHistory)
+    : null;
+
+  // Pré-calcul des hashes de sous-historiques hors boucle pour éviter O(K × N) hachages
+  const subHistoryHashes: string[] = new Array(K);
+  for (let t = K - 1; t >= 0; t--) {
+    const rawSub = history.slice(t + 1);
+    const sub = rawSub.slice(0, Math.min(60, rawSub.length));
+    subHistoryHashes[t] = `${sub.length}_${hashHistoryContent(sub)}`;
+  }
 
   // Cache des bundles d'algos par hash de sous-historique
   const bundleCache = new Map<string, AlgoBundle>();
@@ -97,18 +118,13 @@ export const applyDeterministicMicroSgd = async (
     // Fenêtre temporelle locale dynamique pour l'estimation rapide et déterministe du gradient
     const subHistory = rawSubHistory.slice(0, Math.min(60, rawSubHistory.length));
 
-    // Preuve empirique CAUSALE : évaluée uniquement sur les tirages antérieurs à la cible
-    // (subHistory), jamais sur `history` complet qui contient les cibles du SGD. Sans cela, le
-    // garde-fou de preuve était calibré sur des données futures → fuite rendant l'ajustement optimiste.
-    const proofMap = evaluateAlgoEmpiricalProof(drawName, subHistory);
-
     const gagnants = targetDraw.gagnants;
     if (!gagnants || gagnants.length === 0) continue;
     attempted++;
 
     try {
       // Bundle mémoïsé par hash du sous-historique (mode allégé sans Hawkes spatio-temporel lourd pour le SGD intermédiaire)
-      const subHash = `${subHistory.length}_${hashHistoryContent(subHistory)}`;
+      const subHash = subHistoryHashes[t];
       let subMetrics = bundleCache.get(subHash);
       if (!subMetrics) {
         subMetrics = await buildAlgoBundle(subHistory, drawName, false);
@@ -151,7 +167,7 @@ export const applyDeterministicMicroSgd = async (
       algoKeys.forEach(algo => {
         const key = algo as AlgoKey;
         const oldWeight = adjustedWeights[key] || 0;
-        const proof = proofMap[key];
+        const proof = proofMap?.[key];
         const hasProof = proof && proof.hasProof && proof.proofScore > 0;
         
         let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);

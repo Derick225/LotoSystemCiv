@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { interDrawResonancePlugin } from '../services/prediction/algorithms/interDrawResonance';
 import { interMonthlyResonancePlugin } from '../services/prediction/algorithms/interMonthlyResonance';
-import { algorithmRegistry } from '../services/prediction/algorithmRegistry';
+import { algorithmRegistry, AlgorithmContext } from '../services/prediction/algorithmRegistry';
 import { initCoreAlgorithms } from '../services/prediction/algorithms';
 import { AlgoKey } from '../shared/prediction.types';
 import { DrawResult } from '../types';
 import { globalCache, CACHE_TTL } from '../services/cache/CacheService';
+import { createAlgorithmTestContext } from '../services/prediction/algorithms/testFixtures';
+import { getDefaultWeights } from '../services/prediction/weightsManager';
 
 describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
   beforeAll(async () => {
@@ -16,7 +18,6 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     {
       id: 'd1',
       date: '15/03/2026',
-      tirage: 'Fortune',
       drawName: 'Fortune',
       gagnants: [12, 23, 34, 45, 56],
       machine: [1, 2, 3, 4, 5]
@@ -24,7 +25,6 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     {
       id: 'd2',
       date: '08/03/2026',
-      tirage: 'Fortune',
       drawName: 'Fortune',
       gagnants: [10, 20, 30, 40, 50],
       machine: [6, 7, 8, 9, 11]
@@ -32,7 +32,6 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     {
       id: 'd3',
       date: '15/02/2026',
-      tirage: 'Fortune',
       drawName: 'Fortune',
       gagnants: [12, 25, 32, 45, 78], // Jumeau mensuel M-1 (même jour 15)
       machine: [15, 16, 17, 18, 19]
@@ -40,7 +39,6 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     {
       id: 'd4',
       date: '15/01/2026',
-      tirage: 'Fortune',
       drawName: 'Fortune',
       gagnants: [12, 23, 67, 80, 89], // Jumeau mensuel M-2 (même jour 15)
       machine: [21, 22, 24, 26, 27]
@@ -48,7 +46,6 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     {
       id: 'd5',
       date: '15/03/2025',
-      tirage: 'Fortune',
       drawName: 'Fortune',
       gagnants: [12, 34, 46, 56, 79], // Jumeau annuel Y-1 (même quinzaine mars)
       machine: [31, 32, 33, 35, 36]
@@ -57,7 +54,6 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     ...Array.from({ length: 25 }, (_, i) => ({
       id: `d_extra_${i}`,
       date: `01/0${(i % 9) + 1}/2025`,
-      tirage: 'Fortune',
       drawName: 'Fortune',
       gagnants: [
         ((i * 3) % 90) + 1,
@@ -76,12 +72,15 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
     }))
   ];
 
-  const baseContext = {
+  const baseContext: AlgorithmContext = {
+    ...createAlgorithmTestContext(mockHistory),
     drawName: 'Fortune',
-    history: mockHistory,
-    pluginCache: {},
-    weights: { [AlgoKey.INTER_DRAW_RESONANCE]: 1.0, [AlgoKey.INTER_MONTHLY_RESONANCE]: 1.0 },
-    statisticalBounds: { hurstExponent: 0.58 }
+    weights: {
+      ...getDefaultWeights(),
+      [AlgoKey.INTER_DRAW_RESONANCE]: 1.0,
+      [AlgoKey.INTER_MONTHLY_RESONANCE]: 1.0,
+    },
+    statisticalBounds: { ...createAlgorithmTestContext(mockHistory).statisticalBounds, hurstExponent: 0.58 }
   };
 
   // Amorçage honnête du cache L1 : historique du prédécesseur direct de Fortune

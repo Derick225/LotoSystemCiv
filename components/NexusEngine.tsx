@@ -4,7 +4,7 @@ import { useDrawHistory, useNexusAnalytics } from "../hooks/useLottery";
 import {
   getAlgoWeights,
   generateMasterPrediction,
-} from "../services/predictionEngine";
+} from "../services/prediction/predictionFacade";
 import { generateEmpiricalCalibration } from "../services/prediction/ticketAnalysisService";
 import { generateSmartInsights } from "../services/insightService";
 import {

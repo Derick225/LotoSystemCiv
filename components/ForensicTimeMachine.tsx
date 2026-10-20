@@ -19,7 +19,7 @@ import { AlgoWeights, DrawResult } from "../types";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
-import { generateMasterPrediction } from "../services/predictionEngine";
+import { generateMasterPrediction } from "../services/prediction/predictionFacade";
 import { runForensicAutopsy } from "../services/postPredictionAnalysisService";
 import {
   normalizeWeights,

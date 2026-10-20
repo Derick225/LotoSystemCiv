@@ -17,7 +17,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { DrawResult, AlgoWeights } from "../types";
-import { generateMasterPrediction } from "../services/predictionEngine";
+import { generateMasterPrediction } from "../services/prediction/predictionFacade";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { audioEngine } from "../utils/audioEngine";
 import { drawHasMachineNumbers } from "../constants";

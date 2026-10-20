@@ -11,7 +11,7 @@ import type {
   SeverityLevel,
   ForensicConfidence,
 } from "../types";
-import { normalizeWeights, getAlgoWeights } from "./predictionEngine";
+import { normalizeWeights, getAlgoWeights } from "./prediction/predictionFacade";
 import { syncForensicReports } from "./syncService";
 import { AppError, logError } from "../utils/AppError";
 import { fetchResults } from "./lotteryService";
@@ -1869,4 +1869,3 @@ export const autoTuneModelDnaFromAutopsyReport = async (
     }
   );
 };
-

@@ -116,7 +116,8 @@ describe('Validation de Bout en Bout LONACI (10H, 13H, 16H, 19H55) & Recuit Simu
 
         // 3. Vérification de la famille fermée associée
         const detectedFamily = getPrimaryInterDrawFamily(drawName);
-        expect(detectedFamily.id).toBe(expectedFamily);
+        expect(detectedFamily).not.toBeNull();
+        expect(detectedFamily?.id).toBe(expectedFamily);
       });
     });
   });

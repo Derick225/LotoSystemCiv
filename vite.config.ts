@@ -184,11 +184,6 @@ export default defineConfig(({ mode }) => {
     define: {
       'process.env': JSON.stringify(clientEnv)
     },
-    resolve: {
-      alias: {
-        '@': '/src'
-      }
-    },
     build: {
       outDir: 'dist',
       target: 'esnext',

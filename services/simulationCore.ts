@@ -1,6 +1,6 @@
 import { AlgoWeights } from "../types";
 import { DrawResult } from "../types";
-import { generateMasterPrediction } from "./predictionEngine";
+import { generateMasterPrediction } from "./prediction/predictionFacade";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { useNexusStore } from "../store/useNexusStore";
 import { getPayoutMultiplier, drawHasMachineNumbers } from "../constants";

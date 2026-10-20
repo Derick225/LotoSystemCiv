@@ -4,13 +4,14 @@ import { analyzeForManipulation } from '../services/forensicAuditService';
 import { ConceptDriftDetector } from '../services/prediction/conceptDriftDetector';
 import { FALLBACK_CALIBRATION } from '../shared/prediction.types';
 import { DrawResult } from '../types';
+import { AlgoKey } from '../shared/prediction.types';
 
 describe('Intégration HPC Extensions (Annealing Combinatoire & Lyapunov Topologique)', () => {
   it('generateCombination : Génération avec seed HPC de recuit simulé', async () => {
     const sortedScores = Array.from({ length: 90 }, (_, i) => ({
       num: i + 1,
       score: 50.0 + 40.0 * Math.sin((i + 1) * 0.15),
-      confidence: 0.75,
+      breakdown: { [AlgoKey.FREQUENCY]: 50.0 + 40.0 * Math.sin((i + 1) * 0.15) },
     })).sort((a, b) => b.score - a.score);
 
     const affinityMap: Float32Array[] = Array.from({ length: 91 }, (_, i) => {
@@ -48,7 +49,7 @@ describe('Intégration HPC Extensions (Annealing Combinatoire & Lyapunov Topolog
       mockHistory.push({
         id: `draw-${i}`,
         date: `2026-02-${(i + 1).toString().padStart(2, '0')}`,
-        nom_tirage: 'Reveil',
+        drawName: 'Reveil',
         gagnants: [
           1 + (i % 15),
           20 + (i % 15),

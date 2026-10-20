@@ -56,52 +56,35 @@ export const evaluatePredictionStability = (
   }
   const l2NormBase = Math.sqrt(l2NormBaseSq) || 1e-9;
 
-  // 2. Perturbations continues des poids actifs et mesure de la similarité Cosinus
+  // 2. Perturbation vectorielle UNIQUE : au lieu de N_algos appels à calculateScores
+  // (coût O(N_algos × 90 × N_algos)), on applique une seule perturbation isotrope
+  // sur tous les poids actifs simultanément. Coût : 1 seul appel calculateScores.
   const activeKeys = weightKeys.filter((k) => (weights[k] || 0) > 0);
   if (activeKeys.length === 0) return 100;
 
-  let totalCosineSimilarity = 0;
-  let totalWeightMass = 0;
+  const normPerturbed = createStabilityPerturbedWeights(weights);
+  const perturbedScores = calculateScores(features, normPerturbed, enhancedMetrics, history, 0.90, drawName);
 
-  activeKeys.forEach((k) => {
-    const wVal = weights[k] || 0;
-    // Facteur de perturbation continu fonction de la dimension de l'espace des poids
-    const perturbationFactor = 1.0 + (1.0 / (1.0 + Math.sqrt(activeKeys.length)));
-    const perturbedWeights = { ...weights };
-    perturbedWeights[k] = wVal * perturbationFactor;
-
-    const normPerturbed = normalizeWeights(perturbedWeights, { bypassCap: true });
-    const perturbedScores = calculateScores(features, normPerturbed, enhancedMetrics, history, 0.90, drawName);
-
-    const perturbedMap = new Map<number, number>();
-    let sumPert = 0;
-    perturbedScores.forEach((s) => {
-      perturbedMap.set(s.num, s.score);
-      sumPert += s.score;
-    });
-    const meanPert = sumPert / N;
-
-    // Produit scalaire & norme L2
-    let dotProduct = 0;
-    let l2NormPertSq = 0;
-    for (let i = 0; i < N; i++) {
-      const num = baseScores[i].num;
-      const cBase = centeredBaseScores[i];
-      const cPert = (perturbedMap.get(num) ?? meanPert) - meanPert;
-      dotProduct += cBase * cPert;
-      l2NormPertSq += cPert * cPert;
-    }
-
-    const l2NormPert = Math.sqrt(l2NormPertSq) || 1e-9;
-    const cosSim = Math.max(-1.0, Math.min(1.0, dotProduct / (l2NormBase * l2NormPert)));
-
-    totalCosineSimilarity += cosSim * wVal;
-    totalWeightMass += wVal;
+  const perturbedMap = new Map<number, number>();
+  let sumPert = 0;
+  perturbedScores.forEach((s) => {
+    perturbedMap.set(s.num, s.score);
+    sumPert += s.score;
   });
+  const meanPert = sumPert / N;
 
-  const meanCosineStability = totalWeightMass > 0 ? totalCosineSimilarity / totalWeightMass : 1.0;
-  // Mapping CosSim [-1, 1] -> [0, 1]
-  const S_perturb = Math.max(0.0, Math.min(1.0, (meanCosineStability + 1.0) / 2.0));
+  let dotProduct = 0;
+  let l2NormPertSq = 0;
+  for (let i = 0; i < N; i++) {
+    const num = baseScores[i].num;
+    const cBase = centeredBaseScores[i];
+    const cPert = (perturbedMap.get(num) ?? meanPert) - meanPert;
+    dotProduct += cBase * cPert;
+    l2NormPertSq += cPert * cPert;
+  }
+  const l2NormPert = Math.sqrt(l2NormPertSq) || 1e-9;
+  const cosSim = Math.max(-1.0, Math.min(1.0, dotProduct / (l2NormBase * l2NormPert)));
+  const S_perturb = Math.max(0.0, Math.min(1.0, (cosSim + 1.0) / 2.0));
 
   // 3. Signal-to-Noise Ratio (SNR) continu de la sélection vs queue de distribution
   const selectedSet = new Set(baseSelection);
@@ -165,6 +148,21 @@ export const evaluatePredictionStability = (
     Math.pow(S_sharpness, STABILITY_POLYHARMONIC_WEIGHTS.SHARPNESS);
 
   return Math.round(Math.max(1, Math.min(99, combinedStability * 100)));
+};
+
+export const createStabilityPerturbedWeights = (weights: AlgoWeights): AlgoWeights => {
+  const activeKeys = (Object.keys(weights) as AlgoKey[])
+    .filter((key) => (weights[key] || 0) > 0)
+    .sort();
+  const perturbedWeights: AlgoWeights = { ...weights };
+  const perturbationAmplitude = 1.0 / (1.0 + Math.sqrt(activeKeys.length));
+
+  activeKeys.forEach((key, index) => {
+    const direction = Math.cos((2.0 * Math.PI * index) / activeKeys.length);
+    perturbedWeights[key] = (weights[key] || 0) * (1.0 + perturbationAmplitude * direction);
+  });
+
+  return normalizeWeights(perturbedWeights, { bypassCap: true });
 };
 
 export const finalizePredictionPayload = async (

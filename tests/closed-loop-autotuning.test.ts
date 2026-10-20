@@ -5,21 +5,21 @@ import {
 } from '../services/prediction/closedLoopAutopsyService';
 import {
   getModelEvolutionLineage,
-  getModelDnaKnowledgeBase,
 } from '../services/prediction/modelDnaKnowledgeBase';
 import { getAlgoWeights } from '../services/prediction/weightsManager';
 import { autoTuneModelDnaFromAutopsyReport, runForensicAutopsy } from '../services/postPredictionAnalysisService';
 import { DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
+import type { AlgoKey as AlgoKeyType } from '../shared/prediction.types';
 import { DrawResult } from '../types';
 
 describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro-SGD ➔ Version ADN)', () => {
   const drawName = 'NATIONAL_TEST';
   const mockHistory: DrawResult[] = [
-    { id: '1', date: '22/01/2026', tirage: drawName, gagnants: [12, 24, 36, 48, 60], machine: [1, 2, 3, 4, 5] },
-    { id: '2', date: '15/01/2026', tirage: drawName, gagnants: [11, 23, 35, 47, 59], machine: [6, 7, 8, 9, 10] },
-    { id: '3', date: '08/01/2026', tirage: drawName, gagnants: [10, 22, 34, 46, 58], machine: [15, 16, 17, 18, 19] },
-    { id: '4', date: '01/01/2026', tirage: drawName, gagnants: [12, 25, 36, 49, 70], machine: [20, 21, 22, 23, 24] },
-    { id: '5', date: '25/12/2025', tirage: drawName, gagnants: [5, 15, 25, 35, 45], machine: [30, 31, 32, 33, 34] },
+    { id: '1', date: '22/01/2026', drawName, gagnants: [12, 24, 36, 48, 60], machine: [1, 2, 3, 4, 5] },
+    { id: '2', date: '15/01/2026', drawName, gagnants: [11, 23, 35, 47, 59], machine: [6, 7, 8, 9, 10] },
+    { id: '3', date: '08/01/2026', drawName, gagnants: [10, 22, 34, 46, 58], machine: [15, 16, 17, 18, 19] },
+    { id: '4', date: '01/01/2026', drawName, gagnants: [12, 25, 36, 49, 70], machine: [20, 21, 22, 23, 24] },
+    { id: '5', date: '25/12/2025', drawName, gagnants: [5, 15, 25, 35, 45], machine: [30, 31, 32, 33, 34] },
   ];
 
   it('exécute l’autopsie rétrospective en boucle fermée et produit les métriques déterministes', async () => {
@@ -130,6 +130,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     const noMachineHistory: DrawResult[] = mockHistory.map((d) => ({
       ...d,
       tirage: 'NO_MACHINE_DRAW',
+      drawName: 'NO_MACHINE_DRAW',
       machine: [],
     }));
 
@@ -141,15 +142,15 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     );
 
     for (const retiredKey of RETIRED_ALGO_WEIGHT_KEYS) {
-      const gradInfo = report.algoGradients.find((g) => g.algoKey === retiredKey);
-      expect(gradInfo?.oldWeight ?? 0).toBe(0);
+      const gradInfo = report.algoGradients.find((g) => g.key === retiredKey);
+      expect(gradInfo?.currentWeight ?? 0).toBe(0);
       expect(report.correctedWeights[retiredKey]).toBe(0);
     }
     expect(report.correctedWeights[AlgoKey.MACHINE_TRANSFER]).toBe(0);
 
     // Vérification directe de projectWeightsWithProofGuard : aucun poids verrouillé ne monte même si les autres baissent
-    const lockedKeys = new Set<AlgoKey>([AlgoKey.FREQUENCY, AlgoKey.GAPS]);
-    const forcedZero = new Set<AlgoKey>([AlgoKey.MACHINE_TRANSFER]);
+    const lockedKeys = new Set<AlgoKeyType>([AlgoKey.FREQUENCY, AlgoKey.GAPS]);
+    const forcedZero = new Set<AlgoKeyType>([AlgoKey.MACHINE_TRANSFER]);
     const shrunkCandidates: Record<string, number> = {};
     for (const k of Object.values(AlgoKey)) {
       shrunkCandidates[k] = lockedKeys.has(k)
@@ -177,7 +178,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     const isolatedDraw = 'DRY_RUN_ISOLATED_TEST';
     const isolatedHistory: DrawResult[] = mockHistory.map((d) => ({
       ...d,
-      tirage: isolatedDraw,
+      drawName: isolatedDraw,
     }));
 
     const beforeLineage = await getModelEvolutionLineage(isolatedDraw);
@@ -196,7 +197,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
 
     // Hurst et Entropie ne doivent pas être confondus avec driftResistanceFactor et crossEntropy
     expect(dryResult.dnaRecord.regimeContext?.hurst).not.toBe(
-      dryResult.autopsyReport.temporalDriftMetrics.driftResistanceFactor
+      dryResult.autopsyReport.temporalDriftMetrics?.driftResistanceFactor
     );
     expect(dryResult.dnaRecord.regimeContext?.entropy).not.toBe(
       dryResult.autopsyReport.crossEntropy
@@ -210,7 +211,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
 
     const singleDrawOnlyHistory: DrawResult[] = mockHistory.map((d) => ({
       ...d,
-      tirage: 'NATIONAL',
+      drawName: 'NATIONAL',
     }));
 
     const audit = auditInterDrawPatternsPostMortem(
@@ -227,7 +228,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
       singleDrawOnlyHistory,
       DEFAULT_ALGO_WEIGHTS
     );
-    expect(report.interDrawPostMortem).toBeUndefined();
+    expect(report.interDrawAudit).toBeUndefined();
   });
 
   it('extrait des features distinctes dans l’optimiseur neural avec séparation Walk-Forward et cohérence des biais experts', async () => {
@@ -244,7 +245,7 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     const longHistory: DrawResult[] = Array.from({ length: 18 }, (_, idx) => ({
       id: `${idx + 1}`,
       date: `${String((idx % 28) + 1).padStart(2, '0')}/01/2026`,
-      tirage: drawName,
+      drawName,
       gagnants: [
         ((idx * 3) % 90) + 1,
         ((idx * 7 + 11) % 90) + 1,
@@ -452,4 +453,3 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     expect(resAnnealing.best_combination).toHaveLength(5);
   });
 });
-

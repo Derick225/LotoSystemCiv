@@ -1,4 +1,4 @@
-import { runBacktestTraining } from "../backtestService";
+import { runBacktestTraining } from "../backtest/service";
 import { unpackHistory } from "./zeroCopy";
 import type { DrawResult } from "../../types";
 
