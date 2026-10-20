@@ -4,22 +4,19 @@ import { workerService } from './workerService';
 import { computeTransferEntropy, runSpectral, denoiseFeaturesKernelPCA, runContinuousWaveletTransformAnalysis } from './mathCore';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
 import { lcgGlobalRandom } from '../utils/mathUtils';
+import {
+    calculateGap as calculateGapFromStats,
+    calculateFrequency as calculateFrequencyFromStats,
+    calculateMean as calculateMeanFromStats,
+    calculateStdDev as calculateStdDevFromStats,
+    calculateIQR as calculateIQRFromStats,
+} from './math/statistics';
 
-
-
-// --- HELPERS SIMPLES ---
-
-export const calculateGap = (history: DrawResult[], number: number): number => {
-    for (let i = 0; i < history.length; i++) {
-        if (history[i].gagnants.includes(number)) return i;
-    }
-    return history.length;
-};
-
-export const calculateFrequency = (history: DrawResult[], number: number, limit: number = 50): number => {
-    const subset = history.slice(0, limit);
-    return subset.filter(d => d.gagnants.includes(number)).length;
-};
+export const calculateGap = calculateGapFromStats;
+export const calculateFrequency = calculateFrequencyFromStats;
+export const calculateMean = calculateMeanFromStats;
+export const calculateStdDev = calculateStdDevFromStats;
+export const calculateIQR = calculateIQRFromStats;
 
 // --- UTILS STATISTIQUES VECTORISÉS ---
 
@@ -412,27 +409,11 @@ const factorial = (() => {
 })();
 
 /**
- * Calcule la moyenne arithmétique d'un tableau.
- * Sécurisé contre la division par zéro.
- */
-export const calculateMean = (data: number[]): number => {
-    if (!data || data.length === 0) return 0;
-    let sum = 0;
-    for (let i = 0; i < data.length; i++) sum += data[i];
-    return sum / data.length;
-};
-
-/**
- * Calcule l'écart-type (Standard Deviation) d'un tableau.
+ * Compatibility aliases for the modularized stats helpers.
  */
 export const calculateStandardDeviation = (data: number[]): number => {
-    if (!data || data.length < 2) return 0;
-    const mu = calculateMean(data);
-    let sumSq = 0;
-    for (let i = 0; i < data.length; i++) {
-        sumSq += (data[i] - mu) ** 2;
-    }
-    return Math.sqrt(sumSq / data.length);
+    if (!data || data.length === 0) return 0;
+    return calculateStdDevFromStats(data, calculateMeanFromStats(data));
 };
 
 // Alias for internal use if needed, or replace internal usages
