@@ -1,6 +1,0 @@
-{
-  "summary": "Plan d'implémentation : Refactorisation métier du Stacking Dense des 18 canaux avec Simplexe Bayésien et déploiement du Tableau Analytique Avancé de Calibration (Brier Score, BSS, Platt, ECE) dans l'interface utilisateur.",
-  "updatedAt": "2026-10-19T12:43:57.798002947Z",
-  "requestFeedback": true,
-  "userFacing": true
-}
