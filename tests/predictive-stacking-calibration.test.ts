@@ -3,15 +3,15 @@ import {
   computeStackedChannelWeightsHpc,
   computeWalkForwardCalibrationHpc,
   CalibrationReportHpc,
-} from "../services/wasm/lotoEngineBridge";
+} from "../src/services/wasm/lotoEngineBridge";
 import {
   fuseChannelsLogLinearSimplex,
   calculateScores,
-} from "../services/prediction/scoringEngine";
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS, AlgoWeights } from "../shared/prediction.types";
-import { ExtractedFeatures } from "../services/prediction/featureExtractor";
-import { EnhancedMetrics } from "../services/prediction/metrics.types";
-import { DrawResult } from "../types";
+} from "../src/services/prediction/scoringEngine";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS, AlgoWeights } from "../src/shared/prediction.types";
+import { ExtractedFeatures } from "../src/services/prediction/featureExtractor";
+import { EnhancedMetrics } from "../src/services/prediction/metrics.types";
+import { DrawResult } from "../src/types";
 
 describe("Stacking Dense des 18 Canaux & Simplexe Bayésien (AGENTS.md)", () => {
   it("garantit la convergence stricte sur le simplexe (Sum w_k = 1.0 et w_k >= 0)", () => {
@@ -119,29 +119,20 @@ describe("Stacking Dense des 18 Canaux & Simplexe Bayésien (AGENTS.md)", () => 
 
   it("intègre les probabilités calibrées et logits dans calculateScores sans briser le classement", () => {
     const features: ExtractedFeatures = {
-      freqMap: new Map([[1, 10], [2, 5]]),
-      gapsMap: new Map([[1, 2], [2, 8]]),
-      markovMap: new Map(),
-      affinityMatrix: new Map(),
-      momentumMap: new Map(),
-      spatialMap: new Map(),
-      temporalMap: new Map(),
-      fractalMap: new Map(),
-      shadowMap: new Map(),
-      networkMap: new Map(),
-      echoStateMap: new Map(),
-      gapSequenceMap: new Map(),
-      derivedNeighborMap: new Map(),
-      gapPatternMap: new Map(),
-      sequencePatternMap: new Map(),
-      gapCadenceMap: new Map(),
-      gapTrendMap: new Map(),
-      interMonthlyMap: new Map(),
-      anomalyMap: new Map(),
-      gapBandSequenceMap: new Map(),
-      machineTransferMap: new Map(),
-      interDrawResonanceMap: new Map(),
+      freqMap: new Float32Array(91),
+      gapsMap: new Int32Array(91),
+      markovMap: new Float32Array(91),
+      affinityMap: Array.from({ length: 91 }, () => new Float32Array(91)),
+      momentumMap: new Float32Array(91),
+      machineTransferMap: new Float32Array(91),
+      shadowProbabilityMap: new Float32Array(91),
+      networkCorrelationMap: new Float32Array(91),
+      interDrawMap: new Float32Array(91),
     };
+    features.freqMap[1] = 10;
+    features.freqMap[2] = 5;
+    features.gapsMap[1] = 2;
+    features.gapsMap[2] = 8;
 
     const weights: AlgoWeights = { ...DEFAULT_ALGO_WEIGHTS };
     const advancedMetrics: EnhancedMetrics = {
@@ -166,17 +157,15 @@ describe("Stacking Dense des 18 Canaux & Simplexe Bayésien (AGENTS.md)", () => 
         id: "1",
         drawName: "TEST_DRAW",
         date: "2026-01-01",
-        winners: [1, 2, 3, 4, 5],
         gagnants: [1, 2, 3, 4, 5],
-        machines: [],
+        machine: [],
       },
       {
         id: "2",
         drawName: "TEST_DRAW",
         date: "2026-01-02",
-        winners: [6, 7, 8, 9, 10],
         gagnants: [6, 7, 8, 9, 10],
-        machines: [],
+        machine: [],
       },
     ];
 

@@ -178,6 +178,21 @@ export interface Prediction {
     empiricalReliabilityScore: number;
     evaluatedWindows: number;
     calibrationQualityLabel: string;
+    logLoss?: number;
+    ece?: number;
+    liftVsRandom?: number;
+    meanHits?: number;
+    holdoutBrierSkillScore?: number;
+    holdoutDraws?: number;
+    blockBootstrapBssMean?: number;
+    blockBootstrapBssStd?: number;
+    channelWeights?: Record<string, number>;
+    decileCalibration?: Array<{
+      decile: number;
+      meanPredicted: number;
+      meanObserved: number;
+      count: number;
+    }>;
   };
   simulationScenarios?: SimulationScenarioItem[];
 }

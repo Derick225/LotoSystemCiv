@@ -28,6 +28,8 @@ export interface ScoredNumber {
     // les modifiers dynamiques, la phase cyclique, la résonance Micro-ADN et la mise à zéro des algos
     // en échec. Le re-score PCA le réutilise pour garantir une pondération IDENTIQUE entre les deux passes.
     effectiveWeights?: Record<string, number>;
+    calibratedProbability?: number;
+    logLinearLogit?: number;
   };
 }
 
@@ -150,6 +152,78 @@ export const computeOrthogonalUniquenessWeights = (
   }
 
   return rawAdjusted;
+};
+
+export interface SimplexFusionResult {
+  probabilities: Float64Array;
+  logits: Float64Array;
+}
+
+/**
+ * Fusionne K canaux de scores selon le méta-modèle log-linéaire sur le simplexe marginal :
+ * logit(p_n) = sum_k w_k * logit(s_{k,n}) + beta_0
+ * Contrainte fondamentale : Sum_{n=1}^{90} p_n = 5.0
+ */
+export const fuseChannelsLogLinearSimplex = (
+  channelScores: Record<string, number[]>,
+  weights: AlgoWeights
+): SimplexFusionResult => {
+  const TOTAL_NUMBERS = 90;
+  const NUMBERS_PER_DRAW = 5.0;
+  const uniformBaseRate = NUMBERS_PER_DRAW / TOTAL_NUMBERS;
+
+  const activeKeys = Object.keys(channelScores).filter((k) => {
+    const w = (weights as any)[k];
+    const arr = channelScores[k];
+    return typeof w === "number" && w > 0 && Array.isArray(arr) && arr.length >= TOTAL_NUMBERS;
+  });
+
+  let totalWeight = 0;
+  for (const k of activeKeys) {
+    totalWeight += (weights as any)[k] || 0;
+  }
+
+  const logits = new Float64Array(TOTAL_NUMBERS + 1);
+  let maxLogit = -Infinity;
+
+  for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+    let accLogOdds = 0;
+    if (totalWeight > 0) {
+      for (const k of activeKeys) {
+        const wNorm = ((weights as any)[k] || 0) / totalWeight;
+        const scores = channelScores[k];
+        const rawVal = scores.length === 91 ? scores[n] : scores[n - 1];
+        const sVal = Math.max(1e-12, Number(rawVal) || 0);
+        const odds = Math.max(1e-12, sVal / uniformBaseRate);
+        accLogOdds += wNorm * Math.log(odds);
+      }
+    }
+    logits[n] = accLogOdds;
+    if (accLogOdds > maxLogit) {
+      maxLogit = accLogOdds;
+    }
+  }
+
+  let sumExp = 0;
+  const expZ = new Float64Array(TOTAL_NUMBERS + 1);
+  for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+    const e = Math.exp(logits[n] - maxLogit);
+    expZ[n] = e;
+    sumExp += e;
+  }
+
+  const probabilities = new Float64Array(TOTAL_NUMBERS + 1);
+  if (sumExp > 1e-12) {
+    for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+      probabilities[n] = Math.min(1.0, Math.max(0.0, (expZ[n] / sumExp) * NUMBERS_PER_DRAW));
+    }
+  } else {
+    for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+      probabilities[n] = uniformBaseRate;
+    }
+  }
+
+  return { probabilities, logits };
 };
 
 export const calculateScores = (
@@ -356,6 +430,48 @@ export const calculateScores = (
         }
     });
   }
+
+  // Projection sur le Simplexe Marginal (Sum_{n=1}^{90} p_n = 5.0) via Stacking Log-Linéaire
+  const logits = new Float64Array(masterScores.length);
+  let maxLogit = -Infinity;
+  const uniformBaseRate = 5.0 / 90.0;
+
+  masterScores.forEach((m, idx) => {
+    let z_n = 0;
+    let totalW = 0;
+    const effWeights = m.explainability?.effectiveWeights || {};
+    Object.keys(effWeights).forEach((k) => {
+      const w = effWeights[k] || 0;
+      if (w > 0 && algoRobustStats[k]) {
+        const stats = algoRobustStats[k];
+        const val = Number(m.breakdown[k as AlgoKey]) || 0;
+        const robustZ = getModifiedZScore(val, stats.median, stats.mad);
+        const squashed = 1.0 / (1.0 + Math.exp(-LOGISTIC_APPROX_FACTOR * robustZ));
+        const odds = Math.max(1e-12, squashed / uniformBaseRate);
+        z_n += w * Math.log(odds);
+        totalW += w;
+      }
+    });
+    const logitVal = totalW > 0 ? z_n / totalW : (m.score > 0 ? Math.log(Math.max(1e-12, (m.score / 100.0) / uniformBaseRate)) : 0);
+    logits[idx] = logitVal;
+    if (logitVal > maxLogit) maxLogit = logitVal;
+  });
+
+  let sumExp = 0;
+  const expZ = new Float64Array(masterScores.length);
+  for (let i = 0; i < masterScores.length; i++) {
+    const e = Math.exp(logits[i] - maxLogit);
+    expZ[i] = e;
+    sumExp += e;
+  }
+
+  masterScores.forEach((m, idx) => {
+    const p_n = sumExp > 1e-12 ? Math.min(1.0, Math.max(0.0, (expZ[idx] / sumExp) * 5.0)) : uniformBaseRate;
+    if (m.explainability) {
+      m.explainability.calibratedProbability = p_n;
+      m.explainability.logLinearLogit = logits[idx];
+    }
+  });
 
   // Étape 5 : Normalisation Finale Robuste (Percentiles Dynamiques avec préservation stricte de l'ordre de la queue supérieure)
   const allScores = masterScores.map(m => m.score).sort((a, b) => a - b);

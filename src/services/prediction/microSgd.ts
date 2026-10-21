@@ -2,10 +2,11 @@ import { DrawResult, AlgoWeights } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { EnhancedMetrics } from "./metrics.types";
 import { logger } from "../../utils/logger";
-import { normalizeWeights, evaluateAlgoEmpiricalProof } from "./weightsManager";
+import { normalizeWeights, evaluateAlgoEmpiricalProof, saveAlgoWeights } from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { calculateScores } from "./scoringEngine";
 import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
+import { calculateFractalIndex } from "../mathService";
 
 // ============================================================================
 // CONFIGURATION EXPLICITE (Zéro Nombre Magique)
@@ -61,6 +62,7 @@ export const buildAlgoBundle = async (
 
 /**
  * Micro-ajustement continu des poids par descente de gradient (SGD)
+ * Intègre la mémoire longue de Hurst H et la régularisation entropique L2
  */
 export const applyDeterministicMicroSgd = async (
   drawName: string,
@@ -69,6 +71,7 @@ export const applyDeterministicMicroSgd = async (
   entropyValue: number,
   learningRateOverride: number | undefined,
   useSpatioTemporalHawkes: boolean,
+  hurstOverride?: number,
 ): Promise<AlgoWeights> => {
   let adjustedWeights = { ...weights };
 
@@ -84,7 +87,14 @@ export const applyDeterministicMicroSgd = async (
 
   const baseEta = learningRateOverride !== undefined ? learningRateOverride : TUNING.DEFAULT_SGD_LEARNING_RATE;
   const safeEntropy = (typeof entropyValue === 'number' && !isNaN(entropyValue)) ? entropyValue : 0.5;
-  const eta = baseEta * (1.0 - Math.pow(safeEntropy, 2.0));
+
+  // Modulation continue par la mémoire de Hurst (Hurst Memory Dynamic)
+  const rawHurst = hurstOverride !== undefined ? hurstOverride : calculateFractalIndex(history);
+  const safeHurst = Number.isFinite(rawHurst) ? Math.max(0.01, Math.min(0.99, rawHurst)) : 0.5;
+  const hurstFactor = Math.exp(Math.max(-1.0, Math.min(1.0, safeHurst - 0.5)));
+
+  // Taux d'apprentissage régularisé par entropie et persistance Hurst
+  const eta = baseEta * hurstFactor * (1.0 - Math.pow(safeEntropy, 2.0));
 
   // Preuve empirique calculée UNE SEULE FOIS sur history.slice(K) — le sous-ensemble stable
   // antérieur à toutes les K cibles SGD. Calculer proofMap à l'intérieur de la boucle sur

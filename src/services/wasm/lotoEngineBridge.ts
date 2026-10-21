@@ -2294,6 +2294,13 @@ export function computeNetworkDominoHpc(
   };
 }
 
+export interface DecileCalibrationBucket {
+  decile: number;
+  meanPredicted: number;
+  meanObserved: number;
+  count: number;
+}
+
 export interface CalibrationReportHpc {
   brierScore: number;
   brierSkillScore: number;
@@ -2302,6 +2309,16 @@ export interface CalibrationReportHpc {
   empiricalReliabilityScore: number;
   evaluatedWindows: number;
   calibrationQualityLabel: string;
+  logLoss: number;
+  ece: number;
+  liftVsRandom: number;
+  meanHits: number;
+  holdoutBrierSkillScore: number;
+  holdoutDraws: number;
+  blockBootstrapBssMean: number;
+  blockBootstrapBssStd: number;
+  decileCalibration: DecileCalibrationBucket[];
+  channelWeights?: Record<string, number>;
 }
 
 const UNIFORM_BRIER_BENCHMARK = (5.0 * 85.0) / (90.0 * 90.0);
@@ -2318,6 +2335,13 @@ export function computeWalkForwardCalibrationHpc(
   const wSize = Math.max(4, Math.min(30, windowSize));
   const store = getOrCreateNativeStoreInstance();
 
+  const defaultDeciles: DecileCalibrationBucket[] = Array.from({ length: 10 }, (_, i) => ({
+    decile: i + 1,
+    meanPredicted: Math.round(((i + 0.5) / 10.0 * (5.0 / 90.0)) * 10000.0) / 10000.0,
+    meanObserved: 5.0 / 90.0,
+    count: 0,
+  }));
+
   if (store && typeof store.compute_walk_forward_calibration === 'function') {
     try {
       const rep = store.compute_walk_forward_calibration(normName, wSize);
@@ -2330,6 +2354,15 @@ export function computeWalkForwardCalibrationHpc(
           empiricalReliabilityScore: readWasmField<number>(rep, 'empirical_reliability_score', 50.0),
           evaluatedWindows: readWasmField<number>(rep, 'evaluated_windows', 0),
           calibrationQualityLabel: readWasmField<string>(rep, 'calibration_quality_label', 'DIFFUSION_EQUIPROBABLE_NEUTRE'),
+          logLoss: readWasmField<number>(rep, 'log_loss', 0.0),
+          ece: readWasmField<number>(rep, 'ece', 0.0),
+          liftVsRandom: readWasmField<number>(rep, 'lift_vs_random', 1.0),
+          meanHits: readWasmField<number>(rep, 'mean_hits', 0.0),
+          holdoutBrierSkillScore: readWasmField<number>(rep, 'holdout_brier_skill_score', 0.0),
+          holdoutDraws: readWasmField<number>(rep, 'holdout_draws', 0),
+          blockBootstrapBssMean: readWasmField<number>(rep, 'block_bootstrap_bss_mean', 0.0),
+          blockBootstrapBssStd: readWasmField<number>(rep, 'block_bootstrap_bss_std', 0.0),
+          decileCalibration: defaultDeciles,
         };
       }
     } catch {}
@@ -2349,12 +2382,22 @@ export function computeWalkForwardCalibrationHpc(
       empiricalReliabilityScore: 50.0,
       evaluatedWindows: 0,
       calibrationQualityLabel: 'HISTORIQUE_INSUFFISANT',
+      logLoss: 0.0,
+      ece: 0.0,
+      liftVsRandom: 1.0,
+      meanHits: 0.0,
+      holdoutBrierSkillScore: 0.0,
+      holdoutDraws: 0,
+      blockBootstrapBssMean: 0.0,
+      blockBootstrapBssStd: 0.0,
+      decileCalibration: defaultDeciles,
     };
   }
 
   const evalWindow = Math.min(wSize, totalDraws - 4);
   const startIdx = totalDraws - evalWindow;
   let totalBrier = 0.0;
+  let totalLogLoss = 0.0;
   let totalHits = 0;
   let numSamples = 0;
 
@@ -2363,6 +2406,10 @@ export function computeWalkForwardCalibrationHpc(
   let sumRawSq = 0.0;
   let sumProd = 0.0;
   let totalPairs = 0;
+
+  const bucketPredSum = new Float64Array(10);
+  const bucketObsSum = new Float64Array(10);
+  const bucketCounts = new Uint32Array(10);
 
   for (let t = startIdx; t < totalDraws; t++) {
     const training = history.slice(0, t);
@@ -2419,6 +2466,15 @@ export function computeWalkForwardCalibrationHpc(
       const err = p - y;
       windowBrier += err * err;
 
+      const pClamp = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
+      totalLogLoss += -(y * Math.log(pClamp) + (1.0 - y) * Math.log(1.0 - pClamp));
+
+      // Bucket décile pour ECE
+      const bIdx = Math.min(9, Math.max(0, Math.floor(pClamp * 10)));
+      bucketPredSum[bIdx] += pClamp;
+      bucketObsSum[bIdx] += y;
+      bucketCounts[bIdx]++;
+
       sumRaw += p;
       sumTarget += y;
       sumRawSq += p * p;
@@ -2441,6 +2497,25 @@ export function computeWalkForwardCalibrationHpc(
 
   const meanBrier = numSamples > 0 ? totalBrier / numSamples : UNIFORM_BRIER_BENCHMARK;
   const brierSkillScore = Math.max(-1.0, Math.min(1.0, 1.0 - (meanBrier / UNIFORM_BRIER_BENCHMARK)));
+  const meanLogLoss = totalPairs > 0 ? totalLogLoss / totalPairs : 0.0;
+
+  // Calcul ECE (Expected Calibration Error) sur les 10 déciles
+  let eceAcc = 0.0;
+  const decileBuckets: DecileCalibrationBucket[] = [];
+  for (let b = 0; b < 10; b++) {
+    const cnt = bucketCounts[b];
+    const meanP = cnt > 0 ? bucketPredSum[b] / cnt : ((b + 0.5) / 10.0) * (5.0 / 90.0);
+    const meanO = cnt > 0 ? bucketObsSum[b] / cnt : (5.0 / 90.0);
+    if (cnt > 0 && totalPairs > 0) {
+      eceAcc += Math.abs(meanP - meanO) * (cnt / totalPairs);
+    }
+    decileBuckets.push({
+      decile: b + 1,
+      meanPredicted: Math.round(meanP * 10000.0) / 10000.0,
+      meanObserved: Math.round(meanO * 10000.0) / 10000.0,
+      count: cnt,
+    });
+  }
 
   let plattAlpha = 1.0;
   let plattBeta = 0.0;
@@ -2457,6 +2532,8 @@ export function computeWalkForwardCalibrationHpc(
   const baseSkill = brierSkillScore * 50.0 + 50.0;
   const avgHits = numSamples > 0 ? totalHits / numSamples : 0.0;
   const reliability = Math.max(10.0, Math.min(98.0, baseSkill * 0.7 + avgHits * 30.0));
+  const expectedHitsUniform = 25.0 / 90.0;
+  const liftVsRandom = expectedHitsUniform > 0 ? avgHits / expectedHitsUniform : 1.0;
 
   const qualityLabel = brierSkillScore > 0.08
     ? 'HAUTE_CALIBRATION_EMPIRIQUE'
@@ -2472,7 +2549,173 @@ export function computeWalkForwardCalibrationHpc(
     empiricalReliabilityScore: Math.round(reliability * 10.0) / 10.0,
     evaluatedWindows: numSamples,
     calibrationQualityLabel: qualityLabel,
+    logLoss: Math.round(meanLogLoss * 10000.0) / 10000.0,
+    ece: Math.round(eceAcc * 10000.0) / 10000.0,
+    liftVsRandom: Math.round(liftVsRandom * 1000.0) / 1000.0,
+    meanHits: Math.round(avgHits * 1000.0) / 1000.0,
+    holdoutBrierSkillScore: 0.0,
+    holdoutDraws: 0,
+    blockBootstrapBssMean: 0.0,
+    blockBootstrapBssStd: 0.0,
+    decileCalibration: decileBuckets,
   };
+}
+
+/**
+ * 16. Optimisation Stacking des Canaux sur Simplexe L2 (Exponentiated Gradient)
+ * Minimise la log-loss empirique OOF sous contrainte Sum w_k = 1.0 et w_k >= 0.
+ */
+export function computeStackedChannelWeightsHpc(
+  oofFlat: Float64Array | number[],
+  targetsFlat: Float64Array | number[],
+  numChannels: number,
+  numSamples: number
+): Float64Array {
+  // 1. Appel WASM natif Rust SIMD si le module est présent
+  if (wasmModuleInstance && typeof wasmModuleInstance.stack_channel_weights_wasm === 'function') {
+    try {
+      const oofF64 = oofFlat instanceof Float64Array ? oofFlat : new Float64Array(oofFlat);
+      const tgtF64 = targetsFlat instanceof Float64Array ? targetsFlat : new Float64Array(targetsFlat);
+      const res = wasmModuleInstance.stack_channel_weights_wasm(oofF64, tgtF64, numChannels, numSamples);
+      if (res && res.length === numChannels) {
+        return res instanceof Float64Array ? res : new Float64Array(res);
+      }
+    } catch {}
+  }
+
+  // 2. Fallback déterministe Exponentiated Gradient L2 (AGENTS.md)
+  const TOTAL_NUMBERS = 90;
+  const NUMBERS_PER_DRAW = 5;
+  const stride = TOTAL_NUMBERS + 1;
+  const weights = new Float64Array(numChannels);
+  const uniformW = 1.0 / Math.max(1, numChannels);
+  for (let k = 0; k < numChannels; k++) weights[k] = uniformW;
+
+  const validSamples = Math.max(0, numSamples);
+  if (validSamples === 0 || numChannels === 0) {
+    return weights;
+  }
+
+  const eta = 1.0 / Math.sqrt(numChannels);
+  const lambda = 1.0 / (validSamples * numChannels);
+  const EG_MAX_ITER = 60;
+  const EG_TOL = 1e-6;
+
+  let bestLoss = Infinity;
+  let bestWeights = new Float64Array(weights);
+  let prevLoss = Infinity;
+
+  for (let iter = 0; iter < EG_MAX_ITER; iter++) {
+    const sampleProbs: Float64Array[] = [];
+    let totalLogLoss = 0.0;
+    let logLossCount = 0;
+
+    for (let s = 0; s < validSamples; s++) {
+      const sampleBase = s * numChannels * stride;
+      const targetBase = s * stride;
+
+      const logits = new Float64Array(stride);
+      let maxLogit = -Infinity;
+
+      for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+        let acc = 0.0;
+        for (let k = 0; k < numChannels; k++) {
+          const idx = sampleBase + k * stride + n;
+          const sVal = idx < oofFlat.length ? (oofFlat as any)[idx] : 0.0;
+          const sSafe = Math.max(1e-12, sVal);
+          const odds = Math.max(1e-12, sSafe / (NUMBERS_PER_DRAW / TOTAL_NUMBERS));
+          acc += weights[k] * Math.log(odds);
+        }
+        logits[n] = acc;
+        if (acc > maxLogit) maxLogit = acc;
+      }
+
+      let sumExp = 0.0;
+      const expZ = new Float64Array(stride);
+      for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+        const e = Math.exp(logits[n] - maxLogit);
+        expZ[n] = e;
+        sumExp += e;
+      }
+
+      const probs = new Float64Array(stride);
+      if (sumExp > 1e-12) {
+        for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+          probs[n] = Math.min(1.0, Math.max(0.0, (expZ[n] / sumExp) * NUMBERS_PER_DRAW));
+        }
+      }
+      sampleProbs.push(probs);
+
+      for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+        const y = targetBase + n < targetsFlat.length ? (targetsFlat as any)[targetBase + n] : 0.0;
+        const p = Math.max(1e-9, Math.min(1.0 - 1e-9, probs[n]));
+        totalLogLoss += -(y * Math.log(p) + (1.0 - y) * Math.log(1.0 - p));
+        logLossCount++;
+      }
+    }
+
+    const loss = logLossCount > 0 ? totalLogLoss / logLossCount : 0.0;
+    if (loss < bestLoss) {
+      bestLoss = loss;
+      bestWeights = new Float64Array(weights);
+    }
+    if (Number.isFinite(prevLoss) && Math.abs(prevLoss - loss) <= EG_TOL * Math.max(1.0, Math.abs(prevLoss))) {
+      break;
+    }
+    prevLoss = loss;
+
+    const grad = new Float64Array(numChannels);
+    for (let s = 0; s < validSamples; s++) {
+      const sampleBase = s * numChannels * stride;
+      const targetBase = s * stride;
+      const probs = sampleProbs[s];
+
+      const logOdds: Float64Array[] = [];
+      const channelAvg = new Float64Array(numChannels);
+
+      for (let k = 0; k < numChannels; k++) {
+        const kOdds = new Float64Array(stride);
+        for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+          const idx = sampleBase + k * stride + n;
+          const sVal = idx < oofFlat.length ? (oofFlat as any)[idx] : 0.0;
+          const sSafe = Math.max(1e-12, sVal);
+          const odds = Math.max(1e-12, sSafe / (NUMBERS_PER_DRAW / TOTAL_NUMBERS));
+          const lo = Math.log(odds);
+          kOdds[n] = lo;
+          channelAvg[k] += (probs[n] / NUMBERS_PER_DRAW) * lo;
+        }
+        logOdds.push(kOdds);
+      }
+
+      for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+        const y = targetBase + n < targetsFlat.length ? (targetsFlat as any)[targetBase + n] : 0.0;
+        const p = Math.max(1e-9, Math.min(1.0 - 1e-9, probs[n]));
+        const coeff = p - y;
+        for (let k = 0; k < numChannels; k++) {
+          grad[k] += coeff * (logOdds[k][n] - channelAvg[k]);
+        }
+      }
+    }
+
+    const norm = validSamples * TOTAL_NUMBERS;
+    for (let k = 0; k < numChannels; k++) {
+      grad[k] /= norm;
+    }
+
+    for (let k = 0; k < numChannels; k++) {
+      const reg = lambda * Math.max(-30.0, Math.log(Math.max(1e-12, weights[k])));
+      const exponent = -eta * (grad[k] + reg);
+      weights[k] *= Math.exp(Math.min(50.0, exponent));
+    }
+
+    let sumW = 0.0;
+    for (let k = 0; k < numChannels; k++) sumW += weights[k];
+    if (sumW > 1e-12) {
+      for (let k = 0; k < numChannels; k++) weights[k] /= sumW;
+    }
+  }
+
+  return bestWeights;
 }
 
 export interface InterDrawCrossDyadHpc {

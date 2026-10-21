@@ -260,7 +260,12 @@ export const PredictiveCalibrationAnalyticsDashboard: React.FC<PredictiveCalibra
   const plattAlpha = calib?.plattAlpha ?? 1.0;
   const plattBeta = calib?.plattBeta ?? 0.0;
 
-  const deciles = useMemo(() => {
+  const deciles: Array<{
+    decile: number;
+    meanPredicted: number;
+    meanObserved: number;
+    count: number;
+  }> = useMemo(() => {
     if (calib?.decileCalibration && calib.decileCalibration.length === 10) {
       return calib.decileCalibration;
     }

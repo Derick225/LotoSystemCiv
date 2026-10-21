@@ -13,6 +13,7 @@ import { PredictionComputationOverlay } from "../prediction/PredictionComputatio
 import { GapRangeSequenceWidget } from "../prediction/GapRangeSequenceWidget";
 import { PredictionVectorPortfolio } from "../prediction/PredictionVectorPortfolio";
 import { XAPTransparencyPanel } from "../prediction/XAPTransparencyPanel";
+import { PredictiveCalibrationAnalyticsDashboard } from "../prediction/PredictiveCalibrationAnalyticsDashboard";
 import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDashboard";
 import { OracleScenarioMatrixDeck } from "../prediction/OracleScenarioMatrixDeck";
 import { exportService } from "../../services/exportService";
@@ -779,6 +780,12 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
               gameRegimeInfo={gameRegimeInfo}
               resolvedNoiseLevel={resolvedNoiseLevel}
               resolvedLearningRate={resolvedLearningRate}
+            />
+
+            {/* Dashboard de Calibration Stochastique & Stacking Bayésien */}
+            <PredictiveCalibrationAnalyticsDashboard
+              prediction={activePrediction}
+              drawName={drawName}
             />
 
             {/* Neural Heatmap Floor */}
