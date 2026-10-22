@@ -970,13 +970,13 @@ export const computeContinuousInterDrawCoupling = (
   const zHarm = (pHarm - p0) / Math.max(1e-6, se);
   const zMax = Math.max(Math.abs(zCarry), Math.abs(zHarm));
 
-  // Seuil universel de correction pour tests multiples sur les couples du réseau (M = 22 * 21 = 462 paires)
-  // sqrt(2 * ln(462)) ≈ 3.503 — élimine les faux signaux sur données purement aléatoires
+  // Seuil universel de correction continue pour tests multiples (M = 22 * 21 = 462 paires)
+  // sqrt(2 * ln(462)) ≈ 3.503 — élimine les faux signaux avec transition C^infinity (AGENTS.md)
   const zThresh = Math.sqrt(2.0 * Math.log(462));
-  const zExcess = Math.max(0, zMax - zThresh);
+  const softExcess = Math.log(1.0 + Math.exp(Math.min(25.0, zMax - zThresh)));
 
-  // Poids de couplage continu discriminant W ∈ [0, 1[ : exactement 0 sous H0, > 0 uniquement en cas de signal réel
-  const weight = Math.tanh(zExcess / 2.0);
+  // Poids de couplage continu discriminant W ∈ [0, 1[ : transition douce différentiable sans coupure brusque
+  const weight = Math.tanh(softExcess / 2.0);
   // Corrélation de transition normalisée dans [-1, 1]
   const correlation = Math.max(-1.0, Math.min(1.0, zCarry / Math.sqrt(nPairs)));
 

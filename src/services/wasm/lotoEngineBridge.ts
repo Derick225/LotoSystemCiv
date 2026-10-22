@@ -2131,8 +2131,17 @@ export function generateDiversifiedPortfolioHpc(
  * 12. Identification du Réseau Hermétique (AGENTS.md)
  * Associe chaque tirage à son réseau ('hebdomadaire' vs 'quotidien').
  */
+const WEEKLY_DRAWS_CANONICAL = new Set([
+  'MONDAY SPECIAL', 'MONDAY_SPECIAL',
+  'LUCKY TUESDAY', 'LUCKY_TUESDAY',
+  'MIDWEEK',
+  'FORTUNE THURSDAY', 'FORTUNE_THURSDAY',
+  'FRIDAY BONANZA', 'FRIDAY_BONANZA',
+  'NATIONAL'
+]);
+
 export function getStoreNetworkId(drawName: string): 'hebdomadaire' | 'quotidien' {
-  const normName = drawName.trim().toUpperCase();
+  const normName = drawName.trim().toUpperCase().replace(/[\s-]+/g, '_');
   const store = getOrCreateNativeStoreInstance();
   if (store && typeof store.get_network_id === 'function') {
     try {
@@ -2142,7 +2151,7 @@ export function getStoreNetworkId(drawName: string): 'hebdomadaire' | 'quotidien
       }
     } catch {}
   }
-  return (normName.includes('NATIONAL') || normName.includes('MIDWEEK'))
+  return WEEKLY_DRAWS_CANONICAL.has(normName) || WEEKLY_DRAWS_CANONICAL.has(normName.replace(/_/g, ' '))
     ? 'hebdomadaire'
     : 'quotidien';
 }

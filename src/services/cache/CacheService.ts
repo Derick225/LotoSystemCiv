@@ -106,16 +106,24 @@ class CacheService {
   }
 
   /**
-   * Génère la clé d'isolation canonique stricte pour les relations inter-tirages :
-   * nexus_interdraw_${familyId}_${drawName}
+   * Génère la clé d'isolation canonique stricte pour les relations inter-tirages (AGENTS.md) :
+   * nexus_interdraw_${networkId}_${drawName} avec networkId ∈ {hebdomadaire, quotidien}
    */
   public getInterDrawKey(
-    familyId: string,
+    networkOrFamilyId: string,
     drawName: string,
     subKey?: string
   ): string {
     const cleanDraw = drawName.toLowerCase().trim().replace(/[\s-]+/g, "_");
-    return `nexus_interdraw_${familyId}_${cleanDraw}${subKey ? `_${subKey}` : ""}`;
+    let networkId = networkOrFamilyId.toLowerCase().trim();
+    if (networkId !== "hebdomadaire" && networkId !== "quotidien") {
+      if (networkId.includes("19h55") || networkId.includes("hebdo")) {
+        networkId = "hebdomadaire";
+      } else {
+        networkId = "quotidien";
+      }
+    }
+    return `nexus_interdraw_${networkId}_${cleanDraw}${subKey ? `_${subKey}` : ""}`;
   }
 
   /**

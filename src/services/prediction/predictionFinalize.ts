@@ -382,6 +382,7 @@ export const finalizePredictionPayload = async (
   });
 
   const walkForwardCalibration = computeWalkForwardCalibrationHpc(context.drawName, 15);
+  walkForwardCalibration.channelWeights = { ...weights };
 
   return {
     drawName: context.drawName,
