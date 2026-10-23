@@ -9,7 +9,8 @@ import { LCG } from '../utils/mathUtils';
 
 export const FEATURES_LABELS = [
   'Critical Gap', 'Frequency', 'Shadow',
-  'Consensus Trap', 'Neighbor', 'Machine Leak', 'Norm Gap'
+  'Consensus Trap', 'Neighbor', 'Machine Leak', 'Norm Gap',
+  'Harmonic Resonance', 'Inter-Draw Flux', 'Spectral Memory'
 ];
 
 // Cache stable basé sur une clé string unique (drawName + historique + head draw id)
@@ -315,6 +316,32 @@ const extractNumericFeatures = (
   // D. Norm Gap (Pression de retard asymétrique cumulée continue via logistique)
   const normGapFeature = 1.0 / (1.0 + Math.exp(-zGap));
 
+  // E. Harmonic Resonance (Involution miroir & complément à 90 continue)
+  let harmonicSum = 0;
+  const mir = num < 10 ? num * 10 : (num % 10 === 0 ? Math.floor(num / 10) : parseInt(String(num).split('').reverse().join(''), 10));
+  const validMir = (mir >= 1 && mir <= 90) ? mir : num;
+  const comp = 91 - num;
+  for (const w of contextState.lastDrawWinners) {
+    if (w === validMir || w === comp) harmonicSum += 1.0;
+    const distMir = Math.abs(validMir - w);
+    const distComp = Math.abs(comp - w);
+    harmonicSum += 0.5 * Math.exp(-0.5 * Math.pow(distMir / currentSigmaTopology, 2));
+    harmonicSum += 0.5 * Math.exp(-0.5 * Math.pow(distComp / currentSigmaTopology, 2));
+  }
+  const harmonicFeature = Math.min(1.0, harmonicSum / Math.max(1, contextState.lastDrawWinners.length));
+
+  // F. Inter-Draw Flux (Report direct carry-over et advection de voisinage)
+  let carrySum = 0;
+  for (const w of contextState.lastDrawWinners) {
+    if (w === num) carrySum += 1.0;
+  }
+  const interDrawFluxFeature = Math.min(1.0, carrySum * 0.7 + neighborFeature * 0.3);
+
+  // G. Spectral Memory (Résonance harmonique sur le cycle moyen d'apparition 90/5 = 18 tirages)
+  const expectedPeriod = 90.0 / 5.0;
+  const phase = (gap % expectedPeriod) / expectedPeriod;
+  const spectralMemoryFeature = 0.5 + 0.5 * Math.cos(2.0 * Math.PI * phase);
+
   const allFeatures = [
     criticalGapFeature,
     frequencyFeature,
@@ -322,7 +349,10 @@ const extractNumericFeatures = (
     trapFeature,
     neighborFeature,
     machineFeature,
-    normGapFeature
+    normGapFeature,
+    harmonicFeature,
+    interDrawFluxFeature,
+    spectralMemoryFeature
   ];
 
   return activeIndices.map(idx => allFeatures[idx]);
@@ -1073,8 +1103,10 @@ function predict(node: SyncTreeNode, row: number[]): number {
   const theta = node.threshold;
   const sigma = Math.max(1e-4, node.stdDev || 1.0);
 
-  const z = (x - theta) / sigma;
-  const p = 1.0 / (1.0 + Math.exp(-2.0 * z));
+  // Température différentiable locale tau = max(1e-4, sigma / sqrt(2)) (C^infinity, zéro nombre magique)
+  const tau = Math.max(1e-4, sigma * 0.70710678);
+  const z = (x - theta) / tau;
+  const p = 1.0 / (1.0 + Math.exp(-z));
 
   return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
 }
@@ -1188,9 +1220,10 @@ export function runDecisionForestSync(
     const z = (cand.score - meanScore) / stdScore;
     const level2Weight = 1.0 / (1.0 + Math.exp(-2.0 * z));
 
-    const neighborFeat = cand.features[4] || 0;
-    const machineFeat = cand.features[5] || 0;
-    const microModulation = (neighborFeat + machineFeat) * 0.2;
+    const featureEnergy = cand.features.length > 0
+      ? cand.features.reduce((acc: number, f: number) => acc + f, 0) / cand.features.length
+      : 0;
+    const microModulation = featureEnergy * 0.2;
 
     const continuousBoost = 1.0 + level2Weight * microModulation;
     const refinedScore = Math.min(100, Math.max(0, cand.score * continuousBoost));

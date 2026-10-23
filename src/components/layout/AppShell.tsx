@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { InstallButton } from "../ui/InstallButton";
 import { useToast } from "../ui/Toast";
+import { MobileBottomNav } from "./MobileBottomNav";
 
 const CommandPalette = lazy(() =>
   import("../ui/CommandPalette").then((m) => ({ default: m.CommandPalette })),
@@ -342,53 +343,24 @@ export const AppShell: React.FC<AppShellProps> = ({
       </AnimatePresence>
 
       {/* Main Content Area - Padding left on desktop to prevent overlap with floating sidebar */}
+      {/* Main Content Area - Padding left on desktop to prevent overlap with floating sidebar */}
       <main
-        className={`container mx-auto px-3 md:px-4 md:pl-28 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden transition-all duration-700 ${isFocusMode ? "pt-8 pb-8" : "pt-32 md:pt-44 pb-32 md:pb-40"}`}
+        className={`container mx-auto px-2.5 sm:px-4 md:pl-28 max-w-7xl flex-1 relative z-0 w-full overflow-x-hidden transition-all duration-700 ${
+          isFocusMode ? "pt-6 pb-8" : "pt-24 sm:pt-32 md:pt-44 pb-28 sm:pb-36 md:pb-40"
+        }`}
       >
         {children}
       </main>
 
-      {/* Mobile Bottom Navigation - PLATINUM BAR (Harmonized) */}
-      <div
-        className={`fixed left-6 right-6 z-[90] md:hidden transition-all duration-700 ${isFocusMode ? "translate-y-[150%] opacity-0" : "translate-y-0 opacity-100"}`}
-        style={{ bottom: "calc(1.5rem + env(safe-area-inset-bottom))" }}
-      >
-        <div className="bg-slate-900/90 backdrop-blur-3xl border border-white/10 rounded-3xl p-2 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)] flex items-center relative overflow-x-auto overflow-y-hidden snap-x snap-mandatory scrollbar-hide hide-scrollbar w-full">
-          {/* Inner Glow */}
-          <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 via-transparent to-indigo-500/10 pointer-events-none"></div>
-
-          <div className="flex gap-2 w-max px-2">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setViewMode(item.id as ViewMode);
-                  audioEngine.play("click");
-                }}
-                className={`snap-center flex flex-col items-center gap-1 p-3 px-5 rounded-2xl transition-all relative shrink-0
-                            ${viewMode === item.id ? "text-white" : "text-slate-500 hover:text-slate-300"}
-                        `}
-              >
-                {viewMode === item.id && (
-                  <motion.div
-                    layoutId="nav-pill"
-                    className="absolute inset-0 bg-indigo-600 rounded-2xl shadow-lg shadow-indigo-600/30 -z-10"
-                  />
-                )}
-                <item.icon
-                  size={22}
-                  className={
-                    viewMode === item.id ? "scale-110" : ""
-                  }
-                />
-                <span className="text-xs font-black uppercase tracking-widest">
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      {/* Mobile Bottom Navigation - Tactile & Android Safe-Area Inset Optimized */}
+      <MobileBottomNav
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        isDrawSelected={isDrawSelected}
+        isAdmin={isAdmin}
+        onReset={onReset}
+        onOpenPalette={() => setShowPalette(true)}
+      />
 
       <Suspense fallback={null}>
         <QuantumInspector />

@@ -864,8 +864,8 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                   </button>
                 </div>
 
-                {/* Day Selector - Scrollable horizontal sur mobile */}
-                <div className="flex gap-2 overflow-x-auto pb-4 mb-6 md:mb-8 scrollbar-hide px-2">
+                {/* Day Selector - Scrollable horizontal fluide avec snap */}
+                <div className="flex gap-2 overflow-x-auto pb-3 mb-6 md:mb-8 scrollbar-hide px-1 snap-x snap-mandatory touch-manipulation">
                   {uiDays.map((d) => (
                     <button
                       key={d}
@@ -874,25 +874,25 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                         setSelectedDay(d);
                       }}
                       className={`
-                                          px-5 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl text-[9px] md:text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0
-                                          ${
-                                            selectedDay === d
-                                              ? "bg-indigo-600 text-white shadow-xl shadow-indigo-600/30 border-indigo-500 scale-105"
-                                              : "bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300 hover:bg-slate-800"
-                                          }
-                                      `}
+                        snap-center px-4 md:px-6 py-2 md:py-3 rounded-xl md:rounded-2xl text-[10px] md:text-xs font-black uppercase tracking-widest transition-all whitespace-nowrap border flex-shrink-0 active:scale-95
+                        ${
+                          selectedDay === d
+                            ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30 border-indigo-500 font-bold"
+                            : "bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                        }
+                      `}
                     >
                       {d}
                     </button>
                   ))}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8 px-2 md:px-0">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8 px-1 md:px-0">
                   {loadingSummary
                     ? [1, 2, 3, 4].map((i) => (
                         <div
                           key={i}
-                          className="h-64 bg-white/5 rounded-[2.5rem] md:rounded-[3rem] animate-pulse border border-white/5 mx-auto w-full"
+                          className="h-56 md:h-64 bg-white/5 rounded-2xl md:rounded-[2.5rem] animate-pulse border border-white/5 mx-auto w-full"
                         ></div>
                       ))
                     : (summary as SummaryItem[]).map((item, idx) => {
@@ -918,15 +918,15 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                                 name: item.name,
                               });
                             }}
-                            className={`group p-6 md:p-8 rounded-[2.5rem] md:rounded-[3rem] border transition-all duration-500 cursor-pointer hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? "bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-2xl" : isNext ? "bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20" : "bg-black/40 border-white/5 opacity-60 hover:opacity-100"}`}
+                            className={`group p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-[2.5rem] border transition-all duration-300 cursor-pointer active:scale-[0.98] md:hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? "bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-xl" : isNext ? "bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20" : "bg-black/40 border-white/5 opacity-70 hover:opacity-100"}`}
                           >
-                            <div className="flex justify-between items-start mb-6 md:mb-8 relative z-10">
+                            <div className="flex justify-between items-start mb-4 md:mb-6 relative z-10">
                               <div className="flex items-center gap-2">
-                                <span className="text-lg md:text-xl">
+                                <span className="text-base md:text-xl">
                                   {config.icon}
                                 </span>
                                 <span
-                                  className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest ${isCompleted ? "text-emerald-500" : "text-slate-400"}`}
+                                  className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest ${isCompleted ? "text-emerald-400 font-bold" : "text-slate-400"}`}
                                 >
                                   {item.time}
                                 </span>
@@ -946,25 +946,25 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                               )}
                             </div>
 
-                            <h3 className="font-black text-xl md:text-2xl text-white mb-6 md:mb-8 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">
+                            <h3 className="font-black text-lg sm:text-xl md:text-2xl text-white mb-4 md:mb-6 group-hover:text-indigo-400 transition-colors uppercase truncate relative z-10">
                               {item.name}
                             </h3>
 
                             <div className="mt-auto relative z-10">
                               {item.result ? (
-                                <div className="space-y-4 md:space-y-6">
-                                  <div className="flex gap-2 flex-wrap justify-center sm:justify-start">
+                                <div className="space-y-3 md:space-y-6">
+                                  <div className="flex gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto scrollbar-hide justify-start items-center py-1">
                                     {item.result.gagnants.map((n) => (
                                       <div
                                         key={n}
-                                        className="w-8 h-8 md:w-9 md:h-9 rounded-lg md:rounded-xl bg-indigo-600/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center text-[9px] md:text-[10px] font-black"
+                                        className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-indigo-600/15 text-indigo-300 border border-indigo-500/30 flex items-center justify-center text-xs font-black shadow-sm shrink-0"
                                       >
                                         {n}
                                       </div>
                                     ))}
                                   </div>
                                   <div
-                                    className="flex items-center justify-between pt-4 md:pt-6 border-t border-white/5 cursor-pointer"
+                                    className="flex items-center justify-between pt-3 md:pt-6 border-t border-white/5 cursor-pointer"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       audioEngine.play("click");

@@ -375,8 +375,8 @@ export const DrawDetails: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
       </header>
 
       {/* Navigation Modulaire - Sticky & Scrollable */}
-      <div className="sticky top-[104px] md:top-[120px] z-40 bg-nexus-950/80 backdrop-blur-xl py-2 -mx-3 px-3 md:mx-0 md:px-0">
-        <nav className="flex bg-slate-100 dark:bg-slate-800/80 p-1 rounded-[2rem] md:rounded-2xl border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full">
+      <div className="sticky top-[72px] sm:top-[88px] md:top-[120px] z-40 bg-nexus-950/90 backdrop-blur-xl py-2 -mx-2 px-2 md:mx-0 md:px-0">
+        <nav className="flex bg-slate-100 dark:bg-slate-900/90 p-1 rounded-2xl md:rounded-2xl border border-slate-200 dark:border-slate-800 overflow-x-auto scrollbar-hide shadow-inner w-full md:w-fit max-w-full snap-x snap-mandatory touch-manipulation">
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -384,11 +384,11 @@ export const DrawDetails: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
               onMouseEnter={() => tabPreloaders[t.id as MainTab]?.()}
               onTouchStart={() => tabPreloaders[t.id as MainTab]?.()}
               className={`
-                flex items-center gap-2 md:gap-3 px-4 md:px-6 py-2.5 md:py-3.5 rounded-[1.8rem] md:rounded-[2rem] transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden
+                snap-center flex items-center gap-1.5 md:gap-3 px-3.5 md:px-6 py-2 md:py-3.5 rounded-xl md:rounded-2xl transition-all whitespace-nowrap flex-shrink-0 relative overflow-hidden active:scale-95
                 ${
                   activeMainTab === t.id
-                    ? "bg-white dark:bg-slate-700 shadow-lg text-indigo-600 dark:text-white scale-105 z-10 font-bold"
-                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 font-medium"
+                    ? "bg-white dark:bg-indigo-600 shadow-md text-indigo-600 dark:text-white font-bold"
+                    : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 font-medium"
                 }
               `}
             >
@@ -396,11 +396,11 @@ export const DrawDetails: React.FC<{ onBack?: () => void }> = ({ onBack }) => {
                 size={14}
                 className={`relative z-10 ${activeMainTab === t.id ? "animate-bounce-subtle" : ""}`}
               />
-              <span className="text-xs md:text-xs uppercase tracking-widest leading-none relative z-10">
+              <span className="text-[11px] md:text-xs uppercase tracking-wider md:tracking-widest leading-none relative z-10">
                 {t.label}
               </span>
               {activeMainTab === t.id && (
-                <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/5 to-purple-500/5 pointer-events-none"></div>
+                <div className="absolute inset-0 bg-gradient-to-r from-white/10 to-transparent pointer-events-none"></div>
               )}
             </button>
           ))}

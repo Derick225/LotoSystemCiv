@@ -24,9 +24,9 @@ export const NumberBall: React.FC<NumberBallProps> = React.memo(
     return (
       <div
         className={`
-        ${sizes[size]} ${getNumberColor(number)}
+        relative ${sizes[size]} ${getNumberColor(number)}
         rounded-full flex items-center justify-center font-black text-white
-        border-2 shadow-2xl transition-all hover:scale-110 cursor-pointer select-none
+        border-2 shadow-2xl transition-all hover:scale-110 active:scale-90 cursor-pointer select-none touch-manipulation
         ${glow || isAttractor ? "animate-glow ring-4 ring-indigo-500/50" : ""}
         ${selected ? "ring-4 ring-white border-white" : ""}
         ${confidence && confidence > 80 ? "shadow-indigo-500/40" : ""}

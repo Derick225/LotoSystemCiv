@@ -198,8 +198,9 @@ function predict(node: TreeNode, row: number[]): number {
   const theta = node.threshold;
   const sigma = Math.max(1e-4, node.stdDev || 1.0);
 
-  const z = (x - theta) / sigma;
-  const p = 1.0 / (1.0 + Math.exp(-2.0 * z)); // Sigmoïde continue d'appartenance à la branche droite
+  const tau = Math.max(1e-4, sigma * 0.70710678);
+  const z = (x - theta) / tau;
+  const p = 1.0 / (1.0 + Math.exp(-z)); // Sigmoïde continue d'appartenance à la branche droite
 
   return (1.0 - p) * predict(node.left, row) + p * predict(node.right, row);
 }
@@ -338,9 +339,10 @@ ctx.onmessage = (e) => {
     const z = (cand.score - meanScore) / stdScore;
     const level2Weight = 1.0 / (1.0 + Math.exp(-2.0 * z)); // Transition continue pour l'activation micro
 
-    const neighborFeat = cand.features[4] || 0; // Neighbor feature
-    const machineFeat = cand.features[5] || 0; // Machine leak feature
-    const microModulation = (neighborFeat + machineFeat) * 0.2;
+    const featureEnergy = cand.features.length > 0
+      ? cand.features.reduce((acc, f) => acc + f, 0) / cand.features.length
+      : 0;
+    const microModulation = featureEnergy * 0.2;
 
     const continuousBoost = 1.0 + level2Weight * microModulation;
     const refinedScore = Math.min(100, Math.max(0, cand.score * continuousBoost));

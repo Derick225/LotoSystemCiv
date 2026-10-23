@@ -62,44 +62,47 @@ export const QuantumInspector: React.FC = () => {
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-2xl animate-fade-in"
+      className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/95 backdrop-blur-2xl animate-fade-in"
       onClick={() => {
         audioEngine.play("click");
         setInspectingNumber(null);
       }}
     >
       <div
-        className="bg-slate-900 w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-700 overflow-hidden relative flex flex-col max-h-[90vh]"
+        className="bg-slate-900 w-full sm:max-w-4xl rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-slate-700 overflow-hidden relative flex flex-col max-h-[92vh] sm:max-h-[90vh] pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))] sm:pb-0"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Poignée de glissement tactile pour mobile */}
+        <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mt-2.5 mb-1 sm:hidden shrink-0" />
+
         {/* --- HEADER --- */}
-        <div className="p-4 sm:p-8 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative overflow-hidden">
+        <div className="p-3.5 sm:p-8 bg-slate-950 border-b border-slate-800 flex justify-between items-center gap-3 relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none">
             <Atom size={180} />
           </div>
 
-          <div className="flex items-center gap-4 sm:gap-8 relative z-10">
+          <div className="flex items-center gap-3 sm:gap-8 relative z-10">
             <div className="relative group shrink-0">
               <div className="absolute -inset-4 bg-indigo-500/20 rounded-full blur-xl group-hover:bg-indigo-500/30 transition-all"></div>
-              <NumberBall number={inspectingNumber} size="lg" glow />
-              <div className="absolute -bottom-2 -right-2 bg-indigo-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full border border-indigo-400 shadow-lg tracking-widest">
+              <NumberBall number={inspectingNumber} size="md" glow />
+              <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white text-[8px] sm:text-[9px] font-black px-1.5 py-0.2 rounded-full border border-indigo-400 shadow-lg tracking-widest">
                 TARGET
               </div>
             </div>
             <div>
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-1.5 mb-0.5 sm:mb-1">
                 <ScanBarcode
-                  size={12}
+                  size={11}
                   className="text-emerald-400 animate-pulse"
                 />
-                <span className="text-[9px] sm:text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] sm:tracking-[0.3em]">
+                <span className="text-[8px] sm:text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em] sm:tracking-[0.3em]">
                   Signature Vectorielle
                 </span>
               </div>
-              <h3 className="text-2xl sm:text-4xl md:text-5xl font-black text-white tracking-tighter leading-none">
+              <h3 className="text-xl sm:text-4xl md:text-5xl font-black text-white tracking-tighter leading-none">
                 Vecteur {inspectingNumber}
               </h3>
-              <p className="text-[10px] sm:text-xs text-slate-500 font-mono mt-1 sm:mt-2">
+              <p className="text-[9px] sm:text-xs text-slate-500 font-mono mt-0.5 sm:mt-2">
                 UUID: {((inspectingNumber * 0x1f3d) % 0xffff).toString(16).toUpperCase()}
               </p>
             </div>
@@ -110,14 +113,15 @@ export const QuantumInspector: React.FC = () => {
               audioEngine.play("click");
               setInspectingNumber(null);
             }}
-            className="absolute top-4 right-4 sm:relative sm:top-auto sm:right-auto p-2 sm:p-4 bg-white/5 hover:bg-white/10 rounded-full transition-colors z-10 border border-white/5 group"
+            className="p-2 sm:p-4 bg-white/5 hover:bg-white/10 active:scale-90 rounded-full transition-all z-10 border border-white/5 group touch-manipulation"
+            title="Fermer l'inspecteur"
           >
-            <X size={20} className="text-slate-400 group-hover:text-white" />
+            <X size={18} className="text-slate-400 group-hover:text-white" />
           </button>
         </div>
 
         {/* --- BODY --- */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-8 space-y-6 sm:space-y-10 custom-scrollbar bg-gradient-to-b from-slate-900 to-slate-950">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-8 space-y-4 sm:space-y-10 custom-scrollbar bg-gradient-to-b from-slate-900 to-slate-950">
           {loading ? (
             <div className="h-96 flex flex-col items-center justify-center gap-6 animate-pulse">
               <div className="relative">

@@ -284,14 +284,14 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
             </p>
           </div>
 
-          {/* SELECTEUR DE MODE */}
-          <div className="flex flex-wrap bg-slate-950 p-1.5 rounded-[2rem] border border-slate-800 shadow-inner gap-1">
+          {/* SELECTEUR DE MODE (2x2 sur mobile Android, en ligne sur tablette/desktop) */}
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap w-full sm:w-auto bg-slate-950 p-1.5 rounded-2xl sm:rounded-[2rem] border border-slate-800 shadow-inner gap-1 touch-manipulation">
             <button
               onClick={() => {
                 audioEngine.play("click");
                 setFilterMode("consensus");
               }}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "consensus" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-3 py-2.5 sm:px-4 rounded-xl sm:rounded-2xl text-[11px] sm:text-xs font-black uppercase tracking-wider sm:tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${filterMode === "consensus" ? "bg-emerald-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <ShieldCheck size={14} /> Top
             </button>
@@ -300,7 +300,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 audioEngine.play("click");
                 setFilterMode("average");
               }}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "average" ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-3 py-2.5 sm:px-4 rounded-xl sm:rounded-2xl text-[11px] sm:text-xs font-black uppercase tracking-wider sm:tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${filterMode === "average" ? "bg-blue-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <Scale size={14} /> Moyen
             </button>
@@ -309,7 +309,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 audioEngine.play("click");
                 setFilterMode("quantum_pruning");
               }}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "quantum_pruning" ? "bg-purple-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-3 py-2.5 sm:px-4 rounded-xl sm:rounded-2xl text-[11px] sm:text-xs font-black uppercase tracking-wider sm:tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${filterMode === "quantum_pruning" ? "bg-purple-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <BrainCircuit size={14} /> Quantique
             </button>
@@ -318,7 +318,7 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                 audioEngine.play("click");
                 setFilterMode("shadow");
               }}
-              className={`px-4 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${filterMode === "shadow" ? "bg-rose-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
+              className={`px-3 py-2.5 sm:px-4 rounded-xl sm:rounded-2xl text-[11px] sm:text-xs font-black uppercase tracking-wider sm:tracking-widest transition-all flex items-center justify-center gap-1.5 active:scale-95 ${filterMode === "shadow" ? "bg-rose-600 text-white shadow-lg" : "text-slate-500 hover:text-white"}`}
             >
               <EyeOff size={14} /> Ombre
             </button>
@@ -326,9 +326,9 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-8">
+      <div className="grid lg:grid-cols-12 gap-6 md:gap-8">
         {/* Liste des Élus */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 h-fit max-h-[700px] overflow-y-auto custom-scrollbar">
+        <div className="lg:col-span-4 bg-white dark:bg-slate-800 p-4 sm:p-6 md:p-8 rounded-2xl sm:rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 h-fit max-h-[700px] overflow-y-auto custom-scrollbar">
           <div className="flex justify-between items-center mb-8">
             <h4
               className={`font-black text-[10px] uppercase tracking-widest flex items-center gap-2 ${theme.text}`}
@@ -557,6 +557,33 @@ export const DecisionTreeTab: React.FC<DecisionTreeTabProps> = ({
                       badgeColor =
                         val > 0.7
                           ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+                          : "bg-slate-800 text-slate-400 border border-slate-700/50";
+                    } else if (featName === "Harmonic Resonance") {
+                      description =
+                        val > 0.6
+                          ? "Forte résonance harmonique miroir et complémentaire (91 - n)."
+                          : "Symétrie harmonique neutre.";
+                      badgeColor =
+                        val > 0.6
+                          ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
+                          : "bg-slate-800 text-slate-400 border border-slate-700/50";
+                    } else if (featName === "Inter-Draw Flux") {
+                      description =
+                        val > 0.6
+                          ? "Couplage de report direct et advection de voisinage actif."
+                          : "Flux inter-tirages résiduel.";
+                      badgeColor =
+                        val > 0.6
+                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          : "bg-slate-800 text-slate-400 border border-slate-700/50";
+                    } else if (featName === "Spectral Memory") {
+                      description =
+                        val > 0.6
+                          ? "En phase avec le cycle harmonique fondamental (18 tirages)."
+                          : "Déphasage spectral modéré.";
+                      badgeColor =
+                        val > 0.6
+                          ? "bg-teal-500/10 text-teal-400 border border-teal-500/20"
                           : "bg-slate-800 text-slate-400 border border-slate-700/50";
                     }
 
