@@ -1,3 +1,10 @@
+import {
+  EXACT_SUM_MOMENTS,
+  EXACT_AMPLITUDE_MOMENTS,
+  EXACT_AC_MOMENTS,
+  EXACT_CONSECUTIVE_MOMENTS,
+} from './drawTheory';
+
 export type DrawName = string & { readonly __brand: unique symbol };
 export type NormalizedWeight = number & { readonly __brand: unique symbol };
 export type Probability = number & { readonly __brand: unique symbol };
@@ -139,13 +146,19 @@ export interface EmpiricalCalibration {
   isValid: boolean;
 }
 
+/**
+ * Calibration de repli : cibles exactes de la loi uniforme 5/90 (voir drawTheory.ts).
+ * Ce ne sont pas des constantes empiriques arbitraires mais les moments théoriques de
+ * l'hypothèse nulle, utilisés comme prior de régularisation quand l'historique est trop
+ * court. `isValid=false` signale précisément l'absence de données observées.
+ */
 export const FALLBACK_CALIBRATION: EmpiricalCalibration = {
-  meanSum: 216.9,
-  stdSum: 56.8,
-  meanAmplitude: 58.9,
-  stdAmplitude: 13.5,
-  meanAC: 9.66,
-  stdAC: 0.64,
-  lambdaConsecutives: 0.21,
+  meanSum: EXACT_SUM_MOMENTS.mean,
+  stdSum: EXACT_SUM_MOMENTS.std,
+  meanAmplitude: EXACT_AMPLITUDE_MOMENTS.mean,
+  stdAmplitude: EXACT_AMPLITUDE_MOMENTS.std,
+  meanAC: EXACT_AC_MOMENTS.mean,
+  stdAC: EXACT_AC_MOMENTS.std,
+  lambdaConsecutives: EXACT_CONSECUTIVE_MOMENTS.mean,
   isValid: false
 };

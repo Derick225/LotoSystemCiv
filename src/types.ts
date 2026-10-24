@@ -194,6 +194,28 @@ export interface Prediction {
       count: number;
     }>;
   };
+  /**
+   * Probabilités marginales par numéro (1..90), somme = 5.0, shrinkées vers l'équiprobabilité
+   * selon le Brier Skill Score out-of-fold. λ = 0 ⇒ chaque numéro vaut exactement 5/90.
+   * Ce sont des marginales de tirage, PAS une probabilité de remporter un rang de gain.
+   */
+  numberProbabilities?: Record<number, number>;
+  empiricalSkill?: {
+    /** Rétention du signal du modèle dans [0,1] (0 = équiprobable, 1 = modèle brut). */
+    shrinkage: number;
+    /** BSS out-of-fold retenu (peut être négatif). */
+    brierSkillScore: number;
+    positiveBrierSkillScore: number;
+    /** Incertitude bootstrap ou borne d'échantillonnage ; null si aucune preuve. */
+    uncertainty: number | null;
+    evidenceDraws: number;
+    source: 'holdout' | 'block_bootstrap' | 'walk_forward' | 'none';
+    expectedHitsTopK: number;
+    uniformExpectedHitsTopK: number;
+    liftVsUniform: number;
+    maxProbability: number;
+    maxLiftVsUniform: number;
+  };
   simulationScenarios?: SimulationScenarioItem[];
 }
 

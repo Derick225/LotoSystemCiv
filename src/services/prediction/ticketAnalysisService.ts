@@ -1,5 +1,11 @@
 import { TicketAnalysisResult, AlgoWeights, AdaptiveRules, ForensicReport, DrawResult } from '../../types';
 import { AlgoKey, ScoreBreakdown, EmpiricalCalibration, FALLBACK_CALIBRATION } from '../../shared/prediction.types';
+import {
+  EXACT_SUM_MOMENTS,
+  EXACT_AMPLITUDE_MOMENTS,
+  EXACT_AC_MOMENTS,
+  EXACT_CONSECUTIVE_MOMENTS,
+} from '../../shared/drawTheory';
 import { calculateACValue } from '../mathCore';
 import { calculateGeneticDiversityIndex } from './diversityService';
 import { normalizeWeights } from './weightsManager';
@@ -13,14 +19,16 @@ export const generateEmpiricalCalibration = (
   hurstExponent: number = 0.5,
   entropyRatio: number = 0.95
 ): EmpiricalCalibration => {
-  // Moments théoriques exacts de la distribution discrète uniforme sans remise (Loto 5/90)
-  const THEORETICAL_MU_SUM = 227.5; // 5 * (90 + 1) / 2
-  const THEORETICAL_SIGMA2_SUM = 3223.181; // 5 * ((90^2 - 1) / 12) * ((90 - 5) / (90 - 1))
-  const THEORETICAL_MU_AMP = 60.6667; // ((5 - 1) / (5 + 1)) * (90 + 1)
-  const THEORETICAL_SIGMA2_AMP = 245.555; // (2 * 4 / (36 * 7)) * 91 * 85
-  const THEORETICAL_MU_AC = 9.66;
-  const THEORETICAL_SIGMA2_AC = 0.4096; // 0.64^2
-  const THEORETICAL_LAMBDA_CONSEC = 0.2247; // 5 * (4 / 89)
+  // Moments théoriques exacts de la loi uniforme sans remise 5/90 (drawTheory.ts).
+  // Ils servent de prior de régularisation, jamais de cible empirique : les anciennes
+  // valeurs (meanAC=9.66, σ²_AC=0.4096) étaient mathématiquement impossibles (AC max = 6).
+  const THEORETICAL_MU_SUM = EXACT_SUM_MOMENTS.mean;
+  const THEORETICAL_SIGMA2_SUM = EXACT_SUM_MOMENTS.variance;
+  const THEORETICAL_MU_AMP = EXACT_AMPLITUDE_MOMENTS.mean;
+  const THEORETICAL_SIGMA2_AMP = EXACT_AMPLITUDE_MOMENTS.variance;
+  const THEORETICAL_MU_AC = EXACT_AC_MOMENTS.mean;
+  const THEORETICAL_SIGMA2_AC = EXACT_AC_MOMENTS.variance;
+  const THEORETICAL_LAMBDA_CONSEC = EXACT_CONSECUTIVE_MOMENTS.mean;
 
   if (!history || history.length < 5) {
     return FALLBACK_CALIBRATION;

@@ -82,4 +82,26 @@ describe('Contrat — Attribution Causale intégrée à l’autopsie en boucle f
       );
     }
   });
+
+  it('publie la calibration en ligne (ECE brute → LOO) et l’intervalle conforme déterministe', async () => {
+    const batch = await executeBatchClosedLoopAutopsy(drawName, mockHistory, DEFAULT_ALGO_WEIGHTS, 3);
+    const calibration = batch.onlineCalibration;
+
+    expect(calibration).toBeDefined();
+    expect(calibration!.sampleSize).toBe(batch.reports.length * 90);
+    expect(calibration!.monotoneBlockCount).toBeGreaterThanOrEqual(1);
+    expect(calibration!.eceBefore).toBeGreaterThanOrEqual(0);
+    expect(calibration!.eceAfterLoo).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(calibration!.eceAfterLoo)).toBe(true);
+    expect(calibration!.conformal.sampleSize).toBe(batch.reports.length);
+    expect(calibration!.conformal.lower).toBeGreaterThanOrEqual(0);
+    expect(calibration!.conformal.upper).toBeLessThanOrEqual(5);
+    expect(calibration!.conformal.lower).toBeLessThanOrEqual(calibration!.conformal.upper);
+    expect(calibration!.conformal.coverage).toBeGreaterThan(0);
+    expect(calibration!.conformal.coverage).toBeLessThanOrEqual(1);
+    expect(calibration!.narrative).toContain('Intervalle conforme');
+
+    const batch2 = await executeBatchClosedLoopAutopsy(drawName, mockHistory, DEFAULT_ALGO_WEIGHTS, 3);
+    expect(JSON.stringify(batch2.onlineCalibration)).toEqual(JSON.stringify(calibration));
+  });
 });

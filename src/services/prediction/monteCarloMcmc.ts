@@ -223,8 +223,7 @@ export const runMonteCarloMcmcCore = async (
         numbersToExplain,
         scoresMap,
         shapMap,
-        explainabilityRecord,
-        baseFeatures.machineTransferMap
+        explainabilityRecord
     );
 
     numbersToExplain.forEach(num => {

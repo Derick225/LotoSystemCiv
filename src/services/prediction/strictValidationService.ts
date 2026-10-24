@@ -7,6 +7,7 @@ import { getAlgoWeights, getDefaultWeights, normalizeWeights, validateAlgoWeight
 import { useNexusStore } from "../../store/useNexusStore";
 import { calculateShannonEntropy, calculateFractalIndex } from "../mathService";
 import { calculateACValue } from "../mathCore";
+import { EXACT_CONSECUTIVE_MOMENTS } from "../../shared/drawTheory";
 import { generateMasterPrediction } from "./predictionFacade";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 
@@ -262,8 +263,10 @@ export const validateStructuralTicketStrictly = (
   const comb = (nn: number, k: number) => factorial(nn) / (factorial(k) * factorial(nn - k));
   const probExactParity = comb(n, odds) * Math.pow(p, odds) * Math.pow(1 - p, n - odds);
 
-  // Consecutives Poisson CDF
-  const lambda = calib.lambdaConsecutives || 0.2247;
+  // Consecutives Poisson CDF — taux exact 5/90 (2/9), jamais une constante arbitraire
+  const lambda = Number.isFinite(calib.lambdaConsecutives) && calib.lambdaConsecutives > 0
+    ? calib.lambdaConsecutives
+    : EXACT_CONSECUTIVE_MOMENTS.mean;
   let poissonCDF = 0;
   for (let i = 0; i < consecutives; i++) {
     poissonCDF += (Math.pow(lambda, i) * Math.exp(-lambda)) / factorial(i);

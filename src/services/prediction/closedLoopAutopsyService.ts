@@ -1219,6 +1219,59 @@ export const executeBatchClosedLoopAutopsy = async (
       return a.key.localeCompare(b.key);
     });
 
+  // 10. Calibration en ligne : ECE brute → ECE post-calibration LOO + intervalle conforme
+  const calibrationFolds = reports
+    .filter((r) => r.calibrationSample)
+    .map((r) => ({ p: r.calibrationSample!.probabilities, y: r.calibrationSample!.outcomes }));
+
+  let onlineCalibration: OnlineCalibrationSummary | undefined;
+  if (calibrationFolds.length > 0) {
+    const pooledP = calibrationFolds.flatMap((f) => f.p);
+    const pooledY = calibrationFolds.flatMap((f) => f.y);
+    const binCount = deriveEceBinCount(pooledP.length);
+    const eceBefore = computeEce({ p: pooledP, y: pooledY }, binCount);
+    const eceAfterLoo = looEceAfterCalibration(calibrationFolds, binCount);
+    const pooledCalibrator = fitMonotoneCalibrator({ p: pooledP, y: pooledY });
+
+    // Résidus conforme : |hits Top-5 observés − espérance prédite sur le Top-5|
+    const residuals: number[] = [];
+    for (const report of reports) {
+      const sample = report.calibrationSample;
+      if (!sample) continue;
+      const expectedHits = report.top5Predicted.reduce(
+        (acc, n) => acc + (sample.probabilities[n - 1] ?? 0),
+        0
+      );
+      residuals.push(Math.abs(report.directHitsTop5.length - expectedHits));
+    }
+
+    // Centre de l'intervalle : espérance de hits du tirage le plus récent disponible
+    const latestWithSample = reports.find((r) => r.calibrationSample);
+    const center = latestWithSample
+      ? latestWithSample.top5Predicted.reduce(
+          (acc, n) => acc + (latestWithSample.calibrationSample!.probabilities[n - 1] ?? 0),
+          0
+        )
+      : 0;
+
+    const conformal = conformalInterval(residuals, center, 5);
+    onlineCalibration = {
+      eceBefore: parseFloat(eceBefore.toFixed(6)),
+      eceAfterLoo: parseFloat(eceAfterLoo.toFixed(6)),
+      monotoneBlockCount: pooledCalibrator.blockCount,
+      sampleSize: pooledP.length,
+      conformal: {
+        center: parseFloat(conformal.center.toFixed(4)),
+        lower: parseFloat(conformal.lower.toFixed(4)),
+        upper: parseFloat(conformal.upper.toFixed(4)),
+        quantile: parseFloat(conformal.quantile.toFixed(4)),
+        coverage: parseFloat(conformal.coverage.toFixed(4)),
+        sampleSize: conformal.sampleSize,
+      },
+      narrative: `Calibration en ligne (${calibrationFolds.length} tirages, ${pooledP.length} observations) : ECE ${eceBefore.toFixed(4)} → ${eceAfterLoo.toFixed(4)} (leave-one-out), ${pooledCalibrator.blockCount} bloc(s) isotonique(s). Intervalle conforme ${(conformal.coverage * 100).toFixed(1)}% : ${conformal.lower.toFixed(2)}–${conformal.upper.toFixed(2)} hit(s) attendus (centre ${center.toFixed(2)}, quantile ${conformal.quantile.toFixed(2)}).`,
+    };
+  }
+
   return {
     drawName,
     batchSize: effectiveCount,
@@ -1229,6 +1282,7 @@ export const executeBatchClosedLoopAutopsy = async (
     totalNearMisses,
     aggregatedGradients,
     aggregatedChannelAttribution,
+    onlineCalibration,
     recommendedWeights,
     reports,
   };

@@ -15,6 +15,12 @@ import { logger } from "../../utils/logger";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { generateXAPNarratives } from "./xapExplainabilityService";
 import { computeWalkForwardCalibrationHpc } from "../wasm/lotoEngineBridge";
+import {
+  deriveSkillShrinkage,
+  shrinkProbabilityVector,
+  summarizePredictionEdge,
+} from "./empiricalSkillCalibration";
+import { EXACT_SUM_MOMENTS } from "../../shared/drawTheory";
 
 const TICKET_SIZE = 5;
 
@@ -201,6 +207,11 @@ export const finalizePredictionPayload = async (
 
   const currentEntropyResult = calculateShannonEntropy(context.history);
   const currentEntropy = currentEntropyResult.normalized;
+
+  // Preuve out-of-fold évaluée AVANT toute exposition de probabilités : ce rapport pilote
+  // le shrinkage λ appliqué plus bas. Aucune probabilité n'est publiée sans ce contrôle.
+  const walkForwardCalibration = computeWalkForwardCalibrationHpc(context.drawName, 15);
+  const skillEstimate = deriveSkillShrinkage(walkForwardCalibration);
   
   const calibratedParams = await getCalibratedHyperparameters(context.drawName, currentEntropy);
   const plattA = calibratedParams.sigmoid_slope;
@@ -270,7 +281,7 @@ export const finalizePredictionPayload = async (
     scoresMap,
     shapMap,
     explainabilityRecord,
-    features.machineTransferMap
+    { shrinkage: skillEstimate.shrinkage, brierSkillScore: skillEstimate.pointEstimate }
   );
 
   numbersToExplain.forEach(num => {
@@ -285,20 +296,60 @@ export const finalizePredictionPayload = async (
       explainabilityRecord[num].narrativeInterpretation = xapExplanations[num].narrativeText;
       explainabilityRecord[num].physicsArchetype = xapExplanations[num].physicsArchetype;
       explainabilityRecord[num].topDrivers = xapExplanations[num].topDrivers;
+      explainabilityRecord[num].dominantFamilyShare = xapExplanations[num].dominantFamilyShare;
     }
   });
 
   const diversityMetrics = calculateGeneticDiversityIndex(selection, breakdownRecord);
+
+  // ============================================================================
+  // PROBABILITÉS MARGINALES CALIBRÉES & SHRINKAGE EMPIRIQUE
+  // ============================================================================
+  // Le simplexe log-linéaire est relatif : il ordonne les numéros mais ne prouve aucun
+  // edge. On récupère donc les probabilités recalculées après débruitage PCA, puis on les
+  // shrinke vers 5/90 avec le λ dérivé du BSS out-of-fold (empiricalSkillCalibration.ts).
+  const rawProbabilityVector = new Array<number>(DOMAIN_SIZE).fill(0);
+  denoisedScores.forEach((curr) => {
+    const idx = curr.num - 1;
+    if (idx >= 0 && idx < DOMAIN_SIZE) {
+      rawProbabilityVector[idx] = curr.explainability?.calibratedProbability ?? 0;
+    }
+  });
+
+  const probabilityVector = shrinkProbabilityVector(
+    rawProbabilityVector,
+    skillEstimate.shrinkage
+  );
+
+  const numberProbabilities: Record<number, number> = {};
+  for (let n = 1; n <= DOMAIN_SIZE; n++) {
+    numberProbabilities[n] = probabilityVector[n - 1];
+    const record = explainabilityRecord[n];
+    if (record) {
+      record.rawCalibratedProbability = rawProbabilityVector[n - 1];
+      record.calibratedProbability = probabilityVector[n - 1];
+      record.skillShrinkage = skillEstimate.shrinkage;
+    }
+  }
+
+  const edgeSummary = summarizePredictionEdge(probabilityVector, selection);
+
+  // Note honnête : la preuve out-of-fold est citée avec son incertitude, jamais transformée
+  // en promesse de gain. λ = 0 est une égalité exacte, pas un seuil de décision.
+  const skillEvidenceNote = skillEstimate.source === 'none'
+    ? "Aucune preuve out-of-fold disponible : probabilités marginales ramenées à l'équiprobabilité 5/90 (λ=0)."
+    : `Skill out-of-fold mesuré (${skillEstimate.source}, n=${skillEstimate.evidenceDraws}) : BSS=${skillEstimate.pointEstimate.toFixed(4)}, σ=${Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty.toFixed(4) : 'n/d'}, rétention λ=${skillEstimate.shrinkage.toFixed(4)}${skillEstimate.shrinkage === 0 ? " → probabilités marginales ramenées à l'équiprobabilité 5/90" : ''}.`;
+  const confidenceNote = `${HONEST_NOTE} ${skillEvidenceNote}`;
 
   // Calcul continu et objectif de l'alignement de réalité (Reality Alignment)
   // Basé sur la conformité de la somme totale, la distribution de parité et la régularité topologique
   const historyDraws = context.history.slice(0, context.validTemporalDepth);
   const meanHistSum = historyDraws.length > 0
     ? historyDraws.reduce((acc, d) => acc + d.gagnants.reduce((a, b) => a + b, 0), 0) / historyDraws.length
-    : 227.5;
+    : EXACT_SUM_MOMENTS.mean;
   const stdHistSum = historyDraws.length > 1
     ? Math.sqrt(historyDraws.reduce((acc, d) => acc + Math.pow(d.gagnants.reduce((a, b) => a + b, 0) - meanHistSum, 2), 0) / (historyDraws.length - 1))
-    : 45.0;
+    : EXACT_SUM_MOMENTS.std;
   const currentSum = selection.reduce((a, b) => a + b, 0);
   const zSum = Math.abs(currentSum - meanHistSum) / (stdHistSum || 1.0);
   const sumLikelihood = Math.exp(-0.5 * Math.pow(zSum, 2));
@@ -381,7 +432,6 @@ export const finalizePredictionPayload = async (
     dnaSieveMetrics,
   });
 
-  const walkForwardCalibration = computeWalkForwardCalibrationHpc(context.drawName, 15);
   walkForwardCalibration.channelWeights = { ...weights };
 
   return {
@@ -389,7 +439,7 @@ export const finalizePredictionPayload = async (
     suggestedNumbers: selection,
     candidates,
     confidence: finalConfidence,
-    confidenceNote: HONEST_NOTE,
+    confidenceNote,
     analysis: analysisText,
     breakdown: breakdownRecord,
     timestamp: Date.now(),
@@ -418,6 +468,22 @@ export const finalizePredictionPayload = async (
     dnaSieve: dnaSieveMetrics,
     uncertaintyQuantification,
     walkForwardCalibration,
+    // Probabilités marginales par numéro, shrinkées vers l'équiprobabilité selon la preuve
+    // out-of-fold. Somme = 5.0 (simplexe 5/90) ; λ = 0 ⇒ toutes égales à 5/90.
+    numberProbabilities,
+    empiricalSkill: {
+      shrinkage: skillEstimate.shrinkage,
+      brierSkillScore: skillEstimate.pointEstimate,
+      positiveBrierSkillScore: skillEstimate.positiveEstimate,
+      uncertainty: Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty : null,
+      evidenceDraws: skillEstimate.evidenceDraws,
+      source: skillEstimate.source,
+      expectedHitsTopK: edgeSummary.expectedHitsTopK,
+      uniformExpectedHitsTopK: edgeSummary.uniformExpectedHitsTopK,
+      liftVsUniform: edgeSummary.liftVsUniform,
+      maxProbability: edgeSummary.maxProbability,
+      maxLiftVsUniform: edgeSummary.maxLiftVsUniform,
+    },
     simulationScenarios,
     hyperparameters: {
       hawkesDecay: TUNING.DEFAULT_HAWKES_DECAY,

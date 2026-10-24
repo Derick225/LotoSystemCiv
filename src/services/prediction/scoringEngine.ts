@@ -226,6 +226,74 @@ export const fuseChannelsLogLinearSimplex = (
   return { probabilities, logits };
 };
 
+/**
+ * Projection des scores de canaux sur le simplexe marginal (Σ p_n = K = 5) par stacking
+ * log-linéaire. Isolée afin d'être rejouée après toute transformation des features —
+ * notamment le débruitage PCA. Sans ce rejeu, `calibratedProbability` restait figée sur la
+ * passe nominale et ne correspondait plus au classement final exporté.
+ */
+export const applyLogLinearSimplexProbabilities = (masterScores: ScoredNumber[]): void => {
+  if (masterScores.length === 0) return;
+  const uniformBaseRate = 5.0 / 90.0;
+
+  const activeChannels = new Set<string>();
+  masterScores.forEach((m) => {
+    Object.keys(m.explainability?.effectiveWeights || {}).forEach((k) => activeChannels.add(k));
+  });
+
+  const robustStats: Record<string, { median: number; mad: number }> = {};
+  activeChannels.forEach((k) => {
+    const vals = masterScores.map((m) => Number(m.breakdown[k as AlgoKey]) || 0);
+    const median = getMedian(vals);
+    robustStats[k] = { median, mad: getMAD(vals, median) };
+  });
+
+  const logits = new Float64Array(masterScores.length);
+  let maxLogit = -Infinity;
+
+  masterScores.forEach((m, idx) => {
+    let weightedLogOdds = 0;
+    let totalWeight = 0;
+    const effWeights = m.explainability?.effectiveWeights || {};
+    Object.keys(effWeights).forEach((k) => {
+      const w = effWeights[k] || 0;
+      const stats = robustStats[k];
+      if (w > 0 && stats) {
+        const val = Number(m.breakdown[k as AlgoKey]) || 0;
+        const robustZ = getModifiedZScore(val, stats.median, stats.mad);
+        const squashed = 1.0 / (1.0 + Math.exp(-LOGISTIC_APPROX_FACTOR * robustZ));
+        const odds = Math.max(1e-12, squashed / uniformBaseRate);
+        weightedLogOdds += w * Math.log(odds);
+        totalWeight += w;
+      }
+    });
+
+    const fallbackLogit = m.score > 0
+      ? Math.log(Math.max(1e-12, (m.score / 100.0) / uniformBaseRate))
+      : 0;
+    logits[idx] = totalWeight > 0 ? weightedLogOdds / totalWeight : fallbackLogit;
+    if (logits[idx] > maxLogit) maxLogit = logits[idx];
+  });
+
+  let sumExp = 0;
+  const expZ = new Float64Array(masterScores.length);
+  for (let i = 0; i < masterScores.length; i++) {
+    const e = Math.exp(logits[i] - maxLogit);
+    expZ[i] = e;
+    sumExp += e;
+  }
+
+  masterScores.forEach((m, idx) => {
+    const p = sumExp > 1e-12
+      ? Math.min(1.0, Math.max(0.0, (expZ[idx] / sumExp) * 5.0))
+      : uniformBaseRate;
+    if (m.explainability) {
+      m.explainability.calibratedProbability = p;
+      m.explainability.logLinearLogit = logits[idx];
+    }
+  });
+};
+
 export const calculateScores = (
   features: ExtractedFeatures,
   weights: AlgoWeights,
@@ -432,46 +500,7 @@ export const calculateScores = (
   }
 
   // Projection sur le Simplexe Marginal (Sum_{n=1}^{90} p_n = 5.0) via Stacking Log-Linéaire
-  const logits = new Float64Array(masterScores.length);
-  let maxLogit = -Infinity;
-  const uniformBaseRate = 5.0 / 90.0;
-
-  masterScores.forEach((m, idx) => {
-    let z_n = 0;
-    let totalW = 0;
-    const effWeights = m.explainability?.effectiveWeights || {};
-    Object.keys(effWeights).forEach((k) => {
-      const w = effWeights[k] || 0;
-      if (w > 0 && algoRobustStats[k]) {
-        const stats = algoRobustStats[k];
-        const val = Number(m.breakdown[k as AlgoKey]) || 0;
-        const robustZ = getModifiedZScore(val, stats.median, stats.mad);
-        const squashed = 1.0 / (1.0 + Math.exp(-LOGISTIC_APPROX_FACTOR * robustZ));
-        const odds = Math.max(1e-12, squashed / uniformBaseRate);
-        z_n += w * Math.log(odds);
-        totalW += w;
-      }
-    });
-    const logitVal = totalW > 0 ? z_n / totalW : (m.score > 0 ? Math.log(Math.max(1e-12, (m.score / 100.0) / uniformBaseRate)) : 0);
-    logits[idx] = logitVal;
-    if (logitVal > maxLogit) maxLogit = logitVal;
-  });
-
-  let sumExp = 0;
-  const expZ = new Float64Array(masterScores.length);
-  for (let i = 0; i < masterScores.length; i++) {
-    const e = Math.exp(logits[i] - maxLogit);
-    expZ[i] = e;
-    sumExp += e;
-  }
-
-  masterScores.forEach((m, idx) => {
-    const p_n = sumExp > 1e-12 ? Math.min(1.0, Math.max(0.0, (expZ[idx] / sumExp) * 5.0)) : uniformBaseRate;
-    if (m.explainability) {
-      m.explainability.calibratedProbability = p_n;
-      m.explainability.logLinearLogit = logits[idx];
-    }
-  });
+  applyLogLinearSimplexProbabilities(masterScores);
 
   // Étape 5 : Normalisation Finale Robuste (Percentiles Dynamiques avec préservation stricte de l'ordre de la queue supérieure)
   const allScores = masterScores.map(m => m.score).sort((a, b) => a - b);
@@ -624,6 +653,10 @@ export const applyPCADenoising = async (
           }
         });
       });
+
+      // Les probabilités calibrées doivent refléter les features débruitées, pas la passe
+      // nominale : sinon le simplex exporté contredit le classement final.
+      applyLogLinearSimplexProbabilities(masterScores);
     }
   } catch (e) {
     logger.warn({ err: e }, "PCA Denoising échoué, conservation des scores bruts.");
