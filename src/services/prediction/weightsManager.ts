@@ -87,7 +87,7 @@ export const normalizeWeights = (weights: AlgoWeights, options?: { bypassCap?: b
     finalTotal += w[k];
   });
 
-  if (finalTotal > 0 && Math.abs(finalTotal - 1.0) > 1e-5) {
+  if (finalTotal > 0 && Math.abs(finalTotal - 1.0) > 1e-7) {
     const sortedKeys = [...keys].filter(k => w[k] > 0).sort((a, b) => {
       const diff = w[b] - w[a];
       return diff !== 0 ? diff : a.localeCompare(b);

@@ -17,13 +17,13 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.SHADOW_PROBABILITY]: 'Probabilité Ombre',
   [AlgoKey.NETWORK_CORRELATION]: 'Corrélation Réseau',
   [AlgoKey.ECHO_STATE]: 'Echo State (ESN)',
-  [AlgoKey.GAP_SEQUENCE]: 'Séquence Écart',
+  [AlgoKey.GAP_SEQUENCE]: 'Champ Moyen d\'Ising (Spin Network)',
   [AlgoKey.DERIVED_NEIGHBOR]: 'Voisin/Miroir/Ombre',
-  [AlgoKey.GAP_PATTERN]: 'Motif Écart (AR1)',
-  [AlgoKey.SEQUENCE_PATTERN]: 'Pattern Séquentiel',
+  [AlgoKey.GAP_PATTERN]: 'Processus de Hawkes (Excitation Mutuelle)',
+  [AlgoKey.SEQUENCE_PATTERN]: 'Entropie de Permutation Locale',
   [AlgoKey.GAP_CADENCE]: 'Cadence d\'Écarts',
   [AlgoKey.GAP_TREND]: 'Tendance des Écarts',
-  [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Résonance Inter-Mensuelle',
+  [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Ondelettes Multi-Échelles (Cycle 18)',
   [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolation (Inverse-Variance)',
   [AlgoKey.GAP_BAND_SEQUENCE]: 'Transition de Bandes d\'Écart',
   [AlgoKey.MACHINE_TRANSFER]: 'Transfert Machine',
@@ -33,15 +33,15 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
 export const ALGO_CATEGORIES = [
   {
     name: "Fréquentiel & Transition",
-    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_SEQUENCE, AlgoKey.GAP_PATTERN, AlgoKey.SEQUENCE_PATTERN, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.INTER_MONTHLY_RESONANCE, AlgoKey.GAP_BAND_SEQUENCE, AlgoKey.MACHINE_TRANSFER, AlgoKey.INTER_DRAW_RESONANCE]
+    keys: [AlgoKey.FREQUENCY, AlgoKey.MARKOV, AlgoKey.BAYES, AlgoKey.GAPS, AlgoKey.MOMENTUM, AlgoKey.GAP_CADENCE, AlgoKey.GAP_TREND, AlgoKey.GAP_BAND_SEQUENCE, AlgoKey.MACHINE_TRANSFER, AlgoKey.INTER_DRAW_RESONANCE]
   },
   {
     name: "Mathématique & Structural",
-    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY, AlgoKey.ISOLATION_ANOMALY]
+    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY, AlgoKey.ISOLATION_ANOMALY, AlgoKey.SEQUENCE_PATTERN, AlgoKey.INTER_MONTHLY_RESONANCE]
   },
   {
     name: "Dynamiques Avancées",
-    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR, AlgoKey.GAP_CADENCE]
+    keys: [AlgoKey.SPATIAL, AlgoKey.AFFINITY, AlgoKey.NETWORK_CORRELATION, AlgoKey.ECHO_STATE, AlgoKey.DERIVED_NEIGHBOR, AlgoKey.GAP_PATTERN, AlgoKey.GAP_SEQUENCE]
   }
 ];
 

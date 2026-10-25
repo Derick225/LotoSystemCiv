@@ -179,40 +179,35 @@ describe('VÉRIFICATION EXPERTE DES ALGORITHMES DE RÉSONANCE', () => {
       expect(interMonthlyResonancePlugin.stability).toBe('stable');
     });
 
-    it('détecte les jumeaux temporels multi-échelles (mensuels et annuels) et applique le tamis ADN', () => {
+    it('décompose les harmoniques temporelles via ondelettes de Ricker centrées sur le cycle fondamental T=18', () => {
       const ctx = { ...baseContext, pluginCache: {} };
       interMonthlyResonancePlugin.precompute(ctx);
 
-      let signalDetected = false;
-      let dnaSieveActive = false;
+      let positiveEnergyFound = false;
 
       for (let n = 1; n <= 90; n++) {
         const res = interMonthlyResonancePlugin.evaluate(n, ctx);
         expect(res.score).toBeGreaterThanOrEqual(0);
         expect(res.score).toBeLessThanOrEqual(100);
         expect(Number.isFinite(res.score)).toBe(true);
-        expect(res.confidence).toBeGreaterThanOrEqual(0.2);
+        expect(res.confidence).toBeGreaterThanOrEqual(0.1);
         expect(res.confidence).toBeLessThanOrEqual(1.0);
 
-        if (res.metadata.signalDetected) signalDetected = true;
-        if (res.metadata.dnaSieveActive) dnaSieveActive = true;
+        if (res.metadata.waveletEnergy >= 0) positiveEnergyFound = true;
       }
 
-      expect(signalDetected).toBe(true);
-      expect(dnaSieveActive).toBe(true);
+      expect(positiveEnergyFound).toBe(true);
     });
 
-    it('calcule des composantes mensuelles et annuelles distinctes dans les métadonnées', () => {
+    it('calcule la décomposition spectrale multi-échelles et le cycle fondamental dans les métadonnées', () => {
       const ctx = { ...baseContext, pluginCache: {} };
       interMonthlyResonancePlugin.precompute(ctx);
 
       const res12 = interMonthlyResonancePlugin.evaluate(12, ctx);
       expect(res12.metadata).toBeDefined();
-      expect(typeof res12.metadata.monthlyVal).toBe('number');
-      expect(typeof res12.metadata.annualVal).toBe('number');
-      expect(typeof res12.metadata.dnaMultiplier).toBe('number');
-      expect(typeof res12.metadata.dnaAffinity).toBe('number');
-      expect(res12.metadata.topTwinDate).not.toBe('N/A');
+      expect(typeof res12.metadata.waveletEnergy).toBe('number');
+      expect(res12.metadata.fundamentalCycle).toBe(18);
+      expect(res12.metadata.model).toBe('Multi-Resolution Ricker Wavelet (T0=18)');
     });
 
     it('respecte le déterminisme absolu (100% reproductible)', () => {

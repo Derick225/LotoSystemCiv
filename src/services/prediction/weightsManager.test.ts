@@ -93,27 +93,27 @@ describe('Weights Manager & Algorithm Configuration', () => {
         });
     });
 
-    describe('Retired channels (ALGO-6 dedup / ALGO-7 pseudo-science)', () => {
-        it('DEFAULT_ALGO_WEIGHTS retire redundant + pseudo-science channels to exactly 0', () => {
-            RETIRED_ALGO_WEIGHT_KEYS.forEach(key => {
-                expect(DEFAULT_ALGO_WEIGHTS[key]).toBe(0);
+    describe('Repurposed channels (Hawkes, Ising, Wavelet, Permutation Entropy)', () => {
+        it('DEFAULT_ALGO_WEIGHTS assigns active positive weights to all 24 channels', () => {
+            expect(DEFAULT_ALGO_WEIGHTS[AlgoKey.GAP_PATTERN]).toBeGreaterThan(0);
+            expect(DEFAULT_ALGO_WEIGHTS[AlgoKey.GAP_SEQUENCE]).toBeGreaterThan(0);
+            expect(DEFAULT_ALGO_WEIGHTS[AlgoKey.SEQUENCE_PATTERN]).toBeGreaterThan(0);
+            expect(DEFAULT_ALGO_WEIGHTS[AlgoKey.INTER_MONTHLY_RESONANCE]).toBeGreaterThan(0);
+
+            Object.values(AlgoKey).forEach(key => {
+                expect(DEFAULT_ALGO_WEIGHTS[key]).toBeGreaterThan(0);
             });
         });
 
-        it('normalizeWeights forces retired channels to 0 even under adversarial positive input', () => {
-            // Simule des poids persistés/recalibrés qui tenteraient de réactiver un canal retiré.
-            const adversarial = getDefaultWeights();
-            RETIRED_ALGO_WEIGHT_KEYS.forEach(key => {
-                (adversarial as Record<string, number>)[key] = 1000;
-            });
+        it('normalizeWeights produces a valid L1 simplex distribution summing to 1.0', () => {
+            const weights = getDefaultWeights();
+            const normalized = normalizeWeights(weights);
 
-            const normalized = normalizeWeights(adversarial);
+            expect(normalized[AlgoKey.GAP_PATTERN]).toBeGreaterThan(0);
+            expect(normalized[AlgoKey.GAP_SEQUENCE]).toBeGreaterThan(0);
+            expect(normalized[AlgoKey.SEQUENCE_PATTERN]).toBeGreaterThan(0);
+            expect(normalized[AlgoKey.INTER_MONTHLY_RESONANCE]).toBeGreaterThan(0);
 
-            RETIRED_ALGO_WEIGHT_KEYS.forEach(key => {
-                expect(normalized[key]).toBe(0);
-            });
-
-            // La masse de pondération restante est toujours une norme L1 valide sur les canaux actifs.
             const sum = Object.values(normalized).reduce((a: number, b: number) => a + (b || 0), 0) as number;
             expect(sum).toBeCloseTo(1.0, 5);
         });

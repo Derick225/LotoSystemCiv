@@ -47,6 +47,7 @@ const ARCHETYPE_FAMILIES: ReadonlyArray<{
       AlgoKey.INTER_DRAW_RESONANCE,
       AlgoKey.NETWORK_CORRELATION,
       AlgoKey.GAP_CADENCE,
+      AlgoKey.INTER_MONTHLY_RESONANCE,
     ]),
   },
   {
@@ -55,6 +56,7 @@ const ARCHETYPE_FAMILIES: ReadonlyArray<{
       AlgoKey.FRACTAL,
       AlgoKey.TEMPORAL,
       AlgoKey.GAP_TREND,
+      AlgoKey.SEQUENCE_PATTERN,
     ]),
   },
   {
@@ -66,6 +68,8 @@ const ARCHETYPE_FAMILIES: ReadonlyArray<{
       AlgoKey.ECHO_STATE,
       AlgoKey.ISOLATION_ANOMALY,
       AlgoKey.GAP_BAND_SEQUENCE,
+      AlgoKey.GAP_PATTERN,
+      AlgoKey.GAP_SEQUENCE,
     ]),
   },
 ];
