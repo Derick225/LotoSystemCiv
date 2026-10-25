@@ -78,8 +78,9 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
     try {
       setIsApplyingAdjustments(true);
       audioEngine.play("click");
-      const currentHistory = purifyHistoryForDraw(report.drawName, history);
-      const session = await generateLearningSession(report, currentHistory);
+      const targetDraw = report?.drawName || useNexusStore.getState().drawName || useNexusStore.getState().currentDrawName || "GLOBAL";
+      const currentHistory = purifyHistoryForDraw(targetDraw, history);
+      const session = await generateLearningSession({ ...report, drawName: targetDraw }, currentHistory);
       await applyForensicAdjustments(session, undefined, false);
       setAdjustmentsApplied(true);
       showToast("Ajustements forensiques appliqués aux poids du modèle.", "success");
@@ -110,7 +111,8 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
         keyLearning: "Ajustement suite à l'autopsie forensique",
         userComment: ""
       });
-      await applyBayesianForensicFeedback(report.drawName, report, userRating);
+      const targetDraw = report?.drawName || useNexusStore.getState().drawName || useNexusStore.getState().currentDrawName || "GLOBAL";
+      await applyBayesianForensicFeedback(targetDraw, report, userRating);
       showToast("Retour enregistré, poids ajustés (RLHF)", "success");
     } catch (e) {
       showToast("Erreur lors de l'enregistrement", "error");
@@ -152,7 +154,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
                 Autopsie Forensique & Diagnostic Post-Mortem
               </h2>
               <p className="text-[10px] text-slate-500 font-medium">
-                {report.drawName} • {formatDateSafely(report.date)}
+                {report.drawName || useNexusStore.getState().drawName || "Tirage"} • {formatDateSafely(report.date)}
               </p>
             </div>
           </div>

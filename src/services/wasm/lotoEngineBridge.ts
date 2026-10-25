@@ -1525,6 +1525,38 @@ export function getStoreDrawCount(drawName: string): number {
   return timeline ? timeline.history.length : 0;
 }
 
+export interface StoreTelemetry {
+  drawName: string;
+  drawCount: number;
+  isWasmNative: boolean;
+  mode: 'RUST_WASM' | 'SIMD_FALLBACK';
+  estimatedMemoryBytes: number;
+  frequencyCheckSum: number;
+}
+
+export function getStoreTelemetry(drawName: string): StoreTelemetry {
+  const normName = (drawName || 'GLOBAL').trim().toUpperCase();
+  const count = getStoreDrawCount(normName);
+  const freqs = getStoreFrequencies(normName);
+  let checkSum = 0;
+  for (let i = 1; i <= 90; i++) {
+    checkSum += freqs[i];
+  }
+  const isWasm = isLotoEngineWasmReady();
+  const bytesPerDraw = 48;
+  const fixedTableBytes = 91 * 4 * 3;
+  const estimatedMemoryBytes = fixedTableBytes + (count * bytesPerDraw);
+
+  return {
+    drawName: normName,
+    drawCount: count,
+    isWasmNative: isWasm,
+    mode: isWasm ? 'RUST_WASM' : 'SIMD_FALLBACK',
+    estimatedMemoryBytes,
+    frequencyCheckSum: checkSum,
+  };
+}
+
 export interface NativePredictionResultHpc {
   top5: number[];
   top10: number[];

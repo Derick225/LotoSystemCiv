@@ -902,9 +902,17 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                   <Sparkles size={18} className="text-amber-500" />
                   Top Numéros Portés par la Dynamique Inter-Tirages
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Synthèse continue combinant les probabilités de transition Markov, les reports directs et les résonances harmoniques.
-                </p>
+                <div className="flex items-center gap-2 flex-wrap mt-1">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Synthèse continue combinant les probabilités de transition Markov, les reports directs et les résonances harmoniques.
+                  </p>
+                  {report.isNetworkWideAggregated && (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/25">
+                      <Network size={11} className="text-cyan-500" />
+                      Couplage Intégral Réseau ({report.networkContributions?.length || activeFamily.sequence.length} Tirages)
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -931,6 +939,8 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                               text-[8px] font-black uppercase px-1.5 py-0.5 rounded
                               ${f === 'REPORT_DIRECT'
                                 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                : f === 'RESEAU_CONVERGENCE'
+                                ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/35 font-bold shadow-[0_0_8px_rgba(6,182,212,0.15)]'
                                 : f === 'MIROIR_DECIMAL'
                                 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                                 : f === 'COMPLEMENT_90'
@@ -943,7 +953,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                               }
                             `}
                           >
-                            {f.replace('_', ' ')}
+                            {f === 'RESEAU_CONVERGENCE' ? 'CONVERGENCE RÉSEAU' : f.replace('_', ' ')}
                           </span>
                         ))}
                       </div>
@@ -977,6 +987,92 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               ))}
             </div>
           </div>
+
+          {/* 4.2. INFLUENCE ET CONVERGENCE DE L'ENSEMBLE DU RÉSEAU CHOISI (AGENTS.md) */}
+          {report.networkContributions && report.networkContributions.length > 0 && (
+            <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-cyan-500/20 dark:border-cyan-500/10 backdrop-blur-xl shadow-xl space-y-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-700 dark:text-cyan-300 font-black text-[9px] uppercase tracking-wider">
+                    <Network size={12} className="text-cyan-500" />
+                    Intégration Continue de l'Ensemble du Réseau {activeFamily.label}
+                  </div>
+                  <h3 className="text-base font-black tracking-tight text-slate-900 dark:text-white mt-1 flex items-center gap-2">
+                    Spectre des Contributions Multi-Sources vers {report.targetDraw}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Chaque tirage du réseau alimente continûment les scores prédictifs via sa corrélation de Pearson et son taux de report empirique W(S, T).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-400 font-bold uppercase">
+                    Poids Réseau Cumulé :
+                  </span>
+                  <span className="text-sm font-black font-mono text-cyan-600 dark:text-cyan-400 px-2 py-0.5 bg-cyan-500/10 rounded-lg border border-cyan-500/20">
+                    {report.networkInfluenceWeight?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Grille des nœuds contributeurs du réseau */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {report.networkContributions.map((node) => (
+                  <div
+                    key={`net-contrib-${node.sourceName}`}
+                    className={`p-3 rounded-2xl border transition-all flex flex-col justify-between ${
+                      node.isImmediatePredecessor
+                        ? "bg-amber-50/70 dark:bg-amber-950/20 border-amber-500/30 shadow-xs"
+                        : "bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-white/5 hover:border-cyan-500/30"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-900 dark:text-white truncate">
+                          {node.sourceName}
+                        </span>
+                        {node.isImmediatePredecessor ? (
+                          <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[8px] font-black rounded uppercase">
+                            Prédécesseur
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-[8px] font-black rounded uppercase">
+                            Nœud Réseau
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-baseline justify-between mt-2 text-[10px]">
+                        <span className="text-slate-400 font-medium">Poids continu W(S, T)</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {node.weight.toFixed(3)} ({(node.normalizedWeight * 100).toFixed(1)}%)
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline justify-between mt-1 text-[10px]">
+                        <span className="text-slate-400 font-medium">Report empirique</span>
+                        <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                          {node.carryOverRate.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {node.latestWinners && node.latestWinners.length > 0 && (
+                      <div className="mt-2.5 pt-2 border-t border-slate-200 dark:border-white/5">
+                        <span className="text-[9px] uppercase font-bold text-slate-400 block mb-1">
+                          Vainqueurs Transmis
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {node.latestWinners.slice(0, 5).map((num) => (
+                            <NumberBall key={`net-${node.sourceName}-${num}`} number={num} size="xs" />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 4.5. FLUX STOCHASTIQUES & PROBABILITÉS CONDITIONNELLES (W_{t-1} -> W_t) */}
           {report.sourceTransitions && report.sourceTransitions.length > 0 && (

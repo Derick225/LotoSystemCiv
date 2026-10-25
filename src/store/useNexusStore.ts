@@ -17,7 +17,7 @@ import {
   SymbioticContext,
   NeuralFeedbackLog,
 } from "../types";
-import { getNextScheduledDraw, fetchResults } from "../services/lotteryService";
+import { getNextScheduledDraw, fetchResults, syncHistoryToRustStore } from "../services/lotteryService";
 import {
   getAlgoWeights,
   saveAlgoWeights,
@@ -332,7 +332,10 @@ export const useNexusStore = create<NexusState>()(
       setCalibration: (cal) => set({ calibration: cal }),
       setEmpiricalCalibration: (cal) => set({ empiricalCalibration: cal }),
 
-      setHistoryData: (history, stats, gaps) => set({ history, stats, gaps }),
+      setHistoryData: (history, stats, gaps) => {
+        syncHistoryToRustStore(history, get().drawName);
+        set({ history, stats, gaps });
+      },
       setAnalyticsData: (analytics) =>
         set({
           spectral: analytics?.spectral || [],
@@ -384,6 +387,9 @@ export const useNexusStore = create<NexusState>()(
           for (let i = 1; i <= 90; i++) {
             gaps.push({ number: i, gap: gapLookup[i] });
           }
+
+          // Synchronisation immédiate zéro-copie avec le store natif Rust/WASM
+          syncHistoryToRustStore(historyData, name);
 
           set({ history: historyData, stats, gaps });
         } catch (error) {

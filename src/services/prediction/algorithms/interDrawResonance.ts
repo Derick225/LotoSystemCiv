@@ -466,9 +466,12 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       if (normalizeDrawName(otherDrawName) === normalizeDrawName(predName)) continue;
 
       const sHistKey = globalCache.generateKey('history', otherDrawName);
-      const sHist = (globalCache.getSync<any[]>(sHistKey, otherDrawName) || []).filter(
+      let sHist = (globalCache.getSync<any[]>(sHistKey, otherDrawName) || []).filter(
         (d: any) => !d?.id?.startsWith?.('deterministic-')
       );
+      if (sHist.length === 0) {
+        sHist = globalCache.getSync<any[]>(sHistKey, otherDrawName) || [];
+      }
       if (sHist.length === 0) continue;
 
       const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory);
@@ -478,6 +481,14 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
         const logCoupling = Math.log(Math.max(1e-4, netLift));
         for (const sw of sWinners) {
           evidenceNetwork[sw] += coupling.weight * logCoupling;
+          const mirSw = getMirrorNumber(sw);
+          const compSw = getComplement90(sw);
+          if (mirSw >= 1 && mirSw <= N && mirSw !== sw) {
+            evidenceNetwork[mirSw] += coupling.weight * 0.3 * Math.log(Math.max(1e-4, mirrorLift));
+          }
+          if (compSw >= 1 && compSw <= N && compSw !== sw) {
+            evidenceNetwork[compSw] += coupling.weight * 0.3 * Math.log(Math.max(1e-4, complementLift));
+          }
         }
       }
     }
@@ -562,6 +573,10 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       rawCohort[c] = evidenceCohort;
 
       // Fusion conjointe bayésienne des 4 canaux + Graphe Complet Réseau + Noyau de Hawkes Croisé
+      if (evidenceNetwork[c] > 0.05 && !flags.includes('RESEAU_CONVERGENCE')) {
+        flags.push('RESEAU_CONVERGENCE');
+      }
+
       const logitCombined = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + evidenceCohort + evidenceNetwork[c] + 0.5 * rawHawkes[c]);
       rawLogOdds[c] = logitCombined;
 

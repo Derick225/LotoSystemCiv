@@ -121,6 +121,16 @@ describe('Invariant #4 — Étanchéité des 2 réseaux fermés (AGENTS.md)', ()
     const twice = purifyHistoryForDraw('Fortune', once);
     expect(twice.map(d => d.id)).toEqual(once.map(d => d.id));
   });
+
+  it('purifyHistoryForDraw gère de façon hermétique les drawNames nuls ou indéfinis sans planter', () => {
+    const list: Array<{ id: string; date: string; gagnants: number[]; drawName?: string }> = [
+      { id: '1', date: '01/01/2026', gagnants: [1, 2, 3, 4, 5] }
+    ];
+    expect(() => purifyHistoryForDraw(undefined, list)).not.toThrow();
+    expect(() => purifyHistoryForDraw(null, list)).not.toThrow();
+    expect(() => purifyHistoryForDraw('', list)).not.toThrow();
+    expect(purifyHistoryForDraw(undefined, list)).toEqual(list);
+  });
 });
 
 describe('Invariant #2 — Zéro hasard dans le moteur d\'inférence', () => {

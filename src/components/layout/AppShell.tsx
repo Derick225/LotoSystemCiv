@@ -16,6 +16,7 @@ import { useHpcEngineStatus } from "../../hooks/useHpcEngineStatus";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../../utils/audioEngine";
 import { InstallButton } from "../ui/InstallButton";
+import { SharedStateBadge } from "../ui/SharedStateBadge";
 import { useToast } from "../ui/Toast";
 import { MobileBottomNav } from "./MobileBottomNav";
 
@@ -300,6 +301,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                   <span className="hidden sm:inline">{hpcStatus.isReady ? "HPC RUST WASM" : "HPC SIMD"}</span>
                 </span>
               </button>
+
+              {/* Shared State WASM Synchronization Badge */}
+              <SharedStateBadge />
             </div>
 
             {/* Desktop and Mobile aligned right panel elements */}

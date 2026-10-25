@@ -156,12 +156,28 @@ export interface InterDrawNetworkMatrix {
   meanNetworkCoupling: number;
 }
 
+export interface InterDrawNetworkContribution {
+  sourceName: string;
+  weight: number;
+  normalizedWeight: number;
+  correlation: number;
+  carryOverRate: number;
+  samplePairs: number;
+  latestWinners: number[];
+  isImmediatePredecessor: boolean;
+  influenceScore: number;
+  topTransmittedNumbers: number[];
+}
+
 export interface InterDrawReport {
   targetDraw: string;
   family: InterDrawFamilyConfig;
   networkId: InterDrawNetworkId;
   networkMatrix?: InterDrawNetworkMatrix;
   networkCouplings?: InterDrawNodeCoupling[];
+  networkContributions?: InterDrawNetworkContribution[];
+  isNetworkWideAggregated?: boolean;
+  networkInfluenceWeight?: number;
   predecessor: InterDrawSequenceItem;
   successor: InterDrawSequenceItem;
   currentIndex: number;
@@ -1105,12 +1121,21 @@ export const generateInterDrawReport = async (
     }
   }
 
-  // 1. Récupération des historiques du tirage cible et de son prédécesseur direct dans le réseau
-  const [targetHistory, predHistory, networkMatrix] = await Promise.all([
-    lotteryService.fetchHistory(targetDrawName, forceRefresh),
-    lotteryService.fetchHistory(relation.predecessor.name, forceRefresh),
-    generateNetworkInterconnectionMatrix(networkId)
-  ]);
+  // 1. Récupération des historiques de l'ENSEMBLE du réseau choisi (AGENTS.md)
+  const networkDrawNames = activeFamily.drawNames || [];
+  const networkHistories = new Map<string, DrawResult[]>();
+
+  // Récupérer en parallèle tous les tirages du réseau choisi
+  await Promise.all(
+    networkDrawNames.map(async (name) => {
+      const h = await lotteryService.fetchHistory(name, forceRefresh);
+      networkHistories.set(name, purifyHistoryForDraw(name, h));
+    })
+  );
+
+  const targetHistory = networkHistories.get(targetDrawName) || await lotteryService.fetchHistory(targetDrawName, forceRefresh);
+  const predHistory = networkHistories.get(relation.predecessor.name) || await lotteryService.fetchHistory(relation.predecessor.name, forceRefresh);
+  const networkMatrix = await generateNetworkInterconnectionMatrix(networkId, networkHistories);
 
   const targetLatestResult = targetHistory.length > 0 ? targetHistory[0] : null;
   const predLatestResult = predHistory.length > 0 ? predHistory[0] : null;
@@ -1148,6 +1173,95 @@ export const generateInterDrawReport = async (
     scoredCandidates,
     fullCandidateScores
   } = engine;
+
+  // 3b. Intégration continue de l'ENSEMBLE du réseau de tirage choisi (AGENTS.md)
+  const networkContributions: InterDrawNetworkContribution[] = [];
+  let totalNetworkWeight = 0;
+
+  for (const sourceName of networkDrawNames) {
+    if (normalizeDrawName(sourceName) === normalizeDrawName(targetDrawName)) continue;
+
+    const sHist = networkHistories.get(sourceName) || [];
+    const isImmPred = normalizeDrawName(sourceName) === normalizeDrawName(relation.predecessor.name);
+    const rawWeight = networkMatrix.weights?.[targetDrawName]?.[sourceName];
+    const weight = (rawWeight !== undefined && rawWeight > 0.0001)
+      ? rawWeight
+      : (isImmPred ? 0.75 : 0.25);
+    const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory);
+    const latestWinners = (sHist[0]?.gagnants || []).filter(n => n >= 1 && n <= 90);
+
+    totalNetworkWeight += weight;
+
+    networkContributions.push({
+      sourceName,
+      weight: Math.round(weight * 1000) / 1000,
+      normalizedWeight: 0,
+      correlation: coupling.correlation,
+      carryOverRate: coupling.carryOverRate,
+      samplePairs: coupling.samplePairs,
+      latestWinners,
+      isImmediatePredecessor: isImmPred,
+      influenceScore: Math.round(weight * (coupling.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT) * 100) / 100,
+      topTransmittedNumbers: latestWinners.slice(0, 5)
+    });
+  }
+
+  // Normalisation L1 continue des poids du réseau
+  const effectiveTotalWeight = Math.max(1e-4, totalNetworkWeight);
+  for (const contrib of networkContributions) {
+    contrib.normalizedWeight = Math.round((contrib.weight / effectiveTotalWeight) * 1000) / 1000;
+  }
+  networkContributions.sort((a, b) => b.weight - a.weight);
+
+  // Fusion multi-sources continue sur l'ensemble du réseau
+  const networkCombinedScores = new Float64Array(91);
+  for (let c = 1; c <= 90; c++) {
+    const predScore = fullCandidateScores[c] || 50.0;
+    let networkBonus = 0;
+
+    for (const contrib of networkContributions) {
+      if (contrib.isImmediatePredecessor) continue; // Déjà intégré dans predScore
+      const sWinners = contrib.latestWinners;
+      const sSet = new Set(sWinners);
+
+      // Report direct depuis ce nœud du réseau
+      if (sSet.has(c)) {
+        const netLift = contrib.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT;
+        networkBonus += contrib.normalizedWeight * Math.log(Math.max(1e-4, netLift)) * 8.0;
+      }
+
+      // Harmoniques miroirs / compléments depuis ce nœud du réseau
+      const mirC = getMirrorNumber(c);
+      const compC = getComplement90(c);
+      if (sSet.has(mirC) || sSet.has(compC)) {
+        networkBonus += contrib.normalizedWeight * 4.0;
+      }
+    }
+
+    networkCombinedScores[c] = Math.max(0.5, Math.min(99.5, predScore + networkBonus));
+  }
+
+  const fullAggregatedCandidateScores: number[] = [0];
+  for (let c = 1; c <= 90; c++) {
+    fullAggregatedCandidateScores.push(Math.round(networkCombinedScores[c] * 10) / 10);
+  }
+
+  // Candidats enrichis par la convergence de l'ensemble du réseau
+  const networkEnhancedCandidates: InterDrawCandidateScore[] = scoredCandidates.map(c => {
+    const fusedScore = networkCombinedScores[c.number] ?? c.compositeScore;
+    const flags = [...c.flags];
+    const supportingNodes = networkContributions.filter(
+      node => !node.isImmediatePredecessor && node.latestWinners.includes(c.number)
+    );
+    if (supportingNodes.length > 0 && !flags.includes('RESEAU_CONVERGENCE')) {
+      flags.push('RESEAU_CONVERGENCE');
+    }
+    return {
+      ...c,
+      compositeScore: Math.round(fusedScore * 10) / 10,
+      flags
+    };
+  }).sort((a, b) => b.compositeScore - a.compositeScore);
 
   // 4. Cartographie des paires harmoniques actives pour le tirage courant
   const harmonicPairs: HarmonicPairDetail[] = [];
@@ -1209,12 +1323,12 @@ export const generateInterDrawReport = async (
     };
   });
 
-  // Recommandations
-  const topCandidates = scoredCandidates.slice(0, 10);
-  const recommendedRepeats = scoredCandidates
-    .filter(c => c.flags.includes('REPORT_DIRECT'))
+  // Recommandations enrichies par la convergence de l'ensemble du réseau
+  const topCandidates = networkEnhancedCandidates.slice(0, 10);
+  const recommendedRepeats = networkEnhancedCandidates
+    .filter(c => c.flags.includes('REPORT_DIRECT') || c.flags.includes('RESEAU_CONVERGENCE'))
     .slice(0, 5);
-  const recommendedHarmonics = scoredCandidates
+  const recommendedHarmonics = networkEnhancedCandidates
     .filter(c => c.flags.includes('MIROIR_DECIMAL') || c.flags.includes('COMPLEMENT_90'))
     .slice(0, 5);
 
@@ -1226,11 +1340,11 @@ export const generateInterDrawReport = async (
     for (let j = i + 1; j < topNumbersPool.length; j++) {
       const n1 = topNumbersPool[i];
       const n2 = topNumbersPool[j];
-      const s1 = scoredCandidates.find(c => c.number === n1)?.compositeScore || 50;
-      const s2 = scoredCandidates.find(c => c.number === n2)?.compositeScore || 50;
+      const s1 = networkEnhancedCandidates.find(c => c.number === n1)?.compositeScore || 50;
+      const s2 = networkEnhancedCandidates.find(c => c.number === n2)?.compositeScore || 50;
       const geomAffinity = Math.sqrt(s1 * s2);
-      const conf = ((scoredCandidates.find(c => c.number === n1)?.confidence || 0.5) +
-                    (scoredCandidates.find(c => c.number === n2)?.confidence || 0.5)) / 2;
+      const conf = ((networkEnhancedCandidates.find(c => c.number === n1)?.confidence || 0.5) +
+                    (networkEnhancedCandidates.find(c => c.number === n2)?.confidence || 0.5)) / 2;
 
       pairCandidates.push({
         numbers: [n1, n2],
@@ -1308,6 +1422,9 @@ export const generateInterDrawReport = async (
     networkId,
     networkMatrix,
     networkCouplings: networkMatrix?.couplings,
+    networkContributions,
+    isNetworkWideAggregated: true,
+    networkInfluenceWeight: Math.round(totalNetworkWeight * 100) / 100,
     predecessor: relation.predecessor,
     successor: relation.successor,
     currentIndex: relation.currentIndex,
@@ -1334,7 +1451,7 @@ export const generateInterDrawReport = async (
     recommendedPairs,
     topTransitions,
     sourceTransitions,
-    fullCandidateScores,
+    fullCandidateScores: fullAggregatedCandidateScores,
     hawkesMetrics: engine.hawkesTotalEnergy !== undefined ? {
       totalEnergy: engine.hawkesTotalEnergy,
       betaDecay: engine.hawkesBetaDecay || HAWKES_NEUTRAL_BETA_DECAY,

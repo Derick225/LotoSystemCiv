@@ -34,11 +34,12 @@ export const getUniqueSortedNumbers = (numbers: (string | number | null | undefi
  * L'isolation applique une normalisation rigoureuse (suppression des diacritiques, 
  * des préfixes génériques 'loto'/'tirage' et des espaces superflus) avec comparaison EXACTE.
  */
-export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: string }>(drawName: string, history: T[]): T[] => {
+export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: string; [key: string]: any }>(drawName: string | null | undefined, history: T[]): T[] => {
     if (!history || !Array.isArray(history)) return [];
     
-    const normalizeString = (str: string) =>
-        str
+    const normalizeString = (str: unknown): string => {
+        if (str === null || str === undefined) return "";
+        return String(str)
             .trim()
             .toLowerCase()
             .normalize("NFD")
@@ -46,19 +47,23 @@ export const purifyHistoryForDraw = <T extends { drawName?: string; draw_name?: 
             .replace(/^(loto|tirage)\s+/i, "")
             .replace(/[\s\-_/]+/g, " ")
             .trim();
+    };
 
     const normalizedTarget = normalizeString(drawName);
-    if (normalizedTarget === "all combined" || normalizedTarget === "all" || normalizedTarget === "all_combined") {
+    if (!normalizedTarget || normalizedTarget === "all combined" || normalizedTarget === "all" || normalizedTarget === "all_combined") {
         return history;
     }
 
+    const safeTargetName = drawName ? String(drawName).trim() : "GLOBAL";
+
     const purified = history.reduce((acc: T[], d: any) => {
+        if (!d || typeof d !== "object") return acc;
         const name = d.drawName || d.draw_name || d.tirage;
         if (!name) {
             // Fix corrupted items from cache by forcing the correct drawName
-            acc.push({ ...d, drawName, draw_name: drawName } as T);
+            acc.push({ ...d, drawName: safeTargetName, draw_name: safeTargetName } as T);
         } else {
-            const nameStr = normalizeString(String(name));
+            const nameStr = normalizeString(name);
             if (nameStr === normalizedTarget) {
                 acc.push({ ...d, drawName: name, draw_name: name } as T);
             }
