@@ -22,7 +22,12 @@ import {
   computeButterflyLyapunovHpc,
   computeChainReactionResonanceHpc
 } from './wasm/lotoEngineBridge';
-import { InterDrawNetworkMatrix } from './interDrawService';
+import {
+  InterDrawNetworkMatrix,
+  alignConsecutiveDrawHistories,
+  getMirrorNumber,
+  getComplement90
+} from './interDrawService';
 
 export interface DominoDynamicMetrics {
   dampingGamma: number;
@@ -125,30 +130,61 @@ export async function computeInterDrawComplexDynamics(
     dampingGamma
   );
 
+  // Mesure continue de réverbération harmonique réelle (sans constante arbitraire)
+  let harmonicEnergySum = 0;
+  let harmonicTargetCount = 0;
+  for (const num of dominoRes.leadTriggerNumbers) {
+    const mir = getMirrorNumber(num);
+    const comp = getComplement90(num);
+    if (mir >= 1 && mir <= 90) {
+      harmonicEnergySum += (dominoRes.dominoEnergies[mir] || 50.0);
+      harmonicTargetCount++;
+    }
+    if (comp >= 1 && comp <= 90) {
+      harmonicEnergySum += (dominoRes.dominoEnergies[comp] || 50.0);
+      harmonicTargetCount++;
+    }
+  }
+  const empiricalHarmonicReverb = harmonicTargetCount > 0
+    ? Math.round((harmonicEnergySum / harmonicTargetCount) * 10) / 10
+    : 50.0;
+
   const dominoMetrics: DominoDynamicMetrics = {
     dampingGamma: Math.round(dominoRes.kineticDissipationRate * 1000) / 1000,
     leadTriggerNumbers: dominoRes.leadTriggerNumbers,
     dominoEnergies: Array.from(dominoRes.dominoEnergies),
     kineticVelocity: Math.round((1.0 - dominoRes.kineticDissipationRate * 0.4) * 100) / 100,
-    harmonicReverberationRate: Math.round((dominoRes.leadTriggerNumbers.length > 0 ? 68.4 : 50.0) * 10) / 10,
+    harmonicReverberationRate: empiricalHarmonicReverb,
     explanation: `Propagation d'onde cinétique le long de la séquence chronologique avec amortissement continu γ = ${dominoRes.kineticDissipationRate.toFixed(3)}.`
   };
 
   // 2. CALCUL EFFET PAPILLON : Exposant de Lyapunov & Espace des Phases
-  // Série d'écarts de tirages consécutifs
+  // Alignement temporel strict par date (Zéro glissement d'indice fictif)
+  const alignedPairs = alignConsecutiveDrawHistories(targetHistory, predHistory);
   const lagDeltas: number[] = [];
-  for (let i = 0; i < Math.min(targetWinners.length - 1, 20); i++) {
-    const meanTarget = targetWinners[i].reduce((a, b) => a + b, 0) / 5;
-    const meanPred = (predWinners[i] || []).reduce((a, b) => a + b, 0) / 5;
+  for (const pair of alignedPairs.slice(0, 30)) {
+    const meanTarget = pair.targetWinners.reduce((a, b) => a + b, 0) / 5;
+    const meanPred = pair.predWinners.reduce((a, b) => a + b, 0) / 5;
     lagDeltas.push(meanTarget - meanPred);
   }
-  if (lagDeltas.length < 5) {
-    lagDeltas.push(0.5, -0.2, 0.8, -0.4, 0.3);
+
+  // Estimation continue de l'exposant de Hurst basée strictement sur les écarts réels observés
+  let hurstExponent = 0.5;
+  if (lagDeltas.length >= 2) {
+    const meanDelta = lagDeltas.reduce((a, b) => a + b, 0) / lagDeltas.length;
+    const varDelta = lagDeltas.reduce((a, b) => a + Math.pow(b - meanDelta, 2), 0) / lagDeltas.length;
+    hurstExponent = 0.5 + Math.tanh(Math.sqrt(varDelta) / 30.0) * 0.25;
   }
 
-  // Estimation continue de l'exposant de Hurst
-  const hurstExponent = 0.5 + Math.tanh(lagDeltas.reduce((a, b) => a + Math.abs(b), 0) / (lagDeltas.length * 30)) * 0.25;
-  const butterflyRes = computeButterflyLyapunovHpc(lagDeltas, hurstExponent);
+  const butterflyRes = lagDeltas.length >= 2
+    ? computeButterflyLyapunovHpc(lagDeltas, hurstExponent)
+    : {
+        lyapunovExponent: 0.0,
+        sensitivityRegime: 0.5,
+        isChaotic: false,
+        phaseAttractorX: 0.0,
+        phaseAttractorY: 0.0
+      };
 
   const butterflyMetrics: ButterflyDynamicMetrics = {
     lyapunovExponent: butterflyRes.lyapunovExponent,
@@ -165,7 +201,8 @@ export async function computeInterDrawComplexDynamics(
       : `Trajectoire d'attracteur quasi-périodique stabilisée (λ = ${butterflyRes.lyapunovExponent} <= 0).`
   };
 
-  // 3. CALCUL EFFET DE CASCADE : Graph Heat Kernel exp(-tL) sur le Réseau Fermé
+  // 3. CALCUL EFFET DE CASCADE : Graph Heat Kernel exp(-tL) sur Matrice Symétrique
+  // Le Laplacien normalisé requiert une matrice d'adjacence symétrique W_sym = (W + W^T) / 2
   const drawNames = networkMatrix?.drawNames || [targetDrawName];
   const N = drawNames.length;
   const weightsFlat = new Float64Array(N * N);
@@ -175,13 +212,20 @@ export async function computeInterDrawComplexDynamics(
       const rowDraw = drawNames[i];
       for (let j = 0; j < N; j++) {
         const colDraw = drawNames[j];
-        weightsFlat[i * N + j] = networkMatrix.weights[rowDraw]?.[colDraw] ?? (i === j ? 1.0 : 0.05);
+        if (i === j) {
+          weightsFlat[i * N + j] = 1.0;
+        } else {
+          const wDirect = networkMatrix.weights[rowDraw]?.[colDraw] ?? 0.0;
+          const wReverse = networkMatrix.weights[colDraw]?.[rowDraw] ?? 0.0;
+          // Symétrisation continue rigoureuse pour l'opérateur Laplacien
+          weightsFlat[i * N + j] = (wDirect + wReverse) / 2.0;
+        }
       }
     }
   } else {
     for (let i = 0; i < N; i++) {
       for (let j = 0; j < N; j++) {
-        weightsFlat[i * N + j] = i === j ? 1.0 : 0.1;
+        weightsFlat[i * N + j] = i === j ? 1.0 : 0.0;
       }
     }
   }
@@ -236,13 +280,20 @@ export async function computeInterDrawComplexDynamics(
     couplingsArray.length
   );
 
+  // Seuil continu dérivé de l'énergie moyenne et de la variance du spectre
+  const spectrumVals = Array.from(chainRes.resonanceSpectrum);
+  const meanSpectrum = spectrumVals.reduce((a, b) => a + b, 0) / Math.max(1, spectrumVals.length);
+  const varSpectrum = spectrumVals.reduce((a, b) => a + Math.pow(b - meanSpectrum, 2), 0) / Math.max(1, spectrumVals.length);
+  const stdSpectrum = Math.sqrt(varSpectrum);
+  const criticalEnergyThreshold = meanSpectrum + 2.0 * stdSpectrum;
+
   const chainReactionMetrics: ChainReactionDynamicMetrics = {
     avalancheCriticalNumbers: chainRes.avalancheCriticalNumbers,
-    resonanceSpectrum: Array.from(chainRes.resonanceSpectrum),
+    resonanceSpectrum: spectrumVals,
     maxConstructiveAmplitude: Math.round(chainRes.maxConstructiveAmplitude * 10) / 10,
     percolationDensity: chainRes.percolationDensity,
     criticalSyncPhase: Math.round(Math.sin(chainRes.maxConstructiveAmplitude) * 100) / 100,
-    imminentAvalancheAlert: chainRes.maxConstructiveAmplitude > 80.0 || chainRes.percolationDensity > 45.0,
+    imminentAvalancheAlert: chainRes.maxConstructiveAmplitude > criticalEnergyThreshold,
     explanation: `Superposition interférométrique d'ondes stochastiques Ψ(n) et accumulation de potentiel d'avalanche critique.`
   };
 
@@ -250,20 +301,31 @@ export async function computeInterDrawComplexDynamics(
   const compositeScores = new Float64Array(91);
   const candidatesList: { number: number; score: number; flags: string[] }[] = [];
 
+  let sumScores = 0;
   for (let n = 1; n <= 90; n++) {
     const sDomino = dominoRes.dominoEnergies[n] || 50;
     const sChain = chainRes.resonanceSpectrum[n] || 50;
-
-    // Pondération continue modulée par la sensibilité de Lyapunov
     const wButterfly = butterflyRes.sensitivityRegime;
     const fused = sDomino * (1 - wButterfly * 0.4) + sChain * (0.6 + wButterfly * 0.4);
     const scoreVal = Math.round(Math.min(99.9, Math.max(1.0, fused)) * 10) / 10;
     compositeScores[n] = scoreVal;
+    sumScores += scoreVal;
+  }
 
+  const meanScore = sumScores / 90.0;
+  let varScore = 0;
+  for (let n = 1; n <= 90; n++) {
+    varScore += Math.pow(compositeScores[n] - meanScore, 2);
+  }
+  const stdScore = Math.sqrt(varScore / 90.0);
+  const conductorThreshold = meanScore + stdScore;
+
+  for (let n = 1; n <= 90; n++) {
+    const scoreVal = compositeScores[n];
     const flags: string[] = [];
     if (dominoRes.leadTriggerNumbers.includes(n)) flags.push('DOMINO_IMPULSE');
     if (chainRes.avalancheCriticalNumbers.includes(n)) flags.push('AVALANCHE_RESONANCE');
-    if (scoreVal >= 78.0) flags.push('CASCADE_CONDUCTOR');
+    if (scoreVal >= conductorThreshold) flags.push('CASCADE_CONDUCTOR');
 
     candidatesList.push({
       number: n,

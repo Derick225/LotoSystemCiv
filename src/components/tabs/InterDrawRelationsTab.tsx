@@ -941,6 +941,8 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                                 ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
                                 : f === 'RESEAU_CONVERGENCE'
                                 ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/35 font-bold shadow-[0_0_8px_rgba(6,182,212,0.15)]'
+                                : f === 'TRANSFERT_MACHINE'
+                                ? 'bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/35 font-bold'
                                 : f === 'MIROIR_DECIMAL'
                                 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20'
                                 : f === 'COMPLEMENT_90'
@@ -953,11 +955,31 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                               }
                             `}
                           >
-                            {f === 'RESEAU_CONVERGENCE' ? 'CONVERGENCE RÉSEAU' : f.replace('_', ' ')}
+                            {f === 'RESEAU_CONVERGENCE' ? 'CONVERGENCE RÉSEAU' : f === 'TRANSFERT_MACHINE' ? 'CANAL MACHINE' : f.replace('_', ' ')}
                           </span>
                         ))}
+
+                        {/* Explicabilité : Statut Signal vs Bruit i.i.d. */}
+                        {c.signalStatus && (
+                          <span
+                            className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider border flex items-center gap-1 ${
+                              c.signalStatus === 'SIGNAL_DETECTE'
+                                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                                : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-400/20'
+                            }`}
+                          >
+                            {c.signalStatus === 'SIGNAL_DETECTE' ? (
+                              <>
+                                <Sparkles size={9} className="text-emerald-500" />
+                                <span>Signal Réseau</span>
+                              </>
+                            ) : (
+                              <span>Bruit Neutre</span>
+                            )}
+                          </span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-2.5 mt-1 text-[10px] text-slate-500 font-medium flex-wrap">
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-slate-500 font-medium flex-wrap">
                         <span>Trans: {c.transitionScore}%</span>
                         <span>•</span>
                         <span>Report: {c.repeatScore}%</span>
@@ -971,7 +993,23 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                             </span>
                           </>
                         )}
+                        {c.confidenceInterval && (
+                          <>
+                            <span>•</span>
+                            <span className="font-mono text-slate-600 dark:text-slate-400">
+                              IC 95%: [{c.confidenceInterval[0]}% - {c.confidenceInterval[1]}%]
+                            </span>
+                          </>
+                        )}
                       </div>
+                      {c.sourceContributions && c.sourceContributions.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-1 text-[9px] text-slate-400">
+                          <span className="font-bold uppercase tracking-wider text-cyan-600 dark:text-cyan-400">Sources :</span>
+                          <span className="truncate max-w-xs font-mono">
+                            {c.sourceContributions.map(s => `${s.sourceName} (${s.logLift > 0 ? '+' : ''}${s.logLift})`).join(', ')}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1001,7 +1039,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                     Spectre des Contributions Multi-Sources vers {report.targetDraw}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Chaque tirage du réseau alimente continûment les scores prédictifs via sa corrélation de Pearson et son taux de report empirique W(S, T).
+                    Chaque tirage du réseau alimente continûment les scores prédictifs via sa corrélation de Pearson, son report direct et son canal machine W(S, T).
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1054,20 +1092,44 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
                           {node.carryOverRate.toFixed(1)}%
                         </span>
                       </div>
+
+                      {node.machineTransferRate !== undefined && node.machineTransferRate > 0 && (
+                        <div className="flex items-baseline justify-between mt-1 text-[10px]">
+                          <span className="text-slate-400 font-medium">Transfert Machine</span>
+                          <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
+                            {node.machineTransferRate.toFixed(1)}%
+                          </span>
+                        </div>
+                      )}
                     </div>
 
-                    {node.latestWinners && node.latestWinners.length > 0 && (
-                      <div className="mt-2.5 pt-2 border-t border-slate-200 dark:border-white/5">
-                        <span className="text-[9px] uppercase font-bold text-slate-400 block mb-1">
-                          Vainqueurs Transmis
-                        </span>
-                        <div className="flex flex-wrap gap-1">
-                          {node.latestWinners.slice(0, 5).map((num) => (
-                            <NumberBall key={`net-${node.sourceName}-${num}`} number={num} size="xs" />
-                          ))}
+                    <div className="space-y-1.5 mt-2.5 pt-2 border-t border-slate-200 dark:border-white/5">
+                      {node.latestWinners && node.latestWinners.length > 0 && (
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-slate-400 block mb-1">
+                            Vainqueurs Transmis
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {node.latestWinners.slice(0, 5).map((num) => (
+                              <NumberBall key={`net-${node.sourceName}-${num}`} number={num} size="xs" />
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+
+                      {node.latestMachine && node.latestMachine.length > 0 && (
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-teal-600 dark:text-teal-400 block mb-1">
+                            Machine Transmise
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {node.latestMachine.slice(0, 5).map((num) => (
+                              <NumberBall key={`net-mach-${node.sourceName}-${num}`} number={num} size="xs" />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

@@ -461,6 +461,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       ? family.id
       : (getDrawNetworkId(drawName) || 'quotidien');
     const networkDrawNames = INTER_DRAW_NETWORKS[targetNetId]?.drawNames || [];
+    const networkPairCount = Math.max(2, networkDrawNames.length * (networkDrawNames.length - 1));
+
     for (const otherDrawName of networkDrawNames) {
       if (normalizeDrawName(otherDrawName) === normalizeDrawName(drawName)) continue;
       if (normalizeDrawName(otherDrawName) === normalizeDrawName(predName)) continue;
@@ -474,20 +476,20 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       }
       if (sHist.length === 0) continue;
 
-      const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory);
+      const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory, networkPairCount);
       if (coupling.weight > 0.001) {
         const sWinners = (sHist[0]?.gagnants || []).filter((n: number) => n >= 1 && n <= N);
-        const netLift = coupling.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT;
-        const logCoupling = Math.log(Math.max(1e-4, netLift));
+        const carryLift = (coupling.carryOverRate / 100.0) / THEORETICAL_CARRYOVER_PROB;
+        const logCoupling = Math.log(Math.max(1e-4, carryLift));
         for (const sw of sWinners) {
           evidenceNetwork[sw] += coupling.weight * logCoupling;
           const mirSw = getMirrorNumber(sw);
           const compSw = getComplement90(sw);
           if (mirSw >= 1 && mirSw <= N && mirSw !== sw) {
-            evidenceNetwork[mirSw] += coupling.weight * 0.3 * Math.log(Math.max(1e-4, mirrorLift));
+            evidenceNetwork[mirSw] += coupling.weight * 0.5 * Math.log(Math.max(1e-4, mirrorLift));
           }
           if (compSw >= 1 && compSw <= N && compSw !== sw) {
-            evidenceNetwork[compSw] += coupling.weight * 0.3 * Math.log(Math.max(1e-4, complementLift));
+            evidenceNetwork[compSw] += coupling.weight * 0.5 * Math.log(Math.max(1e-4, complementLift));
           }
         }
       }

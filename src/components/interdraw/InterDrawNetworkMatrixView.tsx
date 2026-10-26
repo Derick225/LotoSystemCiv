@@ -266,19 +266,34 @@ export const InterDrawNetworkMatrixView: React.FC<InterDrawNetworkMatrixViewProp
                   </div>
 
                   <div>
-                    <span className="text-slate-400 block font-medium">Report</span>
-                    <span className="font-mono font-bold text-amber-500">
-                      {c.carryOverRate.toFixed(1)}%
+                    <span className="text-slate-400 block font-medium">Gain ΔLL</span>
+                    <span className={`font-mono font-bold ${(c.predictiveLogLossGain || 0) > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                      {(c.predictiveLogLossGain || 0) > 0 ? `+${(c.predictiveLogLossGain || 0).toFixed(4)}` : '0.0000'}
                     </span>
                   </div>
 
                   <div>
-                    <span className="text-slate-400 block font-medium">Cycles</span>
+                    <span className="text-slate-400 block font-medium">Lag structurel</span>
                     <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
-                      {c.samplePairs}
+                      {c.lagHours ? `${c.lagHours.toFixed(1)}h` : `${c.samplePairs} paires`}
                     </span>
                   </div>
                 </div>
+
+                {((c.machineTransferRate || 0) > 0 || c.timeSlotRelation) && (
+                  <div className="flex items-center justify-between gap-1 mt-2 pt-2 border-t border-slate-200/60 dark:border-white/5 text-[9px]">
+                    {c.timeSlotRelation && (
+                      <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 font-bold uppercase tracking-wider">
+                        {c.timeSlotRelation === 'CONSECUTIVE_SLOT' ? 'Créneau Immédiat' : c.timeSlotRelation === 'SAME_SLOT' ? 'Même Créneau' : 'Inter-Jours'}
+                      </span>
+                    )}
+                    {(c.machineTransferRate || 0) > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 font-bold">
+                        Mach: {c.machineTransferRate?.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -290,6 +305,93 @@ export const InterDrawNetworkMatrixView: React.FC<InterDrawNetworkMatrixViewProp
           </p>
         )}
       </div>
+
+      {/* 3. COMMUNAUTÉS DE CRÉNEAUX ET MODULARITÉ DU RÉSEAU */}
+      {networkMatrix?.communities && networkMatrix.communities.length > 0 && (
+        <div className="p-6 bg-white/80 dark:bg-slate-900/80 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
+          <div className="flex items-center gap-2">
+            <Layers size={16} className="text-indigo-400" />
+            <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
+              Communautés & Clusters Horaires du Réseau (Détection Structurale)
+            </h4>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Contrôle structurel par créneau horaire (10h, 13h, 16h, 19h55) pour distinguer l'inertie intra-créneau de la transmission inter-créneaux.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+            {networkMatrix.communities.map((comm) => (
+              <div
+                key={comm.id}
+                className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-white/5 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-indigo-500">{comm.label}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 font-mono font-bold">
+                    W̄ = {comm.meanInternalCoupling.toFixed(3)}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {comm.drawNames.map((dName) => (
+                    <span
+                      key={`${comm.id}-${dName}`}
+                      className={`text-[10px] px-2 py-0.5 rounded-lg font-medium ${
+                        dName === targetDraw
+                          ? "bg-indigo-600 text-white font-bold"
+                          : "bg-slate-200 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300"
+                      }`}
+                    >
+                      {dName}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 4. CHEMINS INDIRECTS DE CONDUCTION (A -> B -> C) */}
+      {networkMatrix?.indirectPaths && networkMatrix.indirectPaths.length > 0 && (
+        <div className="p-6 bg-white/80 dark:bg-slate-900/80 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} className="text-amber-400" />
+            <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">
+              Chemins Indirects de Conduction (Relais 2-Hops A → B → C)
+            </h4>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Amplification indirecte via un tirage pivot B où le flux composé W(A, B) · W(B, C) renforce l'influence directe.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+            {networkMatrix.indirectPaths.slice(0, 9).map((p, idx) => (
+              <div
+                key={`indirect-${idx}-${p.sourceName}-${p.targetName}`}
+                className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-white/5 space-y-2 text-xs"
+              >
+                <div className="flex items-center justify-between text-slate-900 dark:text-white font-bold">
+                  <div className="flex items-center gap-1">
+                    <span>{p.sourceName}</span>
+                    <ArrowRight size={10} className="text-slate-400" />
+                    <span className="text-amber-500 font-extrabold">{p.bridgeName}</span>
+                    <ArrowRight size={10} className="text-slate-400" />
+                    <span className="text-indigo-400">{p.targetName}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-200 dark:border-white/5">
+                  <span className="text-slate-400">Force indirecte: <strong className="text-amber-400 font-mono">{p.indirectStrength.toFixed(3)}</strong></span>
+                  <span className="text-slate-400">Direct W: <strong className="font-mono text-slate-300">{p.directWeight.toFixed(3)}</strong></span>
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 font-mono font-bold text-[9px]">
+                    x{p.amplificationRatio.toFixed(1)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

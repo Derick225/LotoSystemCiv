@@ -89,6 +89,10 @@ export interface InterDrawCandidateScore {
   confidence: number; // 0 à 1 (Indice bayésien continu)
   flags: string[];
   rawTransitionProb: number;
+  // Explicabilité & Fiabilité Statistique
+  signalStatus?: 'SIGNAL_DETECTE' | 'INDISCERNABLE_BRUIT';
+  confidenceInterval?: [number, number]; // [IC_inf, IC_sup] en %
+  sourceContributions?: { sourceName: string; weight: number; logLift: number }[];
 }
 
 export interface InterDrawPairCombination {
@@ -139,13 +143,34 @@ export interface HarmonicResonanceMetrics {
   harmonicPairs: HarmonicPairDetail[];
 }
 
+export interface InterDrawIndirectPath {
+  sourceName: string;
+  bridgeName: string;
+  targetName: string;
+  directWeight: number;
+  indirectStrength: number;
+  amplificationRatio: number;
+}
+
+export interface InterDrawCommunity {
+  id: string;
+  label: string;
+  timeSlot: string;
+  drawNames: string[];
+  meanInternalCoupling: number;
+}
+
 export interface InterDrawNodeCoupling {
   sourceName: string;
   targetName: string;
   correlation: number; // Pearson r [-1, 1]
   weight: number; // [0, 1] continue
   carryOverRate: number; // %
+  machineTransferRate?: number; // % transfert machine(source) -> gagnants(cible)
   samplePairs: number;
+  predictiveLogLossGain?: number; // Delta LogLoss hors-échantillon (walk-forward vs marginal)
+  lagHours?: number; // Lag temporel moyen en heures
+  timeSlotRelation?: 'CONSECUTIVE_SLOT' | 'SAME_SLOT' | 'CROSS_DAY';
 }
 
 export interface InterDrawNetworkMatrix {
@@ -154,6 +179,9 @@ export interface InterDrawNetworkMatrix {
   weights: Record<string, Record<string, number>>; // W[target][source]
   couplings: InterDrawNodeCoupling[];
   meanNetworkCoupling: number;
+  communities?: InterDrawCommunity[];
+  indirectPaths?: InterDrawIndirectPath[];
+  networkFingerprint?: string;
 }
 
 export interface InterDrawNetworkContribution {
@@ -162,8 +190,10 @@ export interface InterDrawNetworkContribution {
   normalizedWeight: number;
   correlation: number;
   carryOverRate: number;
+  machineTransferRate?: number;
   samplePairs: number;
   latestWinners: number[];
+  latestMachine?: number[];
   isImmediatePredecessor: boolean;
   influenceScore: number;
   topTransmittedNumbers: number[];
@@ -205,6 +235,9 @@ export interface InterDrawReport {
   patternMetrics?: InterDrawPatternReport;
   complexDynamics?: InterDrawComplexDynamicsReport;
   bivariateHpcReport?: BivariateDyadsReportHpc;
+  indirectPaths?: InterDrawIndirectPath[];
+  communities?: InterDrawCommunity[];
+  networkFingerprint?: string;
   generationTimestamp: number;
 }
 
@@ -223,13 +256,22 @@ const continuousSigmoid = (z: number): number => {
  * Aligne chronologiquement de manière stricte les historiques du tirage cible et de son prédécesseur direct.
  * Élimine tout décalage temporel d'un cran d'indice (look-ahead leak ou déphasage de cycle).
  */
+export interface ConsecutiveDrawPair {
+  predWinners: number[];
+  targetWinners: number[];
+  predMachine?: number[];
+  targetMachine?: number[];
+  targetDate: string;
+  predDate: string;
+}
+
 export const alignConsecutiveDrawHistories = (
   targetHistory: DrawResult[],
   predHistory: DrawResult[],
   targetDrawName?: string,
   predDrawName?: string
-): { predWinners: number[]; targetWinners: number[]; targetDate: string; predDate: string }[] => {
-  const paired: { predWinners: number[]; targetWinners: number[]; targetDate: string; predDate: string }[] = [];
+): ConsecutiveDrawPair[] => {
+  const paired: ConsecutiveDrawPair[] = [];
   if (!targetHistory || !predHistory || targetHistory.length === 0 || predHistory.length === 0) {
     return paired;
   }
@@ -273,6 +315,8 @@ export const alignConsecutiveDrawHistories = (
         paired.push({
           predWinners: matchedPred.draw.gagnants,
           targetWinners: tItem.draw.gagnants,
+          predMachine: Array.isArray(matchedPred.draw.machine) ? matchedPred.draw.machine : [],
+          targetMachine: Array.isArray(tItem.draw.machine) ? tItem.draw.machine : [],
           targetDate: tItem.draw.date || '',
           predDate: matchedPred.draw.date || ''
         });
@@ -303,6 +347,8 @@ export const alignConsecutiveDrawHistories = (
       paired.push({
         predWinners: pGagnants,
         targetWinners: tGagnants,
+        predMachine: Array.isArray(p?.machine) ? p.machine : [],
+        targetMachine: Array.isArray(t?.machine) ? t.machine : [],
         targetDate: t.date || '',
         predDate: p.date || ''
       });
@@ -567,37 +613,6 @@ export const runBayesianResonanceEngine = (
   }
   const hawkesWeight = Math.tanh(absExcitationEnergy / Math.max(1.0, Math.sqrt(sampleSize)));
 
-  // 3d. Intégration continue du graphe complet all-to-all du réseau fermé (AGENTS.md)
-  const evidenceNetwork = new Float64Array(N + 1);
-  const targetFamily = targetDrawName ? getPrimaryInterDrawFamily(targetDrawName) : null;
-  if (targetFamily) {
-    const targetNetId = (targetFamily.id === 'hebdomadaire' || targetFamily.id === 'quotidien')
-      ? targetFamily.id
-      : (getDrawNetworkId(targetDrawName) || 'quotidien');
-    const networkDrawNames = INTER_DRAW_NETWORKS[targetNetId]?.drawNames || [];
-    const syntheticTargetHistory = pairedPairs.map(p => ({ date: '', gagnants: p.targetWinners }));
-    for (const otherDrawName of networkDrawNames) {
-      if (targetDrawName && normalizeDrawName(otherDrawName) === normalizeDrawName(targetDrawName)) continue;
-      if (predDrawName && normalizeDrawName(otherDrawName) === normalizeDrawName(predDrawName)) continue;
-
-      const sHistKey = globalCache.generateKey('history', otherDrawName);
-      const sHist = (globalCache.getSync<any[]>(sHistKey, otherDrawName) || []).filter(
-        (d: any) => !d?.id?.startsWith?.('deterministic-')
-      );
-      if (sHist.length === 0) continue;
-
-      const coupling = computeContinuousInterDrawCoupling(sHist, syntheticTargetHistory as any);
-      if (coupling.weight > 0.001) {
-        const sWinners = (sHist[0]?.gagnants || []).filter((n: number) => n >= 1 && n <= N);
-        const netLift = coupling.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT;
-        const logCoupling = Math.log(Math.max(1e-4, netLift));
-        for (const sw of sWinners) {
-          evidenceNetwork[sw] += coupling.weight * logCoupling;
-        }
-      }
-    }
-  }
-
   // Rétrécissement bayésien continu gamma basé sur l'échelle combinatoire de l'espace d'état
   const gamma = sampleSize / (sampleSize + sampleScale);
 
@@ -680,8 +695,8 @@ export const runBayesianResonanceEngine = (
     const logitHawkes = logitP0 + gamma * rawHawkes[c];
     const probHawkes = 1.0 / (1.0 + Math.exp(-logitHawkes));
 
-    // 5. Probabilité conjointe totale bayésienne (fusion différentiable continue incluant le graphe complet)
-    const logitTotal = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + evidenceNetwork[c] + hawkesWeight * rawHawkes[c]);
+    // 5. Probabilité conjointe totale bayésienne (fusion différentiable continue du canal primaire)
+    const logitTotal = logitP0 + gamma * (evidenceTrans + evidenceRepeat + evidenceHarmonic + hawkesWeight * rawHawkes[c]);
     const probComposite = 1.0 / (1.0 + Math.exp(-logitTotal));
 
     candidateMetrics.push({
@@ -944,63 +959,255 @@ export const computeFrequencyPearsonCorrelation = (
  */
 export const computeContinuousInterDrawCoupling = (
   historySource: DrawResult[],
-  historyTarget: DrawResult[]
-): { correlation: number; weight: number; carryOverRate: number; samplePairs: number } => {
+  historyTarget: DrawResult[],
+  networkPairCount?: number
+): {
+  correlation: number;
+  weight: number;
+  carryOverRate: number;
+  machineTransferRate: number;
+  samplePairs: number;
+  predictiveLogLossGain: number;
+  lagHours: number;
+  timeSlotRelation: 'CONSECUTIVE_SLOT' | 'SAME_SLOT' | 'CROSS_DAY';
+} => {
   if (!historySource || historySource.length === 0 || !historyTarget || historyTarget.length === 0) {
-    return { correlation: 0, weight: 0.0, carryOverRate: THEORETICAL_CARRYOVER_RATE_PERCENT, samplePairs: 0 };
+    return {
+      correlation: 0,
+      weight: 0.0,
+      carryOverRate: THEORETICAL_CARRYOVER_RATE_PERCENT,
+      machineTransferRate: 0,
+      samplePairs: 0,
+      predictiveLogLossGain: 0,
+      lagHours: 24.0,
+      timeSlotRelation: 'CROSS_DAY'
+    };
   }
 
   // 1. Alignement chronologique strict des tirages consécutifs source -> cible
   const paired = alignConsecutiveDrawHistories(historyTarget, historySource);
   const nPairs = paired.length;
   if (nPairs < 2) {
-    return { correlation: 0, weight: 0.0, carryOverRate: THEORETICAL_CARRYOVER_RATE_PERCENT, samplePairs: nPairs };
+    return {
+      correlation: 0,
+      weight: 0.0,
+      carryOverRate: THEORETICAL_CARRYOVER_RATE_PERCENT,
+      machineTransferRate: 0,
+      samplePairs: nPairs,
+      predictiveLogLossGain: 0,
+      lagHours: 24.0,
+      timeSlotRelation: 'CROSS_DAY'
+    };
   }
 
-  // 2. Mesure empirique du report direct (carry-over) et des résonances harmoniques
+  // 2. Mesure empirique du report direct (carry-over), des résonances harmoniques et du canal machine
   let carryOverCount = 0;
   let harmonicCount = 0;
+  let expectedHarmonicSum = 0;
+  let varianceHarmonicSum = 0;
+  let machineTransferCount = 0;
+  let machinePairsCount = 0;
+  let expectedMachineSum = 0;
+  let varianceMachineSum = 0;
 
   for (const p of paired) {
     const pSet = new Set(p.predWinners);
     const hasShared = p.targetWinners.some(n => pSet.has(n));
     if (hasShared) carryOverCount++;
 
-    const hasHarmonic = p.predWinners.some(pw => {
+    const harmTargets = new Set<number>();
+    for (const pw of p.predWinners) {
       const mir = getMirrorNumber(pw);
       const comp = getComplement90(pw);
-      return p.targetWinners.includes(mir) || p.targetWinners.includes(comp);
-    });
+      if (mir >= 1 && mir <= 90) harmTargets.add(mir);
+      if (comp >= 1 && comp <= 90) harmTargets.add(comp);
+    }
+    const hasHarmonic = p.targetWinners.some(n => harmTargets.has(n));
     if (hasHarmonic) harmonicCount++;
+
+    // Probabilité nulle exacte par paire sous H0 (hypergéométrique / combinatoire)
+    // P(X >= 1) = 1 - C(90 - H, 5) / C(90, 5)
+    const H = harmTargets.size;
+    let probNoHarmHit = 1.0;
+    for (let step = 0; step < 5; step++) {
+      probNoHarmHit *= Math.max(0, (90 - H - step)) / (90 - step);
+    }
+    const pHarm0 = 1.0 - probNoHarmHit;
+    expectedHarmonicSum += pHarm0;
+    varianceHarmonicSum += pHarm0 * (1.0 - pHarm0);
+
+    // Canal Machine : Transfert Machine(source) -> Gagnants(cible)
+    // Exclut naturellement les tirages sans machine (ex. Fortune Thursday) où predMachine est vide
+    if (Array.isArray(p.predMachine) && p.predMachine.length >= 1) {
+      const pMachSet = new Set(p.predMachine.filter(n => typeof n === 'number' && n >= 1 && n <= 90));
+      if (pMachSet.size > 0) {
+        machinePairsCount++;
+        const hasMachTransfer = p.targetWinners.some(n => pMachSet.has(n));
+        if (hasMachTransfer) machineTransferCount++;
+
+        const M_size = pMachSet.size;
+        let probNoMachHit = 1.0;
+        for (let step = 0; step < 5; step++) {
+          probNoMachHit *= Math.max(0, (90 - M_size - step)) / (90 - step);
+        }
+        const pMach0 = 1.0 - probNoMachHit;
+        expectedMachineSum += pMach0;
+        varianceMachineSum += pMach0 * (1.0 - pMach0);
+      }
+    }
   }
 
-  // Probabilité théorique nulle exacte pour 5/90 (P(X >= 1) = 25.37%)
-  const p0 = THEORETICAL_CARRYOVER_PROB; // ~0.253694
-  const empiricalRate = (carryOverCount / nPairs) * 100.0;
-  const pCarry = carryOverCount / nPairs;
-  const pHarm = harmonicCount / nPairs;
+  // Probabilité théorique nulle exacte pour carry-over 5/90 (P(X >= 1) = 25.3694%)
+  const p0Carry = THEORETICAL_CARRYOVER_PROB; // ~0.253694
+  const empiricalCarryRate = (carryOverCount / nPairs) * 100.0;
+  const expectedCarry = nPairs * p0Carry;
+  const varCarry = nPairs * p0Carry * (1.0 - p0Carry);
 
-  // Z-score binomial exact de la relation de transition (AGENTS.md)
-  const se = Math.sqrt((p0 * (1.0 - p0)) / nPairs);
-  const zCarry = (pCarry - p0) / Math.max(1e-6, se);
-  const zHarm = (pHarm - p0) / Math.max(1e-6, se);
-  const zMax = Math.max(Math.abs(zCarry), Math.abs(zHarm));
+  // Z-scores continus exacts sous hypothèse nulle (AGENTS.md)
+  const zCarry = (carryOverCount - expectedCarry) / Math.sqrt(Math.max(1e-9, varCarry));
+  const zHarm = (harmonicCount - expectedHarmonicSum) / Math.sqrt(Math.max(1e-9, varianceHarmonicSum));
 
-  // Seuil universel de correction continue pour tests multiples (M = 22 * 21 = 462 paires)
-  // sqrt(2 * ln(462)) ≈ 3.503 — élimine les faux signaux avec transition C^infinity (AGENTS.md)
-  const zThresh = Math.sqrt(2.0 * Math.log(462));
-  const softExcess = Math.log(1.0 + Math.exp(Math.min(25.0, zMax - zThresh)));
+  let zMach = 0;
+  let empiricalMachineRate = 0;
+  if (machinePairsCount >= 2 && varianceMachineSum > 1e-9) {
+    zMach = (machineTransferCount - expectedMachineSum) / Math.sqrt(varianceMachineSum);
+    empiricalMachineRate = (machineTransferCount / machinePairsCount) * 100.0;
+  }
 
-  // Poids de couplage continu discriminant W ∈ [0, 1[ : transition douce différentiable sans coupure brusque
-  const weight = Math.tanh(softExcess / 2.0);
+  const zMax = Math.max(Math.abs(zCarry), Math.abs(zHarm), Math.abs(zMach));
+
+  // Seuil universel dérivé du nombre de paires du réseau fermé choisi : M = |V|(|V| - 1)
+  const M = Math.max(2, networkPairCount ?? 462);
+  const zThresh = Math.sqrt(2.0 * Math.log(M));
+
+  // Transition douce C^infinity : excès centré au-dessus du seuil critique (beta = 2.0)
+  const beta = 2.0;
+  const excessSignificance = (1.0 / beta) * Math.log(1.0 + Math.exp(Math.min(25.0, beta * (zMax - zThresh))));
+
+  // 3. Mesure hors-échantillon par Walk-Forward (Log-Loss Reduction)
+  // Évalue la capacité réelle de prédiction de la source vers la cible par rapport à la marginale 5/90
+  let walkForwardLogLossGain = 0;
+  if (nPairs >= 4) {
+    const chronoPairs = [...paired].reverse(); // De l'ancien vers le récent
+    let totalLogLossGain = 0;
+    let evalSteps = 0;
+    const maxSteps = Math.min(25, chronoPairs.length);
+
+    for (let k = 3; k < maxSteps; k++) {
+      const train = chronoPairs.slice(0, k);
+      const test = chronoPairs[k];
+      const testTargetSet = new Set(test.targetWinners);
+
+      let trainCarryHits = 0;
+      let trainHarmHits = 0;
+      let trainHarmAtt = 0;
+      let trainMachHits = 0;
+      let trainMachPairs = 0;
+
+      for (const tp of train) {
+        const tpSet = new Set(tp.predWinners);
+        if (tp.targetWinners.some(n => tpSet.has(n))) trainCarryHits++;
+        for (const pw of tp.predWinners) {
+          const mir = getMirrorNumber(pw);
+          const comp = getComplement90(pw);
+          if (mir >= 1 && mir <= 90) { trainHarmAtt++; if (tp.targetWinners.includes(mir)) trainHarmHits++; }
+          if (comp >= 1 && comp <= 90) { trainHarmAtt++; if (tp.targetWinners.includes(comp)) trainHarmHits++; }
+        }
+        if (Array.isArray(tp.predMachine) && tp.predMachine.length > 0) {
+          trainMachPairs++;
+          const mSet = new Set(tp.predMachine);
+          if (tp.targetWinners.some(n => mSet.has(n))) trainMachHits++;
+        }
+      }
+
+      const trainCarryLift = (trainCarryHits / train.length) / THEORETICAL_CARRYOVER_PROB;
+      const trainHarmLift = trainHarmAtt > 0 ? (trainHarmHits / trainHarmAtt) / (5.0 / 90.0) : 1.0;
+      const trainMachLift = trainMachPairs > 0 ? (trainMachHits / trainMachPairs) / THEORETICAL_CARRYOVER_PROB : 1.0;
+
+      const predSet = new Set(test.predWinners);
+      const harmSet = new Set<number>();
+      for (const pw of test.predWinners) {
+        const mir = getMirrorNumber(pw);
+        const comp = getComplement90(pw);
+        if (mir >= 1 && mir <= 90) harmSet.add(mir);
+        if (comp >= 1 && comp <= 90) harmSet.add(comp);
+      }
+      const machSet = new Set(Array.isArray(test.predMachine) ? test.predMachine : []);
+
+      let sumMult = 0;
+      const mults = new Float64Array(91);
+      for (let n = 1; n <= 90; n++) {
+        let m = 1.0;
+        if (predSet.has(n)) m *= Math.max(0.2, Math.min(5.0, trainCarryLift));
+        if (harmSet.has(n)) m *= Math.max(0.2, Math.min(5.0, trainHarmLift));
+        if (machSet.has(n)) m *= Math.max(0.2, Math.min(5.0, trainMachLift));
+        mults[n] = m;
+        sumMult += m;
+      }
+
+      const eps = 1e-6;
+      let lossMarginal = 0;
+      let lossModel = 0;
+      const p0 = 5.0 / 90.0;
+
+      for (let n = 1; n <= 90; n++) {
+        const y = testTargetSet.has(n) ? 1.0 : 0.0;
+        const pModel = Math.max(0.001, Math.min(0.999, (mults[n] / (sumMult || 1.0)) * 5.0));
+        lossMarginal += -(y * Math.log(p0 + eps) + (1.0 - y) * Math.log(1.0 - p0 + eps));
+        lossModel += -(y * Math.log(pModel + eps) + (1.0 - y) * Math.log(1.0 - pModel + eps));
+      }
+
+      totalLogLossGain += (lossMarginal - lossModel) / 90.0;
+      evalSteps++;
+    }
+
+    if (evalSteps > 0) {
+      walkForwardLogLossGain = totalLogLossGain / evalSteps;
+    }
+  }
+
+  // Shrinkage bayésien empirique continu gamma = n / (n + 18.0)
+  const gammaShrink = nPairs / (nPairs + 18.0);
+  const shrinkedGain = gammaShrink * walkForwardLogLossGain;
+
+  // Modulation continue : fonction sigmoïde sur le gain hors-échantillon
+  const gainModulation = 2.0 / (1.0 + Math.exp(-Math.min(20.0, Math.max(-20.0, 40.0 * shrinkedGain))));
+
+  // 4. Analyse du lag temporel structurel et de la relation de créneau
+  let sumLagHours = 0;
+  let lagCount = 0;
+  for (const p of paired) {
+    if (p.targetDate && p.predDate) {
+      const tTarget = new Date(p.targetDate).getTime();
+      const tPred = new Date(p.predDate).getTime();
+      if (!isNaN(tTarget) && !isNaN(tPred) && tTarget > tPred) {
+        sumLagHours += (tTarget - tPred) / (3600 * 1000);
+        lagCount++;
+      }
+    }
+  }
+  const avgLagHours = lagCount > 0 ? Math.round((sumLagHours / lagCount) * 10) / 10 : 24.0;
+  let timeSlotRelation: 'CONSECUTIVE_SLOT' | 'SAME_SLOT' | 'CROSS_DAY' = 'CROSS_DAY';
+  if (avgLagHours <= 6.5) {
+    timeSlotRelation = 'CONSECUTIVE_SLOT';
+  } else if (avgLagHours >= 20.0 && avgLagHours <= 28.0) {
+    timeSlotRelation = 'SAME_SLOT';
+  }
+
+  // Poids de couplage continu discriminant W ∈ [0, 1[ modulé par la capacité prédictive hors-échantillon
+  const weight = Math.tanh(excessSignificance * gainModulation);
   // Corrélation de transition normalisée dans [-1, 1]
   const correlation = Math.max(-1.0, Math.min(1.0, zCarry / Math.sqrt(nPairs)));
 
   return {
     correlation: Math.round(correlation * 1000) / 1000,
     weight: Math.round(weight * 1000) / 1000,
-    carryOverRate: Math.round(empiricalRate * 10) / 10,
-    samplePairs: nPairs
+    carryOverRate: Math.round(empiricalCarryRate * 10) / 10,
+    machineTransferRate: Math.round(empiricalMachineRate * 10) / 10,
+    samplePairs: nPairs,
+    predictiveLogLossGain: Math.round(walkForwardLogLossGain * 10000) / 10000,
+    lagHours: avgLagHours,
+    timeSlotRelation
   };
 };
 
@@ -1014,12 +1221,7 @@ export const generateNetworkInterconnectionMatrix = async (
 ): Promise<InterDrawNetworkMatrix> => {
   const net = INTER_DRAW_NETWORKS[networkId] || INTER_DRAW_FAMILIES[networkId];
   const drawNames = net?.drawNames || [];
-
-  const matrixCacheKey = globalCache.getInterDrawKey(networkId, 'network', 'matrix');
-  const cached = globalCache.getSync<InterDrawNetworkMatrix>(matrixCacheKey);
-  if (cached && cached.drawNames && cached.drawNames.length === drawNames.length) {
-    return cached;
-  }
+  const networkPairCount = Math.max(2, drawNames.length * (drawNames.length - 1));
 
   const histories = new Map<string, DrawResult[]>();
   await Promise.all(
@@ -1032,6 +1234,19 @@ export const generateNetworkInterconnectionMatrix = async (
       }
     })
   );
+
+  // Empreinte unique continue du réseau basée sur l'état le plus récent de chaque source (AGENTS.md)
+  const networkFingerprint = `${networkId}_${drawNames.map(name => {
+    const h = histories.get(name) || [];
+    const top = h[0];
+    return `${name}:${top?.id || top?.date || '0'}`;
+  }).join('|')}`;
+
+  const matrixCacheKey = globalCache.getInterDrawKey(networkId, 'network', 'matrix');
+  const cached = globalCache.getSync<InterDrawNetworkMatrix>(matrixCacheKey);
+  if (cached && cached.drawNames && cached.drawNames.length === drawNames.length && cached.networkFingerprint === networkFingerprint) {
+    return cached;
+  }
 
   const weights: Record<string, Record<string, number>> = {};
   const couplings: InterDrawNodeCoupling[] = [];
@@ -1048,7 +1263,7 @@ export const generateNetworkInterconnectionMatrix = async (
         continue;
       }
       const histSource = histories.get(source) || [];
-      const res = computeContinuousInterDrawCoupling(histSource, histTarget);
+      const res = computeContinuousInterDrawCoupling(histSource, histTarget, networkPairCount);
       weights[target][source] = res.weight;
       couplings.push({
         sourceName: source,
@@ -1056,19 +1271,95 @@ export const generateNetworkInterconnectionMatrix = async (
         correlation: res.correlation,
         weight: res.weight,
         carryOverRate: res.carryOverRate,
-        samplePairs: res.samplePairs
+        machineTransferRate: res.machineTransferRate,
+        samplePairs: res.samplePairs,
+        predictiveLogLossGain: res.predictiveLogLossGain,
+        lagHours: res.lagHours,
+        timeSlotRelation: res.timeSlotRelation
       });
       totalWeight += res.weight;
       pairCount++;
     }
   }
 
+  // 1. Détection des communautés continues par créneau horaire
+  const slotGroups: Record<string, { label: string; names: string[] }> = {
+    '10:00': { label: 'Créneau 10:00 (Matinée)', names: [] },
+    '13:00': { label: 'Créneau 13:00 (Midi)', names: [] },
+    '16:00': { label: 'Créneau 16:00 (Après-Midi)', names: [] },
+    '19:55': { label: 'Créneau 19:55 (Soirée)', names: [] }
+  };
+
+  for (const name of drawNames) {
+    const seqItem = net?.sequence?.find(s => normalizeDrawName(s.name) === normalizeDrawName(name));
+    const slot = seqItem?.time || '13:00';
+    if (slotGroups[slot]) {
+      slotGroups[slot].names.push(name);
+    } else {
+      slotGroups['13:00'].names.push(name);
+    }
+  }
+
+  const communities: InterDrawCommunity[] = [];
+  for (const [slot, group] of Object.entries(slotGroups)) {
+    if (group.names.length === 0) continue;
+    const intraPairs = couplings.filter(c => group.names.includes(c.sourceName) && group.names.includes(c.targetName));
+    const meanInternal = intraPairs.length > 0
+      ? Math.round((intraPairs.reduce((s, p) => s + p.weight, 0) / intraPairs.length) * 1000) / 1000
+      : 0.0;
+    communities.push({
+      id: `comm_${slot.replace(':', 'h')}`,
+      label: group.label,
+      timeSlot: slot,
+      drawNames: group.names,
+      meanInternalCoupling: meanInternal
+    });
+  }
+
+  // 2. Détection des chemins indirects de conduction A -> B -> C (amplification multi-chemins)
+  const indirectPaths: InterDrawIndirectPath[] = [];
+  for (const src of drawNames) {
+    for (const tgt of drawNames) {
+      if (src === tgt) continue;
+      const directW = weights[tgt]?.[src] ?? 0.0;
+
+      let bestBridge = '';
+      let bestIndirectStrength = 0;
+
+      for (const bridge of drawNames) {
+        if (bridge === src || bridge === tgt) continue;
+        const wAB = weights[bridge]?.[src] ?? 0.0;
+        const wBC = weights[tgt]?.[bridge] ?? 0.0;
+        const strength = wAB * wBC;
+        if (strength > bestIndirectStrength) {
+          bestIndirectStrength = strength;
+          bestBridge = bridge;
+        }
+      }
+
+      if (bestIndirectStrength > 0.01 && bestBridge) {
+        indirectPaths.push({
+          sourceName: src,
+          bridgeName: bestBridge,
+          targetName: tgt,
+          directWeight: directW,
+          indirectStrength: Math.round(bestIndirectStrength * 1000) / 1000,
+          amplificationRatio: Math.round((bestIndirectStrength / Math.max(0.01, directW)) * 100) / 100
+        });
+      }
+    }
+  }
+  indirectPaths.sort((a, b) => b.indirectStrength - a.indirectStrength);
+
   const matrix: InterDrawNetworkMatrix = {
     networkId,
     drawNames,
     weights,
     couplings,
-    meanNetworkCoupling: pairCount > 0 ? Math.round((totalWeight / pairCount) * 1000) / 1000 : 0.5
+    meanNetworkCoupling: pairCount > 0 ? Math.round((totalWeight / pairCount) * 1000) / 1000 : 0.5,
+    communities,
+    indirectPaths: indirectPaths.slice(0, 16),
+    networkFingerprint
   };
 
   const adaptiveTtl = globalCache.getAdaptiveInterDrawTTL(50);
@@ -1177,18 +1468,22 @@ export const generateInterDrawReport = async (
   // 3b. Intégration continue de l'ENSEMBLE du réseau de tirage choisi (AGENTS.md)
   const networkContributions: InterDrawNetworkContribution[] = [];
   let totalNetworkWeight = 0;
+  const networkPairCount = Math.max(2, networkDrawNames.length * (networkDrawNames.length - 1));
 
   for (const sourceName of networkDrawNames) {
     if (normalizeDrawName(sourceName) === normalizeDrawName(targetDrawName)) continue;
 
     const sHist = networkHistories.get(sourceName) || [];
     const isImmPred = normalizeDrawName(sourceName) === normalizeDrawName(relation.predecessor.name);
-    const rawWeight = networkMatrix.weights?.[targetDrawName]?.[sourceName];
-    const weight = (rawWeight !== undefined && rawWeight > 0.0001)
-      ? rawWeight
-      : (isImmPred ? 0.75 : 0.25);
-    const coupling = computeContinuousInterDrawCoupling(sHist, targetHistory);
+    // Récupération du couplage calculé par la matrice ou calcul à la volée avec le seuil réseau exact M
+    const coupling = networkMatrix.couplings.find(
+      c => normalizeDrawName(c.sourceName) === normalizeDrawName(sourceName) &&
+           normalizeDrawName(c.targetName) === normalizeDrawName(targetDrawName)
+    ) || computeContinuousInterDrawCoupling(sHist, targetHistory, networkPairCount);
+
+    const weight = coupling.weight;
     const latestWinners = (sHist[0]?.gagnants || []).filter(n => n >= 1 && n <= 90);
+    const latestMachine = (sHist[0]?.machine || []).filter(n => n >= 1 && n <= 90);
 
     totalNetworkWeight += weight;
 
@@ -1198,8 +1493,10 @@ export const generateInterDrawReport = async (
       normalizedWeight: 0,
       correlation: coupling.correlation,
       carryOverRate: coupling.carryOverRate,
+      machineTransferRate: coupling.machineTransferRate,
       samplePairs: coupling.samplePairs,
       latestWinners,
+      latestMachine,
       isImmediatePredecessor: isImmPred,
       influenceScore: Math.round(weight * (coupling.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT) * 100) / 100,
       topTransmittedNumbers: latestWinners.slice(0, 5)
@@ -1207,38 +1504,88 @@ export const generateInterDrawReport = async (
   }
 
   // Normalisation L1 continue des poids du réseau
-  const effectiveTotalWeight = Math.max(1e-4, totalNetworkWeight);
-  for (const contrib of networkContributions) {
-    contrib.normalizedWeight = Math.round((contrib.weight / effectiveTotalWeight) * 1000) / 1000;
+  if (totalNetworkWeight > 0.001) {
+    for (const contrib of networkContributions) {
+      contrib.normalizedWeight = Math.round((contrib.weight / totalNetworkWeight) * 1000) / 1000;
+    }
+  } else {
+    // Distribution uniforme a priori continue sur le simplexe (cold start sans données)
+    const uniformWeight = 1.0 / Math.max(1, networkContributions.length);
+    for (const contrib of networkContributions) {
+      contrib.normalizedWeight = Math.round(uniformWeight * 1000) / 1000;
+    }
   }
   networkContributions.sort((a, b) => b.weight - a.weight);
 
-  // Fusion multi-sources continue sur l'ensemble du réseau
+  // Fusion multi-sources continue sur l'ensemble du réseau (AGENTS.md)
+  // Pooling log-linéaire : logit(p_combined) = logit(p_pred) + gamma * sum_s w_s * Delta_LLR(s, c)
+  const gammaShrinkage = sampleSize / (sampleSize + 18.0); // Échelle combinatoire N/K = 18.0
   const networkCombinedScores = new Float64Array(91);
+  const candidateSourceContribs: Record<number, { sourceName: string; weight: number; logLift: number }[]> = {};
+  for (let c = 1; c <= 90; c++) {
+    candidateSourceContribs[c] = [];
+  }
+
   for (let c = 1; c <= 90; c++) {
     const predScore = fullCandidateScores[c] || 50.0;
-    let networkBonus = 0;
+    const predProb = Math.max(0.001, Math.min(0.999, predScore / 100.0));
+    const logitPred = Math.log(predProb / (1.0 - predProb));
+
+    let networkLLR = 0;
 
     for (const contrib of networkContributions) {
-      if (contrib.isImmediatePredecessor) continue; // Déjà intégré dans predScore
+      if (contrib.isImmediatePredecessor) continue; // Déjà intégré dans le modèle du prédécesseur direct
+      if (contrib.normalizedWeight <= 0.0001) continue;
+
       const sWinners = contrib.latestWinners;
       const sSet = new Set(sWinners);
+      let contribLLR = 0;
 
-      // Report direct depuis ce nœud du réseau
+      // Report direct depuis ce nœud : LLR signé ln(Lift_carry)
       if (sSet.has(c)) {
-        const netLift = contrib.carryOverRate / THEORETICAL_CARRYOVER_RATE_PERCENT;
-        networkBonus += contrib.normalizedWeight * Math.log(Math.max(1e-4, netLift)) * 8.0;
+        const carryLift = (contrib.carryOverRate / 100.0) / THEORETICAL_CARRYOVER_PROB;
+        // Si carryLift < 1, ln(carryLift) est négatif (effet de déficit/répulsion)
+        const logCarryLift = Math.log(Math.max(1e-4, carryLift));
+        networkLLR += contrib.normalizedWeight * logCarryLift;
+        contribLLR += logCarryLift;
       }
 
-      // Harmoniques miroirs / compléments depuis ce nœud du réseau
+      // Harmoniques miroirs / compléments depuis ce nœud : LLR signé ln(Lift_harm)
       const mirC = getMirrorNumber(c);
       const compC = getComplement90(c);
       if (sSet.has(mirC) || sSet.has(compC)) {
-        networkBonus += contrib.normalizedWeight * 4.0;
+        const harmLift = (contrib.carryOverRate > 0)
+          ? Math.max(0.1, (contrib.carryOverRate / 100.0) / THEORETICAL_CARRYOVER_PROB)
+          : 1.0;
+        const logHarmLift = Math.log(Math.max(1e-4, harmLift));
+        networkLLR += contrib.normalizedWeight * 0.5 * logHarmLift;
+        contribLLR += 0.5 * logHarmLift;
+      }
+
+      // Canal Machine : Transfert Machine(source) -> Gagnants(cible)
+      if (contrib.latestMachine && contrib.latestMachine.length > 0 && (contrib.machineTransferRate || 0) > 0) {
+        const sMachineSet = new Set(contrib.latestMachine);
+        if (sMachineSet.has(c)) {
+          const machLift = (contrib.machineTransferRate! / 100.0) / THEORETICAL_CARRYOVER_PROB;
+          const logMachLift = Math.log(Math.max(1e-4, machLift));
+          networkLLR += contrib.normalizedWeight * 0.5 * logMachLift;
+          contribLLR += 0.5 * logMachLift;
+        }
+      }
+
+      if (Math.abs(contribLLR) > 1e-4) {
+        candidateSourceContribs[c].push({
+          sourceName: contrib.sourceName,
+          weight: contrib.normalizedWeight,
+          logLift: Math.round(contribLLR * 1000) / 1000
+        });
       }
     }
 
-    networkCombinedScores[c] = Math.max(0.5, Math.min(99.5, predScore + networkBonus));
+    // Combinaison continue avec rétrécissement bayésien gamma (zéro magic number, zéro seuil binaire)
+    const logitCombined = logitPred + gammaShrinkage * networkLLR;
+    const probCombined = 1.0 / (1.0 + Math.exp(-logitCombined));
+    networkCombinedScores[c] = Math.round(probCombined * 1000) / 10.0;
   }
 
   const fullAggregatedCandidateScores: number[] = [0];
@@ -1256,10 +1603,34 @@ export const generateInterDrawReport = async (
     if (supportingNodes.length > 0 && !flags.includes('RESEAU_CONVERGENCE')) {
       flags.push('RESEAU_CONVERGENCE');
     }
+
+    const machineNodes = networkContributions.filter(
+      node => node.latestMachine && node.latestMachine.includes(c.number) && (node.machineTransferRate || 0) > 0
+    );
+    if (machineNodes.length > 0 && !flags.includes('TRANSFERT_MACHINE')) {
+      flags.push('TRANSFERT_MACHINE');
+    }
+
+    // Intervalle de confiance 95% continu dérivé de l'écart type d'échantillonnage
+    const p = Math.max(0.001, Math.min(0.999, fusedScore / 100.0));
+    const effectiveN = Math.max(2, sampleSize);
+    const se = Math.sqrt((p * (1.0 - p)) / effectiveN);
+    const ciLow = Math.round(Math.max(0.001, p - 1.96 * se) * 1000) / 10;
+    const ciHigh = Math.round(Math.min(0.999, p + 1.96 * se) * 1000) / 10;
+
+    // Statut signal statistique vs bruit i.i.d.
+    const hasSignificantCoupling = (c.flags.length > 0 && c.confidence > 0.55) || supportingNodes.some(n => n.weight > 0.05);
+    const isDepartingFromNull = ciLow > 50.0 || (ciHigh < 50.0 && fusedScore < 40.0);
+    const signalStatus: 'SIGNAL_DETECTE' | 'INDISCERNABLE_BRUIT' =
+      (hasSignificantCoupling || isDepartingFromNull) ? 'SIGNAL_DETECTE' : 'INDISCERNABLE_BRUIT';
+
     return {
       ...c,
       compositeScore: Math.round(fusedScore * 10) / 10,
-      flags
+      flags,
+      signalStatus,
+      confidenceInterval: [ciLow, ciHigh] as [number, number],
+      sourceContributions: candidateSourceContribs[c.number] || []
     };
   }).sort((a, b) => b.compositeScore - a.compositeScore);
 
@@ -1461,6 +1832,9 @@ export const generateInterDrawReport = async (
     patternMetrics,
     complexDynamics,
     bivariateHpcReport,
+    indirectPaths: networkMatrix?.indirectPaths,
+    communities: networkMatrix?.communities,
+    networkFingerprint: networkMatrix?.networkFingerprint,
     generationTimestamp: Date.now()
   };
 
@@ -1658,6 +2032,59 @@ export const calculateInterDrawVector = (
   const engine = runBayesianResonanceEngine(pairedPairs, lastWinners, predLaggedHistory, retroAlpha, undefined, drawName, relation.predecessor.name);
   for (let n = 1; n <= 90; n++) {
     vec[n] = engine.fullCandidateScores[n] || THEORETICAL_SINGLE_PROB;
+  }
+
+  // 1.5. Intégration continue multi-sources de l'ensemble du réseau (AGENTS.md)
+  // Permet au featureExtractor et fusionService de bénéficier de toute la topologie réseau même hors cache complet
+  const networkDrawNames = activeFamily.sequence?.map(s => s.name) || activeFamily.drawNames || [];
+  const networkPairCount = Math.max(2, networkDrawNames.length * (networkDrawNames.length - 1));
+  const gammaShrinkage = Math.max(0.1, pairedPairs.length / (pairedPairs.length + 18.0));
+
+  for (const otherName of networkDrawNames) {
+    if (normalizeDrawName(otherName) === normalizeDrawName(drawName) ||
+        normalizeDrawName(otherName) === normalizeDrawName(relation.predecessor.name)) {
+      continue;
+    }
+
+    const otherHistKey = globalCache.generateKey('history', otherName);
+    const cachedOther = (globalCache.getSync<DrawResult[]>(otherHistKey, otherName) || [])
+      .filter(d => !d.id?.startsWith('deterministic-'));
+    if (cachedOther.length < 2) continue;
+
+    const coupling = computeContinuousInterDrawCoupling(cachedOther, history, networkPairCount);
+    if (coupling.weight <= 0.001) continue;
+
+    const otherWinners = (cachedOther[0]?.gagnants || []).filter(n => n >= 1 && n <= 90);
+    const otherMachine = (cachedOther[0]?.machine || []).filter(n => n >= 1 && n <= 90);
+    if (otherWinners.length === 0 && otherMachine.length === 0) continue;
+
+    const otherWinnersSet = new Set(otherWinners);
+    const otherMachineSet = new Set(otherMachine);
+    const carryLift = (coupling.carryOverRate / 100.0) / THEORETICAL_CARRYOVER_PROB;
+    const logCarry = Math.log(Math.max(1e-4, carryLift));
+    const machLift = ((coupling.machineTransferRate || 0) / 100.0) / THEORETICAL_CARRYOVER_PROB;
+    const logMach = Math.log(Math.max(1e-4, machLift));
+
+    for (let c = 1; c <= 90; c++) {
+      let deltaLLR = 0;
+      if (otherWinnersSet.has(c)) {
+        deltaLLR += logCarry;
+      }
+      const mirC = getMirrorNumber(c);
+      const compC = getComplement90(c);
+      if (otherWinnersSet.has(mirC) || otherWinnersSet.has(compC)) {
+        deltaLLR += 0.5 * logCarry;
+      }
+      if (otherMachineSet.has(c) && (coupling.machineTransferRate || 0) > 0) {
+        deltaLLR += 0.5 * logMach;
+      }
+
+      if (Math.abs(deltaLLR) > 1e-4) {
+        const curP = Math.max(0.001, Math.min(0.999, vec[c]));
+        const logit = Math.log(curP / (1.0 - curP)) + gammaShrinkage * coupling.weight * deltaLLR;
+        vec[c] = 1.0 / (1.0 + Math.exp(-logit));
+      }
+    }
   }
 
   // 2. Injection continue des métriques de Lift conditionnel des paires et de résonance de cascade (+-1, +-2)

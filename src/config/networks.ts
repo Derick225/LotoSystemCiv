@@ -252,7 +252,7 @@ export const getDrawFullTimestamp = (
     embeddedTime = `${timeMatch[1].padStart(2, '0')}:${timeMatch[2]}`;
   }
 
-  const time = explicitTime || (drawName ? getDrawScheduledTime(drawName) : (embeddedTime || '13:00'));
+  const time = explicitTime || embeddedTime || (drawName ? getDrawScheduledTime(drawName) : '13:00');
   const [hours, minutes] = time.split(':').map(Number);
   const safeHours = Number.isFinite(hours) ? hours : 13;
   const safeMinutes = Number.isFinite(minutes) ? minutes : 0;
