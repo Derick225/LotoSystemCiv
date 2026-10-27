@@ -101,6 +101,10 @@ export async function runSimulationCore(config: SimulationConfig) {
     if (config.onProgress && i % 5 === 0) {
       config.onProgress(Math.round((i / simWindow.length) * 100));
     }
+    // Yielding coopératif au thread UI pour garantir la fluidité sur mobile
+    if (i % 2 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
     if (balance < UNIT_BET) {
       if (bankruptcyAt === null) bankruptcyAt = i;

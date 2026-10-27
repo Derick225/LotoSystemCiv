@@ -2,6 +2,7 @@ import { AlgoWeights } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { LCG } from '../../utils/mathUtils';
 import { normalizeWeights } from '../prediction/weightsManager';
+import { computeKlDivergenceHpc, runMonteCarloWhatIfHpc } from '../wasm/lotoEngineBridge';
 
 export interface InverseWhatIfResult {
   targetBall: number;
@@ -45,18 +46,10 @@ export const normalizeGridToSimplex = (rawScores: number[]): number[] => {
 };
 
 /**
- * Calcule la Divergence Kullback-Leibler D_KL(P_base || P_sim) sur le simplex 90D
+ * Calcule la Divergence Kullback-Leibler D_KL(P_base || P_sim) sur le simplex 90D en Rust/WASM HPC
  */
 export const computeKLDivergence = (pBase: number[], pSim: number[]): number => {
-  if (pBase.length < 90 || pSim.length < 90) return 0;
-  
-  let kl = 0;
-  for (let i = 0; i < 90; i++) {
-    const p = Math.max(1e-7, pBase[i]);
-    const q = Math.max(1e-7, pSim[i]);
-    kl += p * Math.log(p / q);
-  }
-  return parseFloat(Math.max(0, kl).toFixed(5));
+  return computeKlDivergenceHpc(pBase, pSim);
 };
 
 /**
@@ -263,7 +256,7 @@ export const detectBifurcationPoints = (
 };
 
 /**
- * Test de Stress Monte Carlo Multi-Scénarios avec Mémoire Linéaire Float32Array
+ * Test de Stress Monte Carlo Multi-Scénarios avec Moteur Rust/WASM HPC & Mémoire Linéaire
  * Zéro overhead d'allocation d'objets, optimisé pour haute densité d'itérations (N >= 10^5).
  */
 export const runMonteCarloStressTest = (
@@ -273,11 +266,58 @@ export const runMonteCarloStressTest = (
   noiseStdDev: number = 0.05
 ): MonteCarloStressResult[] => {
   const algoKeys = Object.keys(baseWeights) as AlgoKey[];
-  
-  // Mémoire linéaire contiguë Float32Array pour les 90 boules sur N itérations (zéro fragmentation)
-  const linearScores = new Float32Array(iterations * 90);
+  const kAlgos = algoKeys.length;
+  if (kAlgos === 0) return [];
 
-  // Seed déterministe canonique dérivé de l'empreinte vectorielle des poids
+  // Seed déterministe canonique FNV-1a dérivé de l'empreinte vectorielle
+  let seedVal = 0x811c9dc5n;
+  for (const k of algoKeys) {
+    const str = `${k}:${(baseWeights[k] || 0).toFixed(4)}`;
+    for (let c = 0; c < str.length; c++) {
+      seedVal = (seedVal ^ BigInt(str.charCodeAt(c))) * 0x1000193n;
+    }
+  }
+
+  try {
+    // Évaluation en 1 passe des K colonnes pour former la matrice 90 x K
+    const baseMatrix = new Float64Array(90 * kAlgos);
+    const baseWeightsArr = new Float64Array(kAlgos);
+
+    for (let j = 0; j < kAlgos; j++) {
+      const k = algoKeys[j];
+      baseWeightsArr[j] = baseWeights[k] || 0;
+      const unitW: Record<string, number> = { [k]: 1.0 };
+      const colScores = evalGridScores(unitW as AlgoWeights);
+      for (let b = 0; b < 90; b++) {
+        baseMatrix[b * kAlgos + j] = colScores[b] || 0;
+      }
+    }
+
+    const hpcStats = runMonteCarloWhatIfHpc({
+      baseMatrix,
+      kAlgos,
+      baseWeights: baseWeightsArr,
+      iterations,
+      noiseStdDev,
+      seed: seedVal,
+    });
+
+    if (hpcStats && hpcStats.length > 0) {
+      return hpcStats.slice(0, 10).map((s) => ({
+        ball: s.ball,
+        meanScore: s.meanScore,
+        stdDev: s.stdDev,
+        p5: s.p5,
+        p95: s.p95,
+        stabilityIndex: s.stabilityIndex,
+      }));
+    }
+  } catch (err) {
+    console.warn('[whatIfEngine] Échec runMonteCarloWhatIfHpc, exécution du fallback synchrone :', err);
+  }
+
+  // Fallback linéaire contigu Float32Array (zéro fragmentation)
+  const linearScores = new Float32Array(iterations * 90);
   const weightFingerprint = algoKeys.map(k => `${k}:${(baseWeights[k] || 0).toFixed(4)}`).join('_');
   const prng = new LCG(`monte_carlo_whatif_${weightFingerprint}`);
 

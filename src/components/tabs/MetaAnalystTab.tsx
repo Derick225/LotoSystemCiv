@@ -354,6 +354,9 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
       };
 
       for (let j = trialsCount; j >= 1; j--) {
+        // Yielding coopératif au thread UI pour garantir 60 FPS constants
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
         const targetDraw = history[j - 1]; // Le tirage réel ciblé
         const historicalWindow = history.slice(j); // L'historique coupé avant ce tirage réel
 
