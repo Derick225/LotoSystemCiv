@@ -2771,6 +2771,7 @@ export interface InterDrawCrossDyadHpc {
 
 export interface BivariateDyadsReportHpc {
   dyads: InterDrawCrossDyadHpc[];
+  machineDyads?: InterDrawCrossDyadHpc[];
   transitionMatrix: Float64Array;
   totalPairedDraws: number;
   meanCouplingZ: number;
@@ -2842,6 +2843,9 @@ export function computeBivariateCrossDyadsHpc(
 
   const counts = new Uint32Array(90 * 90);
   const srcFreqs = new Uint32Array(91);
+  const machCounts = new Uint32Array(90 * 90);
+  const machSrcFreqs = new Uint32Array(91);
+  let machinePairsCount = 0;
 
   for (let i = 0; i < nPairs; i++) {
     const sDraw = histSrc[i];
@@ -2852,6 +2856,20 @@ export function computeBivariateCrossDyadsHpc(
         for (const t of tDraw.winners) {
           if (t >= 1 && t <= 90) {
             counts[(s - 1) * 90 + (t - 1)]++;
+          }
+        }
+      }
+    }
+
+    if (Array.isArray(sDraw.machine) && sDraw.machine.length > 0) {
+      machinePairsCount++;
+      for (const m of sDraw.machine) {
+        if (m >= 1 && m <= 90) {
+          machSrcFreqs[m]++;
+          for (const t of tDraw.winners) {
+            if (t >= 1 && t <= 90) {
+              machCounts[(m - 1) * 90 + (t - 1)]++;
+            }
           }
         }
       }
@@ -2895,8 +2913,42 @@ export function computeBivariateCrossDyadsHpc(
 
   dyads.sort((a, b) => b.zScore - a.zScore || a.sourceNumber - b.sourceNumber);
 
+  // Dyades canal machine : machine(source) -> gagnants(cible)
+  const machineDyads: InterDrawCrossDyadHpc[] = [];
+  if (machinePairsCount >= 2) {
+    const expectedMach = machinePairsCount * pJoint;
+    const varMach = machinePairsCount * pJoint * (1.0 - pJoint);
+    const stdDevMach = Math.max(1e-9, Math.sqrt(varMach));
+
+    for (let m = 1; m <= 90; m++) {
+      const row = (m - 1) * 90;
+      for (let t = 1; t <= 90; t++) {
+        const o = machCounts[row + (t - 1)];
+        if (o > 0) {
+          const z = (o - expectedMach) / stdDevMach;
+          const lift = expectedMach > 0 ? o / expectedMach : 1.0;
+          const sig = 100.0 / (1.0 + Math.exp(-1.2 * z));
+
+          if (z >= minZScore) {
+            machineDyads.push({
+              sourceNumber: m,
+              targetNumber: t,
+              occurrences: o,
+              expectedOccurrences: Math.round(expectedMach * 1000) / 1000,
+              zScore: Math.round(z * 1000) / 1000,
+              lift: Math.round(lift * 100) / 100,
+              significanceScore: Math.round(sig * 10) / 10,
+            });
+          }
+        }
+      }
+    }
+    machineDyads.sort((a, b) => b.zScore - a.zScore || a.sourceNumber - b.sourceNumber);
+  }
+
   return {
     dyads,
+    machineDyads,
     transitionMatrix: matrix,
     totalPairedDraws: nPairs,
     meanCouplingZ: Math.round((sumZ / 8100.0) * 1000) / 1000,

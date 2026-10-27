@@ -6,6 +6,9 @@ import {
   computeMarkovTransitionHpc,
   solveCombinatorialAnnealingHpc,
   computeTopologicalLyapunovHpc,
+  appendSingleDrawToStore,
+  computeBivariateCrossDyadsHpc,
+  clearStoreTimeline,
 } from '../src/services/wasm/lotoEngineBridge';
 
 describe('LotoEngine HPC Bridge & Fallbacks', () => {
@@ -91,5 +94,26 @@ describe('LotoEngine HPC Bridge & Fallbacks', () => {
     expect(typeof res.lyapunov_exponent).toBe('number');
     expect(typeof res.is_chaotic).toBe('boolean');
     expect(res.divergence_force).toBeGreaterThanOrEqual(0);
+  });
+
+  it('calcule les dyades bivariées et les dyades du canal machine', () => {
+    clearStoreTimeline('SOURCE_TEST');
+    clearStoreTimeline('TARGET_TEST');
+
+    appendSingleDrawToStore('SOURCE_TEST', 1000, [1, 2, 3, 4, 5], [10, 20, 30, 40, 50]);
+    appendSingleDrawToStore('SOURCE_TEST', 2000, [6, 7, 8, 9, 11], [12, 22, 32, 42, 52]);
+    appendSingleDrawToStore('TARGET_TEST', 1000, [10, 25, 35, 45, 55], [60, 61, 62, 63, 64]);
+    appendSingleDrawToStore('TARGET_TEST', 2000, [12, 26, 36, 46, 56], [65, 66, 67, 68, 69]);
+
+    const report = computeBivariateCrossDyadsHpc('SOURCE_TEST', 'TARGET_TEST', -5.0);
+    expect(report).toBeDefined();
+    expect(report.totalPairedDraws).toBe(2);
+    expect(report.transitionMatrix.length).toBe(90 * 90);
+    expect(report.machineDyads).toBeDefined();
+    expect(report.machineDyads!.length).toBeGreaterThan(0);
+
+    const dyad10 = report.machineDyads!.find((d: any) => d.sourceNumber === 10 && d.targetNumber === 10);
+    expect(dyad10).toBeDefined();
+    expect(dyad10!.occurrences).toBe(1);
   });
 });

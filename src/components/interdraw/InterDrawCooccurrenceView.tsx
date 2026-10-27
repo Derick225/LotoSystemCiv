@@ -48,7 +48,7 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
   predecessorName,
   predecessorNumbers
 }) => {
-  const [activeTab, setActiveTab] = useState<'DYADS' | 'MATRIX_90' | 'PATTERNS' | 'BIVARIATE'>('DYADS');
+  const [activeTab, setActiveTab] = useState<'DYADS' | 'MACHINE_DYADS' | 'MATRIX_90' | 'PATTERNS' | 'BIVARIATE'>('DYADS');
   const [dyadFilter, setDyadFilter] = useState<'ACTIVE' | 'ALL'>('ACTIVE');
   const [bivariateFilter, setBivariateFilter] = useState<'ACTIVE' | 'ALL'>('ACTIVE');
   const [selectedPair, setSelectedPair] = useState<InterDrawTargetPairCooccurrence | null>(null);
@@ -74,6 +74,8 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
   // Source des dyades : prioriser les dyades Wasm calculées en Rust Core si disponibles
   const wasmDyads: InterDrawCrossDyadHpc[] = bivariateHpcReport?.dyads || [];
   const hasWasmDyads = wasmDyads.length > 0;
+  const wasmMachineDyads: InterDrawCrossDyadHpc[] = bivariateHpcReport?.machineDyads || [];
+  const hasMachineDyads = wasmMachineDyads.length > 0;
 
   const displayedWasmDyads = useMemo(() => {
     if (!hasWasmDyads) return [];
@@ -209,6 +211,26 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
             </span>
           )}
         </button>
+
+        {hasMachineDyads && (
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setActiveTab('MACHINE_DYADS');
+            }}
+            className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-wider transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'MACHINE_DYADS'
+                ? "bg-cyan-600 text-white shadow-lg shadow-cyan-600/30 scale-102"
+                : "bg-white/80 dark:bg-slate-900/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+            }`}
+          >
+            <Activity size={14} className={activeTab === 'MACHINE_DYADS' ? 'animate-pulse' : 'text-cyan-400'} />
+            <span>Dyades Machine (HPC)</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 text-[9px] font-mono font-bold">
+              {wasmMachineDyads.length}
+            </span>
+          </button>
+        )}
 
         <button
           onClick={() => {
@@ -578,6 +600,74 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* SOUS-VUE MACHINE DYADS */}
+      {activeTab === 'MACHINE_DYADS' && (
+        <div className="bg-white/80 dark:bg-slate-900/80 p-5 md:p-6 rounded-3xl border border-cyan-500/20 dark:border-cyan-500/10 backdrop-blur-xl shadow-xl space-y-5">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Activity size={16} className="text-cyan-400" />
+                <h4 className="text-sm md:text-base font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                  Dyades Croisées du Canal Machine (Machine → Gagnants)
+                </h4>
+                <span className="px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-[9px] font-mono font-bold">
+                  HPC Vectorisé
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                Corrélations bivariées stochastiques mesurant le transfert des numéros Machine de {predecessorName} vers les gagnants de {targetDraw}.
+              </p>
+            </div>
+            <div className="px-3 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-xs font-mono font-bold">
+              {wasmMachineDyads.length} dyades significatives
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {wasmMachineDyads.slice(0, 30).map((d, idx) => (
+              <div
+                key={`mach-dyad-${d.sourceNumber}-${d.targetNumber}`}
+                className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-cyan-500/30 flex flex-col justify-between gap-2.5 shadow-xs"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-slate-400 font-bold">#{idx + 1}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono text-[9px] font-bold">
+                    z = +{d.zScore.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-center gap-2 py-1">
+                  <div className="text-center">
+                    <span className="text-[8px] font-black uppercase text-cyan-400 block mb-0.5">Machine</span>
+                    <NumberBall number={d.sourceNumber} size="sm" />
+                  </div>
+                  <ArrowRight size={13} className="text-cyan-500 mt-2 shrink-0" />
+                  <div className="text-center">
+                    <span className="text-[8px] font-black uppercase text-amber-400 block mb-0.5">Gagnant</span>
+                    <NumberBall number={d.targetNumber} size="sm" />
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200 dark:border-white/5 text-[10px] space-y-1">
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-slate-400">Occurrences :</span>
+                    <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                      {d.occurrences}x <span className="text-[9px] text-slate-400">(att. {d.expectedOccurrences.toFixed(1)})</span>
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-baseline">
+                    <span className="text-slate-400">Sur-représentation :</span>
+                    <span className="font-mono font-black text-cyan-400">
+                      {d.lift}x
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
