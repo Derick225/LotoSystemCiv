@@ -16,6 +16,7 @@ import { useToast } from "../ui/Toast";
 import { TicketXRay } from "../TicketXRay";
 import { PredictionComputationOverlay } from "../prediction/PredictionComputationOverlay";
 import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
+import { PlatinumStochasticModelCard } from "../analysis/PlatinumStochasticModelCard";
 import {
   Activity,
   Layers,
@@ -1172,6 +1173,17 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           )}
         </AnimatePresence>
       </div>
+
+      {/* 3. MODÉLISATION STOCHASTIQUE AVANCÉE : MARKOWITZ-KELLY, HAWKES 2D & KALMAN EKF */}
+      {result && (
+        <PlatinumStochasticModelCard
+          markowitz={result.markowitzPortfolio}
+          kalman={result.kalmanRegimeState}
+          hawkes={result.spatioTemporalHawkes}
+          selectedScenarioId={selectedScenarioId}
+          onSelectScenarioId={handleScenarioClick}
+        />
+      )}
 
       {/* 4. RADAR GÉNOMIQUE & SCÉNARIOS STRATÉGIQUES PLATINUM */}
       <div className="space-y-6">

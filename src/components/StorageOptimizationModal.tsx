@@ -19,6 +19,11 @@ import {
   compressForensicStorage, 
   executeComprehensiveStorageOptimization 
 } from "../services/storageOptimizationService";
+import {
+  auditHermeticPersistence,
+  repairHermeticPersistence,
+  HermeticPersistenceAudit,
+} from "../services/storage/hermeticStorageGuard";
 import { StorageAuditReport, StorageOptimizationResult } from "../types";
 import { useToast } from "./ui/Toast";
 import { audioEngine } from "../utils/audioEngine";
@@ -38,6 +43,7 @@ export const StorageOptimizationModal: React.FC<StorageOptimizationModalProps> =
 }) => {
   const { showToast } = useToast();
   const [audit, setAudit] = useState<StorageAuditReport | null>(null);
+  const [hermeticAudit, setHermeticAudit] = useState<HermeticPersistenceAudit | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [activeAction, setActiveAction] = useState<string | null>(null);
@@ -46,8 +52,12 @@ export const StorageOptimizationModal: React.FC<StorageOptimizationModalProps> =
   const loadAudit = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await auditStorageConsistency(drawName);
+      const [res, hRes] = await Promise.all([
+        auditStorageConsistency(drawName),
+        auditHermeticPersistence(),
+      ]);
       setAudit(res);
+      setHermeticAudit(hRes);
     } catch (err) {
       console.error("Storage audit error:", err);
       showToast("Erreur lors de l'audit de cohérence", "error");
@@ -55,6 +65,28 @@ export const StorageOptimizationModal: React.FC<StorageOptimizationModalProps> =
       setIsLoading(false);
     }
   }, [drawName, showToast]);
+
+  const handleHermeticRepair = async () => {
+    try {
+      setIsProcessing(true);
+      setActiveAction("hermetic_repair");
+      audioEngine.play("click");
+      const res = await repairHermeticPersistence();
+      showToast(
+        `Réparation hermétique réussie : ${res.deduplicatedCount} doublon(s) purgé(s), ${res.purgedSyntheticCount} synthétique(s) éliminé(s), ${res.invalidCacheKeysPurged} clé(s) assainie(s).`,
+        "success"
+      );
+      audioEngine.play("success");
+      await loadAudit();
+      if (onDataChanged) onDataChanged();
+    } catch (err) {
+      console.error("Error during hermetic repair:", err);
+      showToast("Erreur lors de la réparation hermétique", "error");
+    } finally {
+      setIsProcessing(false);
+      setActiveAction(null);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -353,6 +385,35 @@ export const StorageOptimizationModal: React.FC<StorageOptimizationModalProps> =
                         <Trash2 size={12} />
                       )}
                       <span>Nettoyer ({audit.orphanSnapshotsCount})</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* 4. Hermetic Persistence & Network Isolation (AGENTS.md) */}
+                {hermeticAudit && (
+                  <div className="p-4 bg-indigo-950/40 rounded-2xl border border-indigo-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1 max-w-md">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck size={14} className="text-emerald-400" />
+                        <h4 className="text-xs font-bold text-white uppercase">
+                          Étanchéité des Réseaux &amp; Données Réelles (AGENTS.md)
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Score d'étanchéité : <strong className="text-emerald-400">{hermeticAudit.networkHermeticityScore}%</strong> | Tirages conformes : <span className="font-mono text-white">{hermeticAudit.validDrawsCount}</span> | Doublons : <span className="font-mono text-amber-400">{hermeticAudit.exactDuplicatesCount}</span> | Synthétiques résiduels : <span className="font-mono text-rose-400">{hermeticAudit.syntheticDrawsDetected}</span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleHermeticRepair}
+                      disabled={isProcessing}
+                      className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      {activeAction === "hermetic_repair" ? (
+                        <RefreshCw size={12} className="animate-spin" />
+                      ) : (
+                        <ShieldCheck size={12} />
+                      )}
+                      <span>Assainir &amp; Réparer</span>
                     </button>
                   </div>
                 )}

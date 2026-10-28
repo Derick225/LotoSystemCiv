@@ -833,6 +833,9 @@ export interface PlatinumResult {
    * valeur inventée, pour l'analyse post-prédiction.
    */
   channelScores?: Partial<Record<AlgoKey, number[]>>;
+  markowitzPortfolio?: import("./services/prediction/markowitzKellyPortfolioService").MarkowitzPortfolioReport;
+  kalmanRegimeState?: import("./services/prediction/stochasticKalmanRegimeService").KalmanRegimeState;
+  spatioTemporalHawkes?: import("./services/prediction/spatioTemporalHawkes2DService").SpatioTemporalHawkesReport;
 }
 
 export interface PlatinumScenario {

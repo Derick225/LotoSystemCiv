@@ -9,6 +9,9 @@ import { getLocalForensicReports } from './postPredictionAnalysisService';
 import { calculateDnaSieveWeights } from './temporalAnalysisService';
 import { EnhancedMetrics } from './prediction/metrics.types';
 import { AlgoKey } from '../shared/prediction.types';
+import { computeMarkowitzKellyPortfolio } from './prediction/markowitzKellyPortfolioService';
+import { computeSpatioTemporalHawkes2D } from './prediction/spatioTemporalHawkes2DService';
+import { updateEntropyKalmanRegime } from './prediction/stochasticKalmanRegimeService';
 
 // ═══════════════════════════════════════════════════════════════
 // CONSTANTS & MATHEMATICAL FOUNDATIONS
@@ -243,6 +246,17 @@ export async function generatePlatinumPredictionCore(
         rawSpatialVector[i] = bd.spatial || 0;
     }
 
+    // 2. MODÉLISATION HAWKES SPATIO-TEMPORELLE 2D CONTINUE (GRILLE 9x10 & MEMOIRE MULTI-LAGS)
+    const hawkes2DReport = useSpatioTemporalHawkes ? computeSpatioTemporalHawkes2D(history, 35) : null;
+    if (hawkes2DReport) {
+        hawkes2DReport.nodes.forEach(node => {
+            if (node.number >= 1 && node.number <= MAX_NUM) {
+                rawSpatialVector[node.number] += node.spatialNeighborhoodExcitation * 10.0;
+                rawMomentumVector[node.number] += node.temporalExcitation * 10.0;
+            }
+        });
+    }
+
     const stdFreq = standardizeVector(rawFreqVector);
     const stdGap = standardizeVector(rawGapVector);
     const stdMomentum = standardizeVector(rawMomentumVector);
@@ -357,21 +371,20 @@ export async function generatePlatinumPredictionCore(
     const normalizedGap = normalizeVector(rawGapVector);
     const normalizedSpectral = normalizeVector(rawSpectralVector);
 
-    // 5. ANALYSE STATISTIQUE DU RÉGIME CONTINU (PROBABILITÉS DOUCES)
-    onProgress?.(80, "Analyse d'entropie du régime & Décomposition de phase...");
-    const entropyScore = computeVectorEntropy(normalizedVector);
-
-    const pivot = opts.regimePivot;
-    const regimeSigma = 0.05;
-    
-    // Probabilités douces continues par sigmoïdes
-    const pStable = sigmoid(-20.0 * (entropyScore - (pivot - regimeSigma)));
-    const pChaotic = sigmoid(20.0 * (entropyScore - (pivot + regimeSigma)));
-    const pTransition = Math.max(0, 1.0 - pStable - pChaotic);
-
-    let regime: 'STABLE' | 'TRANSITION' | 'CHAOTIC' = 'TRANSITION';
-    if (pStable > pChaotic && pStable > pTransition) regime = 'STABLE';
-    else if (pChaotic > pStable && pChaotic > pTransition) regime = 'CHAOTIC';
+    // 5. ANALYSE STATISTIQUE DU RÉGIME CONTINU (FILTRE DE KALMAN STOCHASTIQUE EKF & DÉTECTION DE RUPTURE)
+    onProgress?.(80, "Analyse d'entropie du régime & Filtrage de Kalman EKF...");
+    const rawEntropy = computeVectorEntropy(normalizedVector);
+    const kalmanRegime = updateEntropyKalmanRegime({
+        drawName,
+        measuredEntropy: rawEntropy,
+        historyLength: history.length,
+        regimePivot: opts.regimePivot,
+    });
+    const entropyScore = kalmanRegime.filteredEntropy;
+    const regime = kalmanRegime.regime;
+    const pStable = kalmanRegime.probStable;
+    const pChaotic = kalmanRegime.probChaotic;
+    const pTransition = kalmanRegime.probTransition;
 
     // 6. GÉNÉRATION DES 6 SCÉNARIOS STRATÉGIQUES HYPER-CONVERGENTS
     onProgress?.(85, "Génération des scénarios stratégiques déterministes...");
@@ -693,6 +706,12 @@ export async function generatePlatinumPredictionCore(
     }
     const deterministicId = `platinum_pred_${Math.abs(hashVal)}_${Date.now()}`;
 
+    // Optimisation de Portefeuille Markowitz & Critère de Kelly Continu Multi-Scénarios
+    const markowitzPortfolio = computeMarkowitzKellyPortfolio({
+        scenarios,
+        totalBankroll: 50000,
+    });
+
     onProgress?.(100, "Analyse Platinum complétée !");
 
     return {
@@ -726,7 +745,10 @@ export async function generatePlatinumPredictionCore(
             [AlgoKey.BAYES]: Array.from(stdBayes),
             [AlgoKey.FRACTAL]: Array.from(stdFractal),
             [AlgoKey.SPATIAL]: Array.from(stdSpatial)
-        }
+        },
+        markowitzPortfolio,
+        kalmanRegimeState: kalmanRegime,
+        spatioTemporalHawkes: hawkes2DReport || undefined,
     };
 }
 

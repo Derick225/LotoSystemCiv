@@ -31,6 +31,7 @@ import {
   type NumberDnaAttribution,
   type DnaPerformanceDriftReport,
 } from './prediction/dnaAuditLogService';
+import { validateDrawRecord } from './storage/hermeticStorageGuard';
 
 /**
  * Constantes fondamentales du système de loterie 5/90.
@@ -112,13 +113,18 @@ const DELTA_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes de cooldown entre syn
 const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): DrawResult[] => {
   const byKey = new Map<string, DrawResult>();
   for (const item of existing) {
-    if (item.id && item.id.startsWith('deterministic-')) continue;
-    const key = `${normalizeDrawName(item.drawName)}_${normalizeDate(item.date)}`;
-    byKey.set(key, item);
+    const val = validateDrawRecord(item);
+    if (!val.valid || !val.cleanDraw) continue;
+    const clean = val.cleanDraw;
+    const key = `${normalizeDrawName(clean.drawName)}_${normalizeDate(clean.date)}`;
+    byKey.set(key, clean);
   }
   for (const row of deltaRows) {
-    const key = `${normalizeDrawName(row.drawName)}_${normalizeDate(row.date)}`;
-    byKey.set(key, row);
+    const val = validateDrawRecord(row);
+    if (!val.valid || !val.cleanDraw) continue;
+    const clean = val.cleanDraw;
+    const key = `${normalizeDrawName(clean.drawName)}_${normalizeDate(clean.date)}`;
+    byKey.set(key, clean);
   }
   return Array.from(byKey.values())
     .sort((a, b) => getDrawTimestamp(b.date, b.drawName) - getDrawTimestamp(a.date, a.drawName))
@@ -144,6 +150,7 @@ export const clearHistorySyncFingerprint = (targetDrawName?: string): void => {
  * 1. Un contrôle d'idempotence strict par empreinte (zéro ré-injection cumulative).
  * 2. Un tri chronologique ascendant (flèche du temps) pour que history.last() soit le plus récent.
  * 3. La conversion en secondes POSIX des horodatages.
+ * 4. La validation hermétique unitaire (5 entiers uniques ∈ [1, 90], zéro synthétique).
  */
 export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: string): void => {
   if (!draws || draws.length === 0) return;
@@ -163,16 +170,18 @@ export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: str
     const chronological = [...draws].reverse();
 
     for (const d of chronological) {
-      if (d.gagnants && d.gagnants.length >= LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) {
-        const tsMs = getDrawTimestamp(d.date, d.drawName || targetDrawName);
-        const tsSec = Math.floor(tsMs / 1000); // Secondes POSIX
-        appendSingleDrawToStore(
-          d.drawName || targetDrawName || 'GLOBAL',
-          tsSec,
-          d.gagnants,
-          d.machine || []
-        );
-      }
+      const val = validateDrawRecord(d);
+      if (!val.valid || !val.cleanDraw) continue;
+      const clean = val.cleanDraw;
+
+      const tsMs = getDrawTimestamp(clean.date, clean.drawName || targetDrawName);
+      const tsSec = Math.floor(tsMs / 1000); // Secondes POSIX
+      appendSingleDrawToStore(
+        clean.drawName || targetDrawName || 'GLOBAL',
+        tsSec,
+        clean.gagnants,
+        clean.machine || []
+      );
     }
     lastSyncedFingerprintByDraw.set(drawKey, fingerprint);
   } catch (err) {

@@ -1,5 +1,6 @@
 import { get, set, del, keys as idbKeys, clear } from "idb-keyval";
 import { getCanonicalDrawHistoryHash } from "../../utils/mathUtils";
+import { getDrawNetworkId } from "../../config/networks";
 
 /**
  * Configuration centralisée des durées de vie du cache (TTL) par domaine métier.
@@ -117,13 +118,29 @@ class CacheService {
     const cleanDraw = drawName.toLowerCase().trim().replace(/[\s-]+/g, "_");
     let networkId = networkOrFamilyId.toLowerCase().trim();
     if (networkId !== "hebdomadaire" && networkId !== "quotidien") {
-      if (networkId.includes("19h55") || networkId.includes("hebdo")) {
+      const officialNetwork = getDrawNetworkId(drawName);
+      if (officialNetwork) {
+        networkId = officialNetwork;
+      } else if (networkId.includes("19h55") || networkId.includes("hebdo")) {
         networkId = "hebdomadaire";
+      } else if (networkId === "isolated" || networkId.includes("isole")) {
+        networkId = "isolated";
       } else {
         networkId = "quotidien";
       }
     }
     return `nexus_interdraw_${networkId}_${cleanDraw}${subKey ? `_${subKey}` : ""}`;
+  }
+
+  /**
+   * Vérifie si une clé de cache respecte la stricte isolation canonique AGENTS.md.
+   */
+  public isHermeticInterDrawKey(key: string): boolean {
+    if (!key.startsWith("nexus_interdraw_")) return false;
+    const parts = key.split("_");
+    if (parts.length < 4) return false;
+    const net = parts[2];
+    return net === "hebdomadaire" || net === "quotidien" || net === "isolated";
   }
 
   /**
