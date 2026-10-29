@@ -1,5 +1,9 @@
 
 import type { SpatialMetrics, DrawResult, SpatialCluster, BarycenterPoint } from '../types';
+import {
+  computeSpatialGridHpc,
+  computeBarycenterTrajectoryHpc,
+} from './wasm/lotoEngineBridge';
 
 // Configuration Grille Loto 5/90 (9 lignes de 10 colonnes)
 const GRID_COLS = 10;
@@ -7,9 +11,6 @@ const GRID_ROWS = 9;
 
 // Conversion Numéro -> Coordonnées (0-based)
 const getCoords = (num: number) => {
-    // 1 -> x:0, y:0
-    // 10 -> x:9, y:0
-    // 11 -> x:0, y:1
     const index = num - 1;
     return {
         x: index % GRID_COLS,
@@ -23,69 +24,39 @@ const getDistance = (n1: number, n2: number) => {
     return Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
 };
 
-// Approximation de la fonction quantile normale standard (Probit)
-// Permet de calculer le Z-score exact pour une probabilité cumulée p.
-const ndtri = (p: number): number => {
-    if (p <= 0 || p >= 1) return 0.0;
-    const t = Math.sqrt(-2.0 * Math.log(p < 0.5 ? p : 1.0 - p));
-    const c0 = 2.515517;
-    const c1 = 0.802853;
-    const c2 = 0.010328;
-    const d1 = 1.432788;
-    const d2 = 0.189269;
-    const d3 = 0.001308;
-    const z = t - ((c2 * t + c1) * t + c0) / (((d3 * t + d2) * t + d1) * t + 1.0);
-    return p < 0.5 ? -z : z;
-};
-
 export const calculateSpatialMetrics = (results: DrawResult[]): SpatialMetrics => {
-    // Grille de densité (Index 1-90)
-    const gridDensity = new Float32Array(91).fill(0);
     const recent = results.slice(0, 50); // Fenêtre glissante 50 tirages
     const N = recent.length || 1;
 
-    // Calcul de la densité brute (Heatmap)
-    recent.forEach(d => {
-        d.gagnants.forEach(n => { 
-            if (n > 0 && n <= 90) gridDensity[n]++; 
-        });
-    });
+    // Aplatir les tirages pour le calcul vectorisé en Rust/WASM
+    const flat = new Int32Array(recent.length * 5);
+    for (let d = 0; d < recent.length; d++) {
+        const w = recent[d]?.gagnants || [];
+        for (let c = 0; c < 5; c++) {
+            flat[d * 5 + c] = w[c] || 0;
+        }
+    }
 
-    // Statistical moments - replacing MAGIC threshold values with continuous limits
-    const densityValues = Array.from(gridDensity).slice(1);
-    const meanDensity = densityValues.reduce((a, b) => a + b, 0) / 90;
-    const squaredDiffsSum = densityValues.reduce((acc, v) => acc + Math.pow(v - meanDensity, 2), 0);
-    const variance = squaredDiffsSum / 90;
-    const stdDev = Math.sqrt(variance);
+    // 1. Calcul du champ spatial complet en Rust/WASM HPC (grille, gravité, barycentre, seuil probit)
+    const hpc = computeSpatialGridHpc(flat, recent.length);
 
-    // Calcul de l'entropie de Shannon normalisée sur la distribution de densité
-    const totalDensitySum = densityValues.reduce((a, b) => a + b, 0) || 1;
-    let entropy = 0;
-    densityValues.forEach(v => {
-        const p_val = v / totalDensitySum;
-        if (p_val > 0) entropy -= p_val * Math.log2(p_val);
-    });
-    const maxEntropy = Math.log2(90);
-    const normEntropy = entropy / maxEntropy; // entre 0 (concentration max) et 1 (dispersion uniforme)
+    // Grille de densité indexée 0..90 pour la compatibilité avec l'affichage
+    const gridDensity = new Float32Array(91);
+    for (let i = 1; i <= 90; i++) {
+        gridDensity[i] = hpc.gridDensity[i - 1];
+    }
 
-    // Confiance adaptative : si l'entropie est forte (chaos), on élargit la recherche (confiance basse -> seuil bas)
-    // Si l'entropie est faible (pics nets), on resserre (confiance haute -> seuil haut)
-    const p_confidence = 0.3 + 0.4 * normEntropy;
-    const z = ndtri(p_confidence);
-    const densityThreshold = meanDensity + z * stdDev;
-    
-    // Clustering DBSCAN (Density-Based Spatial Clustering)
-    // Identifies zones where numbers appear grouped geographically on the grid
+    const densityThreshold = hpc.densityThreshold;
+
+    // 2. Clustering DBSCAN géographique sur points chauds
     const clusters: SpatialCluster[] = [];
     const visited = new Set<number>();
     const MIN_PTS = 2;
 
     for (let i = 1; i <= 90; i++) {
-        // Only cluster "hot" points to avoid noise
         if (visited.has(i) || gridDensity[i] < densityThreshold) continue;
-        
-        // Find geographically hot neighbors using exact integer Chebyshev distance
-        const neighbors = Array.from({length: 90}, (_, idx) => idx + 1)
+
+        const neighbors = Array.from({ length: 90 }, (_, idx) => idx + 1)
             .filter(n => {
                 if (visited.has(n) || gridDensity[n] < densityThreshold) return false;
                 const c1 = getCoords(i);
@@ -94,57 +65,32 @@ export const calculateSpatialMetrics = (results: DrawResult[]): SpatialMetrics =
             });
 
         if (neighbors.length >= MIN_PTS) {
-            const clusterIds = [i, ...neighbors]; // Inclure le point source
+            const clusterIds = [i, ...neighbors];
             clusterIds.forEach(id => visited.add(id));
-            
-            // Calcul du centroïde du cluster
+
             const coords = clusterIds.map(getCoords);
             const avgX = coords.reduce((a, b) => a + b.x, 0) / coords.length;
             const avgY = coords.reduce((a, b) => a + b.y, 0) / coords.length;
-
-            // Score de potentiel : somme des densités des membres
             const rawPotential = clusterIds.reduce((a, b) => a + gridDensity[b], 0);
-            
+
             clusters.push({
                 id: `cluster-${clusters.length}`,
                 center: { x: avgX, y: avgY },
                 numbers: Array.from(new Set(clusterIds)).sort((a, b) => a - b),
                 density: parseFloat((clusterIds.length / (GRID_COLS * GRID_ROWS)).toFixed(2)),
-                potential: Math.min(100, Math.round((rawPotential / N) * 100)), // Normalisation
+                potential: Math.min(100, Math.round((rawPotential / N) * 100)),
                 color: ['#6366f1', '#ec4899', '#10b981', '#f59e0b'][clusters.length % 4]
             });
         }
     }
 
-    // Calcul du Barycentre du dernier tirage (Le point d'équilibre instantané)
-    const lastDraw = results[0]?.gagnants || [];
-    let sumX = 0, sumY = 0;
-    lastDraw.forEach(n => {
-        const c = getCoords(n);
-        sumX += c.x; sumY += c.y;
-    });
-
-    // Dynamic Newtonian Gravity Wells Calculation
-    // Evaluates a continuous gravitational pull field across the entire grid
+    // 3. Puits de gravité newtoniens directement issus du champ de forces HPC
     const gravityWells: any[] = [];
-    const pullField = new Float32Array(90);
-    
-    for (let num = 1; num <= 90; num++) {
-        let pull = 0;
-        for (let other = 1; other <= 90; other++) {
-            const density = gridDensity[other];
-            if (density <= 0) continue;
-            const dist = getDistance(num, other);
-            // Continuous gravity function: Force decreases with distance square. 1 protects against self-division
-            pull += density / (1 + dist * dist);
-        }
-        pullField[num - 1] = pull;
-    }
-    
-    // Find local maxima with spatial separation (minimum clearance of 3 grid coordinates)
+    const pullField = hpc.gravityPulls;
+
     const sortedCandidates = Array.from({ length: 90 }, (_, i) => ({ num: i + 1, pull: pullField[i] }))
         .sort((a, b) => b.pull - a.pull);
-        
+
     const selectedWells: number[] = [];
     for (const cand of sortedCandidates) {
         if (selectedWells.length >= 3) break;
@@ -158,17 +104,21 @@ export const calculateSpatialMetrics = (results: DrawResult[]): SpatialMetrics =
             selectedWells.push(cand.num);
         }
     }
-    
-    const maxPull = Math.max(...pullField) || 1;
+
+    let maxPull = 0;
+    for (let i = 0; i < 90; i++) {
+        if (pullField[i] > maxPull) maxPull = pullField[i];
+    }
+    if (maxPull === 0) maxPull = 1;
+
     selectedWells.forEach((num, index) => {
         const coords = getCoords(num);
         const rawForce = pullField[num - 1];
         const pullPercent = Math.round((rawForce / maxPull) * 100);
-        
-        // Subordinate numbers falling directly in this well's event horizon
+
         const subordinates = Array.from({ length: 90 }, (_, i) => i + 1)
             .filter(other => getDistance(num, other) <= 1.5);
-            
+
         gravityWells.push({
             id: `gwell-${index}`,
             x: coords.x,
@@ -181,11 +131,11 @@ export const calculateSpatialMetrics = (results: DrawResult[]): SpatialMetrics =
     return {
         gridDensity: Array.from(gridDensity),
         detectedPatterns: [],
-        barycenter: { 
-            x: lastDraw.length ? sumX / lastDraw.length : 4.5, 
-            y: lastDraw.length ? sumY / lastDraw.length : 4 
+        barycenter: {
+            x: hpc.barycenterX,
+            y: hpc.barycenterY,
         },
-        advancedClusters: clusters.sort((a,b) => b.potential - a.potential),
+        advancedClusters: clusters.sort((a, b) => b.potential - a.potential),
         gravityWells
     };
 };
@@ -194,34 +144,22 @@ export const getSpatialScores = (data: DrawResult[]): Record<number, number> => 
     const metrics = calculateSpatialMetrics(data);
     const scores: Record<number, number> = {};
     const maxDensity = Math.max(...metrics.gridDensity) || 1;
-    
-    // Score de base : densité individuelle
+
     for (let i = 1; i <= 90; i++) {
         const density = metrics.gridDensity[i] || 0;
         scores[i] = (density / maxDensity) * 100;
     }
-    
-    // Bonus de Cluster : Les numéros dans un cluster chaud reçoivent un boost probabiliste
+
     metrics.advancedClusters.forEach(c => {
         c.numbers.forEach(n => {
-            // Mapping continu de l'impact du cluster (Sigmoïde)
             const clusterImpact = 100 * (1 - Math.exp(-0.01 * c.potential));
             scores[n] = Math.min(100, scores[n] + clusterImpact);
         });
     });
-    
+
     return scores;
 };
 
 export const getBarycenterTrajectory = (results: DrawResult[], limit: number = 12): BarycenterPoint[] => {
-    // Calcule la trajectoire du centre de gravité sur les N derniers tirages
-    return results.slice(0, limit).map((d, idx) => {
-        let sumX = 0, sumY = 0;
-        d.gagnants.forEach(n => {
-            const c = getCoords(n);
-            sumX += c.x; sumY += c.y;
-        });
-        const len = d.gagnants.length || 1;
-        return { x: sumX / len, y: sumY / len, drawIndex: idx };
-    });
+    return computeBarycenterTrajectoryHpc(results, limit);
 };

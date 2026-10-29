@@ -19,7 +19,7 @@ function verifyAbi(): void {
 
   const libRsPath = path.join(rootDir, 'crates', 'loto-engine', 'src', 'lib.rs');
   const dtsPath = path.join(rootDir, 'crates', 'loto-engine', 'pkg', 'loto_engine.d.ts');
-  const bridgePath = path.join(rootDir, 'services', 'wasm', 'lotoEngineBridge.ts');
+  const bridgePath = path.join(rootDir, 'src', 'services', 'wasm', 'lotoEngineBridge.ts');
 
   // 1. Lire la liste canonique des exports déclarés dans lib.rs
   const libRsContent = fs.readFileSync(libRsPath, 'utf8');
@@ -52,7 +52,7 @@ function verifyAbi(): void {
   const missingInRustSource = bridgeInvokedSymbols.filter(sym => {
     // Filtrer les méthodes d'instance de store et les utilitaires standards
     const isExportOrMethod = rustSourceExports.includes(sym) ||
-      ['append_single_draw', 'get_frequencies', 'get_current_gaps', 'get_draw_count', 'clear_draw', 'bootstrap_json', 'generate_portfolio', 'analyze_draw', 'get_network_id', 'compute_interdraw_coupling', 'compute_network_domino_wasm', 'compute_walk_forward_calibration', 'clear_and_reload', 'rebuild_all_seen_indexes'].includes(sym);
+      ['append_single_draw', 'get_frequencies', 'get_current_gaps', 'get_draw_count', 'clear_draw', 'bootstrap_json', 'generate_portfolio', 'analyze_draw', 'get_network_id', 'compute_interdraw_coupling', 'compute_network_domino_wasm', 'compute_walk_forward_calibration', 'clear_and_reload', 'rebuild_all_seen_indexes', 'compute_bivariate_dyads_wasm'].includes(sym);
     return !isExportOrMethod;
   });
 

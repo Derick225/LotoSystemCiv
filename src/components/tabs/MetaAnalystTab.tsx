@@ -17,6 +17,7 @@ import { TicketXRay } from "../TicketXRay";
 import { PredictionComputationOverlay } from "../prediction/PredictionComputationOverlay";
 import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
 import { PlatinumStochasticModelCard } from "../analysis/PlatinumStochasticModelCard";
+import { PlatinumDecisionStudio } from "../analysis/PlatinumDecisionStudio";
 import {
   Activity,
   Layers,
@@ -37,6 +38,7 @@ import {
   Cpu,
   Dna,
   ShieldCheck,
+  Scale,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -213,6 +215,9 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(
     null,
   );
+  const [activeView, setActiveView] = useState<
+    "SCENARIOS" | "GENOME" | "DECISION" | "BACKTEST"
+  >("SCENARIOS");
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
   // Advanced Operational Calibration Parameters
@@ -619,266 +624,528 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
         progress={loadingProgress}
       />
 
-      {!result && !isInferring && (
-        <div className="flex flex-col items-center justify-center min-h-[500px] p-8 text-center bg-slate-900/50 rounded-3xl border border-white/5">
-          <div className="p-6 bg-slate-900 rounded-full shadow-2xl mb-8 border border-white/5">
-            <Layers size={64} className="text-slate-500" />
-          </div>
-          <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter mb-4">
-            Nexus <span className="text-indigo-500">Platinum</span>
-          </h2>
-          <p className="text-slate-400 max-w-md text-sm font-medium leading-relaxed mb-10">
-            Activez le moteur de fusion tensorielle pour générer un spectre de
-            probabilité unifié à partir de tous les modèles disponibles.
-          </p>
-          <button
-            onClick={runAnalysis}
-            className="px-10 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-3 group"
-          >
-            <Zap
-              size={18}
-              className="group-hover:text-yellow-300 transition-colors"
-            />{" "}
-            Initialiser le Système
-          </button>
-        </div>
-      )}
-
-      {result && (
-        <>
-      {/* 1. MISSION CONTROL HEADER */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
-            <span>Cohérence</span>
-            <ShieldCheck size={14} className="text-emerald-400" />
-          </span>
-          <div className="mt-2 text-2xl font-black text-white flex items-center gap-2">
-            {result.coherence}
-            <Activity size={16} style={{ color: metricHue(result.coherence) }} />
-          </div>
-          <span className="text-[9px] font-mono text-slate-500 mt-1">
-            {typeof result.entropy === "number"
-              ? `H = ${result.entropy.toFixed(3)} bit/sym`
-              : "H = n/d"}
-          </span>
-        </div>
-
-        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
-            <span>Tamis ADN Actif</span>
-            <Dna size={14} className="text-violet-400" />
-          </span>
-          <div className="mt-2 text-2xl font-black text-violet-400 flex items-baseline gap-1">
-            {typeof result.dnaSieveInfo?.dnaConcordanceMean === "number"
-              ? result.dnaSieveInfo.dnaConcordanceMean
-              : "n/d"}
-            {typeof result.dnaSieveInfo?.dnaConcordanceMean === "number" && (
-              <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">
-                indice
-              </span>
-            )}
-          </div>
-          <span className="text-[9px] font-mono text-slate-400 mt-1 truncate">
-            Intensité :{" "}
-            {typeof result.dnaSieveInfo?.sieveIntensityPercent === "number"
-              ? `${result.dnaSieveInfo.sieveIntensityPercent}%`
-              : "n/d"}
-          </span>
-        </div>
-
-        <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
-          <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
-            <span>Régime</span>
-            <span className="text-[9px] font-mono text-slate-400">
-              {typeof result.regimeProbabilities?.stable === "number"
-                ? `${result.regimeProbabilities.stable}% S`
-                : "n/d"}
-            </span>
-          </span>
-          <div
-            className="mt-2 text-xl font-black uppercase"
-            style={{ color: regimeTint(result.regimeProbabilities) }}
-          >
-            {result.regime}
-          </div>
-          {result.regimeProbabilities && (
-            <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden flex mt-2">
-              <div
-                className="bg-emerald-500 h-full"
-                style={{ width: `${result.regimeProbabilities.stable}%` }}
-                title={`Stable: ${result.regimeProbabilities.stable}%`}
-              />
-              <div
-                className="bg-amber-500 h-full"
-                style={{ width: `${result.regimeProbabilities.transition}%` }}
-                title={`Transition: ${result.regimeProbabilities.transition}%`}
-              />
-              <div
-                className="bg-rose-500 h-full"
-                style={{ width: `${result.regimeProbabilities.chaotic}%` }}
-                title={`Chaotique: ${result.regimeProbabilities.chaotic}%`}
-              />
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={runAnalysis}
-          className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl p-4 flex flex-col items-center justify-center text-white transition-colors group shadow-lg shadow-indigo-600/20 active:scale-95"
-        >
-          <RefreshCw
-            size={20}
-            className="mb-1 group-hover:rotate-180 transition-transform duration-300"
-          />
-          <span className="text-xs font-black uppercase tracking-widest">
-            Re-Scan Déterministe
-          </span>
-        </button>
-      </div>
-
-      {/* 2. HYPER-SPECTRUM CHART (The main visual) */}
-      <div className="bg-slate-900/40 backdrop-blur-xl p-8 md:p-10 rounded-[2rem] border border-slate-850 shadow-2xl relative overflow-hidden group">
-        <div className="flex justify-between items-center mb-8 px-2">
-          <div>
-            <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-              <BarChart3 className="text-indigo-400" size={12} /> Densité
-              Relative (100 = numéro le mieux classé)
-            </h3>
-            <span className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
-              Hyper-Spectre Harmonique
-            </span>
-          </div>
-          {hoveredIndex !== null && (
-            <div className="flex items-center gap-2.5 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/20 shadow-inner animate-fade-in">
-              <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">
-                Numéro {hoveredIndex}
-              </span>
-              <span
-                className="text-sm font-black"
-                style={{ color: metricHue(spectrumData[hoveredIndex - 1]?.v ?? 0) }}
-              >
-                {spectrumData[hoveredIndex - 1]?.v ?? "n/d"}
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={spectrumData}
-              onMouseMove={(e) => {
-                if (e.activeTooltipIndex !== undefined)
-                  setHoveredIndex(e.activeTooltipIndex + 1);
-              }}
-              onMouseLeave={() => setHoveredIndex(null)}
-            >
-              <defs>
-                <linearGradient id="spectrumBar" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#818cf8" />
-                  <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.4} />
-                </linearGradient>
-              </defs>
-              <Tooltip />
-              <Bar dataKey="v" radius={[2, 2, 0, 0]} animationDuration={1500}>
-                {spectrumData.map((entry, index) => (
-                  <Cell
-                    key={`cell-${index}`}
-                    fill={
-                      selectedScenario?.numbers.includes(entry.n)
-                        ? selectedScenario.color
-                        : "#818cf8"
-                    }
-                    fillOpacity={
-                      0.25 + 0.75 * (entry.v / spectrumMax)
-                    }
-                    className="transition-all duration-300"
-                  />
-                ))}
-              </Bar>
-              <ReferenceLine
-                y={spectrumMean}
-                stroke="#475569"
-                strokeDasharray="3 3"
-                label={{
-                  value: `moyenne ${spectrumMean.toFixed(1)}`,
-                  position: "insideTopRight",
-                  fill: "#64748b",
-                  fontSize: 10,
-                }}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* X-Axis Labels (Simplified) */}
-        <div className="flex justify-between text-xs font-mono text-slate-600 px-1 mt-2">
-          <span>1</span>
-          <span>10</span>
-          <span>20</span>
-          <span>30</span>
-          <span>40</span>
-          <span>50</span>
-          <span>60</span>
-          <span>70</span>
-          <span>80</span>
-          <span>90</span>
-        </div>
-      </div>
-
-      {/* 3. ADVANCED OPERATIONS & CALIBRATION */}
-      <div
-        id="platinum-calibration-panel"
-        className="bg-slate-900/60 backdrop-blur-md rounded-3xl p-6 border border-white/5 space-y-6"
-      >
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-              <Sliders size={16} className="text-amber-500" />
-              Tableau de Calibration de Précision
-            </h3>
-            <p className="text-[10px] text-slate-400 mt-1">
-              Ajustez l'algorithme hyper-convergé et lancez un rétro-audit
-              temporel pour calibrer vos tickets.
-            </p>
-          </div>
+      {/* 0. WORKSTATION SUB-NAVIGATION */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-2 bg-slate-900/80 backdrop-blur-md rounded-2xl border border-white/5">
+        <div className="flex items-center gap-1.5 overflow-x-auto">
           <button
             onClick={() => {
               audioEngine.play("click");
-              setShowCalibration(!showCalibration);
+              setActiveView("SCENARIOS");
             }}
-            className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-2 bg-slate-850 hover:bg-slate-750 text-slate-300"
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeView === "SCENARIOS"
+                ? "bg-indigo-600 text-white shadow-lg shadow-indigo-600/30"
+                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+            }`}
           >
-            <Settings
-              size={12}
-              className={
-                showCalibration
-                  ? "rotate-90 transition-transform"
-                  : "transition-transform"
-              }
-            />
-            {showCalibration ? "Masquer Réglages" : "Configurer Moteur"}
+            <Layers size={14} />
+            <span>Multi-Scénarios & Spectre</span>
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setActiveView("GENOME");
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeView === "GENOME"
+                ? "bg-violet-600 text-white shadow-lg shadow-violet-600/30"
+                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+            }`}
+          >
+            <Dna size={14} />
+            <span>Génome & Tamis ADN</span>
+            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-violet-400/20 text-violet-200">
+              Direct
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setActiveView("DECISION");
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeView === "DECISION"
+                ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30"
+                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+            }`}
+          >
+            <Scale size={14} />
+            <span>Studio Décisionnel & Kelly</span>
+          </button>
+
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setActiveView("BACKTEST");
+            }}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all ${
+              activeView === "BACKTEST"
+                ? "bg-amber-600 text-white shadow-lg shadow-amber-600/30"
+                : "text-slate-400 hover:text-white hover:bg-slate-800/60"
+            }`}
+          >
+            <Sliders size={14} />
+            <span>Calibration & Rétro-Audit</span>
           </button>
         </div>
 
-        <AnimatePresence>
-          {showCalibration && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="overflow-hidden pt-4 border-t border-white/5 space-y-6"
+        <div className="flex items-center gap-2">
+          {result ? (
+            <button
+              onClick={runAnalysis}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 text-[10px] font-black uppercase tracking-widest border border-white/5 transition-all active:scale-95"
             >
+              <RefreshCw size={12} />
+              Re-Scan
+            </button>
+          ) : (
+            <button
+              onClick={runAnalysis}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-md shadow-indigo-600/30"
+            >
+              <Zap size={12} />
+              Lancer Inférence
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* VIEW 1: MULTI-SCÉNARIOS & SPECTRE */}
+      {activeView === "SCENARIOS" && (
+        <>
+          {!result && !isInferring && (
+            <div className="flex flex-col items-center justify-center min-h-[480px] p-8 text-center bg-slate-900/50 rounded-3xl border border-white/5">
+              <div className="p-6 bg-slate-900 rounded-full shadow-2xl mb-8 border border-white/5">
+                <Layers size={64} className="text-indigo-400" />
+              </div>
+              <h2 className="text-3xl md:text-5xl font-black text-white tracking-tighter mb-4">
+                Nexus <span className="text-indigo-500">Platinum</span>
+              </h2>
+              <p className="text-slate-400 max-w-md text-sm font-medium leading-relaxed mb-6">
+                Activez le moteur de fusion tensorielle pour générer un spectre de
+                probabilité unifié à partir de tous les modèles disponibles.
+              </p>
+              <p className="text-slate-500 max-w-md text-xs leading-relaxed mb-8">
+                Astuce : Vous pouvez explorer l'autopsie génomique et le tamisage fréquentiel dès maintenant dans l'onglet{" "}
+                <button
+                  onClick={() => setActiveView("GENOME")}
+                  className="text-violet-400 font-bold underline hover:text-violet-300"
+                >
+                  Génome & Tamis ADN
+                </button>
+                , sans attendre l'inférence.
+              </p>
+              <button
+                onClick={runAnalysis}
+                className="px-10 py-5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all active:scale-95 flex items-center gap-3 group"
+              >
+                <Zap
+                  size={18}
+                  className="group-hover:text-yellow-300 transition-colors"
+                />{" "}
+                Initialiser le Système
+              </button>
+            </div>
+          )}
+
+          {result && (
+            <div className="space-y-6">
+              {/* MISSION CONTROL HEADER */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                    <span>Cohérence</span>
+                    <ShieldCheck size={14} className="text-emerald-400" />
+                  </span>
+                  <div className="mt-2 text-2xl font-black text-white flex items-center gap-2">
+                    {result.coherence}
+                    <Activity size={16} style={{ color: metricHue(result.coherence) }} />
+                  </div>
+                  <span className="text-[9px] font-mono text-slate-500 mt-1">
+                    {typeof result.entropy === "number"
+                      ? `H = ${result.entropy.toFixed(3)} bit/sym`
+                      : "H = n/d"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                    <span>Tamis ADN Actif</span>
+                    <Dna size={14} className="text-violet-400" />
+                  </span>
+                  <div className="mt-2 text-2xl font-black text-violet-400 flex items-baseline gap-1">
+                    {typeof result.dnaSieveInfo?.dnaConcordanceMean === "number"
+                      ? result.dnaSieveInfo.dnaConcordanceMean
+                      : "n/d"}
+                    {typeof result.dnaSieveInfo?.dnaConcordanceMean === "number" && (
+                      <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">
+                        indice
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[9px] font-mono text-slate-400 mt-1 truncate">
+                    Intensité :{" "}
+                    {typeof result.dnaSieveInfo?.sieveIntensityPercent === "number"
+                      ? `${result.dnaSieveInfo.sieveIntensityPercent}%`
+                      : "n/d"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-900 p-4 rounded-3xl border border-white/5 flex flex-col justify-between">
+                  <span className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                    <span>Régime</span>
+                    <span className="text-[9px] font-mono text-slate-400">
+                      {typeof result.regimeProbabilities?.stable === "number"
+                        ? `${result.regimeProbabilities.stable}% S`
+                        : "n/d"}
+                    </span>
+                  </span>
+                  <div
+                    className="mt-2 text-xl font-black uppercase"
+                    style={{ color: regimeTint(result.regimeProbabilities) }}
+                  >
+                    {result.regime}
+                  </div>
+                  {result.regimeProbabilities && (
+                    <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden flex mt-2">
+                      <div
+                        className="bg-emerald-500 h-full"
+                        style={{ width: `${result.regimeProbabilities.stable}%` }}
+                        title={`Stable: ${result.regimeProbabilities.stable}%`}
+                      />
+                      <div
+                        className="bg-amber-500 h-full"
+                        style={{ width: `${result.regimeProbabilities.transition}%` }}
+                        title={`Transition: ${result.regimeProbabilities.transition}%`}
+                      />
+                      <div
+                        className="bg-rose-500 h-full"
+                        style={{ width: `${result.regimeProbabilities.chaotic}%` }}
+                        title={`Chaotique: ${result.regimeProbabilities.chaotic}%`}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={runAnalysis}
+                  className="bg-indigo-600 hover:bg-indigo-500 rounded-3xl p-4 flex flex-col items-center justify-center text-white transition-colors group shadow-lg shadow-indigo-600/20 active:scale-95"
+                >
+                  <RefreshCw
+                    size={20}
+                    className="mb-1 group-hover:rotate-180 transition-transform duration-300"
+                  />
+                  <span className="text-xs font-black uppercase tracking-widest">
+                    Re-Scan Déterministe
+                  </span>
+                </button>
+              </div>
+
+              {/* HYPER-SPECTRUM CHART */}
+              <div className="bg-slate-900/40 backdrop-blur-xl p-8 md:p-10 rounded-[2rem] border border-slate-850 shadow-2xl relative overflow-hidden group">
+                <div className="flex justify-between items-center mb-8 px-2">
+                  <div>
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+                      <BarChart3 className="text-indigo-400" size={12} /> Densité
+                      Relative (100 = numéro le mieux classé)
+                    </h3>
+                    <span className="text-2xl sm:text-3xl font-black text-white tracking-tighter">
+                      Hyper-Spectre Harmonique
+                    </span>
+                  </div>
+                  {hoveredIndex !== null && (
+                    <div className="flex items-center gap-2.5 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/20 shadow-inner animate-fade-in">
+                      <span className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">
+                        Numéro {hoveredIndex}
+                      </span>
+                      <span
+                        className="text-sm font-black"
+                        style={{ color: metricHue(spectrumData[hoveredIndex - 1]?.v ?? 0) }}
+                      >
+                        {spectrumData[hoveredIndex - 1]?.v ?? "n/d"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={spectrumData}
+                      onMouseMove={(e) => {
+                        if (e.activeTooltipIndex !== undefined)
+                          setHoveredIndex(e.activeTooltipIndex + 1);
+                      }}
+                      onMouseLeave={() => setHoveredIndex(null)}
+                    >
+                      <defs>
+                        <linearGradient id="spectrumBar" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#818cf8" />
+                          <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.4} />
+                        </linearGradient>
+                      </defs>
+                      <Tooltip />
+                      <Bar dataKey="v" radius={[2, 2, 0, 0]} animationDuration={1500}>
+                        {spectrumData.map((entry, index) => (
+                          <Cell
+                            key={`cell-${index}`}
+                            fill={
+                              selectedScenario?.numbers.includes(entry.n)
+                                ? selectedScenario.color
+                                : "#818cf8"
+                            }
+                            fillOpacity={
+                              0.25 + 0.75 * (entry.v / spectrumMax)
+                            }
+                            className="transition-all duration-300"
+                          />
+                        ))}
+                      </Bar>
+                      <ReferenceLine
+                        y={spectrumMean}
+                        stroke="#475569"
+                        strokeDasharray="3 3"
+                        label={{
+                          value: `moyenne ${spectrumMean.toFixed(1)}`,
+                          position: "insideTopRight",
+                          fill: "#64748b",
+                          fontSize: 10,
+                        }}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="flex justify-between text-xs font-mono text-slate-600 px-1 mt-2">
+                  <span>1</span>
+                  <span>10</span>
+                  <span>20</span>
+                  <span>30</span>
+                  <span>40</span>
+                  <span>50</span>
+                  <span>60</span>
+                  <span>70</span>
+                  <span>80</span>
+                  <span>90</span>
+                </div>
+              </div>
+
+              {/* STOCHASTIC MODELS */}
+              <PlatinumStochasticModelCard
+                markowitz={result.markowitzPortfolio}
+                kalman={result.kalmanRegimeState}
+                hawkes={result.spatioTemporalHawkes}
+                selectedScenarioId={selectedScenarioId}
+                onSelectScenarioId={handleScenarioClick}
+              />
+
+              {/* SCENARIOS SECTION */}
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Radio className="text-indigo-400" size={22} />
+                    <div>
+                      <h3 className="text-base font-black text-white uppercase tracking-wider">
+                        6 Scénarios Stratégiques Platinum
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Vecteurs d'inférence pondérés pour le tirage {drawName}. Sélectionnez un scénario pour rayon-X ou morphing.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {result.scenarios.map((scenario) => (
+                    <ScenarioCard
+                      key={scenario.id}
+                      scenario={scenario}
+                      isSelected={selectedScenarioId === scenario.id}
+                      onClick={() => handleScenarioClick(scenario.id)}
+                      onSave={() => handleSave(scenario)}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* DEEP INSPECTION */}
+              <AnimatePresence>
+                {selectedScenario && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      id={`scenario-xray-${selectedScenario.id}`}
+                      className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 md:p-10 border border-slate-200/60 dark:border-slate-800 shadow-xl shadow-slate-200/20 dark:shadow-none relative"
+                    >
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                          <Fingerprint className="text-slate-400" size={20} />
+                          <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">
+                            Rayon-X : {selectedScenario.name}
+                          </h4>
+                        </div>
+                        <button
+                          onClick={() => handleExportScenario(selectedScenario)}
+                          data-html2canvas-ignore
+                          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-colors"
+                        >
+                          <Share2 size={14} /> Exporter
+                        </button>
+                      </div>
+
+                      <TicketXRay
+                        numbers={selectedScenario.numbers}
+                        score={selectedScenario.relativeIndex}
+                        showTitle={false}
+                      />
+
+                      <div className="mt-6 flex items-start gap-3 p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
+                        <AlertCircle
+                          size={16}
+                          className="text-indigo-500 shrink-0 mt-0.5"
+                        />
+                        <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
+                          Ce scénario est optimisé pour un régime{" "}
+                          <strong>{result.regime}</strong>. Indice de cohérence globale :{" "}
+                          <strong>{result.coherence}</strong> / 100 (entropie inverse du
+                          vecteur de consensus). Un tirage équitable reste équiprobable
+                          quel que soit le scénario.
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* VIEW 2: GÉNAME & TAMIS ADN (ACCESSIBLE DIRECTEMENT AVANT OU APRÈS INFÉRENCE) */}
+      {activeView === "GENOME" && (
+        <div className="space-y-4">
+          <div className="p-4 bg-slate-900/60 rounded-2xl border border-white/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
+                <Dna className="text-violet-400" size={16} />
+                Autopsie Génomique & Tamisage Fréquentiel — {drawName}
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Exploration déterministe autonome : accessible en continu avant ou après inférence des scénarios.
+              </p>
+            </div>
+            {!result ? (
+              <button
+                onClick={runAnalysis}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
+              >
+                <Zap size={12} /> Lancer Inférence Scénarios
+              </button>
+            ) : (
+              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-lg">
+                Scénarios Synchronisés ({result.scenarios.length})
+              </span>
+            )}
+          </div>
+
+          <UnifiedDnaSieveRadar
+            drawName={drawName}
+            initialViewMode="RADAR"
+            scenarios={result?.scenarios}
+            selectedScenarioId={selectedScenarioId}
+            onSelectScenarioId={handleScenarioClick}
+          />
+        </div>
+      )}
+
+      {/* VIEW 3: STUDIO DÉCISIONNEL & KELLY */}
+      {activeView === "DECISION" && (
+        <div className="space-y-4">
+          {!result ? (
+            <div className="flex flex-col items-center justify-center min-h-[400px] p-8 text-center bg-slate-900/50 rounded-3xl border border-white/5">
+              <div className="p-5 bg-slate-900 rounded-full shadow-2xl mb-6 border border-white/5">
+                <Scale size={48} className="text-emerald-400" />
+              </div>
+              <h3 className="text-xl font-black text-white uppercase tracking-wider mb-2">
+                Studio Décisionnel &amp; Dimensionnement Kelly
+              </h3>
+              <p className="text-slate-400 max-w-md text-xs font-medium leading-relaxed mb-6">
+                Le Studio requiert un résultat d'inférence multi-scénarios pour activer le morphing continu $(\alpha \in [0, 1])$, le calcul d'espérance mathématique (EV) et l'allocation Kelly fractionnaire selon les cotes officielles LONACI.
+              </p>
+              <button
+                onClick={runAnalysis}
+                className="px-8 py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-600/20 transition-all active:scale-95 flex items-center gap-2"
+              >
+                <Zap size={14} /> Initialiser l'Inférence Multi-Scénarios
+              </button>
+            </div>
+          ) : (
+            <PlatinumDecisionStudio
+              result={result}
+              drawName={drawName}
+              selectedScenarioId={selectedScenarioId}
+              onSelectScenarioId={handleScenarioClick}
+            />
+          )}
+        </div>
+      )}
+
+      {/* VIEW 4: CALIBRATION & RÉTRO-AUDIT */}
+      {activeView === "BACKTEST" && (
+        <div className="space-y-6">
+          <div
+            id="platinum-calibration-panel"
+            className="bg-slate-900/60 backdrop-blur-md rounded-3xl p-6 border border-white/5 space-y-6"
+          >
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                  <Sliders size={16} className="text-amber-500" />
+                  Tableau de Calibration de Précision & Paramètres Opérationnels
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Ajustez les hyperparamètres continus et lancez un rétro-audit temporel pour auditer la validité empirique des modèles.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={runBacktest}
+                  disabled={isBacktesting}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isBacktesting ? (
+                    <>
+                      <RefreshCw size={12} className="animate-spin" /> Audit rétrograde...
+                    </>
+                  ) : (
+                    <>
+                      <History size={12} className="text-violet-400" /> Lancer Rétro-Audit
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={runAnalysis}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-600/20 active:scale-95 flex items-center gap-2"
+                >
+                  <Zap size={12} /> Appliquer & Synchroniser
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-white/5 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Sliders */}
                 <div className="space-y-4">
                   {/* Regime Pivot Slider */}
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider">
                       <span className="text-slate-400 flex items-center gap-1.5">
-                        <Cpu size={12} className="text-indigo-400" /> Seuil
-                        Pivot de Régime
+                        <Cpu size={12} className="text-indigo-400" /> Seuil Pivot de Régime
                       </span>
                       <span className="text-indigo-400 font-mono">
                         {regimePivot.toFixed(2)}
@@ -894,8 +1161,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                       className="w-full accent-indigo-500 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
                     />
                     <p className="text-[9px] text-slate-500 leading-normal">
-                      Seuil d'inflexion stochastique. Détermine la limite de
-                      sensibilité entre les régimes ordonnés et chaotiques.
+                      Seuil d'inflexion stochastique. Détermine la limite de sensibilité entre les régimes ordonnés et chaotiques.
                     </p>
                   </div>
 
@@ -903,8 +1169,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider">
                       <span className="text-slate-400 flex items-center gap-1.5">
-                        <History size={12} className="text-violet-400" /> Gain
-                        Rétroactif Forensic
+                        <History size={12} className="text-violet-400" /> Gain Rétroactif Forensic
                       </span>
                       <span className="text-violet-400 font-mono">
                         {forensicGain.toFixed(1)}x
@@ -920,8 +1185,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                       className="w-full accent-violet-500 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
                     />
                     <p className="text-[9px] text-slate-500 leading-normal">
-                      Intensité de correction d'erreurs. Multiplie la
-                      rétroaction des dérives et manques historiques.
+                      Intensité de correction d'erreurs. Multiplie la rétroaction des dérives et manques historiques.
                     </p>
                   </div>
                 </div>
@@ -931,8 +1195,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider">
                       <span className="text-slate-400 flex items-center gap-1.5">
-                        <Activity size={12} className="text-rose-400" /> Phase
-                        Trigonométrique
+                        <Activity size={12} className="text-rose-400" /> Phase Trigonométrique
                       </span>
                       <span className="text-rose-400 font-mono">
                         {phaseFrequency.toFixed(1)} rad
@@ -944,14 +1207,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                       max="2.0"
                       step="0.1"
                       value={phaseFrequency}
-                      onChange={(e) =>
-                        setPhaseFrequency(Number(e.target.value))
-                      }
+                      onChange={(e) => setPhaseFrequency(Number(e.target.value))}
                       className="w-full accent-rose-500 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
                     />
                     <p className="text-[9px] text-slate-500 leading-normal">
-                      Dispersion orbitale des scénarios. Modifie le décalage
-                      fréquentiel angulaire pour éviter les chevauchements.
+                      Dispersion orbitale des scénarios. Modifie le décalage fréquentiel angulaire pour éviter les chevauchements.
                     </p>
                   </div>
 
@@ -962,8 +1222,7 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                         Filtre de Shannon (Réduction de Bruit)
                       </span>
                       <span className="text-[9px] text-slate-500 mt-0.5 block leading-normal max-w-xs">
-                        Élimine de façon différentielle les bruits blancs sous
-                        le spectre d'énergie moyenne.
+                        Élimine de façon différentielle les bruits blancs sous le spectre d'énergie moyenne.
                       </span>
                     </div>
                     <button
@@ -987,295 +1246,162 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Actions bar inside configurations */}
-              <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-white/5 justify-end">
-                <button
-                  onClick={runBacktest}
-                  disabled={isBacktesting}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-white/5 text-[10px] font-black uppercase tracking-widest rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2"
+            {/* Backtesting Results Dashboard */}
+            <AnimatePresence>
+              {backtestResults && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.98 }}
+                  className="bg-slate-950/80 rounded-2xl p-5 border border-violet-500/10 space-y-5 pt-4"
                 >
-                  {isBacktesting ? (
-                    <>
-                      <RefreshCw size={12} className="animate-spin" /> Audit
-                      rétrograde...
-                    </>
-                  ) : (
-                    <>
-                      <History size={12} className="text-violet-400" />{" "}
-                      Rétro-Audit Temporel
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={runAnalysis}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all shadow-lg shadow-indigo-600/20 active:scale-95 flex items-center gap-2"
-                >
-                  <Zap size={12} /> Appliquer & Synchroniser
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Backtesting Results Dashboard */}
-        <AnimatePresence>
-          {backtestResults && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              className="bg-slate-950/80 rounded-2xl p-5 border border-violet-500/10 space-y-5 pt-4"
-            >
-              <div className="flex justify-between items-center border-b border-white/5 pb-3">
-                <div>
-                  <h4 className="text-[10px] font-black text-violet-400 uppercase tracking-widest flex items-center gap-1.5">
-                    <CheckCircle2 size={12} /> Diagnostic de l'Audit Temporel
-                    (Time Machine)
-                  </h4>
-                  <p className="text-[10px] text-slate-400 mt-0.5">
-                    Rapport d'autopsie stochastique simulé sur les{" "}
-                    <strong>{backtestResults.trials}</strong> derniers tirages
-                    réels.
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    audioEngine.play("click");
-                    setBacktestResults(null);
-                  }}
-                  className="text-slate-500 hover:text-slate-300 text-[10px] font-bold uppercase tracking-wider font-mono p-1"
-                >
-                  Effacer
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {Object.entries(backtestResults.scenariosStats).map(
-                  ([id, stats]: any) => (
-                    <div
-                      key={id}
-                      className="p-4 bg-slate-900 rounded-xl border border-white/5 space-y-2"
+                  <div className="flex justify-between items-center border-b border-white/5 pb-3">
+                    <div>
+                      <h4 className="text-[10px] font-black text-violet-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <CheckCircle2 size={12} /> Diagnostic de l'Audit Temporel (Time Machine)
+                      </h4>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Rapport d'autopsie stochastique simulé sur les{" "}
+                        <strong>{backtestResults.trials}</strong> derniers tirages réels.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        audioEngine.play("click");
+                        setBacktestResults(null);
+                      }}
+                      className="text-slate-500 hover:text-slate-300 text-[10px] font-bold uppercase tracking-wider font-mono p-1"
                     >
-                      <div className="flex justify-between items-start">
-                        <span className="text-[11px] font-black text-white uppercase truncate max-w-[130px]">
-                          {stats.name}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-500">
-                          ≥2 bons :{" "}
-                          <strong className="text-emerald-400">
-                            {stats.ge2Rate}%
-                          </strong>
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[9px] font-mono text-slate-400">
-                          <span>Hits moyens</span>
-                          <span className="text-slate-300">
-                            {stats.meanHits} / 5{" "}
-                            <span className="text-slate-500">
-                              (aléatoire {stats.expectedHits})
+                      Effacer
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {Object.entries(backtestResults.scenariosStats).map(
+                      ([id, stats]: any) => (
+                        <div
+                          key={id}
+                          className="p-4 bg-slate-900 rounded-xl border border-white/5 space-y-2"
+                        >
+                          <div className="flex justify-between items-start">
+                            <span className="text-[11px] font-black text-white uppercase truncate max-w-[130px]">
+                              {stats.name}
                             </span>
+                            <span className="text-[10px] font-mono text-slate-500">
+                              ≥2 bons :{" "}
+                              <strong className="text-emerald-400">
+                                {stats.ge2Rate}%
+                              </strong>
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[9px] font-mono text-slate-400">
+                              <span>Hits moyens</span>
+                              <span className="text-slate-300">
+                                {stats.meanHits} / 5{" "}
+                                <span className="text-slate-500">
+                                  (aléatoire {stats.expectedHits})
+                                </span>
+                              </span>
+                            </div>
+                            <div className="relative w-full bg-slate-850 h-1 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-violet-500 to-indigo-500"
+                                style={{ width: `${(stats.meanHits / 5) * 100}%` }}
+                              />
+                              <div
+                                className="absolute top-0 h-full w-px bg-slate-400/70"
+                                style={{
+                                  left: `${(stats.expectedHits / 5) * 100}%`,
+                                }}
+                                title={`Espérance sous tirage équitable : ${stats.expectedHits}`}
+                              />
+                            </div>
+                          </div>
+                          <span className="text-[9px] font-mono text-slate-500 block">
+                            Nombre total de hits :{" "}
+                            <strong className="text-indigo-400">
+                              {stats.totalHits}
+                            </strong>
+                          </span>
+                          <span className="text-[9px] font-mono text-slate-500 block">
+                            Test équité (≥2 bons) :{" "}
+                            {stats.pValue === null || stats.qValue === null ? (
+                              <span className="text-slate-400">
+                                n/d — échantillon insuffisant
+                              </span>
+                            ) : (
+                              <>
+                                p ={" "}
+                                <strong className="text-slate-300">
+                                  {stats.pValue.toFixed(3)}
+                                </strong>
+                                {" · "}q (FDR) ={" "}
+                                <strong
+                                  className={
+                                    stats.qValue <= NEUTRAL_FDR_TOLERANCE
+                                      ? "text-emerald-400"
+                                      : "text-slate-300"
+                                  }
+                                >
+                                  {stats.qValue.toFixed(3)}
+                                </strong>
+                              </>
+                            )}
                           </span>
                         </div>
-                        {/* Progress Hits Bar + repère du hasard pur */}
-                        <div className="relative w-full bg-slate-850 h-1 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-gradient-to-r from-violet-500 to-indigo-500"
-                            style={{ width: `${(stats.meanHits / 5) * 100}%` }}
-                          />
-                          <div
-                            className="absolute top-0 h-full w-px bg-slate-400/70"
-                            style={{
-                              left: `${(stats.expectedHits / 5) * 100}%`,
-                            }}
-                            title={`Espérance sous tirage équitable : ${stats.expectedHits}`}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-[9px] font-mono text-slate-500 block">
-                        Nombre total de hits :{" "}
-                        <strong className="text-indigo-400">
-                          {stats.totalHits}
-                        </strong>
+                      ),
+                    )}
+                  </div>
+
+                  <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/15 space-y-1.5 text-[10px]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">
+                        Plus grand nombre de hits observés sur la fenêtre :
                       </span>
-                      <span className="text-[9px] font-mono text-slate-500 block">
-                        Test équité (≥2 bons) :{" "}
-                        {stats.pValue === null || stats.qValue === null ? (
-                          <span className="text-slate-400">
-                            n/d — échantillon insuffisant
-                          </span>
-                        ) : (
-                          <>
-                            p ={" "}
-                            <strong className="text-slate-300">
-                              {stats.pValue.toFixed(3)}
-                            </strong>
-                            {" · "}q (FDR) ={" "}
-                            <strong
-                              className={
-                                stats.qValue <= NEUTRAL_FDR_TOLERANCE
-                                  ? "text-emerald-400"
-                                  : "text-slate-300"
-                              }
-                            >
-                              {stats.qValue.toFixed(3)}
-                            </strong>
-                          </>
-                        )}
+                      <span className="font-black text-emerald-400 uppercase tracking-wider">
+                        {backtestResults.bestScenario}
                       </span>
                     </div>
-                  ),
-                )}
-              </div>
-
-              <div className="p-3 bg-indigo-500/5 rounded-xl border border-indigo-500/15 space-y-1.5 text-[10px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">
-                    Plus grand nombre de hits observés sur la fenêtre :
-                  </span>
-                  <span className="font-black text-emerald-400 uppercase tracking-wider">
-                    {backtestResults.bestScenario}
-                  </span>
-                </div>
-                <p className="text-[9px] font-mono text-slate-500 leading-relaxed">
-                  Référence tirage équitable (loi hypergéométrique exacte 5/90) :{" "}
-                  {NULL_EXPECTED_HITS.toFixed(2)} hit(s) attendu(s) par tirage et{" "}
-                  {(NULL_PROB_AT_LEAST_2 * 100).toFixed(2)}% de tirages à ≥2 bons
-                  numéros.{" "}
-                  {backtestVerdict === null || backtestVerdict.testedCount === 0 ? (
-                    <>
-                      Aucun test de significativité n'a pu être calculé sur cette
-                      fenêtre : la conclusion reste indéterminée.
-                    </>
-                  ) : backtestVerdict.rejected.length === 0 ? (
-                    <>
-                      Test binomial exact unilatéral (n = {backtestResults.trials}) sur{" "}
-                      {backtestVerdict.testedCount} scénario(s) puis correction FDR : la
-                      plus petite q-value observée est {backtestVerdict.minQ?.toFixed(3)},
-                      au-dessus de la tolérance dérivée du jeu (
-                      {(NEUTRAL_FDR_TOLERANCE * 100).toFixed(2)}% = proportion neutre
-                      5/90). Aucun scénario ne se distingue significativement du hasard
-                      sur cette fenêtre.
-                    </>
-                  ) : (
-                    <>
-                      Test binomial exact unilatéral (n = {backtestResults.trials}) puis
-                      correction FDR : {backtestVerdict.rejected.join(", ")} passe(nt)
-                      sous la tolérance dérivée du jeu (
-                      {(NEUTRAL_FDR_TOLERANCE * 100).toFixed(2)}% = 5/90). À confirmer sur
-                      une fenêtre plus longue avant toute conclusion opérationnelle.
-                    </>
-                  )}
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {/* 3. MODÉLISATION STOCHASTIQUE AVANCÉE : MARKOWITZ-KELLY, HAWKES 2D & KALMAN EKF */}
-      {result && (
-        <PlatinumStochasticModelCard
-          markowitz={result.markowitzPortfolio}
-          kalman={result.kalmanRegimeState}
-          hawkes={result.spatioTemporalHawkes}
-          selectedScenarioId={selectedScenarioId}
-          onSelectScenarioId={handleScenarioClick}
-        />
-      )}
-
-      {/* 4. RADAR GÉNOMIQUE & SCÉNARIOS STRATÉGIQUES PLATINUM */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Radio className="text-indigo-400" size={22} />
-            <div>
-              <h3 className="text-base font-black text-white uppercase tracking-wider">
-                6 Scénarios Stratégiques Platinum &amp; Empreinte Spectrale
-              </h3>
-              <p className="text-xs text-slate-400">
-                Superposition déterministe de l'ADN réel du tirage ({drawName}) et du profil spectrale de chaque scénario.
-              </p>
-            </div>
+                    <p className="text-[9px] font-mono text-slate-500 leading-relaxed">
+                      Référence tirage équitable (loi hypergéométrique exacte 5/90) :{" "}
+                      {NULL_EXPECTED_HITS.toFixed(2)} hit(s) attendu(s) par tirage et{" "}
+                      {(NULL_PROB_AT_LEAST_2 * 100).toFixed(2)}% de tirages à ≥2 bons
+                      numéros.{" "}
+                      {backtestVerdict === null || backtestVerdict.testedCount === 0 ? (
+                        <>
+                          Aucun test de significativité n'a pu être calculé sur cette
+                          fenêtre : la conclusion reste indéterminée.
+                        </>
+                      ) : backtestVerdict.rejected.length === 0 ? (
+                        <>
+                          Test binomial exact unilatéral (n = {backtestResults.trials}) sur{" "}
+                          {backtestVerdict.testedCount} scénario(s) puis correction FDR : la
+                          plus petite q-value observée est {backtestVerdict.minQ?.toFixed(3)},
+                          au-dessus de la tolérance dérivée du jeu (
+                          {(NEUTRAL_FDR_TOLERANCE * 100).toFixed(2)}% = proportion neutre
+                          5/90). Aucun scénario ne se distingue significativement du hasard
+                          sur cette fenêtre.
+                        </>
+                      ) : (
+                        <>
+                          Test binomial exact unilatéral (n = {backtestResults.trials}) puis
+                          correction FDR : {backtestVerdict.rejected.join(", ")} passe(nt)
+                          sous la tolérance dérivée du jeu (
+                          {(NEUTRAL_FDR_TOLERANCE * 100).toFixed(2)}% = 5/90). À confirmer sur
+                          une fenêtre plus longue avant toute conclusion opérationnelle.
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
-
-        <UnifiedDnaSieveRadar
-          drawName={drawName}
-          initialViewMode="RADAR"
-          scenarios={result.scenarios}
-          selectedScenarioId={selectedScenarioId}
-          onSelectScenarioId={handleScenarioClick}
-        />
-
-        {/* SCENARIO SELECTOR */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {result.scenarios.map((scenario) => (
-            <ScenarioCard
-              key={scenario.id}
-              scenario={scenario}
-              isSelected={selectedScenarioId === scenario.id}
-              onClick={() => handleScenarioClick(scenario.id)}
-              onSave={() => handleSave(scenario)}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* 4. DEEP INSPECTION (Conditional) */}
-      <AnimatePresence>
-        {selectedScenario && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div
-              id={`scenario-xray-${selectedScenario.id}`}
-              className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 md:p-10 border border-slate-200/60 dark:border-slate-800 shadow-xl shadow-slate-200/20 dark:shadow-none relative"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <Fingerprint className="text-slate-400" size={20} />
-                  <h4 className="text-sm font-black text-slate-800 dark:text-white uppercase tracking-widest">
-                    Rayon-X : {selectedScenario.name}
-                  </h4>
-                </div>
-                <button
-                  onClick={() => handleExportScenario(selectedScenario)}
-                  data-html2canvas-ignore
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-600 dark:text-slate-300 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-colors"
-                >
-                  <Share2 size={14} /> Exporter
-                </button>
-              </div>
-
-              <TicketXRay
-                numbers={selectedScenario.numbers}
-                score={selectedScenario.relativeIndex}
-                showTitle={false}
-              />
-
-              <div className="mt-6 flex items-start gap-3 p-4 bg-slate-50 dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800">
-                <AlertCircle
-                  size={16}
-                  className="text-indigo-500 shrink-0 mt-0.5"
-                />
-                <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
-                  Ce scénario est optimisé pour un régime{" "}
-                  <strong>{result.regime}</strong>. Indice de cohérence globale :{" "}
-                  <strong>{result.coherence}</strong> / 100 (entropie inverse du
-                  vecteur de consensus). Un tirage équitable reste équiprobable
-                  quel que soit le scénario.
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      </>)}
+      )}
     </div>
   );
 };

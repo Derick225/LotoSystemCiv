@@ -5,6 +5,7 @@ import {
 } from "../../services/spatialService";
 import { predictBarycenterShift } from "../../services/mathService";
 import { useNexusStore } from "../../store/useNexusStore";
+import { isLotoEngineWasmReady } from "../../services/wasm/lotoEngineBridge";
 import type { SpatialMetrics, DrawResult, BarycenterPoint } from "../../types";
 import {
   Layers,
@@ -179,9 +180,17 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
             <Clock size={20} className={isPlaying ? "animate-spin" : ""} />
           </div>
           <div>
-            <h4 className="text-sm font-black uppercase tracking-widest">
-              Replay Historique
-            </h4>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-black uppercase tracking-widest">
+                Replay Historique
+              </h4>
+              {isLotoEngineWasmReady() && (
+                <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md flex items-center gap-1">
+                  <Sparkles size={10} />
+                  Rust / WASM
+                </span>
+              )}
+            </div>
             <p className="text-[10px] text-slate-400 font-medium">
               {timeIndex === 0 ? "TEMPS RÉEL" : `Recul de ${timeIndex} tirages`}
             </p>

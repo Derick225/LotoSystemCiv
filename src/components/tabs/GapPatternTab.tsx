@@ -37,6 +37,10 @@ import {
 import { audioEngine } from "../../utils/audioEngine";
 import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from "../../shared/prediction.types";
 import { generateMasterPrediction, getAlgoWeights } from "../../services/prediction/predictionFacade";
+import {
+  computePearsonCorrelationHpc,
+  isLotoEngineWasmReady,
+} from "../../services/wasm/lotoEngineBridge";
 
 /**
  * Famille "Écart" telle que réellement mesurée par la matrice de corrélation ci-dessous.
@@ -122,26 +126,7 @@ export const GapPatternTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     scoresX: number[],
     scoresY: number[],
   ): number | null => {
-    const n = scoresX.length;
-    if (n === 0) return null;
-    const meanX = scoresX.reduce((a, b) => a + b, 0) / n;
-    const meanY = scoresY.reduce((a, b) => a + b, 0) / n;
-
-    let num = 0;
-    let denX = 0;
-    let denY = 0;
-
-    for (let i = 0; i < n; i++) {
-      const diffX = scoresX[i] - meanX;
-      const diffY = scoresY[i] - meanY;
-      num += diffX * diffY;
-      denX += diffX * diffX;
-      denY += diffY * diffY;
-    }
-
-    // Variance nulle : la corrélation de Pearson est indéfinie, ne pas l'afficher comme mesurée.
-    if (denX === 0 || denY === 0) return null;
-    return num / Math.sqrt(denX * denY);
+    return computePearsonCorrelationHpc(scoresX, scoresY);
   };
 
   const runCorrelationAnalysis = async () => {

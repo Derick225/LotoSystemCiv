@@ -170,7 +170,7 @@ export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: str
     const chronological = [...draws].reverse();
 
     for (const d of chronological) {
-      const val = validateDrawRecord(d);
+      const val = validateDrawRecord(d, { allowSynthetic: true });
       if (!val.valid || !val.cleanDraw) continue;
       const clean = val.cleanDraw;
 

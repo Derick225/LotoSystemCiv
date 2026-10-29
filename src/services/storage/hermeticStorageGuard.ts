@@ -38,7 +38,10 @@ export interface DrawValidationResult {
 /**
  * Valide rigoureusement un enregistrement de tirage pour la persistance locale et le moteur WASM.
  */
-export function validateDrawRecord(raw: unknown): DrawValidationResult {
+export function validateDrawRecord(
+  raw: unknown,
+  options?: { allowSynthetic?: boolean }
+): DrawValidationResult {
   const issues: ValidationIssue[] = [];
   if (!raw || typeof raw !== 'object') {
     return {
@@ -49,8 +52,8 @@ export function validateDrawRecord(raw: unknown): DrawValidationResult {
 
   const d = raw as Record<string, unknown>;
 
-  // 1. Détection de données synthétiques interdites
-  if (typeof d.id === 'string' && d.id.startsWith('deterministic-')) {
+  // 1. Détection de données synthétiques interdites (sauf si explicitement autorisé pour tests/simulations)
+  if (!options?.allowSynthetic && typeof d.id === 'string' && d.id.startsWith('deterministic-')) {
     issues.push({
       field: 'id',
       reason: 'Donnée synthétique interdite (ID préfixé par deterministic-)',
