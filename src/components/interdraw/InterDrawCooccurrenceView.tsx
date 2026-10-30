@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   InterDrawCooccurrenceReport,
   InterDrawTargetPairCooccurrence,
@@ -59,6 +59,15 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
   });
   const [matrixSearchQuery, setMatrixSearchQuery] = useState<string>("");
 
+  // Synchronisation dynamique : basculer automatiquement sur une boule active du tirage source dès chargement
+  useEffect(() => {
+    if (predecessorNumbers && predecessorNumbers.length > 0) {
+      if (!predecessorNumbers.includes(selectedMatrixSource)) {
+        setSelectedMatrixSource(predecessorNumbers[0]);
+      }
+    }
+  }, [predecessorNumbers]);
+
   if (!cooccurrences && !bivariateHpcReport) {
     return (
       <div className="p-8 text-center bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-white/5">
@@ -99,6 +108,19 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
       : cooccurrences.bivariateTriggers;
   }, [cooccurrences, bivariateFilter]);
 
+  // Map des dyades observées pour la source sélectionnée
+  const sourceDyadsMap = useMemo(() => {
+    const map = new Map<number, InterDrawCrossDyadHpc>();
+    if (bivariateHpcReport?.dyads) {
+      for (const d of bivariateHpcReport.dyads) {
+        if (d.sourceNumber === selectedMatrixSource) {
+          map.set(d.targetNumber, d);
+        }
+      }
+    }
+    return map;
+  }, [bivariateHpcReport, selectedMatrixSource]);
+
   // Transitions pour la matrice 90x90 Wasm pour la ligne selectedMatrixSource
   const matrixTransitions = useMemo(() => {
     if (!bivariateHpcReport?.transitionMatrix || selectedMatrixSource < 1 || selectedMatrixSource > 90) {
@@ -106,16 +128,27 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
     }
     const matrix = bivariateHpcReport.transitionMatrix;
     const rowOffset = (selectedMatrixSource - 1) * 90;
-    const results: { targetNumber: number; prob: number; lift: number }[] = [];
+    const results: {
+      targetNumber: number;
+      rawProb: number;
+      prob: number;
+      lift: number;
+      occurrences: number;
+      zScore: number;
+    }[] = [];
     const baseline = 5.0 / 90.0;
 
     for (let t = 1; t <= 90; t++) {
       const prob = matrix[rowOffset + (t - 1)] || 0;
       const lift = baseline > 0 ? prob / baseline : 1.0;
+      const dyad = sourceDyadsMap.get(t);
       results.push({
         targetNumber: t,
+        rawProb: prob,
         prob: Math.round(prob * 1000) / 10,
-        lift: Math.round(lift * 100) / 100
+        lift: Math.round(lift * 100) / 100,
+        occurrences: dyad?.occurrences ?? 0,
+        zScore: dyad?.zScore ?? 0,
       });
     }
 
@@ -127,8 +160,27 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
       }
     }
 
-    return filtered.sort((a, b) => b.prob - a.prob);
-  }, [bivariateHpcReport, selectedMatrixSource, matrixSearchQuery]);
+    // Tri continu avec départage strict sans seuil magique
+    return filtered.sort((a, b) => {
+      const diff = b.rawProb - a.rawProb;
+      if (Math.abs(diff) > 1e-6) {
+        return diff;
+      }
+      // Départage par occurrences observées réelles
+      if (b.occurrences !== a.occurrences) {
+        return b.occurrences - a.occurrences;
+      }
+      return a.targetNumber - b.targetNumber;
+    });
+  }, [bivariateHpcReport, selectedMatrixSource, matrixSearchQuery, sourceDyadsMap]);
+
+  // Détection de distribution plate / Laplace prior équiprobable
+  const isUniformMatrix = useMemo(() => {
+    if (matrixTransitions.length < 2) return false;
+    const first = matrixTransitions[0].rawProb;
+    const last = matrixTransitions[matrixTransitions.length - 1].rawProb;
+    return Math.abs(first - last) < 1e-6;
+  }, [matrixTransitions]);
 
   return (
     <div className="space-y-6 animate-fade-in font-sans">
@@ -760,6 +812,23 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
             </div>
           </div>
 
+          {/* Bannière pédagogique en cas d'équiprobabilité a priori */}
+          {isUniformMatrix && (
+            <div className="p-3.5 bg-amber-50/80 dark:bg-amber-950/25 border border-amber-300 dark:border-amber-700/40 rounded-2xl flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+              <Info size={16} className="text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-black uppercase tracking-wider text-[10px]">
+                  Distribution Neutre A Priori (Lissage Bayesien de Laplace)
+                </p>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5 leading-relaxed">
+                  Le numéro source #{selectedMatrixSource} n'a aucune cooccurrence discriminante enregistrée dans l'historique apparié ({predecessorName} → {targetDraw}). 
+                  En application du principe <em>Zéro Nombre Magique</em>, les 90 cibles reçoivent la probabilité théorique neutre (~5.56%, Lift 1.0x).
+                  Cliquez sur un des numéros actifs du bandeau ci-dessus pour afficher les vraies transitions observées.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Grille de distribution conditionnelle */}
           <div className="space-y-3">
             <div className="flex items-center justify-between text-xs text-slate-500">
@@ -807,6 +876,11 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
                         <span className={`text-[9px] font-mono font-bold ${isOverperforming ? 'text-emerald-500' : 'text-slate-400'}`}>
                           Lift: {t.lift}x
                         </span>
+                        {t.occurrences > 0 && (
+                          <span className="block text-[8px] font-mono font-bold text-sky-600 dark:text-sky-400">
+                            {t.occurrences}x obs.
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

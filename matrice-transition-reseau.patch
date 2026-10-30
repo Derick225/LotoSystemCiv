@@ -1,0 +1,842 @@
+diff --git a/src/components/interdraw/InterDrawCooccurrenceView.tsx b/src/components/interdraw/InterDrawCooccurrenceView.tsx
+index 58bc8d9..5420b15 100644
+--- a/src/components/interdraw/InterDrawCooccurrenceView.tsx
++++ b/src/components/interdraw/InterDrawCooccurrenceView.tsx
+@@ -10,6 +10,14 @@ import {
+   BivariateDyadsReportHpc,
+   InterDrawCrossDyadHpc
+ } from "../../services/wasm/lotoEngineBridge";
++import type { InterDrawNetworkTransitionReport } from "../../services/interDrawService";
++import {
++  rankTransitionRow,
++  isTransitionRowInformative,
++  TRANSITION_BASELINE,
++  TransitionScope
++} from "../../services/interDrawTransitionMatrix";
++import { useNexusStore } from "../../store/useNexusStore";
+ import { InterDrawPatternView } from "./InterDrawPatternView";
+ import { NumberBall } from "../NumberBall";
+ import { audioEngine } from "../../utils/audioEngine";
+@@ -35,6 +43,7 @@ interface InterDrawCooccurrenceViewProps {
+   cooccurrences?: InterDrawCooccurrenceReport;
+   patterns?: InterDrawPatternReport;
+   bivariateHpcReport?: BivariateDyadsReportHpc;
++  networkTransition?: InterDrawNetworkTransitionReport;
+   targetDraw: string;
+   predecessorName: string;
+   predecessorNumbers: number[];
+@@ -44,6 +53,7 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+   cooccurrences,
+   patterns,
+   bivariateHpcReport,
++  networkTransition,
+   targetDraw,
+   predecessorName,
+   predecessorNumbers
+@@ -59,15 +69,9 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+   });
+   const [matrixSearchQuery, setMatrixSearchQuery] = useState<string>("");
+ 
+-  if (!cooccurrences && !bivariateHpcReport) {
+-    return (
+-      <div className="p-8 text-center bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-white/5">
+-        <p className="text-xs text-slate-400 italic">
+-          Données de dyades et cooccurrences en cours de calcul ou historique apparié insuffisant.
+-        </p>
+-      </div>
+-    );
+-  }
++  // Portée de la matrice (prédécesseur immédiat / réseau complet) : état global persisté
++  const matrixScope = useNexusStore(st => st.interDrawMatrixScope);
++  const setMatrixScope = useNexusStore(st => st.setInterDrawMatrixScope);
+ 
+   const activePredSet = useMemo(() => new Set(predecessorNumbers), [predecessorNumbers]);
+ 
+@@ -99,36 +103,34 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+       : cooccurrences.bivariateTriggers;
+   }, [cooccurrences, bivariateFilter]);
+ 
+-  // Transitions pour la matrice 90x90 Wasm pour la ligne selectedMatrixSource
+-  const matrixTransitions = useMemo(() => {
+-    if (!bivariateHpcReport?.transitionMatrix || selectedMatrixSource < 1 || selectedMatrixSource > 90) {
+-      return [];
+-    }
+-    const matrix = bivariateHpcReport.transitionMatrix;
+-    const rowOffset = (selectedMatrixSource - 1) * 90;
+-    const results: { targetNumber: number; prob: number; lift: number }[] = [];
+-    const baseline = 5.0 / 90.0;
+-
+-    for (let t = 1; t <= 90; t++) {
+-      const prob = matrix[rowOffset + (t - 1)] || 0;
+-      const lift = baseline > 0 ? prob / baseline : 1.0;
+-      results.push({
+-        targetNumber: t,
+-        prob: Math.round(prob * 1000) / 10,
+-        lift: Math.round(lift * 100) / 100
+-      });
+-    }
++  // Matrice de transition 90×90 de la portée choisie. Tri par probabilité brute (non arrondie),
++  // puis cooccurrences, puis numéro : les égalités ne retombent plus sur l'ordre 1, 2, 3…
++  const activeMatrix = networkTransition
++    ? (matrixScope === 'IMMEDIATE' ? networkTransition.immediate : networkTransition.network)
++    : undefined;
+ 
+-    let filtered = results;
+-    if (matrixSearchQuery.trim()) {
+-      const q = parseInt(matrixSearchQuery.trim(), 10);
+-      if (!isNaN(q) && q >= 1 && q <= 90) {
+-        filtered = filtered.filter(item => item.targetNumber === q);
+-      }
+-    }
+-
+-    return filtered.sort((a, b) => b.prob - a.prob);
+-  }, [bivariateHpcReport, selectedMatrixSource, matrixSearchQuery]);
++  const matrixTransitions = useMemo(() => {
++    if (!activeMatrix || selectedMatrixSource < 1 || selectedMatrixSource > 90) return [];
++    const q = parseInt(matrixSearchQuery.trim(), 10);
++    const targetFilter = !isNaN(q) && q >= 1 && q <= 90 ? q : undefined;
++    return rankTransitionRow(activeMatrix, selectedMatrixSource, targetFilter);
++  }, [activeMatrix, selectedMatrixSource, matrixSearchQuery]);
++
++  const matrixRowInformative = activeMatrix
++    ? isTransitionRowInformative(activeMatrix, selectedMatrixSource)
++    : false;
++
++  // Garde-fou placé APRÈS tous les hooks : un return anticipé avant un hook fait varier leur nombre
++  // d'un rendu à l'autre (« Rendered more hooks than during the previous render »).
++  if (!cooccurrences && !bivariateHpcReport && !networkTransition) {
++    return (
++      <div className="p-8 text-center bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-white/5">
++        <p className="text-xs text-slate-400 italic">
++          Données de dyades et cooccurrences en cours de calcul ou historique apparié insuffisant.
++        </p>
++      </div>
++    );
++  }
+ 
+   return (
+     <div className="space-y-6 animate-fade-in font-sans">
+@@ -682,12 +684,14 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+                 <h4 className="text-sm md:text-base font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                   Matrice de Transition Bivariée 90×90 (P(t | s))
+                 </h4>
+-                <span className="px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 text-[9px] font-mono font-bold">
+-                  Wasm Core
+-                </span>
++                {activeMatrix && (
++                  <span className="px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 text-[9px] font-mono font-bold">
++                    {activeMatrix.pairsUsed} paires · {activeMatrix.sourcesUsed} tirage{activeMatrix.sourcesUsed > 1 ? 's' : ''} source
++                  </span>
++                )}
+               </div>
+               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+-                Distribution markovienne des probabilités de sortie du tirage cible pour chaque numéro source $s \in [1..90]$.
++                Probabilité qu'un numéro sorte dans {targetDraw} sachant que le numéro source est sorti dans le(s) tirage(s) précédent(s) du réseau.
+               </p>
+             </div>
+ 
+@@ -760,7 +764,63 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+             </div>
+           </div>
+ 
++          {/* Portée des tirages sources : prédécesseur immédiat ou réseau complet pondéré */}
++          <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-white/5 space-y-3">
++            <div className="flex flex-wrap items-center gap-2">
++              <span className="text-[10px] font-bold text-slate-400 uppercase">Tirages sources :</span>
++              {([
++                ['IMMEDIATE', `Prédécesseur (${predecessorName})`],
++                ['NETWORK', 'Réseau complet pondéré']
++              ] as [TransitionScope, string][]).map(([scope, label]) => (
++                <button
++                  key={`mat-scope-${scope}`}
++                  onClick={() => {
++                    audioEngine.play("click");
++                    setMatrixScope(scope);
++                  }}
++                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
++                    matrixScope === scope
++                      ? "bg-sky-600 text-white shadow-md ring-2 ring-sky-400"
++                      : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
++                  }`}
++                >
++                  {label}
++                </button>
++              ))}
++            </div>
++            {activeMatrix && activeMatrix.bySource.length > 0 && (
++              <div className="flex flex-wrap gap-1.5">
++                {activeMatrix.bySource.slice(0, 10).map(src => (
++                  <span
++                    key={`mat-src-${src.name}`}
++                    className="px-2 py-0.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/60 text-[10px] font-mono text-slate-700 dark:text-slate-300"
++                  >
++                    {src.name} · {src.pairs} paires{activeMatrix.scope === 'NETWORK' ? ` · w×${src.appliedWeight.toFixed(2)}` : ''}
++                  </span>
++                ))}
++                {activeMatrix.bySource.length > 10 && (
++                  <span className="text-[10px] text-slate-400 self-center">+{activeMatrix.bySource.length - 10} autres</span>
++                )}
++              </div>
++            )}
++          </div>
++
++          {!activeMatrix && (
++            <p className="text-center py-6 text-xs text-slate-400 italic">
++              Matrice de transition en cours de recalcul pour ce tirage…
++            </p>
++          )}
++
++          {activeMatrix && !matrixRowInformative && (
++            <p className="text-center py-6 text-xs text-amber-600 dark:text-amber-400 font-medium">
++              {activeMatrix.pairsUsed < 2
++                ? `Historique apparié insuffisant (${activeMatrix.pairsUsed} paire${activeMatrix.pairsUsed > 1 ? 's' : ''}) : aucune probabilité de transition fiable à afficher.`
++                : `Le numéro ${selectedMatrixSource} n'est jamais sorti dans les tirages sources alignés : sa ligne ne contient que l'a priori uniforme (${(TRANSITION_BASELINE * 100).toFixed(2)} %).`}
++            </p>
++          )}
++
+           {/* Grille de distribution conditionnelle */}
++          {activeMatrix && matrixRowInformative && (
+           <div className="space-y-3">
+             <div className="flex items-center justify-between text-xs text-slate-500">
+               <span className="font-bold uppercase tracking-wider text-[10px]">
+@@ -802,10 +862,10 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+                       <NumberBall number={t.targetNumber} size="xs" />
+                       <div>
+                         <span className="text-xs font-black font-mono text-slate-900 dark:text-white block">
+-                          {t.prob}%
++                          {(t.prob * 100).toFixed(1)}%
+                         </span>
+                         <span className={`text-[9px] font-mono font-bold ${isOverperforming ? 'text-emerald-500' : 'text-slate-400'}`}>
+-                          Lift: {t.lift}x
++                          Lift: {t.lift.toFixed(2)}x · obs {t.count.toFixed(1)}
+                         </span>
+                       </div>
+                     </div>
+@@ -814,6 +874,7 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
+               })}
+             </div>
+           </div>
++          )}
+         </div>
+       )}
+ 
+diff --git a/src/components/tabs/InterDrawRelationsTab.tsx b/src/components/tabs/InterDrawRelationsTab.tsx
+index 80a4704..c65a315 100644
+--- a/src/components/tabs/InterDrawRelationsTab.tsx
++++ b/src/components/tabs/InterDrawRelationsTab.tsx
+@@ -1589,6 +1589,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
+               cooccurrences={report.cooccurrenceMetrics}
+               patterns={report.patternMetrics}
+               bivariateHpcReport={report.bivariateHpcReport}
++              networkTransition={report.networkTransition}
+               targetDraw={report.targetDraw}
+               predecessorName={report.predecessor?.name || 'Prédécesseur'}
+               predecessorNumbers={report.predecessorResult?.gagnants || []}
+diff --git a/src/services/interDrawService.ts b/src/services/interDrawService.ts
+index 2ad2754..2883e4f 100644
+--- a/src/services/interDrawService.ts
++++ b/src/services/interDrawService.ts
+@@ -53,6 +53,11 @@ import {
+   InterDrawCentroidPattern,
+   InterDrawRetentionPattern
+ } from './interDrawPatternService';
++import {
++  buildWeightedTransitionMatrix,
++  WeightedTransitionMatrix,
++  TransitionPairSource
++} from './interDrawTransitionMatrix';
+ 
+ // Probabilité marginale théorique exacte d'un numéro : 5/90.
+ const THEORETICAL_SINGLE_PROB =
+@@ -199,6 +204,16 @@ export interface InterDrawNetworkContribution {
+   topTransmittedNumbers: number[];
+ }
+ 
++/**
++ * Matrices de transition 90×90 par portée de sources (même code de calcul, cf. interDrawTransitionMatrix.ts) :
++ * - immediate : prédécesseur immédiat uniquement ;
++ * - network   : tous les tirages du réseau fermé, pondérés par leur couplage continu.
++ */
++export interface InterDrawNetworkTransitionReport {
++  immediate: WeightedTransitionMatrix;
++  network: WeightedTransitionMatrix;
++}
++
+ export interface InterDrawReport {
+   targetDraw: string;
+   family: InterDrawFamilyConfig;
+@@ -235,6 +250,7 @@ export interface InterDrawReport {
+   patternMetrics?: InterDrawPatternReport;
+   complexDynamics?: InterDrawComplexDynamicsReport;
+   bivariateHpcReport?: BivariateDyadsReportHpc;
++  networkTransition?: InterDrawNetworkTransitionReport;
+   indirectPaths?: InterDrawIndirectPath[];
+   communities?: InterDrawCommunity[];
+   networkFingerprint?: string;
+@@ -1402,12 +1418,12 @@ export const generateInterDrawReport = async (
+   if (!forceRefresh) {
+     // Accès ultra-rapide L1 synchrone (< 0.1 ms) pour éliminer la latence
+     const fastSync = globalCache.getSync<InterDrawReport>(cacheKey, targetDrawName);
+-    if (fastSync && fastSync.predecessor?.name && fastSync.successor?.name && Array.isArray(fastSync.topCandidates)) {
++    if (fastSync && fastSync.predecessor?.name && fastSync.successor?.name && Array.isArray(fastSync.topCandidates) && fastSync.networkTransition) {
+       return fastSync;
+     }
+ 
+     const cached = await globalCache.get<InterDrawReport>(cacheKey, targetDrawName);
+-    if (cached && cached.predecessor?.name && cached.successor?.name && Array.isArray(cached.topCandidates)) {
++    if (cached && cached.predecessor?.name && cached.successor?.name && Array.isArray(cached.topCandidates) && cached.networkTransition) {
+       return cached;
+     }
+   }
+@@ -1467,6 +1483,7 @@ export const generateInterDrawReport = async (
+ 
+   // 3b. Intégration continue de l'ENSEMBLE du réseau de tirage choisi (AGENTS.md)
+   const networkContributions: InterDrawNetworkContribution[] = [];
++  const rawCouplingWeights = new Map<string, number>();
+   let totalNetworkWeight = 0;
+   const networkPairCount = Math.max(2, networkDrawNames.length * (networkDrawNames.length - 1));
+ 
+@@ -1482,6 +1499,7 @@ export const generateInterDrawReport = async (
+     ) || computeContinuousInterDrawCoupling(sHist, targetHistory, networkPairCount);
+ 
+     const weight = coupling.weight;
++    rawCouplingWeights.set(sourceName, weight);
+     const latestWinners = (sHist[0]?.gagnants || []).filter(n => n >= 1 && n <= 90);
+     const latestMachine = (sHist[0]?.machine || []).filter(n => n >= 1 && n <= 90);
+ 
+@@ -1787,6 +1805,35 @@ export const generateInterDrawReport = async (
+     console.warn('[INTER-DRAW] Erreur calcul bivariateHpcReport :', e);
+   }
+ 
++  // 10. Matrice de transition 90x90 : prédécesseur immédiat ET réseau complet pondéré (AGENTS.md).
++  // Les paires sont alignées chronologiquement (source strictement avant cible) pour chaque tirage du réseau.
++  let networkTransition: InterDrawNetworkTransitionReport | undefined = undefined;
++  try {
++    const immediateSource: TransitionPairSource = {
++      name: relation.predecessor.name,
++      weight: 1,
++      pairs: pairedPairs
++    };
++    const networkSources: TransitionPairSource[] = [];
++    for (const sourceName of networkDrawNames) {
++      if (normalizeDrawName(sourceName) === normalizeDrawName(targetDrawName)) continue;
++      const sHist = networkHistories.get(sourceName) || [];
++      const pairs = alignConsecutiveDrawHistories(targetHistory, sHist, targetDrawName, sourceName);
++      if (pairs.length === 0) continue;
++      networkSources.push({
++        name: sourceName,
++        weight: rawCouplingWeights.get(sourceName) ?? 0,
++        pairs
++      });
++    }
++    networkTransition = {
++      immediate: buildWeightedTransitionMatrix([immediateSource], 'IMMEDIATE'),
++      network: buildWeightedTransitionMatrix(networkSources, 'NETWORK')
++    };
++  } catch (e) {
++    console.warn('[INTER-DRAW] Erreur calcul networkTransition :', e);
++  }
++
+   const report: InterDrawReport = {
+     targetDraw: targetDrawName,
+     family: activeFamily,
+@@ -1832,6 +1879,7 @@ export const generateInterDrawReport = async (
+     patternMetrics,
+     complexDynamics,
+     bivariateHpcReport,
++    networkTransition,
+     indirectPaths: networkMatrix?.indirectPaths,
+     communities: networkMatrix?.communities,
+     networkFingerprint: networkMatrix?.networkFingerprint,
+diff --git a/src/services/interDrawTransitionMatrix.ts b/src/services/interDrawTransitionMatrix.ts
+new file mode 100644
+index 0000000..b8441ce
+--- /dev/null
++++ b/src/services/interDrawTransitionMatrix.ts
+@@ -0,0 +1,177 @@
++/**
++ * Matrice de transition inter-tirages 90×90 (module pur, sans I/O, déterministe).
++ *
++ * M[s][t] = P(t ∈ tirage cible | s ∈ tirage source), avec lissage de Laplace dérivé :
++ *   p(s,t) = (O(s,t) + 1) / (n_s + TOTAL/PER_DRAW)
++ * où O(s,t) est le nombre (pondéré) de paires où s est sorti dans la source et t dans la cible,
++ * et n_s le nombre (pondéré) de sorties de s dans la source.
++ * L'a priori a pour moyenne 1/(TOTAL/PER_DRAW) = PER_DRAW/TOTAL (= 5/90) et force TOTAL/PER_DRAW (= 18),
++ * ce qui est identique au lissage historique du moteur (Rust et fallback TS).
++ *
++ * Deux portées sont calculées par le même code :
++ *  - IMMEDIATE : un seul tirage source (le prédécesseur immédiat), poids 1 ;
++ *  - NETWORK   : tous les tirages du réseau fermé, chaque source pondérée par son couplage continu
++ *                (AGENTS.md : « toute paire du réseau existe avec un poids continu »).
++ *
++ * L'alignement chronologique des paires (source strictement avant cible) est fait en amont par
++ * `alignConsecutiveDrawHistories` : ce module reçoit des paires déjà alignées.
++ */
++
++export const TRANSITION_TOTAL_NUMBERS = 90; // = LOTTERY_CONSTANTS.TOTAL_NUMBERS
++export const TRANSITION_NUMBERS_PER_DRAW = 5; // = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW
++
++/** Force de l'a priori de Laplace : TOTAL / PER_DRAW (= 18). */
++const PRIOR_STRENGTH = TRANSITION_TOTAL_NUMBERS / TRANSITION_NUMBERS_PER_DRAW;
++/** Probabilité marginale théorique d'un numéro dans un tirage (= 5/90). */
++export const TRANSITION_BASELINE = TRANSITION_NUMBERS_PER_DRAW / TRANSITION_TOTAL_NUMBERS;
++
++export type TransitionScope = 'IMMEDIATE' | 'NETWORK';
++
++export interface TransitionPair {
++  predWinners: number[];
++  targetWinners: number[];
++}
++
++export interface TransitionPairSource {
++  name: string;
++  /** Poids de couplage continu (≥ 0). Ignoré (= 1) pour un tirage source unique. */
++  weight: number;
++  pairs: TransitionPair[];
++}
++
++export interface TransitionSourceSummary {
++  name: string;
++  pairs: number;
++  /** Poids normalisé réellement appliqué (moyenne des poids = 1). */
++  appliedWeight: number;
++}
++
++export interface WeightedTransitionMatrix {
++  scope: TransitionScope;
++  /** 90×90 aplati, ligne = source (s-1), colonne = cible (t-1). */
++  probs: number[];
++  /** Cooccurrences pondérées O(s,t), même disposition. */
++  counts: number[];
++  /** n_s : nombre pondéré de sorties de chaque numéro source (longueur 90). */
++  sourceMass: number[];
++  /** Nombre de paires de tirages alignées, toutes sources confondues. */
++  pairsUsed: number;
++  /** Nombre de tirages sources ayant au moins une paire. */
++  sourcesUsed: number;
++  bySource: TransitionSourceSummary[];
++}
++
++export interface TransitionRowCell {
++  targetNumber: number;
++  /** Probabilité brute (non arrondie) dans [0, 1]. */
++  prob: number;
++  /** prob / (5/90). */
++  lift: number;
++  /** Cooccurrences pondérées observées. */
++  count: number;
++}
++
++const isValidNumber = (n: number): boolean =>
++  Number.isInteger(n) && n >= 1 && n <= TRANSITION_TOTAL_NUMBERS;
++
++export function buildWeightedTransitionMatrix(
++  sources: TransitionPairSource[],
++  scope: TransitionScope
++): WeightedTransitionMatrix {
++  const N = TRANSITION_TOTAL_NUMBERS;
++  const counts = new Array<number>(N * N).fill(0);
++  const sourceMass = new Array<number>(N).fill(0);
++
++  const active = sources.filter(s => s.pairs.length > 0);
++
++  // Normalisation des poids : moyenne = 1 sur les sources actives. Les masses n_s gardent ainsi
++  // l'échelle d'un effectif réel de paires, et l'a priori de Laplace ne domine pas artificiellement
++  // quand les couplages sont tous petits (ex. 0,05).
++  const safeW = (w: number) => (Number.isFinite(w) && w > 0 ? w : 0);
++  const totalW = active.reduce((acc, s) => acc + safeW(s.weight), 0);
++  const applied = (s: TransitionPairSource): number => {
++    if (scope === 'IMMEDIATE' || active.length === 1) return 1;
++    if (totalW <= 0) return 1; // aucun couplage exploitable : poids uniforme
++    return (safeW(s.weight) * active.length) / totalW;
++  };
++
++  let pairsUsed = 0;
++  const bySource: TransitionSourceSummary[] = [];
++
++  for (const src of active) {
++    const w = applied(src);
++    for (const pair of src.pairs) {
++      for (const s of pair.predWinners) {
++        if (!isValidNumber(s)) continue;
++        sourceMass[s - 1] += w;
++        const row = (s - 1) * N;
++        for (const t of pair.targetWinners) {
++          if (isValidNumber(t)) counts[row + (t - 1)] += w;
++        }
++      }
++    }
++    pairsUsed += src.pairs.length;
++    bySource.push({ name: src.name, pairs: src.pairs.length, appliedWeight: w });
++  }
++
++  bySource.sort((a, b) => b.appliedWeight - a.appliedWeight || b.pairs - a.pairs || a.name.localeCompare(b.name));
++
++  const probs = new Array<number>(N * N);
++  for (let s = 0; s < N; s++) {
++    const denom = sourceMass[s] + PRIOR_STRENGTH;
++    for (let t = 0; t < N; t++) {
++      probs[s * N + t] = (counts[s * N + t] + 1) / denom;
++    }
++  }
++
++  return {
++    scope,
++    probs,
++    counts,
++    sourceMass,
++    pairsUsed,
++    sourcesUsed: active.length,
++    bySource,
++  };
++}
++
++/**
++ * Classe la ligne `source` de la matrice. Tri : probabilité décroissante, puis cooccurrences
++ * pondérées décroissantes, puis numéro croissant. Aucun arrondi avant le tri : les égalités
++ * ne sont donc plus résolues par l'ordre 1, 2, 3… de l'index.
++ */
++export function rankTransitionRow(
++  matrix: WeightedTransitionMatrix,
++  source: number,
++  targetFilter?: number
++): TransitionRowCell[] {
++  if (!isValidNumber(source)) return [];
++  const N = TRANSITION_TOTAL_NUMBERS;
++  const row = (source - 1) * N;
++  const cells: TransitionRowCell[] = [];
++  for (let t = 1; t <= N; t++) {
++    if (targetFilter !== undefined && t !== targetFilter) continue;
++    const prob = matrix.probs[row + (t - 1)] ?? 0;
++    cells.push({
++      targetNumber: t,
++      prob,
++      lift: TRANSITION_BASELINE > 0 ? prob / TRANSITION_BASELINE : 1,
++      count: matrix.counts[row + (t - 1)] ?? 0,
++    });
++  }
++  return cells.sort(
++    (a, b) => b.prob - a.prob || b.count - a.count || a.targetNumber - b.targetNumber
++  );
++}
++
++/**
++ * Une ligne est « informative » si le numéro source a réellement été observé dans au moins un
++ * tirage source aligné. Sinon la ligne vaut l'a priori uniforme et aucun classement n'a de sens.
++ */
++export function isTransitionRowInformative(
++  matrix: WeightedTransitionMatrix,
++  source: number
++): boolean {
++  if (!isValidNumber(source)) return false;
++  return matrix.pairsUsed >= 2 && matrix.sourceMass[source - 1] > 0;
++}
+diff --git a/src/store/useNexusStore.ts b/src/store/useNexusStore.ts
+index aa5efd7..b7fb863 100644
+--- a/src/store/useNexusStore.ts
++++ b/src/store/useNexusStore.ts
+@@ -24,6 +24,7 @@ import {
+   normalizeWeights,
+ } from "../services/prediction/weightsManager";
+ import { EmpiricalCalibration } from "../shared/prediction.types";
++import type { TransitionScope } from "../services/interDrawTransitionMatrix";
+ 
+ interface NexusState {
+   // UI State
+@@ -51,6 +52,8 @@ interface NexusState {
+   useCloudEngine: boolean;
+   useSpatioTemporalHawkes: boolean;
+   temporalDepth: number;
++  // Portée de la matrice de transition inter-tirages 90×90 (partagée entre onglets, persistée)
++  interDrawMatrixScope: TransitionScope;
+ 
+   // Data State
+   history: DrawResult[];
+@@ -95,6 +98,7 @@ interface NexusState {
+   setUseCloudEngine: (useCloud: boolean) => void;
+   setUseSpatioTemporalHawkes: (use: boolean) => void;
+   setTemporalDepth: (depth: number) => void;
++  setInterDrawMatrixScope: (scope: TransitionScope) => void;
+   setLastPrediction: (pred: Prediction | null) => void;
+   setSmartInsights: (insights: SmartInsight[]) => void;
+   setCalibration: (cal: CalibrationData | null) => void;
+@@ -138,6 +142,7 @@ export const useNexusStore = create<NexusState>()(
+       vocalContext: null,
+       useCloudEngine: false,
+       temporalDepth: 100,
++      interDrawMatrixScope: "NETWORK",
+ 
+       history: [],
+       stats: [],
+@@ -327,6 +332,8 @@ export const useNexusStore = create<NexusState>()(
+       setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
+       setUseSpatioTemporalHawkes: (use) => set({ useSpatioTemporalHawkes: use }),
+       setTemporalDepth: (depth) => set({ temporalDepth: depth }),
++      setInterDrawMatrixScope: (scope) =>
++        set({ interDrawMatrixScope: scope === "IMMEDIATE" ? "IMMEDIATE" : "NETWORK" }),
+       setLastPrediction: (pred) => set({ lastPrediction: pred }),
+       setSmartInsights: (insights) => set({ smartInsights: insights }),
+       setCalibration: (cal) => set({ calibration: cal }),
+@@ -433,6 +440,7 @@ export const useNexusStore = create<NexusState>()(
+         drawName: state.drawName,
+         useCloudEngine: state.useCloudEngine,
+         temporalDepth: state.temporalDepth,
++        interDrawMatrixScope: state.interDrawMatrixScope,
+       }),
+       storage:
+         typeof window !== "undefined"
+@@ -466,6 +474,7 @@ export const useNexusVocalContext = () => useNexusStore((s) => s.vocalContext);
+ export const useNexusUseCloudEngine = () => useNexusStore((s) => s.useCloudEngine);
+ export const useNexusUseSpatioTemporalHawkes = () => useNexusStore((s) => s.useSpatioTemporalHawkes);
+ export const useNexusTemporalDepth = () => useNexusStore((s) => s.temporalDepth);
++export const useNexusInterDrawMatrixScope = () => useNexusStore((s) => s.interDrawMatrixScope);
+ 
+ // Data selectors
+ export const useNexusHistory = () => useNexusStore((s) => s.history);
+@@ -506,6 +515,7 @@ export const useNexusActions = () =>
+     setUseCloudEngine: s.setUseCloudEngine,
+     setUseSpatioTemporalHawkes: s.setUseSpatioTemporalHawkes,
+     setTemporalDepth: s.setTemporalDepth,
++    setInterDrawMatrixScope: s.setInterDrawMatrixScope,
+     setLastPrediction: s.setLastPrediction,
+     setSmartInsights: s.setSmartInsights,
+     setCalibration: s.setCalibration,
+diff --git a/tests/interDrawNetworkTransitionIntegration.test.ts b/tests/interDrawNetworkTransitionIntegration.test.ts
+new file mode 100644
+index 0000000..13f60f4
+--- /dev/null
++++ b/tests/interDrawNetworkTransitionIntegration.test.ts
+@@ -0,0 +1,98 @@
++import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
++import { generateInterDrawReport } from '../src/services/interDrawService';
++import { lotteryService } from '../src/services/lotteryService';
++import { INTER_DRAW_NETWORKS } from '../src/constants';
++import { rankTransitionRow, isTransitionRowInformative } from '../src/services/interDrawTransitionMatrix';
++import type { DrawResult } from '../src/types';
++
++const WEEKS = 40;
++const NAMES = INTER_DRAW_NETWORKS.hebdomadaire.drawNames; // Lun → Sam, 19h55
++
++// LCG déterministe (aucun Math.random : cf. AGENTS.md)
++const lcg = (seed: number) => () => {
++  seed = (seed * 1664525 + 1013904223) >>> 0;
++  return seed / 4294967296;
++};
++
++const fmt = (d: Date) =>
++  `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
++
++function buildHistories(): Map<string, DrawResult[]> {
++  const base = new Date(2025, 0, 6); // lundi
++  const out = new Map<string, DrawResult[]>();
++  NAMES.forEach((name, dayIdx) => {
++    const list: DrawResult[] = [];
++    for (let w = 0; w < WEEKS; w++) {
++      const rnd = lcg(1000 * (dayIdx + 1) + w + 7);
++      const set = new Set<number>();
++      while (set.size < 5) set.add(1 + Math.floor(rnd() * 90));
++      const date = new Date(base.getFullYear(), base.getMonth(), base.getDate() + w * 7 + dayIdx);
++      list.push({
++        id: `${name}-${w}`,
++        drawName: name,
++        date: fmt(date),
++        gagnants: [...set].sort((a, b) => a - b),
++        machine: [],
++      });
++    }
++    out.set(name, list.reverse()); // plus récent en premier
++  });
++  return out;
++}
++
++describe('Matrice de transition inter-tirages : prédécesseur immédiat vs réseau complet', () => {
++  const histories = buildHistories();
++  let spy: ReturnType<typeof vi.spyOn>;
++
++  beforeAll(() => {
++    spy = vi
++      .spyOn(lotteryService, 'fetchHistory')
++      .mockImplementation(async (name: string) => histories.get(name) ?? []);
++  });
++  afterAll(() => spy.mockRestore());
++
++  it('le rapport expose les deux portées et le réseau utilise plus de sources que le prédécesseur', async () => {
++    const report = await generateInterDrawReport('Fortune Thursday', 'hebdomadaire', true);
++    expect(report).toBeDefined();
++    const nt = report!.networkTransition;
++    expect(nt).toBeDefined();
++
++    // Portée « prédécesseur immédiat » : une seule source
++    expect(nt!.immediate.scope).toBe('IMMEDIATE');
++    expect(nt!.immediate.sourcesUsed).toBe(1);
++    expect(nt!.immediate.pairsUsed).toBeGreaterThanOrEqual(2);
++
++    // Portée « réseau complet » : tous les autres tirages du réseau (5 sur 6), jamais la cible elle-même
++    expect(nt!.network.scope).toBe('NETWORK');
++    expect(nt!.network.sourcesUsed).toBeGreaterThan(1);
++    expect(nt!.network.pairsUsed).toBeGreaterThan(nt!.immediate.pairsUsed);
++    const names = nt!.network.bySource.map(s => s.name);
++    expect(names).not.toContain('Fortune Thursday');
++    expect(names).toContain(report!.predecessor.name);
++  });
++
++  it('les poids réseau sont continus (aucun tirage exclu par seuil) et normalisés à moyenne 1', async () => {
++    const report = await generateInterDrawReport('Fortune Thursday', 'hebdomadaire', true);
++    const bySource = report!.networkTransition!.network.bySource;
++    expect(bySource.every(s => s.appliedWeight >= 0 && Number.isFinite(s.appliedWeight))).toBe(true);
++    const mean = bySource.reduce((a, s) => a + s.appliedWeight, 0) / bySource.length;
++    expect(mean).toBeCloseTo(1, 9);
++  });
++
++  it('le classement d’une ligne observée est monotone et non dégénéré (plus de 1, 2, 3, 4…)', async () => {
++    const report = await generateInterDrawReport('Fortune Thursday', 'hebdomadaire', true);
++    for (const matrix of [report!.networkTransition!.immediate, report!.networkTransition!.network]) {
++      const source = report!.predecessorResult!.gagnants[0];
++      expect(isTransitionRowInformative(matrix, source)).toBe(true);
++      const ranked = rankTransitionRow(matrix, source);
++      expect(ranked).toHaveLength(90);
++      for (let i = 1; i < ranked.length; i++) {
++        expect(ranked[i - 1].prob).toBeGreaterThanOrEqual(ranked[i].prob);
++      }
++      // la tête du classement correspond à de vraies cooccurrences observées
++      expect(ranked[0].count).toBeGreaterThan(0);
++      const top30 = ranked.slice(0, 30).map(c => c.targetNumber);
++      expect(top30).not.toEqual(Array.from({ length: 30 }, (_, i) => i + 1));
++    }
++  });
++});
+diff --git a/tests/interDrawTransitionMatrix.test.ts b/tests/interDrawTransitionMatrix.test.ts
+new file mode 100644
+index 0000000..3308f21
+--- /dev/null
++++ b/tests/interDrawTransitionMatrix.test.ts
+@@ -0,0 +1,129 @@
++import { describe, it, expect } from 'vitest';
++import {
++  buildWeightedTransitionMatrix,
++  rankTransitionRow,
++  isTransitionRowInformative,
++  TRANSITION_BASELINE,
++  TransitionPairSource,
++} from '../src/services/interDrawTransitionMatrix';
++
++const pair = (pred: number[], target: number[]) => ({ predWinners: pred, targetWinners: target });
++
++describe('interDrawTransitionMatrix', () => {
++  it('chaque ligne somme à NUMBERS_PER_DRAW (5) : P(t ∈ cible | s) sur 90 cibles', () => {
++    const sources: TransitionPairSource[] = [
++      {
++        name: 'A',
++        weight: 1,
++        pairs: [
++          pair([1, 2, 3, 4, 5], [10, 20, 30, 40, 50]),
++          pair([1, 7, 8, 9, 11], [10, 21, 31, 41, 51]),
++          pair([2, 3, 5, 12, 13], [10, 22, 32, 42, 52]),
++        ],
++      },
++    ];
++    const m = buildWeightedTransitionMatrix(sources, 'IMMEDIATE');
++    for (const s of [1, 2, 3, 40, 90]) {
++      const row = m.probs.slice((s - 1) * 90, s * 90);
++      expect(row.reduce((a, b) => a + b, 0)).toBeCloseTo(5, 9);
++    }
++  });
++
++  it('la ligne observée est classée par vraie probabilité, pas par ordre numérique', () => {
++    const m = buildWeightedTransitionMatrix(
++      [
++        {
++          name: 'A',
++          weight: 1,
++          pairs: [
++            pair([5, 6, 7, 8, 9], [80, 81, 82, 83, 84]),
++            pair([5, 6, 7, 8, 9], [80, 81, 85, 86, 87]),
++            pair([5, 6, 7, 8, 9], [80, 88, 89, 90, 1]),
++          ],
++        },
++      ],
++      'IMMEDIATE'
++    );
++    const ranked = rankTransitionRow(m, 5);
++    expect(ranked[0].targetNumber).toBe(80); // 3 occurrences
++    expect(ranked[1].targetNumber).toBe(81); // 2 occurrences
++    // 1 a été vu une fois ; il doit passer avant les cibles jamais vues (ex. 2, 3, 4)
++    const pos1 = ranked.findIndex(c => c.targetNumber === 1);
++    const pos2 = ranked.findIndex(c => c.targetNumber === 2);
++    expect(pos1).toBeLessThan(pos2);
++  });
++
++  it('départage les égalités par cooccurrences puis par numéro, de façon déterministe', () => {
++    const m = buildWeightedTransitionMatrix(
++      [{ name: 'A', weight: 1, pairs: [pair([1, 2, 3, 4, 5], [10, 20, 30, 40, 50]), pair([1, 2, 3, 4, 5], [10, 20, 30, 40, 50])] }],
++      'IMMEDIATE'
++    );
++    const a = rankTransitionRow(m, 1).map(c => c.targetNumber);
++    const b = rankTransitionRow(m, 1).map(c => c.targetNumber);
++    expect(a).toEqual(b);
++    expect(a.slice(0, 5)).toEqual([10, 20, 30, 40, 50]);
++  });
++
++  it('sans paires : matrice a priori uniforme, ligne non informative (plus de faux classement)', () => {
++    const m = buildWeightedTransitionMatrix([], 'NETWORK');
++    expect(m.pairsUsed).toBe(0);
++    expect(isTransitionRowInformative(m, 1)).toBe(false);
++    const row = rankTransitionRow(m, 1);
++    expect(new Set(row.map(c => c.prob)).size).toBe(1);
++    expect(row[0].prob).toBeCloseTo(TRANSITION_BASELINE, 12);
++  });
++
++  it('numéro source jamais observé : ligne non informative', () => {
++    const m = buildWeightedTransitionMatrix(
++      [{ name: 'A', weight: 1, pairs: [pair([1, 2, 3, 4, 5], [6, 7, 8, 9, 10]), pair([1, 2, 3, 4, 5], [6, 7, 8, 9, 10])] }],
++      'IMMEDIATE'
++    );
++    expect(isTransitionRowInformative(m, 1)).toBe(true);
++    expect(isTransitionRowInformative(m, 90)).toBe(false);
++  });
++
++  it('NETWORK agrège toutes les sources et pondère par le couplage continu', () => {
++    const strong = Array.from({ length: 6 }, () => pair([1, 2, 3, 4, 5], [10, 11, 12, 13, 14]));
++    const weak = Array.from({ length: 6 }, () => pair([1, 2, 3, 4, 5], [20, 21, 22, 23, 24]));
++    const m = buildWeightedTransitionMatrix(
++      [
++        { name: 'FORT', weight: 0.9, pairs: strong },
++        { name: 'FAIBLE', weight: 0.1, pairs: weak },
++      ],
++      'NETWORK'
++    );
++    expect(m.sourcesUsed).toBe(2);
++    expect(m.pairsUsed).toBe(12);
++    const top = rankTransitionRow(m, 1).slice(0, 5).map(c => c.targetNumber).sort((a, b) => a - b);
++    expect(top).toEqual([10, 11, 12, 13, 14]); // la source forte domine
++    // la source faible n'est jamais supprimée (pas de seuil binaire) : 20 > cible jamais vue
++    const p20 = rankTransitionRow(m, 1, 20)[0].prob;
++    const p90 = rankTransitionRow(m, 1, 90)[0].prob;
++    expect(p20).toBeGreaterThan(p90);
++    // poids appliqués normalisés à moyenne 1
++    const mean = m.bySource.reduce((a, s) => a + s.appliedWeight, 0) / m.bySource.length;
++    expect(mean).toBeCloseTo(1, 12);
++  });
++
++  it('NETWORK avec poids tous nuls ou invalides retombe sur un poids uniforme', () => {
++    const p = [pair([1, 2, 3, 4, 5], [6, 7, 8, 9, 10]), pair([1, 2, 3, 4, 5], [6, 7, 8, 9, 10])];
++    const m = buildWeightedTransitionMatrix(
++      [
++        { name: 'A', weight: 0, pairs: p },
++        { name: 'B', weight: Number.NaN, pairs: p },
++      ],
++      'NETWORK'
++    );
++    expect(m.bySource.every(s => s.appliedWeight === 1)).toBe(true);
++    expect(m.probs.every(Number.isFinite)).toBe(true);
++  });
++
++  it('ignore les numéros hors [1, 90]', () => {
++    const m = buildWeightedTransitionMatrix(
++      [{ name: 'A', weight: 1, pairs: [pair([0, 91, 1, 2, 3], [100, -1, 4, 5, 6]), pair([1, 2, 3, 4, 5], [4, 5, 6, 7, 8])] }],
++      'IMMEDIATE'
++    );
++    expect(m.probs.every(Number.isFinite)).toBe(true);
++    expect(m.probs.length).toBe(8100);
++  });
++});
