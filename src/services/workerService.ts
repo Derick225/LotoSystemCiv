@@ -11,6 +11,10 @@ import {
     computeCooccurrenceTensorHpc,
     computeRobustHurstHpc,
     computeFftPowerSpectrumHpc,
+    computeSpatialGridHpc,
+    computeBarycenterTrajectoryHpc,
+    computePearsonCorrelationHpc,
+    computePearsonCorrelationMatrixHpc,
     WasmLyapunovResult,
     WasmAnnealingResult,
     WasmHawkesResult,
@@ -253,6 +257,32 @@ class WorkerService {
                 case 'SPECTRAL_FFT_HPC':
                     result = computeFftPowerSpectrumHpc(p.signal);
                     break;
+                case 'SPATIAL_GRID_HPC': {
+                    const flatDraws = p.flatDraws instanceof Int32Array ? p.flatDraws : new Int32Array(p.flatDraws || []);
+                    const numDraws = p.numDraws || Math.floor(flatDraws.length / 5);
+                    const spatial = computeSpatialGridHpc(flatDraws, numDraws);
+                    result = {
+                        gridDensity: spatial.gridDensity,
+                        gravityPulls: spatial.gravityPulls,
+                        barycenterX: spatial.barycenterX,
+                        barycenterY: spatial.barycenterY,
+                        entropy: spatial.entropy,
+                        densityThreshold: spatial.densityThreshold
+                    };
+                    break;
+                }
+                case 'BARYCENTER_TRAJECTORY_HPC':
+                    result = computeBarycenterTrajectoryHpc(p.results || [], p.limit || 20);
+                    break;
+                case 'PEARSON_CORRELATION_HPC': {
+                    const x = p.x instanceof Float64Array ? p.x : new Float64Array(p.x || []);
+                    const y = p.y instanceof Float64Array ? p.y : new Float64Array(p.y || []);
+                    result = computePearsonCorrelationHpc(x, y);
+                    break;
+                }
+                case 'PEARSON_MATRIX_HPC':
+                    result = computePearsonCorrelationMatrixHpc(p.algoScores || {}, p.keys || []);
+                    break;
                 default:
                     result = { status: 'OK' };
             }
@@ -369,6 +399,53 @@ class WorkerService {
             winCols,
             activePredNumbers
         });
+    }
+
+    /**
+     * Exécute le calcul de la grille spatiale et des puits newtoniens en arrière-plan via le Web Worker HPC
+     */
+    public async runSpatialGridHpc(
+        flatDraws: Int32Array | number[],
+        numDraws: number
+    ): Promise<{
+        gridDensity: Float64Array;
+        gravityPulls: Float64Array;
+        barycenterX: number;
+        barycenterY: number;
+        entropy: number;
+        densityThreshold: number;
+    }> {
+        return this.runTask('SPATIAL_GRID_HPC', { flatDraws, numDraws });
+    }
+
+    /**
+     * Exécute la trajectoire barycentrique historique en arrière-plan via le Web Worker HPC
+     */
+    public async runBarycenterTrajectoryHpc(
+        results: { gagnants: number[]; date?: string }[],
+        limit: number = 20
+    ): Promise<Array<{ x: number; y: number; drawIndex: number; date?: string }>> {
+        return this.runTask('BARYCENTER_TRAJECTORY_HPC', { results, limit });
+    }
+
+    /**
+     * Exécute la corrélation de Pearson en arrière-plan via le Web Worker HPC
+     */
+    public async runPearsonCorrelationHpc(
+        x: Float64Array | number[],
+        y: Float64Array | number[]
+    ): Promise<number | null> {
+        return this.runTask('PEARSON_CORRELATION_HPC', { x, y });
+    }
+
+    /**
+     * Exécute la matrice de corrélation de Pearson complète en arrière-plan via le Web Worker HPC
+     */
+    public async runPearsonMatrixHpc(
+        algoScores: Record<string, number[] | Float64Array>,
+        keys: readonly string[]
+    ): Promise<{ matrix: Record<string, Record<string, number | null>>; average: number }> {
+        return this.runTask('PEARSON_MATRIX_HPC', { algoScores, keys });
     }
 }
 

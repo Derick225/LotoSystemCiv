@@ -4,6 +4,7 @@ import type { DrawResult } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { EnhancedMetrics } from '../prediction/metrics.types';
 import { calculateStatisticalBounds } from '../mathService';
+import { computeTopologicalProximityVectorHpc } from '../wasm/lotoEngineBridge';
 import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 import { 
     calculatePoissonScores, 
@@ -92,12 +93,7 @@ export const buildTensorMatrix = async (
     const matrix: Record<number, Record<string, number>> = {};
     const topologicalProximity: Record<number, number> = {};
 
-    const getGridPos = (val: number) => {
-      const row = Math.floor((val - 1) / 10);
-      const col = (val - 1) % 10;
-      return { row, col };
-    };
-
+    // 1. Évaluation matricielle des algorithmes enregistrés
     for (let num = 1; num <= 90; num++) {
       const breakdown: Record<string, number> = {};
       algorithmRegistry.forEach((plugin: AlgorithmPlugin) => {
@@ -108,27 +104,12 @@ export const buildTensorMatrix = async (
         }
       });
       matrix[num] = breakdown;
+    }
 
-      // Câblage de la rétro-injection Topologique Continue 
-      let maxSimForWinner = 1e-9;
-      targetDraw.gagnants.forEach((w) => {
-        const linSim = Math.exp(-0.25 * Math.abs(num - w));
-        const gridDist = Math.sqrt(Math.pow(getGridPos(num).row - getGridPos(w).row, 2) + Math.pow(getGridPos(num).col - getGridPos(w).col, 2));
-        const gridSim = Math.exp(-0.35 * gridDist);
-        const mirror91Sim = Math.exp(-0.5 * Math.abs((num + w) - 91));
-        const revP = parseInt(num.toString().split("").reverse().join(""), 10) || 0;
-        const mirrorRevSim = Math.exp(-0.5 * Math.abs(revP - w));
-        
-        const modP = num % 10;
-        const modW = w % 10;
-        const harmonicDist = Math.min(Math.abs(modP - modW), 10 - Math.abs(modP - modW));
-        const harmonicSim = Math.exp(-0.5 * harmonicDist);
-        
-        const decadeSim = Math.exp(-0.5 * Math.abs(Math.floor((num - 1) / 10) - Math.floor((w - 1) / 10)));
-        const sim = Math.max(linSim, gridSim, mirror91Sim, mirrorRevSim, harmonicSim, decadeSim);
-        if (sim > maxSimForWinner) maxSimForWinner = sim;
-      });
-      topologicalProximity[num] = maxSimForWinner;
+    // 2. Rétro-injection Topologique Continue Vectorisée en Rust/WASM HPC (Zéro Allocation String)
+    const proxVector = computeTopologicalProximityVectorHpc(targetDraw.gagnants);
+    for (let num = 1; num <= 90; num++) {
+      topologicalProximity[num] = proxVector[num];
     }
 
     const compiledTensor = {
@@ -149,4 +130,46 @@ export const buildTensorMatrix = async (
 
   const tensors = await Promise.all(tasks);
   return tensors;
+};
+
+/**
+ * Version asynchrone avec régulation de cadence 60 FPS (Yielding de microtâches)
+ * Garantit que l'extraction profonde de tenseurs n'engendre aucun micro-gel de l'interface.
+ */
+export const buildTensorMatrixAsync = async (
+  drawName: string,
+  history: DrawResult[],
+  depth: number = 30,
+  onProgress?: (progressPercent: number) => void
+): Promise<TensorContext[]> => {
+  const startIndex = Math.min(depth, history.length - 20);
+  if (startIndex <= 0) return [];
+
+  const results: TensorContext[] = [];
+  const chunkSize = 5;
+
+  for (let i = 0; i < startIndex; i += chunkSize) {
+    const sliceEnd = Math.min(i + chunkSize, startIndex);
+    const chunkIndices = Array.from({ length: sliceEnd - i }, (_, k) => i + k);
+
+    const chunkResults = await Promise.all(
+      chunkIndices.map(async (idx) => {
+        const sub = await buildTensorMatrix(drawName, history.slice(idx, idx + 21), 1);
+        return sub[0];
+      })
+    );
+
+    for (const res of chunkResults) {
+      if (res) results.push(res);
+    }
+
+    if (onProgress) {
+      onProgress(Math.min(100, Math.round((results.length / startIndex) * 100)));
+    }
+
+    // Cède le fil d'exécution au navigateur pour maintenir 60 FPS
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+  return results;
 };

@@ -9,7 +9,11 @@ import {
     computeMarkovTransitionHpc,
     computeCooccurrenceTensorHpc,
     computeRobustHurstHpc,
-    computeFftPowerSpectrumHpc
+    computeFftPowerSpectrumHpc,
+    computeSpatialGridHpc,
+    computeBarycenterTrajectoryHpc,
+    computePearsonCorrelationHpc,
+    computePearsonCorrelationMatrixHpc
 } from './wasm/lotoEngineBridge';
 
 self.onmessage = (e: MessageEvent) => {
@@ -90,6 +94,32 @@ self.onmessage = (e: MessageEvent) => {
                 break;
             case 'SPECTRAL_FFT_HPC':
                 result = computeFftPowerSpectrumHpc(p.signal);
+                break;
+            case 'SPATIAL_GRID_HPC': {
+                const flatDraws = p.flatDraws instanceof Int32Array ? p.flatDraws : new Int32Array(p.flatDraws || []);
+                const numDraws = p.numDraws || Math.floor(flatDraws.length / 5);
+                const spatial = computeSpatialGridHpc(flatDraws, numDraws);
+                result = {
+                    gridDensity: spatial.gridDensity,
+                    gravityPulls: spatial.gravityPulls,
+                    barycenterX: spatial.barycenterX,
+                    barycenterY: spatial.barycenterY,
+                    entropy: spatial.entropy,
+                    densityThreshold: spatial.densityThreshold
+                };
+                break;
+            }
+            case 'BARYCENTER_TRAJECTORY_HPC':
+                result = computeBarycenterTrajectoryHpc(p.results || [], p.limit || 20);
+                break;
+            case 'PEARSON_CORRELATION_HPC': {
+                const x = p.x instanceof Float64Array ? p.x : new Float64Array(p.x || []);
+                const y = p.y instanceof Float64Array ? p.y : new Float64Array(p.y || []);
+                result = computePearsonCorrelationHpc(x, y);
+                break;
+            }
+            case 'PEARSON_MATRIX_HPC':
+                result = computePearsonCorrelationMatrixHpc(p.algoScores || {}, p.keys || []);
                 break;
             default:
                 result = { status: 'OK' };

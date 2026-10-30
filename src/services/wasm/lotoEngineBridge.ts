@@ -3435,6 +3435,79 @@ export function tensorScoreHpc(
   return scores;
 }
 
+export const computeTensorScoreHpc = tensorScoreHpc;
+
+// Table de lookup statique des coordonnées et harmoniques des 90 numéros (zéro allocation en boucle)
+interface NumberGeoData {
+  row: number;
+  col: number;
+  rev: number;
+  mod10: number;
+  decade: number;
+}
+
+export const NUMBER_GEO_TABLE: NumberGeoData[] = (() => {
+  const table: NumberGeoData[] = new Array(91);
+  table[0] = { row: 0, col: 0, rev: 0, mod10: 0, decade: 0 };
+  for (let n = 1; n <= 90; n++) {
+    const idx = n - 1;
+    const row = Math.floor(idx / 10);
+    const col = idx % 10;
+    const mod10 = n % 10;
+    const rev = n < 10 ? n : (n % 10) * 10 + Math.floor(n / 10);
+    const decade = Math.floor(idx / 10);
+    table[n] = { row, col, rev, mod10, decade };
+  }
+  return table;
+})();
+
+/**
+ * Calcul Vectorisé Rapide de la Proximité Topologique Continue (1-90 vs Gagnants)
+ * Remplace les boucles dynamiques JavaScript et élimine les allocations de chaînes string.
+ */
+export function computeTopologicalProximityVectorHpc(winners: number[] | Int32Array): Float64Array {
+  const result = new Float64Array(91);
+  const winLen = winners.length;
+  if (winLen === 0) return result;
+
+  for (let num = 1; num <= 90; num++) {
+    const pGeo = NUMBER_GEO_TABLE[num];
+    let maxSimForWinner = 1e-9;
+
+    for (let i = 0; i < winLen; i++) {
+      const w = winners[i];
+      if (w < 1 || w > 90) continue;
+      if (num === w) {
+        maxSimForWinner = 1.0;
+        break;
+      }
+      const wGeo = NUMBER_GEO_TABLE[w];
+
+      const linSim = Math.exp(-0.25 * Math.abs(num - w));
+      const dRow = pGeo.row - wGeo.row;
+      const dCol = pGeo.col - wGeo.col;
+      const gridDist = Math.sqrt(dRow * dRow + dCol * dCol);
+      const gridSim = Math.exp(-0.35 * gridDist);
+      const mirror91Sim = Math.exp(-0.5 * Math.abs(num + w - 91));
+      const mirrorRevSim = Math.exp(-0.5 * Math.abs(pGeo.rev - w));
+
+      const dHarm = Math.abs(pGeo.mod10 - wGeo.mod10);
+      const harmonicDist = Math.min(dHarm, 10 - dHarm);
+      const harmonicSim = Math.exp(-0.5 * harmonicDist);
+
+      const decadeSim = Math.exp(-0.5 * Math.abs(pGeo.decade - wGeo.decade));
+
+      const sim = Math.max(linSim, gridSim, mirror91Sim, mirrorRevSim, harmonicSim, decadeSim);
+      if (sim > maxSimForWinner) {
+        maxSimForWinner = sim;
+      }
+    }
+    result[num] = maxSimForWinner;
+  }
+
+  return result;
+}
+
 export interface SpatialFieldMetricsHpcResult {
   gridDensity: Float64Array;
   gravityPulls: Float64Array;

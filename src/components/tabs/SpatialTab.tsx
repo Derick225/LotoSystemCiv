@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   calculateSpatialMetrics,
+  calculateSpatialMetricsAsync,
   getBarycenterTrajectory,
 } from "../../services/spatialService";
 import { predictBarycenterShift } from "../../services/mathService";
@@ -85,24 +86,37 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
 
   const maxHistory = Math.min(history.length - 20, 100);
 
-  // Recalcul des métriques basé sur la fenêtre temporelle active
+  // Recalcul asynchrone non-bloquant hors thread principal (60 FPS garanti)
   useEffect(() => {
     if (history.length > 20) {
-      // Fenêtre glissante virtuelle sur l'historique
       const snapshotHistory = history.slice(timeIndex);
+      let isMounted = true;
 
-      try {
-        const spatialMetrics = calculateSpatialMetrics(snapshotHistory);
-        const traj = getBarycenterTrajectory(snapshotHistory, 15);
+      calculateSpatialMetricsAsync(snapshotHistory)
+        .then((spatialMetrics) => {
+          if (!isMounted) return;
+          const traj = getBarycenterTrajectory(snapshotHistory, 15);
+          setMetrics(spatialMetrics);
+          setTrajectory(traj.reverse());
+          setLastDraw(snapshotHistory[0]);
+          setLocalLoading(false);
+        })
+        .catch(() => {
+          if (!isMounted) return;
+          try {
+            const spatialMetrics = calculateSpatialMetrics(snapshotHistory);
+            const traj = getBarycenterTrajectory(snapshotHistory, 15);
+            setMetrics(spatialMetrics);
+            setTrajectory(traj.reverse());
+            setLastDraw(snapshotHistory[0]);
+          } finally {
+            setLocalLoading(false);
+          }
+        });
 
-        setMetrics(spatialMetrics);
-        setTrajectory(traj.reverse());
-        setLastDraw(snapshotHistory[0]);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLocalLoading(false);
-      }
+      return () => {
+        isMounted = false;
+      };
     }
   }, [history, timeIndex]);
 
@@ -187,7 +201,7 @@ export function SpatialTab({ drawName }: SpatialTabProps) {
               {isLotoEngineWasmReady() && (
                 <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md flex items-center gap-1">
                   <Sparkles size={10} />
-                  Rust / WASM
+                  Rust / WASM · 60 FPS Worker
                 </span>
               )}
             </div>

@@ -52,88 +52,103 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
   return normalized;
 };
 
+// Table géométrique pré-calculée pour 1..90 (Zéro allocation en boucle chaude)
+const GEO_TABLE = Array.from({ length: 91 }, (_, num) => {
+  if (num === 0) return { row: 0, col: 0, rev: -1, mod10: -1, decade: -1 };
+  const row = Math.floor((num - 1) / 10);
+  const col = (num - 1) % 10;
+  const rev = num < 10 ? num : (num % 10) * 10 + Math.floor(num / 10);
+  return {
+    row,
+    col,
+    rev: rev >= 1 && rev <= 90 ? rev : -1,
+    mod10: num % 10,
+    decade: row,
+  };
+});
+
 // Fitness via produit matriciel pur avec normalisation statistique dynamique
 const evaluateTensor = (w: AlgoWeights, tensors: TensorContext[]): number => {
   let totalHits = 0;
+  const keys = Object.keys(w) as AlgoKey[];
+  const numKeys = keys.length;
+  const activeWeights: number[] = new Array(numKeys);
+  for (let k = 0; k < numKeys; k++) {
+    activeWeights[k] = w[keys[k]] || 0;
+  }
   
   for (const tensor of tensors) {
-    const scores: { num: number; score: number }[] = [];
-    const allScores: number[] = [];
+    const scores: { num: number; score: number }[] = new Array(90);
+    const allScores: number[] = new Array(90);
 
-    // 1. Calcul des scores bruts et collecte pour statistiques
+    // 1. Calcul des scores bruts et collecte pour statistiques (sans allocations répétées)
     for (let num = 1; num <= 90; num++) {
       let sum = 0;
       const metrics = tensor.matrix[num];
-      const keys = Object.keys(w) as AlgoKey[];
       
-      for (const k of keys) {
-        const feat = metrics[k] || 0;
-        sum += feat * (w[k] || 0);
+      for (let k = 0; k < numKeys; k++) {
+        const feat = metrics ? (metrics[keys[k]] || 0) : 0;
+        sum += feat * activeWeights[k];
       }
-      allScores.push(sum);
-      scores.push({ num, score: sum });
+      allScores[num - 1] = sum;
+      scores[num - 1] = { num, score: sum };
     }
 
     // 2. Calcul de la médiane et de l'écart-type pour une sigmoïde adaptative (Zéro Nombre Magique)
     const sortedScores = [...allScores].sort((a, b) => a - b);
     const median = sortedScores[Math.floor(sortedScores.length / 2)];
-    const mean = allScores.reduce((a, b) => a + b, 0) / allScores.length;
-    const variance = allScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / allScores.length;
+    const mean = allScores.reduce((a, b) => a + b, 0) / 90;
+    const variance = allScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 90;
     const stdDev = Math.sqrt(variance) || 1e-6;
     const slope = 1.0 / stdDev; // Pente dérivée de la dispersion des données
 
     // 3. Application de la CDF Logistique centrée sur la médiane
-    scores.forEach(s => {
-      const zScore = (s.score - median) / stdDev;
-      s.score = 100 / (1 + Math.exp(-slope * zScore));
-    });
+    for (let i = 0; i < 90; i++) {
+      const zScore = (scores[i].score - median) / stdDev;
+      scores[i].score = 100 / (1 + Math.exp(-slope * zScore));
+    }
 
-    // 4. Évaluation des hits (Top 5)
+    // 4. Évaluation des hits (Top 5 & Top 10)
     scores.sort((a, b) => b.score !== a.score ? b.score - a.score : a.num - b.num); // Tri déterministe
-    const top5 = scores.slice(0, 5).map(s => s.num);
+    const top5 = [scores[0].num, scores[1].num, scores[2].num, scores[3].num, scores[4].num];
     const top10 = scores.slice(0, 10).map(s => s.num);
 
-    const getGridPos = (val: number) => {
-      const row = Math.floor((val - 1) / 10);
-      const col = (val - 1) % 10;
-      return { row, col };
-    };
-
     let totalContinLoss = 0;
-    tensor.targetWinners.forEach((w) => {
+    const targetWinners = tensor.targetWinners;
+    const targetLen = targetWinners.length;
+
+    for (let i = 0; i < targetLen; i++) {
+      const wNum = targetWinners[i];
       let maxSimForWinner = 1e-9;
-      top5.forEach((p) => {
-        let sim = 0.0;
-        if (p === w) {
-          sim = 1.0;
-        } else {
-          const linSim = Math.exp(-0.25 * Math.abs(p - w));
-          const posP = getGridPos(p);
-          const posW = getGridPos(w);
-          const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-          const gridSim = Math.exp(-0.35 * gridDist);
+      const geoW = (wNum >= 1 && wNum <= 90) ? GEO_TABLE[wNum] : { row: 0, col: 0, rev: -1, mod10: -1, decade: -1 };
 
-          let mirrorSim = 0.0;
-          if (p + w === 91) mirrorSim = 0.45;
-          const strP = p.toString();
-          const revP = parseInt(strP.split("").reverse().join(""), 10);
-          if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, 0.40);
-
-          let harmonicSim = 0.0;
-          if (p % 10 === w % 10) harmonicSim = 0.35;
-
-          let decadeSim = 0.0;
-          if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = 0.25;
-
-          sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
+      for (let j = 0; j < 5; j++) {
+        const p = top5[j];
+        if (p === wNum) {
+          maxSimForWinner = 1.0;
+          break;
         }
-        if (sim > maxSimForWinner) maxSimForWinner = sim;
-      });
-      totalContinLoss += (1.0 - maxSimForWinner);
-    });
 
-    const targetSize = tensor.targetWinners.length || 5;
-    const match10 = top10.filter(n => tensor.targetWinners.includes(n)).length;
+        const geoP = (p >= 1 && p <= 90) ? GEO_TABLE[p] : { row: 0, col: 0, rev: -1, mod10: -1, decade: -1 };
+        const linSim = Math.exp(-0.25 * Math.abs(p - wNum));
+        const gridDist = Math.sqrt(Math.pow(geoP.row - geoW.row, 2) + Math.pow(geoP.col - geoW.col, 2));
+        const gridSim = Math.exp(-0.35 * gridDist);
+
+        let mirrorSim = 0.0;
+        if (p + wNum === 91) mirrorSim = 0.45;
+        if (geoP.rev >= 1 && geoP.rev <= 90 && geoP.rev === wNum) mirrorSim = Math.max(mirrorSim, 0.40);
+
+        let harmonicSim = (geoP.mod10 === geoW.mod10) ? 0.35 : 0.0;
+        let decadeSim = (geoP.decade === geoW.decade) ? 0.25 : 0.0;
+
+        const sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
+        if (sim > maxSimForWinner) maxSimForWinner = sim;
+      }
+      totalContinLoss += (1.0 - maxSimForWinner);
+    }
+
+    const targetSize = targetLen || 5;
+    const match10 = top10.filter(n => targetWinners.includes(n)).length;
 
     // Fitness structurelle basée sur la similarité au lieu de booléens purs
     const globalSimilarityScore = targetSize - totalContinLoss; 
