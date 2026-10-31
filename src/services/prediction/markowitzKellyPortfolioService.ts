@@ -143,7 +143,8 @@ export function computeMarkowitzKellyPortfolio(params: {
   let traceSum = 0;
 
   for (let i = 0; i < K; i++) {
-    const setA = new Set(scenarios[i].numbers);
+    const numsA = scenarios[i].numbers || [];
+    const setA = new Set(numsA);
     const pA = probabilities[i];
     const varA = Math.max(1e-4, pA * (1.0 - pA));
 
@@ -152,12 +153,15 @@ export function computeMarkowitzKellyPortfolio(params: {
         covMatrix[i][j] = varA;
         traceSum += varA;
       } else {
-        const setB = new Set(scenarios[j].numbers);
+        const numsB = scenarios[j].numbers || [];
+        const setB = new Set(numsB);
         let intersection = 0;
         setA.forEach(n => {
           if (setB.has(n)) intersection++;
         });
-        const overlapRatio = intersection / 5.0; // ∈ [0, 1]
+        const lenA = Math.max(1, numsA.length);
+        const lenB = Math.max(1, numsB.length);
+        const overlapRatio = intersection / Math.sqrt(lenA * lenB); // ∈ [0, 1]
         const pB = probabilities[j];
         const varB = Math.max(1e-4, pB * (1.0 - pB));
         // Covariance proportionnelle au chevauchement stochastique

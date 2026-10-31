@@ -144,7 +144,9 @@ export const generateAbbreviatedWheel = (
     generateFullWheel(ticket, guarantee).map(c => c.join('-'))
   );
   
-  const maxTickets = Math.min(2000, Math.max(50, Math.ceil(totalScenarios * 0.1)));
+  // Borne supérieure dérivée de l'approximation de Set Cover (O(ln m) * Borne de Schönheim)
+  // sans seuil arbitraire de 10% qui empêchait d'atteindre la couverture complète requise
+  const maxTickets = Math.min(candidateTickets.length, 2000, Math.max(50, Math.ceil(schonheimBound * 3)));
   
   while (coveredScenarios.size < totalScenarios && selectedTickets.length < maxTickets) {
     let bestIdx = -1;

@@ -53,6 +53,11 @@ import {
   InterDrawCentroidPattern,
   InterDrawRetentionPattern
 } from './interDrawPatternService';
+import {
+  buildWeightedTransitionMatrix,
+  WeightedTransitionMatrix,
+  TransitionPairSource
+} from './interDrawTransitionMatrix';
 
 // Probabilité marginale théorique exacte d'un numéro : 5/90.
 const THEORETICAL_SINGLE_PROB =
@@ -199,6 +204,16 @@ export interface InterDrawNetworkContribution {
   topTransmittedNumbers: number[];
 }
 
+/**
+ * Matrices de transition 90×90 par portée de sources (même code de calcul, cf. interDrawTransitionMatrix.ts) :
+ * - immediate : prédécesseur immédiat uniquement ;
+ * - network   : tous les tirages du réseau fermé, pondérés par leur couplage continu.
+ */
+export interface InterDrawNetworkTransitionReport {
+  immediate: WeightedTransitionMatrix;
+  network: WeightedTransitionMatrix;
+}
+
 export interface InterDrawReport {
   targetDraw: string;
   family: InterDrawFamilyConfig;
@@ -235,6 +250,7 @@ export interface InterDrawReport {
   patternMetrics?: InterDrawPatternReport;
   complexDynamics?: InterDrawComplexDynamicsReport;
   bivariateHpcReport?: BivariateDyadsReportHpc;
+  networkTransition?: InterDrawNetworkTransitionReport;
   indirectPaths?: InterDrawIndirectPath[];
   communities?: InterDrawCommunity[];
   networkFingerprint?: string;
@@ -1402,12 +1418,12 @@ export const generateInterDrawReport = async (
   if (!forceRefresh) {
     // Accès ultra-rapide L1 synchrone (< 0.1 ms) pour éliminer la latence
     const fastSync = globalCache.getSync<InterDrawReport>(cacheKey, targetDrawName);
-    if (fastSync && fastSync.predecessor?.name && fastSync.successor?.name && Array.isArray(fastSync.topCandidates)) {
+    if (fastSync && fastSync.predecessor?.name && fastSync.successor?.name && Array.isArray(fastSync.topCandidates) && fastSync.networkTransition) {
       return fastSync;
     }
 
     const cached = await globalCache.get<InterDrawReport>(cacheKey, targetDrawName);
-    if (cached && cached.predecessor?.name && cached.successor?.name && Array.isArray(cached.topCandidates)) {
+    if (cached && cached.predecessor?.name && cached.successor?.name && Array.isArray(cached.topCandidates) && cached.networkTransition) {
       return cached;
     }
   }
@@ -1467,6 +1483,7 @@ export const generateInterDrawReport = async (
 
   // 3b. Intégration continue de l'ENSEMBLE du réseau de tirage choisi (AGENTS.md)
   const networkContributions: InterDrawNetworkContribution[] = [];
+  const rawCouplingWeights = new Map<string, number>();
   let totalNetworkWeight = 0;
   const networkPairCount = Math.max(2, networkDrawNames.length * (networkDrawNames.length - 1));
 
@@ -1482,6 +1499,7 @@ export const generateInterDrawReport = async (
     ) || computeContinuousInterDrawCoupling(sHist, targetHistory, networkPairCount);
 
     const weight = coupling.weight;
+    rawCouplingWeights.set(sourceName, weight);
     const latestWinners = (sHist[0]?.gagnants || []).filter(n => n >= 1 && n <= 90);
     const latestMachine = (sHist[0]?.machine || []).filter(n => n >= 1 && n <= 90);
 
@@ -1787,6 +1805,36 @@ export const generateInterDrawReport = async (
     console.warn('[INTER-DRAW] Erreur calcul bivariateHpcReport :', e);
   }
 
+  // 10. Matrice de transition 90x90 : prédécesseur immédiat ET réseau complet pondéré (AGENTS.md).
+  // Les paires sont alignées chronologiquement (source strictement avant cible) pour chaque tirage du réseau.
+  let networkTransition: InterDrawNetworkTransitionReport | undefined = undefined;
+  try {
+    const predName = relation.predecessor?.name || 'Prédécesseur';
+    const immediateSource: TransitionPairSource = {
+      name: predName,
+      weight: 1,
+      pairs: pairedPairs
+    };
+    const networkSources: TransitionPairSource[] = [];
+    for (const sourceName of networkDrawNames) {
+      if (normalizeDrawName(sourceName) === normalizeDrawName(targetDrawName)) continue;
+      const sHist = networkHistories.get(sourceName) || [];
+      const pairs = alignConsecutiveDrawHistories(targetHistory, sHist, targetDrawName, sourceName);
+      if (pairs.length === 0) continue;
+      networkSources.push({
+        name: sourceName,
+        weight: rawCouplingWeights.get(sourceName) ?? 0,
+        pairs
+      });
+    }
+    networkTransition = {
+      immediate: buildWeightedTransitionMatrix([immediateSource], 'IMMEDIATE'),
+      network: buildWeightedTransitionMatrix(networkSources, 'NETWORK')
+    };
+  } catch (e) {
+    console.warn('[INTER-DRAW] Erreur calcul networkTransition :', e);
+  }
+
   const report: InterDrawReport = {
     targetDraw: targetDrawName,
     family: activeFamily,
@@ -1832,6 +1880,7 @@ export const generateInterDrawReport = async (
     patternMetrics,
     complexDynamics,
     bivariateHpcReport,
+    networkTransition,
     indirectPaths: networkMatrix?.indirectPaths,
     communities: networkMatrix?.communities,
     networkFingerprint: networkMatrix?.networkFingerprint,

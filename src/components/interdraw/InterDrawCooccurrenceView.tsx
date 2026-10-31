@@ -10,6 +10,14 @@ import {
   BivariateDyadsReportHpc,
   InterDrawCrossDyadHpc
 } from "../../services/wasm/lotoEngineBridge";
+import type { InterDrawNetworkTransitionReport } from "../../services/interDrawService";
+import {
+  rankTransitionRow,
+  isTransitionRowInformative,
+  TRANSITION_BASELINE,
+  TransitionScope
+} from "../../services/interDrawTransitionMatrix";
+import { useNexusStore } from "../../store/useNexusStore";
 import { InterDrawPatternView } from "./InterDrawPatternView";
 import { NumberBall } from "../NumberBall";
 import { audioEngine } from "../../utils/audioEngine";
@@ -35,6 +43,7 @@ interface InterDrawCooccurrenceViewProps {
   cooccurrences?: InterDrawCooccurrenceReport;
   patterns?: InterDrawPatternReport;
   bivariateHpcReport?: BivariateDyadsReportHpc;
+  networkTransition?: InterDrawNetworkTransitionReport;
   targetDraw: string;
   predecessorName: string;
   predecessorNumbers: number[];
@@ -44,6 +53,7 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
   cooccurrences,
   patterns,
   bivariateHpcReport,
+  networkTransition,
   targetDraw,
   predecessorName,
   predecessorNumbers
@@ -53,11 +63,15 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
   const [bivariateFilter, setBivariateFilter] = useState<'ACTIVE' | 'ALL'>('ACTIVE');
   const [selectedPair, setSelectedPair] = useState<InterDrawTargetPairCooccurrence | null>(null);
   
-  // Pour la matrice de transition 90x90 Wasm
+  // Pour la matrice de transition 90x90 Wasm / Réseau
   const [selectedMatrixSource, setSelectedMatrixSource] = useState<number>(() => {
     return predecessorNumbers.length > 0 ? predecessorNumbers[0] : 1;
   });
   const [matrixSearchQuery, setMatrixSearchQuery] = useState<string>("");
+
+  // Portée de la matrice (prédécesseur immédiat / réseau complet) : état global persisté
+  const matrixScope = useNexusStore(st => st.interDrawMatrixScope);
+  const setMatrixScope = useNexusStore(st => st.setInterDrawMatrixScope);
 
   // Synchronisation dynamique : basculer automatiquement sur une boule active du tirage source dès chargement
   useEffect(() => {
@@ -67,16 +81,6 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
       }
     }
   }, [predecessorNumbers]);
-
-  if (!cooccurrences && !bivariateHpcReport) {
-    return (
-      <div className="p-8 text-center bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-white/5">
-        <p className="text-xs text-slate-400 italic">
-          Données de dyades et cooccurrences en cours de calcul ou historique apparié insuffisant.
-        </p>
-      </div>
-    );
-  }
 
   const activePredSet = useMemo(() => new Set(predecessorNumbers), [predecessorNumbers]);
 
@@ -108,79 +112,33 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
       : cooccurrences.bivariateTriggers;
   }, [cooccurrences, bivariateFilter]);
 
-  // Map des dyades observées pour la source sélectionnée
-  const sourceDyadsMap = useMemo(() => {
-    const map = new Map<number, InterDrawCrossDyadHpc>();
-    if (bivariateHpcReport?.dyads) {
-      for (const d of bivariateHpcReport.dyads) {
-        if (d.sourceNumber === selectedMatrixSource) {
-          map.set(d.targetNumber, d);
-        }
-      }
-    }
-    return map;
-  }, [bivariateHpcReport, selectedMatrixSource]);
+  // Matrice de transition 90×90 de la portée choisie. Tri par probabilité brute (non arrondie),
+  // puis cooccurrences, puis numéro : les égalités ne retombent plus sur l'ordre 1, 2, 3…
+  const activeMatrix = networkTransition
+    ? (matrixScope === 'IMMEDIATE' ? networkTransition.immediate : networkTransition.network)
+    : undefined;
 
-  // Transitions pour la matrice 90x90 Wasm pour la ligne selectedMatrixSource
   const matrixTransitions = useMemo(() => {
-    if (!bivariateHpcReport?.transitionMatrix || selectedMatrixSource < 1 || selectedMatrixSource > 90) {
-      return [];
-    }
-    const matrix = bivariateHpcReport.transitionMatrix;
-    const rowOffset = (selectedMatrixSource - 1) * 90;
-    const results: {
-      targetNumber: number;
-      rawProb: number;
-      prob: number;
-      lift: number;
-      occurrences: number;
-      zScore: number;
-    }[] = [];
-    const baseline = 5.0 / 90.0;
+    if (!activeMatrix || selectedMatrixSource < 1 || selectedMatrixSource > 90) return [];
+    const q = parseInt(matrixSearchQuery.trim(), 10);
+    const targetFilter = !isNaN(q) && q >= 1 && q <= 90 ? q : undefined;
+    return rankTransitionRow(activeMatrix, selectedMatrixSource, targetFilter);
+  }, [activeMatrix, selectedMatrixSource, matrixSearchQuery]);
 
-    for (let t = 1; t <= 90; t++) {
-      const prob = matrix[rowOffset + (t - 1)] || 0;
-      const lift = baseline > 0 ? prob / baseline : 1.0;
-      const dyad = sourceDyadsMap.get(t);
-      results.push({
-        targetNumber: t,
-        rawProb: prob,
-        prob: Math.round(prob * 1000) / 10,
-        lift: Math.round(lift * 100) / 100,
-        occurrences: dyad?.occurrences ?? 0,
-        zScore: dyad?.zScore ?? 0,
-      });
-    }
+  const matrixRowInformative = activeMatrix
+    ? isTransitionRowInformative(activeMatrix, selectedMatrixSource)
+    : false;
 
-    let filtered = results;
-    if (matrixSearchQuery.trim()) {
-      const q = parseInt(matrixSearchQuery.trim(), 10);
-      if (!isNaN(q) && q >= 1 && q <= 90) {
-        filtered = filtered.filter(item => item.targetNumber === q);
-      }
-    }
-
-    // Tri continu avec départage strict sans seuil magique
-    return filtered.sort((a, b) => {
-      const diff = b.rawProb - a.rawProb;
-      if (Math.abs(diff) > 1e-6) {
-        return diff;
-      }
-      // Départage par occurrences observées réelles
-      if (b.occurrences !== a.occurrences) {
-        return b.occurrences - a.occurrences;
-      }
-      return a.targetNumber - b.targetNumber;
-    });
-  }, [bivariateHpcReport, selectedMatrixSource, matrixSearchQuery, sourceDyadsMap]);
-
-  // Détection de distribution plate / Laplace prior équiprobable
-  const isUniformMatrix = useMemo(() => {
-    if (matrixTransitions.length < 2) return false;
-    const first = matrixTransitions[0].rawProb;
-    const last = matrixTransitions[matrixTransitions.length - 1].rawProb;
-    return Math.abs(first - last) < 1e-6;
-  }, [matrixTransitions]);
+  // Garde-fou placé APRÈS tous les hooks pour respecter les règles de React Hooks
+  if (!cooccurrences && !bivariateHpcReport && !networkTransition) {
+    return (
+      <div className="p-8 text-center bg-white/50 dark:bg-slate-900/50 rounded-3xl border border-slate-200 dark:border-white/5">
+        <p className="text-xs text-slate-400 italic">
+          Données de dyades et cooccurrences en cours de calcul ou historique apparié insuffisant.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in font-sans">
@@ -734,12 +692,14 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
                 <h4 className="text-sm md:text-base font-black uppercase tracking-wider text-slate-900 dark:text-white">
                   Matrice de Transition Bivariée 90×90 (P(t | s))
                 </h4>
-                <span className="px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 text-[9px] font-mono font-bold">
-                  Wasm Core
-                </span>
+                {activeMatrix && (
+                  <span className="px-2 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-600 dark:text-sky-400 text-[9px] font-mono font-bold">
+                    {activeMatrix.pairsUsed} paires · {activeMatrix.sourcesUsed} tirage{activeMatrix.sourcesUsed > 1 ? 's' : ''} source
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Distribution markovienne des probabilités de sortie du tirage cible pour chaque numéro source $s \in [1..90]$.
+                Probabilité qu'un numéro sorte dans {targetDraw} sachant que le numéro source est sorti dans le(s) tirage(s) précédent(s) du réseau.
               </p>
             </div>
 
@@ -812,82 +772,117 @@ export const InterDrawCooccurrenceView: React.FC<InterDrawCooccurrenceViewProps>
             </div>
           </div>
 
-          {/* Bannière pédagogique en cas d'équiprobabilité a priori */}
-          {isUniformMatrix && (
-            <div className="p-3.5 bg-amber-50/80 dark:bg-amber-950/25 border border-amber-300 dark:border-amber-700/40 rounded-2xl flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
-              <Info size={16} className="text-amber-500 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-black uppercase tracking-wider text-[10px]">
-                  Distribution Neutre A Priori (Lissage Bayesien de Laplace)
-                </p>
-                <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5 leading-relaxed">
-                  Le numéro source #{selectedMatrixSource} n'a aucune cooccurrence discriminante enregistrée dans l'historique apparié ({predecessorName} → {targetDraw}). 
-                  En application du principe <em>Zéro Nombre Magique</em>, les 90 cibles reçoivent la probabilité théorique neutre (~5.56%, Lift 1.0x).
-                  Cliquez sur un des numéros actifs du bandeau ci-dessus pour afficher les vraies transitions observées.
-                </p>
-              </div>
+          {/* Portée des tirages sources : prédécesseur immédiat ou réseau complet pondéré */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-white/5 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Tirages sources :</span>
+              {([
+                ['IMMEDIATE', `Prédécesseur (${predecessorName})`],
+                ['NETWORK', 'Réseau complet pondéré']
+              ] as [TransitionScope, string][]).map(([scope, label]) => (
+                <button
+                  key={`mat-scope-${scope}`}
+                  onClick={() => {
+                    audioEngine.play("click");
+                    setMatrixScope(scope);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    matrixScope === scope
+                      ? "bg-sky-600 text-white shadow-md ring-2 ring-sky-400"
+                      : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-slate-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
+            {activeMatrix && activeMatrix.bySource.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {activeMatrix.bySource.slice(0, 10).map(src => (
+                  <span
+                    key={`mat-src-${src.name}`}
+                    className="px-2 py-0.5 rounded-lg bg-slate-200/70 dark:bg-slate-700/60 text-[10px] font-mono text-slate-700 dark:text-slate-300"
+                  >
+                    {src.name} · {src.pairs} paires{activeMatrix.scope === 'NETWORK' ? ` · w×${src.appliedWeight.toFixed(2)}` : ''}
+                  </span>
+                ))}
+                {activeMatrix.bySource.length > 10 && (
+                  <span className="text-[10px] text-slate-400 self-center">+{activeMatrix.bySource.length - 10} autres</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {!activeMatrix && (
+            <p className="text-center py-6 text-xs text-slate-400 italic">
+              Matrice de transition en cours de recalcul pour ce tirage…
+            </p>
+          )}
+
+          {activeMatrix && !matrixRowInformative && (
+            <p className="text-center py-6 text-xs text-amber-600 dark:text-amber-400 font-medium">
+              {activeMatrix.pairsUsed < 2
+                ? `Historique apparié insuffisant (${activeMatrix.pairsUsed} paire${activeMatrix.pairsUsed > 1 ? 's' : ''}) : aucune probabilité de transition fiable à afficher.`
+                : `Le numéro ${selectedMatrixSource} n'est jamais sorti dans les tirages sources alignés : sa ligne ne contient que l'a priori uniforme (${(TRANSITION_BASELINE * 100).toFixed(2)} %).`}
+            </p>
           )}
 
           {/* Grille de distribution conditionnelle */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span className="font-bold uppercase tracking-wider text-[10px]">
-                Top Destinations Projetées (sur 90) :
-              </span>
-              <span className="font-mono text-[10px]">
-                Baseline théorique : 5.56% (Lift 1.0x)
-              </span>
-            </div>
+          {activeMatrix && matrixRowInformative && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span className="font-bold uppercase tracking-wider text-[10px]">
+                  Top Destinations Projetées (sur 90) :
+                </span>
+                <span className="font-mono text-[10px]">
+                  Baseline théorique : 5.56% (Lift 1.0x)
+                </span>
+              </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-2.5">
-              {matrixTransitions.slice(0, 30).map((t, idx) => {
-                const isRepeat = t.targetNumber === selectedMatrixSource;
-                const isOverperforming = t.lift >= 1.5;
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-2.5">
+                {matrixTransitions.slice(0, 30).map((t, idx) => {
+                  const isRepeat = t.targetNumber === selectedMatrixSource;
+                  const isOverperforming = t.lift >= 1.5;
 
-                return (
-                  <div
-                    key={`mat-cell-${selectedMatrixSource}-${t.targetNumber}`}
-                    className={`
-                      p-2.5 rounded-xl border flex flex-col justify-between transition-all
-                      ${isOverperforming
-                        ? "bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-500/30"
-                        : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5"
-                      }
-                    `}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-mono text-slate-400 font-bold">
-                        #{idx + 1}
-                      </span>
-                      {isRepeat && (
-                        <span className="px-1 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[8px] font-black uppercase">
-                          Report
+                  return (
+                    <div
+                      key={`mat-cell-${selectedMatrixSource}-${t.targetNumber}`}
+                      className={`
+                        p-2.5 rounded-xl border flex flex-col justify-between transition-all
+                        ${isOverperforming
+                          ? "bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-500/30"
+                          : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-white/5"
+                        }
+                      `}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-mono text-slate-400 font-bold">
+                          #{idx + 1}
                         </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2 my-1">
-                      <NumberBall number={t.targetNumber} size="xs" />
-                      <div>
-                        <span className="text-xs font-black font-mono text-slate-900 dark:text-white block">
-                          {t.prob}%
-                        </span>
-                        <span className={`text-[9px] font-mono font-bold ${isOverperforming ? 'text-emerald-500' : 'text-slate-400'}`}>
-                          Lift: {t.lift}x
-                        </span>
-                        {t.occurrences > 0 && (
-                          <span className="block text-[8px] font-mono font-bold text-sky-600 dark:text-sky-400">
-                            {t.occurrences}x obs.
+                        {isRepeat && (
+                          <span className="px-1 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[8px] font-black uppercase">
+                            Report
                           </span>
                         )}
                       </div>
+
+                      <div className="flex items-center gap-2 my-1">
+                        <NumberBall number={t.targetNumber} size="xs" />
+                        <div>
+                          <span className="text-xs font-black font-mono text-slate-900 dark:text-white block">
+                            {(t.prob * 100).toFixed(1)}%
+                          </span>
+                          <span className={`text-[9px] font-mono font-bold ${isOverperforming ? 'text-emerald-500' : 'text-slate-400'}`}>
+                            Lift: {t.lift.toFixed(2)}x · obs {t.count.toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

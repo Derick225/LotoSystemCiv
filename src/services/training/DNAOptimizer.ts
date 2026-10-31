@@ -394,7 +394,8 @@ export class DNAOptimizer {
     }
 
     const { isChaotic, divergenceForce } = this.lyapunovExponentCached;
-    const lastDraw = historicalDraws[0];
+    const lastDraw = historicalDraws[0] || [];
+    if (!Array.isArray(lastDraw) || lastDraw.length === 0) return 0.5;
     let candidateResonance = 0;
 
     // Zero-magic continuous damping

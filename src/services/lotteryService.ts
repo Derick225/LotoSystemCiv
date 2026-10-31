@@ -106,6 +106,10 @@ const normalizeDrawName = (name: string): string => {
     return name.trim().charAt(0).toUpperCase() + name.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c) => c.toUpperCase());
 };
 
+export function getDrawTimestamp(dateStr: string, drawName?: string, explicitTime?: string): number {
+  return getDrawFullTimestamp(dateStr, drawName, explicitTime);
+}
+
 const inFlightHistoryFetches = new Map<string, Promise<DrawResult[]>>();
 const lastDeltaSyncByDraw = new Map<string, number>();
 const DELTA_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes de cooldown entre synchronisations différentielles par tirage
@@ -465,10 +469,6 @@ export const lotteryService = {
     await this.fetchHistory(drawName);
     return generateDiversifiedPortfolioHpc(drawName, numTickets);
   }
-};
-
-export const getDrawTimestamp = (dateStr: string, drawName?: string, explicitTime?: string): number => {
-    return getDrawFullTimestamp(dateStr, drawName, explicitTime);
 };
 
 /**

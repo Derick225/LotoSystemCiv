@@ -1589,6 +1589,7 @@ export const InterDrawRelationsTab: React.FC<InterDrawRelationsTabProps> = ({
               cooccurrences={report.cooccurrenceMetrics}
               patterns={report.patternMetrics}
               bivariateHpcReport={report.bivariateHpcReport}
+              networkTransition={report.networkTransition}
               targetDraw={report.targetDraw}
               predecessorName={report.predecessor?.name || 'Prédécesseur'}
               predecessorNumbers={report.predecessorResult?.gagnants || []}

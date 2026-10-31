@@ -24,6 +24,7 @@ import {
   normalizeWeights,
 } from "../services/prediction/weightsManager";
 import { EmpiricalCalibration } from "../shared/prediction.types";
+import type { TransitionScope } from "../services/interDrawTransitionMatrix";
 
 interface NexusState {
   // UI State
@@ -51,6 +52,8 @@ interface NexusState {
   useCloudEngine: boolean;
   useSpatioTemporalHawkes: boolean;
   temporalDepth: number;
+  // Portée de la matrice de transition inter-tirages 90×90 (partagée entre onglets, persistée)
+  interDrawMatrixScope: TransitionScope;
 
   // Data State
   history: DrawResult[];
@@ -95,6 +98,7 @@ interface NexusState {
   setUseCloudEngine: (useCloud: boolean) => void;
   setUseSpatioTemporalHawkes: (use: boolean) => void;
   setTemporalDepth: (depth: number) => void;
+  setInterDrawMatrixScope: (scope: TransitionScope) => void;
   setLastPrediction: (pred: Prediction | null) => void;
   setSmartInsights: (insights: SmartInsight[]) => void;
   setCalibration: (cal: CalibrationData | null) => void;
@@ -138,6 +142,7 @@ export const useNexusStore = create<NexusState>()(
       vocalContext: null,
       useCloudEngine: false,
       temporalDepth: 100,
+      interDrawMatrixScope: "NETWORK",
 
       history: [],
       stats: [],
@@ -327,6 +332,8 @@ export const useNexusStore = create<NexusState>()(
       setUseCloudEngine: (useCloud) => set({ useCloudEngine: useCloud }),
       setUseSpatioTemporalHawkes: (use) => set({ useSpatioTemporalHawkes: use }),
       setTemporalDepth: (depth) => set({ temporalDepth: depth }),
+      setInterDrawMatrixScope: (scope) =>
+        set({ interDrawMatrixScope: scope === "IMMEDIATE" ? "IMMEDIATE" : "NETWORK" }),
       setLastPrediction: (pred) => set({ lastPrediction: pred }),
       setSmartInsights: (insights) => set({ smartInsights: insights }),
       setCalibration: (cal) => set({ calibration: cal }),
@@ -433,6 +440,7 @@ export const useNexusStore = create<NexusState>()(
         drawName: state.drawName,
         useCloudEngine: state.useCloudEngine,
         temporalDepth: state.temporalDepth,
+        interDrawMatrixScope: state.interDrawMatrixScope,
       }),
       storage:
         typeof window !== "undefined"
@@ -466,6 +474,7 @@ export const useNexusVocalContext = () => useNexusStore((s) => s.vocalContext);
 export const useNexusUseCloudEngine = () => useNexusStore((s) => s.useCloudEngine);
 export const useNexusUseSpatioTemporalHawkes = () => useNexusStore((s) => s.useSpatioTemporalHawkes);
 export const useNexusTemporalDepth = () => useNexusStore((s) => s.temporalDepth);
+export const useNexusInterDrawMatrixScope = () => useNexusStore((s) => s.interDrawMatrixScope);
 
 // Data selectors
 export const useNexusHistory = () => useNexusStore((s) => s.history);
@@ -506,6 +515,7 @@ export const useNexusActions = () =>
     setUseCloudEngine: s.setUseCloudEngine,
     setUseSpatioTemporalHawkes: s.setUseSpatioTemporalHawkes,
     setTemporalDepth: s.setTemporalDepth,
+    setInterDrawMatrixScope: s.setInterDrawMatrixScope,
     setLastPrediction: s.setLastPrediction,
     setSmartInsights: s.setSmartInsights,
     setCalibration: s.setCalibration,
