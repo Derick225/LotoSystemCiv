@@ -144,6 +144,10 @@ export const runGeneticOptimization = async (
 
     // Envoi de la charge utile avec la configuration déterministe et les métriques de régime
     const packed = packHistory(historyLite);
+    const transferList: Transferable[] = [];
+    if (packed.historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(packed.historyBuffer instanceof SharedArrayBuffer))) {
+      transferList.push(packed.historyBuffer);
+    }
     worker.postMessage({ 
       type: 'start', 
       payload: { 
@@ -155,8 +159,8 @@ export const runGeneticOptimization = async (
         baseWeights, 
         baseRules, 
         config,
-        timeSignature: `${drawName}_${history.length}_${historyLite.length}`
+        timeSignature: `${drawName}_${fullHistory.length}_${historyLite.length}`
       } 
-    }, [packed.historyBuffer]);
+    }, transferList);
   });
 };

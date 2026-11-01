@@ -1,6 +1,7 @@
 import { DrawResult } from "../types";
 import { calculateShannonEntropy, calculateVolatility } from "./mathService";
 import { isLotoEngineWasmReady, computeTopologicalLyapunovHpc } from "./wasm/lotoEngineBridge";
+import { getMirrorNumber, getComplement90 } from "../config/networks";
 
 // ============================================================================
 // UTILITAIRES MATHÉMATIQUES ADAPTATIFS (Zéro Nombre Magique)
@@ -1041,12 +1042,21 @@ export const calculateTopologicalLyapunov = (
       const circularDiff = Math.min(Math.abs(num - w), 90 - Math.abs(num - w));
       const distanceAffinity = Math.exp(-Math.pow(circularDiff, 2) / 2.0);
 
-      let mirrorSim = distanceAffinity * gridDamping;
+      // Complément à 90 (somme = 91)
+      const compNum = getComplement90(num);
+      const compDiff = Math.abs(compNum - w);
+      const compAffinity = Math.exp(-Math.pow(compDiff, 2) / 2.0);
 
-      const revNum = parseInt(num.toString().split("").reverse().join(""), 10);
-      const revDiff = Math.abs(revNum - w);
-      const revAffinity = Math.exp(-Math.pow(revDiff, 2) / 2.0);
-      mirrorSim = Math.max(mirrorSim, revAffinity * revDamping);
+      // Miroir décimal canonique (ex: 13 <-> 31, 7 <-> 70)
+      const mirrorNum = getMirrorNumber(num);
+      const mirrorDiff = Math.abs(mirrorNum - w);
+      const mirrorAffinity = Math.exp(-Math.pow(mirrorDiff, 2) / 2.0);
+
+      const mirrorSim = Math.max(
+        distanceAffinity * gridDamping,
+        compAffinity * gridDamping,
+        mirrorAffinity * revDamping
+      );
 
       const sim = Math.max(gridSim, mirrorSim);
       if (sim > maxSim) maxSim = sim;

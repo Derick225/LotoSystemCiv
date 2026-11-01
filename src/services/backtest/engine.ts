@@ -132,6 +132,10 @@ export const runSurvivalSimulation = async (
     };
 
     const packed = packHistory(history);
+    const transferList: Transferable[] = [];
+    if (packed.historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(packed.historyBuffer instanceof SharedArrayBuffer))) {
+      transferList.push(packed.historyBuffer);
+    }
 
     worker.postMessage(
       {
@@ -147,7 +151,7 @@ export const runSurvivalSimulation = async (
         unitBet: unitBet ?? DEFAULT_SIMULATION_CONFIG.ticketCost,
         payoutModel,
       },
-      [packed.historyBuffer]
+      transferList
     );
   });
 };

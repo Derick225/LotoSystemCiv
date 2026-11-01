@@ -494,13 +494,13 @@ export class BacktestingFramework {
 
         let winAmount = 0;
         if (roll < p5) {
-          winAmount = bet * 15000; // 5 numéros corrects
+          winAmount = bet * getPayoutMultiplier("LEGACY", 5); // 5 numéros corrects
         } else if (roll < p5 + p4) {
-          winAmount = bet * 1500; // 4 numéros corrects
+          winAmount = bet * getPayoutMultiplier("LEGACY", 4); // 4 numéros corrects
         } else if (roll < p5 + p4 + p3) {
-          winAmount = bet * 100; // 3 numéros corrects
+          winAmount = bet * getPayoutMultiplier("LEGACY", 3); // 3 numéros corrects
         } else if (roll < p5 + p4 + p3 + p2) {
-          winAmount = bet * 15; // 2 numéros corrects
+          winAmount = bet * getPayoutMultiplier("LEGACY", 2); // 2 numéros corrects
         } else {
           winAmount = 0; // 0 ou 1 numéro correct : aucun gain
         }
@@ -529,9 +529,9 @@ export class BacktestingFramework {
     const sortedBalances = [...finalBalances].sort((a, b) => a - b);
     const sortedDrawdowns = [...maxDrawdowns].sort((a, b) => a - b);
 
-    const medianIdx = Math.floor(runs * 0.5);
-    const p5Idx = Math.floor(runs * 0.05);
-    const p95Idx = Math.floor(runs * 0.95);
+    const medianIdx = Math.min(sortedBalances.length - 1, Math.max(0, Math.floor(runs * 0.5)));
+    const p5Idx = Math.min(sortedBalances.length - 1, Math.max(0, Math.floor(runs * 0.05)));
+    const p95Idx = Math.min(sortedBalances.length - 1, Math.max(0, Math.floor(runs * 0.95)));
 
     // Compute empirical Sharpe ratio distribution approximation
     const averageBalance = finalBalances.reduce((a, b) => a + b, 0) / runs;

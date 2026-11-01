@@ -202,8 +202,9 @@ const getLocalHistory = async (): Promise<PredictionHistoryItem[]> => {
 export const findMatchingResultForPrediction = (prediction: PredictionHistoryItem, historyUpdates: DrawResult[]): DrawResult | null => {
   if (!historyUpdates || historyUpdates.length === 0) return null;
   const predTime = prediction.timestamp;
-  const drawInfo = ALL_DRAWS.find(d => d.name === prediction.drawName);
-  const timeStr = drawInfo ? drawInfo.time : "21:00";
+  const targetNorm = prediction.drawName ? prediction.drawName.trim().toLowerCase() : '';
+  const drawInfo = ALL_DRAWS.find(d => d.name.trim().toLowerCase() === targetNorm);
+  const timeStr = drawInfo ? drawInfo.time : "13:00";
   const [drawHour, drawMinute] = timeStr.split(':').map(Number);
 
   let bestMatch: DrawResult | null = null;

@@ -109,6 +109,10 @@ export const runBayesianOptimization = async (
 
         getBayesianMemoryAsync(drawName).then((memoryObservations) => {
             const packed = packHistory(historyLite);
+            const transferList: Transferable[] = [];
+            if (packed.historyBuffer && (typeof SharedArrayBuffer === 'undefined' || !(packed.historyBuffer instanceof SharedArrayBuffer))) {
+                transferList.push(packed.historyBuffer);
+            }
             worker.postMessage({
                 type: 'start',
                 payload: {
@@ -122,7 +126,7 @@ export const runBayesianOptimization = async (
                     memoryObservations,
                     timeSignature: `${drawName}_${fullHistory.length}`
                 }
-            }, [packed.historyBuffer]);
+            }, transferList);
         }).catch((err) => {
             clearTimeout(timeoutTimer);
             worker.terminate();

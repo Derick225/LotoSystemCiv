@@ -7,6 +7,7 @@ import { detectGameRegime } from "../mathService";
 import { getAlgoWeights, normalizeWeights } from "../prediction/weightsManager";
 import { drawHasMachineNumbers } from "../../constants";
 import { AlgoKey } from "../../shared/prediction.types";
+import { getMirrorNumber, getComplement90 } from "../../config/networks";
 import type {
   TrainingReport,
   TrainingResult,
@@ -66,23 +67,10 @@ const calculateEmpiricalPk = (hitsArray: number[], drawWinnersSize: number = 5) 
 
   const betaBinomialProb = (k: number) => {
     if (k < 0 || k > n) return 0;
-    // Log-combinations implementation for dynamic size binomial coefficients
-    const logGamma = (z: number) => {
-      let y = z;
-      let tmp = z + 5.5;
-      tmp -= (z + 0.5) * Math.log(tmp);
-      let ser = 1.000000000190015;
-      const cof = [76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5];
-      for (let j = 0; j <= 5; j++) {
-        y++;
-        ser += cof[j] / y;
-      }
-      return -tmp + Math.log((2.5066282746310005 * ser) / z);
-    };
     const logComb = (tn: number, tk: number) => {
       if (tk < 0 || tk > tn) return -Infinity;
       if (tk === 0 || tk === tn) return 0;
-      return logGamma(tn + 1) - logGamma(tk + 1) - logGamma(tn - tk + 1);
+      return lgamma(tn + 1) - lgamma(tk + 1) - lgamma(tn - tk + 1);
     };
     const C_n_k = Math.round(Math.exp(logComb(n, k)));
     return (
@@ -90,7 +78,7 @@ const calculateEmpiricalPk = (hitsArray: number[], drawWinnersSize: number = 5) 
       Math.exp(
         lgamma(k + alpha) +
         lgamma(n - k + beta) -
-        lgamma(alpha + beta) -
+        lgamma(n + alpha + beta) -
         lgamma(alpha) -
         lgamma(beta) +
         lgamma(alpha + beta)
@@ -309,12 +297,13 @@ export const runBacktestTraining = async (
           const gridSim = Math.exp(-0.35 * gridDist);
 
           // 3. Symétries miroirs/flips de chiffres (topologie arithmétique continue)
-          const diff91 = Math.abs((p + w) - 91);
+          const compP = getComplement90(p);
+          const diff91 = Math.abs(compP - w);
           const mirror91Sim = Math.exp(-0.5 * diff91);
 
-          const revP = parseInt(p.toString().split("").reverse().join(""), 10) || 0;
-          const revDiff = Math.abs(revP - w);
-          const mirrorRevSim = Math.exp(-0.5 * revDiff);
+          const mirrorP = getMirrorNumber(p);
+          const mirrorDiff = Math.abs(mirrorP - w);
+          const mirrorRevSim = Math.exp(-0.5 * mirrorDiff);
 
           // 4. Harmoniques décimales de finaux (Distance angulaire Modulo 10)
           const modP = p % 10;
@@ -334,7 +323,7 @@ export const runBacktestTraining = async (
           const parityFactor = (p % 2 === w % 2) ? 1.15 : 0.85;
 
           // 2. Mirror/Flip resonance booster (e.g. 13 <-> 31)
-          const isMirror = (revP === w || p === (parseInt(w.toString().split("").reverse().join(""), 10) || 0));
+          const isMirror = (mirrorP === w || p === getMirrorNumber(w));
           const mirrorBoost = isMirror ? 1.45 : 1.0;
 
           // 3. Modular proximity resonance (distance modulo 90)

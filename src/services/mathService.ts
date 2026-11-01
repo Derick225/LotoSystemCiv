@@ -3,7 +3,7 @@ import { useNexusStore } from '../store/useNexusStore';
 import { workerService } from './workerService';
 import { computeTransferEntropy, runSpectral, denoiseFeaturesKernelPCA, runContinuousWaveletTransformAnalysis } from './mathCore';
 import { DrawResult, ProjectionItem, TopFollowerAnalysis, SpectralMetric, FractalMetric, NumberRegularity, ClusterPoint, BarycenterPoint, DetailedNumberMetrics, ShadowNumbers, TrendOscillatorPoint, ChiSquareMetric, GapEfficiency } from '../types';
-import { lcgGlobalRandom } from '../utils/mathUtils';
+import { LCG, LCG_CONSTANTS } from '../utils/mathUtils';
 import {
     calculateGap as calculateGapFromStats,
     calculateFrequency as calculateFrequencyFromStats,
@@ -445,7 +445,7 @@ export const calculateBayesianScore = (prior: number, likelihood: number): numbe
  * @param weights Poids de probabilité pour chaque numéro (1-90).
  * @param iterations Nombre d'itérations (défaut 5000).
  */
-export const runMonteCarloSimulation = (weights: Record<number, number>, iterations: number = 5000): Record<number, number> => {
+export const runMonteCarloSimulation = (weights: Record<number, number>, iterations: number = 5000, seed?: string | number): Record<number, number> => {
     const results: Record<number, number> = {};
     const items = Object.entries(weights).map(([n, w]) => ({ n: Number(n), w: Math.max(0, w) }));
     
@@ -459,8 +459,10 @@ export const runMonteCarloSimulation = (weights: Record<number, number>, iterati
 
     if (totalWeight === 0) return {};
 
+    const prng = new LCG(seed ?? LCG_CONSTANTS.DEFAULT_SEED);
+
     for (let i = 0; i < iterations; i++) {
-        const r = lcgGlobalRandom() * totalWeight;
+        const r = prng.next() * totalWeight;
         // Recherche dichotomique pour performance O(log N)
         let lo = 0, hi = items.length - 1;
         while (lo < hi) {

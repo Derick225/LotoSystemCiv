@@ -6,6 +6,7 @@ import { packMatrix, packArray } from './workers/zeroCopy';
 import { calculateDnaSieveWeights } from './temporalAnalysisService';
 import type { AlgoWeights } from '../shared/prediction.types';
 import { LCG } from '../utils/mathUtils';
+import { getMirrorNumber, getComplement90 } from '../config/networks';
 
 export const FEATURES_LABELS = [
   'Critical Gap', 'Frequency', 'Shadow',
@@ -318,9 +319,8 @@ const extractNumericFeatures = (
 
   // E. Harmonic Resonance (Involution miroir & complément à 90 continue)
   let harmonicSum = 0;
-  const mir = num < 10 ? num * 10 : (num % 10 === 0 ? Math.floor(num / 10) : parseInt(String(num).split('').reverse().join(''), 10));
-  const validMir = (mir >= 1 && mir <= 90) ? mir : num;
-  const comp = 91 - num;
+  const validMir = getMirrorNumber(num);
+  const comp = getComplement90(num);
   for (const w of contextState.lastDrawWinners) {
     if (w === validMir || w === comp) harmonicSum += 1.0;
     const distMir = Math.abs(validMir - w);

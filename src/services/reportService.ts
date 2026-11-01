@@ -49,10 +49,11 @@ export const generateTacticalReport = async (data: ReportData) => {
     doc.setFont('helvetica', 'normal');
     doc.text(`Confiance Globale: ${data.prediction.confidence}%`, margin, y);
     y += 6;
-    doc.text(`Analyse IA: ${data.prediction.analysis}`, margin, y, { maxWidth: pageWidth - (margin * 2) });
+    const analysisText = data.prediction.analysis || 'Analyse tactique non disponible';
+    doc.text(`Analyse IA: ${analysisText}`, margin, y, { maxWidth: pageWidth - (margin * 2) });
     
     // Calcul de la hauteur du texte d'analyse
-    const analysisLines = doc.splitTextToSize(data.prediction.analysis, pageWidth - (margin * 2));
+    const analysisLines = doc.splitTextToSize(analysisText, pageWidth - (margin * 2));
     y += (analysisLines.length * 5) + 10;
 
     // --- Section 2: Numéros Suggérés ---
@@ -63,12 +64,16 @@ export const generateTacticalReport = async (data: ReportData) => {
 
     const suggestedData = data.prediction.suggestedNumbers.map(n => {
         const bd = data.prediction.breakdown[n] || {};
+        const bdVals = Object.values(bd) as number[];
+        const avgScore = bdVals.length > 0
+            ? Math.round(bdVals.reduce((a: number, b: number) => a + (b || 0), 0) / bdVals.length)
+            : 0;
         return [
             n,
             `${Math.round((bd.frequency || 0))}%`,
             `${Math.round((bd.gap || 0))}%`,
             `${Math.round((bd.bayes || 0))}%`, // Bayes Score
-            `${Math.round((Object.values(bd).reduce((a: number, b: number) => a + (b || 0), 0) / Object.keys(bd).length))}%` // Moyenne approx
+            `${avgScore}%` // Moyenne continue
         ];
     });
 

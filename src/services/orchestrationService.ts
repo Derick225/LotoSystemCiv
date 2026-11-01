@@ -4,6 +4,7 @@ import { calculateACValue, calculateShannonEntropy, calculateFractalIndex } from
 import { normalizeWeights, getDefaultWeights } from './prediction/weightsManager';
 import { LOTTERY_CONSTANTS } from './lotteryService';
 import { drawHasMachineNumbers } from '../constants';
+import { getComplement90, getMirrorNumber } from '../config/networks';
 
 
 export interface ThermoState {
@@ -136,8 +137,10 @@ export const adaptConfigurationToPhase = (history: DrawResult[]): OrchestrationC
     }
 
     draw.gagnants.forEach(n => {
-      const mir = 91 - n;
-      if (mir !== n && mir >= 1 && mir <= 90 && prev.gagnants.includes(mir)) mirrorHits++;
+      const comp = getComplement90(n);
+      const mir = getMirrorNumber(n);
+      if (comp !== n && comp >= 1 && comp <= 90 && prev.gagnants.includes(comp)) mirrorHits++;
+      else if (mir !== n && mir >= 1 && mir <= 90 && prev.gagnants.includes(mir)) mirrorHits += 0.8;
       if (prev.gagnants.includes(n)) repeatHits++;
     });
   }
@@ -426,12 +429,18 @@ export const runOrchestrationPipeline = (
       });
     }
 
-    // 4. mirror : miroir (91 - n)
+    // 4. mirror : miroir arithmétique (91 - n) et miroir décimal
     let mirrorRaw = 0;
+    const compVal = getComplement90(num);
+    const mirVal = getMirrorNumber(num);
     for (let t = 0; t < lookBack; t++) {
-      const mirrorVal = 91 - num;
-      if (history[t].gagnants.includes(mirrorVal)) {
-        mirrorRaw += Math.pow(config.timeDecay, t);
+      const g = history[t].gagnants;
+      const decay = Math.pow(config.timeDecay, t);
+      if (g.includes(compVal)) {
+        mirrorRaw += decay;
+      }
+      if (mirVal !== num && mirVal !== compVal && g.includes(mirVal)) {
+        mirrorRaw += decay * 0.8;
       }
     }
 

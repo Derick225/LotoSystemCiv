@@ -111,8 +111,10 @@ export const analyzeIntraDraw = (result: DrawResult, calibration?: EmpiricalCali
         diag2Counts.set(x - y, (diag2Counts.get(x - y) || 0) + 1);
     });
 
+    const len = Math.max(1, winners.length);
+
     // Barycentre
-    const barycenter = { x: sumX / 5, y: sumY / 5 };
+    const barycenter = { x: sumX / len, y: sumY / len };
 
     // Dispersion (Écart-type de la distance au barycentre)
     const varianceSum = winners.reduce((acc, n) => {
@@ -120,7 +122,7 @@ export const analyzeIntraDraw = (result: DrawResult, calibration?: EmpiricalCali
         const distSq = Math.pow(x - barycenter.x, 2) + Math.pow(y - barycenter.y, 2);
         return acc + distSq;
     }, 0);
-    const spatialDispersion = Math.sqrt(varianceSum / 5);
+    const spatialDispersion = Math.sqrt(varianceSum / len);
 
     // --- 3. DÉTECTION DE PATTERNS ---
     const patterns: NamedPattern[] = [];
@@ -135,13 +137,13 @@ export const analyzeIntraDraw = (result: DrawResult, calibration?: EmpiricalCali
     }
 
     // B. Pattern "L'Éventail" (Spread)
-    const spread = winners[4] - winners[0];
+    const spread = winners.length >= 2 ? winners[winners.length - 1] - winners[0] : 0;
     if (spread > THRESHOLDS.SPREAD.MAX) {
         patterns.push({ 
             id: 'spread-max', name: 'Grand Éventail', severity: 'low',
             description: `Dispersion maximale du spectre (${spread} rangs).` 
         });
-    } else if (spread < THRESHOLDS.SPREAD.MIN) {
+    } else if (spread > 0 && spread < THRESHOLDS.SPREAD.MIN) {
         patterns.push({ 
             id: 'spread-min', name: 'Micro-Cluster', severity: 'high',
             description: `Compression extrême sur ${spread} rangs.` 
@@ -149,9 +151,9 @@ export const analyzeIntraDraw = (result: DrawResult, calibration?: EmpiricalCali
     }
 
     // C. Pattern "Alignement Géométrique"
-    const maxRow = Math.max(...rowCounts.values());
-    const maxCol = Math.max(...colCounts.values());
-    const maxDiag = Math.max(Math.max(...diag1Counts.values()), Math.max(...diag2Counts.values()));
+    const maxRow = Math.max(0, ...rowCounts.values());
+    const maxCol = Math.max(0, ...colCounts.values());
+    const maxDiag = Math.max(0, ...diag1Counts.values(), ...diag2Counts.values());
 
     if (maxRow >= THRESHOLDS.ALIGNMENT.MIN_NODES) {
         patterns.push({ id: 'geo-row', name: 'Ligne de Force', severity: 'medium', description: `${maxRow} numéros sur la même ligne horizontale.` });
@@ -164,7 +166,7 @@ export const analyzeIntraDraw = (result: DrawResult, calibration?: EmpiricalCali
     }
 
     // D. Pattern "Résonance Finale" (Jumeaux/Triplés)
-    const maxFinale = Math.max(...finalesMap.values());
+    const maxFinale = Math.max(0, ...finalesMap.values());
     if (maxFinale >= 3) {
         patterns.push({ id: 'twins', name: 'Triplé Finale', severity: 'medium', description: 'Concentration harmonique sur une unité de finale.' });
     }
@@ -185,14 +187,16 @@ export const analyzeIntraDraw = (result: DrawResult, calibration?: EmpiricalCali
 
     // --- 4. FORMATAGE DE SORTIE ---
     const ac = calculateACValue(winners);
-    const maxDecadeCount = Math.max(...decadesMap.values());
+    const maxDecadeCount = Math.max(0, ...decadesMap.values());
+    const evensCount = winners.length - oddsCount;
+    const highCount = winners.length - lowCount;
 
     return {
         acValue: ac,
         sum,
         digitalRoot: calculateDigitalRoot(sum),
-        parityRatio: `${5 - oddsCount}P-${oddsCount}I`,
-        lowHighRatio: `${lowCount}M-${5 - lowCount}P`,
+        parityRatio: `${evensCount}P-${oddsCount}I`,
+        lowHighRatio: `${lowCount}M-${highCount}P`,
         internalGaps,
         maxInternalGap: Math.max(...internalGaps, 0),
         finalesCount: Object.fromEntries(finalesMap), // Conversion Map -> Object pour compatibilité UI

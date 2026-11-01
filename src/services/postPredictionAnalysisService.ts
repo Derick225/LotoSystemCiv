@@ -32,22 +32,23 @@ const binomialPValue = (n: number, p: number, k: number): number => {
   if (k <= 0) return 1.0;
   if (k > n) return 0.0;
   
-  const fact = (num: number): number => {
-    let r = 1;
-    for (let i = 2; i <= num; i++) r *= i;
-    return r;
-  };
-  
   const nCr = (nVal: number, rVal: number): number => {
     if (rVal < 0 || rVal > nVal) return 0;
-    return fact(nVal) / (fact(rVal) * fact(nVal - rVal));
+    if (rVal === 0 || rVal === nVal) return 1;
+    let r = rVal;
+    if (r > nVal / 2) r = nVal - r;
+    let res = 1;
+    for (let i = 1; i <= r; i++) {
+      res = (res * (nVal - r + i)) / i;
+    }
+    return res;
   };
   
   let sum = 0;
   for (let j = k; j <= n; j++) {
     sum += nCr(n, j) * Math.pow(p, j) * Math.pow(1 - p, n - j);
   }
-  return sum;
+  return Math.min(1.0, Math.max(0.0, sum));
 };
 
 // ============================================================================

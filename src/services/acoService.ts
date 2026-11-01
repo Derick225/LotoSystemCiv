@@ -312,8 +312,22 @@ const fallbackHeuristic = (history: DrawResult[]): AntColonyPath[] => {
         .map(e => e[0])
         .sort((a, b) => a - b);
 
+    const firstWinners = history[0]?.gagnants || [];
+    let fallbackNumbers = sorted;
+    if (fallbackNumbers.length < 5) {
+        const set = new Set(fallbackNumbers);
+        for (const n of firstWinners) {
+            if (set.size >= 5) break;
+            if (n >= 1 && n <= 90) set.add(n);
+        }
+        for (let n = 1; n <= 90 && set.size < 5; n++) {
+            set.add(n);
+        }
+        fallbackNumbers = Array.from(set).sort((a, b) => a - b);
+    }
+
     return [{
-        numbers: sorted.length === 5 ? sorted : (history[0]?.gagnants.slice(0, 5) || []),
+        numbers: fallbackNumbers,
         pheromoneDensity: 0.5,
         confidence: 45,
         isOracleBiased: false

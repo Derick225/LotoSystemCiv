@@ -257,10 +257,10 @@ export async function runSimulationCore(config: SimulationConfig) {
   const grossLoss = Math.abs(simHistory.reduce((sum, h) => h.profit < 0 ? sum + h.profit : sum, 0));
   const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? 999 : 0) : grossProfit / grossLoss;
 
-  // Calcul du Recovery Factor (Profit Net / Max Drawdown Monétaire)
+  // Calcul du Recovery Factor (Profit Net / Max Drawdown Monétaire Réel)
   const netProfit = balance - INITIAL_BANKROLL;
-  const maxDrawdownMonetary = INITIAL_BANKROLL * maxDrawdown; // approximation
-  const recoveryFactor = maxDrawdownMonetary === 0 ? (netProfit > 0 ? 999 : 0) : netProfit / maxDrawdownMonetary;
+  const maxDrawdownMonetary = peakBalance * maxDrawdown;
+  const recoveryFactor = maxDrawdownMonetary <= 0 ? (netProfit > 0 ? 999 : 0) : netProfit / maxDrawdownMonetary;
 
   const mathProofMetadata = extractMathProofMetadata({
     history,
