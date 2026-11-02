@@ -1,5 +1,6 @@
 import { LCG } from '../../utils/mathUtils';
 import { unpackHistory, computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
+import { getMirrorNumber, getComplement90 } from '../../config/networks';
 
 export {};
 
@@ -208,10 +209,9 @@ const evaluate = (w: AlgoWeights, _r: AdaptiveRules, history: DrawResultLite[], 
           const gridSim = Math.exp(-0.35 * gridDist) * (coeffs.cGrid / 0.35);
 
           let mirrorSim = 0.0;
-          if (p + w === 91) mirrorSim = coeffs.cMirror;
-          const strP = p.toString();
-          const revP = parseInt(strP.split("").reverse().join(""), 10);
-          if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, coeffs.cMirror * 0.9);
+          if (p === getComplement90(w)) mirrorSim = coeffs.cMirror;
+          const mirP = getMirrorNumber(p);
+          if (mirP >= 1 && mirP <= 90 && mirP === w) mirrorSim = Math.max(mirrorSim, coeffs.cMirror * 0.9);
 
           let harmonicSim = 0.0;
           if (p % 10 === w % 10) harmonicSim = coeffs.cHarmonic;
