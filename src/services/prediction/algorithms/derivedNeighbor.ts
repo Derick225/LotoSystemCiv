@@ -1,5 +1,6 @@
 import { AlgoKey } from '../../../shared/prediction.types';
 import { AlgorithmPlugin } from '../algorithmRegistry';
+import { getComplement90, getMirrorNumber } from '../../../constants';
 
 /**
  * Calculates circular (geodesic) distance on a 1D circular manifold (torus of 90 numbers).
@@ -69,17 +70,15 @@ export const derivedNeighborPlugin: AlgorithmPlugin = {
         if (!transformMap[minus1]) transformMap[minus1] = [];
         transformMap[minus1].push({ type: '-1', source: chosen });
 
-        // Ombre (Shadow): Complémentaire à 90 (ou 91 pour que 1->90)
-        const shadow = 91 - chosen;
+        // Ombre (Shadow): Complémentaire à 90
+        const shadow = getComplement90(chosen);
         if (shadow >= 1 && shadow <= 90) {
             if (!transformMap[shadow]) transformMap[shadow] = [];
             transformMap[shadow].push({ type: 'ombre', source: chosen });
         }
 
-        // Miroir (Mirror): Inversion des chiffres
-        const strNum = chosen.toString().padStart(2, '0');
-        const reversedStr = strNum.split('').reverse().join('');
-        const mirror = parseInt(reversedStr, 10);
+        // Miroir (Mirror): Miroir décimal canonique
+        const mirror = getMirrorNumber(chosen);
         if (mirror >= 1 && mirror <= 90 && mirror !== chosen) {
             if (!transformMap[mirror]) transformMap[mirror] = [];
             transformMap[mirror].push({ type: 'miroir', source: chosen });
