@@ -384,7 +384,8 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
     const crossCouplingMatrix = new Float64Array(stride * stride);
 
     // Calcul continu des poids de couplage par canal (softmax des évidences empiriques, zéro nombre magique)
-    const logCarry = Math.log(Math.max(1e-4, carryOverLift * carryHurstModulator));
+    // Atténuation continue (facteur 0.5) sur l'inertie directe afin de favoriser les transitions et harmoniques
+    const logCarry = Math.log(Math.max(1e-4, carryOverLift * carryHurstModulator)) * 0.5;
     const logHarm = Math.log(Math.max(1e-4, ((mirrorLift + complementLift) / 2.0) * harmonicHurstModulator));
     const expTrans = 1.0;
     const expCarry = Math.exp(Math.max(-2, Math.min(2, logCarry)));
@@ -520,14 +521,14 @@ export const interDrawResonancePlugin: AlgorithmPlugin = {
       }
       rawTrans[c] = evidenceTrans;
 
-      // --- CANAL 2 : REPORT DIRECT CARRY-OVER (INERTIE STOCHASTIQUE SANS BIAIS +1) ---
+      // --- CANAL 2 : REPORT DIRECT CARRY-OVER (INERTIE STOCHASTIQUE ATTÉNUÉE 0.5 SANS BIAIS +1) ---
       let evidenceRepeat = 0;
       if (isDirectCandidate) {
         flags.push('REPORT_DIRECT');
         const structuralPriorLift = carryOverLift * carryHurstModulator;
         const pDenom = (fromTotals[c] + laplaceAlpha) * p0;
         const empiricalLift = pDenom > 0 ? (repeatCounts[c] + laplaceAlpha * p0) / pDenom : 1.0;
-        evidenceRepeat = Math.log(Math.max(1e-4, structuralPriorLift * empiricalLift));
+        evidenceRepeat = Math.log(Math.max(1e-4, structuralPriorLift * empiricalLift)) * 0.5;
       }
       rawCarry[c] = evidenceRepeat;
 
