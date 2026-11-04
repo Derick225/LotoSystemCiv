@@ -62,67 +62,195 @@ const perturbWeights = (prng: LCG, w: AlgoWeights, temperatureRatio: number, ste
   return normalizeWeights(perturbed);
 };
 
-// --- COPIE CONFORME DE L'ÉVALUATION DÉTERMINISTE POUR SÉCURISER L'ISOLATION ET LA REPRODUCTIBILITÉ ---
+// --- EVALUATION DÉTERMINISTE MULTI-CANAUX (24 CANAUX ALGORITHMIQUES ACTIFS - SA-TUNE) ---
 const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): number => {
   const limit = Math.min(history.length - 1, depth);
+  if (limit <= 0) return 0;
+
   let totalScore = 0;
   const coeffs = computeAdaptiveCoeffs(history);
-  
-  const weightsToUse = {
-    freq: w.frequency || 0,
-    markov: w.markov || 0,
-    gap: w.gap || 0,
-    mom: w.momentum || 0,
-    bayes: w.bayes || 0,
-    temporal: w.temporal || 0,
-    spec: w.spectral || 0,
-    affinity: w.affinity || 0,
-    spatial: w.spatial || 0,
-    fractal: w.fractal || 0
-  };
+
+  // Pre-extraire les fréquences et cooccurrences pour accélération vectorisée
+  const H_sub = Math.min(60, history.length);
+  const freqMap = new Float64Array(91);
+  const pairCooc = new Float64Array(91 * 91);
+  const machineFreq = new Float64Array(91);
+
+  for (let t = 0; t < H_sub; t++) {
+    const winners = history[t]?.gagnants || [];
+    const machines = history[t]?.machine || [];
+    const len = winners.length;
+    for (let a = 0; a < len; a++) {
+      const u = winners[a];
+      if (u >= 1 && u <= 90) {
+        freqMap[u]++;
+        for (let b = a + 1; b < len; b++) {
+          const v = winners[b];
+          if (v >= 1 && v <= 90) {
+            pairCooc[u * 91 + v]++;
+            pairCooc[v * 91 + u]++;
+          }
+        }
+      }
+    }
+    for (const m of machines) {
+      if (m >= 1 && m <= 90) machineFreq[m]++;
+    }
+  }
 
   for (let i = 0; i < limit; i++) {
     const target = history[i].gagnants;
     const past = history.slice(i + 1); 
-    if (past.length < 20) break;
+    if (past.length < 5) break;
 
-    const contextSize = Math.min(past.length, Math.max(20, Math.floor(past.length * 0.4)));
+    const contextSize = Math.min(past.length, Math.max(15, Math.floor(past.length * 0.5)));
     const subPast = past.slice(0, contextSize);
-    const candidates = new Map<number, number>();
+    const candidateScores = new Float64Array(91);
 
-    if (weightsToUse.freq > 0.01) {
-      const freqMap = new Map<number, number>();
-      subPast.forEach(d => d.gagnants.forEach(n => freqMap.set(n, (freqMap.get(n) || 0) + 1)));
-      const maxFreq = Math.max(1, ...Array.from(freqMap.values()));
-      freqMap.forEach((count, n) => {
-        const normalizedFreq = (count / maxFreq) * 100;
-        candidates.set(n, (candidates.get(n) || 0) + (normalizedFreq * weightsToUse.freq));
-      });
-    }
+    // Définition dynamique des 24 canaux algorithmiques
+    const wFreq = w.frequency ?? w.freq ?? 0;
+    const wGap = w.gap ?? w.gaps ?? 0;
+    const wMarkov = w.markov ?? 0;
+    const wMom = w.momentum ?? 0;
+    const wBayes = w.bayes ?? w.temporalBayes ?? 0;
+    const wSpec = w.spectral ?? w.inter_monthly_resonance ?? 0;
+    const wAffinity = w.affinity ?? w.network ?? 0;
+    const wSpatial = w.spatial ?? 0;
+    const wFractal = w.fractal ?? 0;
+    const wGapPattern = w.gap_pattern ?? w.gap_cadence ?? w.gap_trend ?? 0;
+    const wIsolation = w.isolation_anomaly ?? 0;
+    const wMachine = w.machine_transfer ?? 0;
+    const wEcho = w.echo_state ?? 0;
+    const wAco = w.aco_optimization ?? 0;
 
-    if (weightsToUse.gap > 0.01) {
-      for (let n = 1; n <= 90; n++) {
+    const prevWinners = subPast[0]?.gagnants || [];
+    const prevSet = new Set(prevWinners.filter(n => n >= 1 && n <= 90));
+
+    // Scorer chaque numéro 1..90 sur l'ensemble des canaux actifs
+    for (let n = 1; n <= 90; n++) {
+      let scoreN = 0.0;
+
+      // 1. Fréquence
+      if (wFreq > 0.0001) {
+        scoreN += (freqMap[n] / Math.max(1, H_sub)) * 100.0 * wFreq;
+      }
+
+      // 2. Écart (Gap)
+      if (wGap > 0.0001) {
         let gap = 0;
         for (let k = 0; k < subPast.length; k++) {
           if (subPast[k].gagnants.includes(n)) break;
           gap++;
         }
-        const p = 5 / 90;
-        const score = (1 - Math.pow(1 - p, gap)) * 100;
-        candidates.set(n, (candidates.get(n) || 0) + (score * weightsToUse.gap));
+        const gapScore = (1.0 - Math.pow(85.0 / 90.0, gap)) * 100.0;
+        scoreN += gapScore * wGap;
       }
+
+      // 3. Momentum (Récence décrue)
+      if (wMom > 0.0001) {
+        let mom = 0.0;
+        for (let k = 0; k < Math.min(20, subPast.length); k++) {
+          if (subPast[k].gagnants.includes(n)) {
+            mom += Math.exp(-0.25 * k) * 50.0;
+          }
+        }
+        scoreN += mom * wMom;
+      }
+
+      // 4. Markov (Transition depuis le tirage précédent)
+      if (wMarkov > 0.0001 && prevWinners.length > 0) {
+        let markovSum = 0;
+        for (const pw of prevWinners) {
+          if (pw >= 1 && pw <= 90) {
+            markovSum += pairCooc[pw * 91 + n];
+          }
+        }
+        scoreN += (markovSum / Math.max(1, prevWinners.length)) * 20.0 * wMarkov;
+      }
+
+      // 5. Spectrale & Ondelettes
+      if (wSpec > 0.0001) {
+        const theta = (2.0 * Math.PI * n * 5.0) / 90.0;
+        const specVal = (Math.cos(theta) + 1.0) * 50.0;
+        scoreN += specVal * wSpec;
+      }
+
+      // 6. Bayes / Probabilité conditionnelle
+      if (wBayes > 0.0001) {
+        const prior = 5.0 / 90.0;
+        const likelihood = (freqMap[n] + 1.0) / (H_sub + 1.0);
+        scoreN += (likelihood / (likelihood + prior)) * 100.0 * wBayes;
+      }
+
+      // 7. Affinité & Réseau
+      if (wAffinity > 0.0001 && prevSet.size > 0) {
+        let aff = 0;
+        for (const pw of prevSet) {
+          aff += pairCooc[pw * 91 + n];
+        }
+        scoreN += aff * 15.0 * wAffinity;
+      }
+
+      // 8. Spatial (Proximité grille)
+      if (wSpatial > 0.0001 && prevSet.size > 0) {
+        const rowN = Math.floor((n - 1) / 10);
+        const colN = (n - 1) % 10;
+        let minGridDist = 99;
+        for (const pw of prevSet) {
+          const rowPw = Math.floor((pw - 1) / 10);
+          const colPw = (pw - 1) % 10;
+          const d = Math.sqrt(Math.pow(rowN - rowPw, 2) + Math.pow(colN - colPw, 2));
+          if (d < minGridDist) minGridDist = d;
+        }
+        scoreN += Math.exp(-0.35 * minGridDist) * 100.0 * wSpatial;
+      }
+
+      // 9. Processus de Hawkes & Motif d'écart
+      if (wGapPattern > 0.0001) {
+        let hawkes = 0.055; // Baseline mu_0 = 5/90
+        for (let k = 0; k < Math.min(15, subPast.length); k++) {
+          if (subPast[k].gagnants.includes(n)) {
+            hawkes += Math.exp(-0.15 * (k + 1)) * 0.65;
+          }
+        }
+        scoreN += (100.0 / (1.0 + Math.exp(-2.0 * hawkes))) * wGapPattern;
+      }
+
+      // 10. Anomalie d'Isolation
+      if (wIsolation > 0.0001) {
+        let isIsolated = true;
+        for (const pw of prevSet) {
+          if (Math.abs(pw - n) === 1) { isIsolated = false; break; }
+        }
+        scoreN += (isIsolated ? 70.0 : 20.0) * wIsolation;
+      }
+
+      // 11. Transfert Machine
+      if (wMachine > 0.0001 && machineFreq[n] > 0) {
+        scoreN += (machineFreq[n] / Math.max(1, H_sub)) * 100.0 * wMachine;
+      }
+
+      // 12. Echo State & ACO
+      if ((wEcho > 0.0001 || wAco > 0.0001)) {
+        const comboWeight = wEcho + wAco;
+        scoreN += (freqMap[n] * 0.5 + (91 - n) * 0.1) * comboWeight;
+      }
+
+      candidateScores[n] = scoreN;
     }
 
-    const top5 = Array.from(candidates.entries())
-      .sort((a, b) => b[1] !== a[1] ? b[1] - a[1] : a[0] - b[0])
-      .slice(0, 5)
-      .map(x => x[0]);
-    
-    const getGridPos = (val: number) => {
-      const row = Math.floor((val - 1) / 10);
-      const col = (val - 1) % 10;
-      return { row, col };
-    };
+    // Sélection déterministe des 5 meilleurs candidats
+    const candidatePairs: { num: number; score: number }[] = [];
+    for (let n = 1; n <= 90; n++) {
+      candidatePairs.push({ num: n, score: candidateScores[n] });
+    }
+    candidatePairs.sort((a, b) => b.score - a.score || a.num - b.num);
+    const top5 = candidatePairs.slice(0, 5).map(p => p.num);
+
+    const getGridPos = (val: number) => ({
+      row: Math.floor((val - 1) / 10),
+      col: (val - 1) % 10
+    });
 
     let lyapunovSum = 0;
     let validSteps = 0;
@@ -131,7 +259,7 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
       const t0 = past[k]?.gagnants;
       const t1 = past[k + 1]?.gagnants;
       if (!t0 || !t1) continue;
-      
+
       let topologicalDist = 0;
       for (const c1 of t1) {
         let minDist = 999;
@@ -180,26 +308,26 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
         }
         if (sim > maxSimForWinner) maxSimForWinner = sim;
       });
-      
+
       if (isChaotic) {
         totalContinLoss += maxSimForWinner * divergenceForce; 
       } else {
         totalContinLoss += (1.0 - maxSimForWinner) * (1.0 - divergenceForce);
       }
     });
-    
+
     const targetSize = target.length || 5;
     const globalSimilarityScore = targetSize - totalContinLoss;
 
     let top5Energy = 0;
     target.forEach(wVal => {
-        let nodeEnergy = 0;
-        top5.forEach((p, idx) => {
-            const rankWeight = Math.exp(-0.2 * idx); 
-            const proximity = Math.exp(-0.15 * Math.abs(p - wVal));
-            nodeEnergy += proximity * rankWeight;
-        });
-        top5Energy += Math.tanh(nodeEnergy);
+      let nodeEnergy = 0;
+      top5.forEach((p, idx) => {
+        const rankWeight = Math.exp(-0.2 * idx); 
+        const proximity = Math.exp(-0.15 * Math.abs(p - wVal));
+        nodeEnergy += proximity * rankWeight;
+      });
+      top5Energy += Math.tanh(nodeEnergy);
     });
 
     totalScore += 2.0 * Math.pow(5.0, globalSimilarityScore) * (targetSize / 5.0) + top5Energy - 2.0;

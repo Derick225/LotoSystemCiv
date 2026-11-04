@@ -1,5 +1,6 @@
 import { fetchResults } from './lotteryService';
 import type { AlgoWeights } from '../types';
+import { DEFAULT_ALGO_WEIGHTS } from '../shared/prediction.types';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService'; 
 import { purifyHistoryForDraw } from '../utils/arrayUtils'; 
 import { packHistory } from './workers/zeroCopy'; 
@@ -22,12 +23,15 @@ export const runSimulatedAnnealingOptimization = async (
     throw new Error(`Historique insuffisant pour le recuit simulé (minimum absolu de 5 tirages requis).`);
   }
 
+  // Garantie des 24 canaux algorithmiques actifs si incomplet
+  const fullBaseWeights: AlgoWeights = { ...DEFAULT_ALGO_WEIGHTS, ...(baseWeights || {}) };
+
   // Métriques de régime stochastique déterministes
   const hurst = calculateFractalIndex(fullHistory);
   const entropy = calculateShannonEntropy(fullHistory.slice(0, Math.min(100, fullHistory.length))).normalized;
 
-  const numWeights = Object.keys(baseWeights).length;
-  const maxIterations = options?.maxIterations || Math.max(50, Math.ceil(numWeights * Math.sqrt(fullHistory.length) * 0.8));
+  const numWeights = Object.keys(fullBaseWeights).length;
+  const maxIterations = options?.maxIterations || Math.max(80, Math.ceil(numWeights * Math.sqrt(fullHistory.length) * 1.2));
   const historyDepth = options?.historyDepth || Math.max(20, Math.floor(fullHistory.length * 0.5));
 
   const historyLite = fullHistory.map(h => ({ 
@@ -97,7 +101,7 @@ export const runSimulatedAnnealingOptimization = async (
       type: 'start', 
       payload: { 
         drawName, 
-        baseWeights,
+        baseWeights: fullBaseWeights,
         config: {
           maxIterations,
           historyDepth
