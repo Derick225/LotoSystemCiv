@@ -20,7 +20,8 @@ import {
   computeGraphHeatKernelHpc,
   computeDominoAdvectionHpc,
   computeButterflyLyapunovHpc,
-  computeChainReactionResonanceHpc
+  computeChainReactionResonanceHpc,
+  computeDifferentiable4PhenomenaFusionHpc
 } from './wasm/lotoEngineBridge';
 import {
   InterDrawNetworkMatrix,
@@ -78,6 +79,28 @@ export interface ChainReactionDynamicMetrics {
   explanation: string;
 }
 
+export interface CandidatePhenomenonContribution {
+  dominoScore: number;
+  butterflyScore: number;
+  cascadeScore: number;
+  chainScore: number;
+}
+
+export interface DynamicCandidate {
+  number: number;
+  score: number;
+  flags: string[];
+  breakdown?: CandidatePhenomenonContribution;
+}
+
+export interface DynamicFusionWeights {
+  wDomino: number;
+  wButterfly: number;
+  wCascade: number;
+  wChain: number;
+  entropy: number;
+}
+
 export interface InterDrawComplexDynamicsReport {
   targetDraw: string;
   networkId: InterDrawNetworkId;
@@ -85,8 +108,9 @@ export interface InterDrawComplexDynamicsReport {
   butterfly: ButterflyDynamicMetrics;
   cascade: CascadeDynamicMetrics;
   chainReaction: ChainReactionDynamicMetrics;
+  fusionWeights?: DynamicFusionWeights;
   compositeDynamicScore: number[]; // 91 éléments
-  topDynamicCandidates: { number: number; score: number; flags: string[] }[];
+  topDynamicCandidates: DynamicCandidate[];
   timestamp: number;
 }
 
@@ -297,40 +321,75 @@ export async function computeInterDrawComplexDynamics(
     explanation: `Superposition interférométrique d'ondes stochastiques Ψ(n) et accumulation de potentiel d'avalanche critique.`
   };
 
-  // FUSION CONTINUE DIFFÉRENTIABLE DES SCORES DYNAMIQUES
-  const compositeScores = new Float64Array(91);
-  const candidatesList: { number: number; score: number; flags: string[] }[] = [];
+  // FUSION CONTINUEMENT DIFFÉRENTIABLE C^∞ DES 4 PHÉNOMÈNES PHYSIQUES
+  const fusionRes = computeDifferentiable4PhenomenaFusionHpc(
+    dominoRes.dominoEnergies,
+    chainRes.resonanceSpectrum,
+    {
+      velocity: butterflyRes.phaseAttractorX,
+      acceleration: butterflyRes.phaseAttractorY,
+      lyapunovExponent: butterflyRes.lyapunovExponent,
+      sensitivityRegime: butterflyRes.sensitivityRegime
+    },
+    heatKernelRes.diffusionMatrix,
+    N,
+    targetIdx >= 0 ? targetIdx : 0,
+    flatPredHistory,
+    predWinners.length,
+    hurstExponent
+  );
 
-  let sumScores = 0;
-  for (let n = 1; n <= 90; n++) {
-    const sDomino = dominoRes.dominoEnergies[n] || 50;
-    const sChain = chainRes.resonanceSpectrum[n] || 50;
-    const wButterfly = butterflyRes.sensitivityRegime;
-    const fused = sDomino * (1 - wButterfly * 0.4) + sChain * (0.6 + wButterfly * 0.4);
-    const scoreVal = Math.round(Math.min(99.9, Math.max(1.0, fused)) * 10) / 10;
-    compositeScores[n] = scoreVal;
-    sumScores += scoreVal;
-  }
+  const compositeScores = Array.from(fusionRes.fusedScores);
 
-  const meanScore = sumScores / 90.0;
-  let varScore = 0;
-  for (let n = 1; n <= 90; n++) {
-    varScore += Math.pow(compositeScores[n] - meanScore, 2);
-  }
-  const stdScore = Math.sqrt(varScore / 90.0);
-  const conductorThreshold = meanScore + stdScore;
+  // Détermination des seuils statistiques par phénomène pour l'attribution des badges/flags
+  const getMeanStd = (arr: Float64Array | number[]) => {
+    let sum = 0;
+    for (let n = 1; n <= 90; n++) sum += (arr[n] || 0);
+    const mean = sum / 90.0;
+    let varVal = 0;
+    for (let n = 1; n <= 90; n++) varVal += Math.pow((arr[n] || 0) - mean, 2);
+    const std = Math.sqrt(varVal / 90.0) || 1e-6;
+    return { mean, std };
+  };
 
+  const statsD = getMeanStd(dominoRes.dominoEnergies);
+  const statsB = getMeanStd(fusionRes.butterflyScores);
+  const statsC = getMeanStd(fusionRes.cascadeScores);
+  const statsR = getMeanStd(chainRes.resonanceSpectrum);
+
+  const threshD = statsD.mean + 1.2 * statsD.std;
+  const threshB = statsB.mean + 1.2 * statsB.std;
+  const threshC = statsC.mean + 1.2 * statsC.std;
+  const threshR = statsR.mean + 1.2 * statsR.std;
+
+  const candidatesList: DynamicCandidate[] = [];
   for (let n = 1; n <= 90; n++) {
     const scoreVal = compositeScores[n];
     const flags: string[] = [];
-    if (dominoRes.leadTriggerNumbers.includes(n)) flags.push('DOMINO_IMPULSE');
-    if (chainRes.avalancheCriticalNumbers.includes(n)) flags.push('AVALANCHE_RESONANCE');
-    if (scoreVal >= conductorThreshold) flags.push('CASCADE_CONDUCTOR');
+
+    if ((dominoRes.dominoEnergies[n] || 0) >= threshD || dominoRes.leadTriggerNumbers.includes(n)) {
+      flags.push('DOMINO_IMPULSE');
+    }
+    if ((fusionRes.butterflyScores[n] || 0) >= threshB) {
+      flags.push('BUTTERFLY_ATTRACTOR');
+    }
+    if ((fusionRes.cascadeScores[n] || 0) >= threshC) {
+      flags.push('CASCADE_CONDUCTOR');
+    }
+    if ((chainRes.resonanceSpectrum[n] || 0) >= threshR || chainRes.avalancheCriticalNumbers.includes(n)) {
+      flags.push('AVALANCHE_RESONANCE');
+    }
 
     candidatesList.push({
       number: n,
       score: scoreVal,
-      flags
+      flags,
+      breakdown: fusionRes.candidateBreakdowns[n] || {
+        dominoScore: dominoRes.dominoEnergies[n] || 50,
+        butterflyScore: fusionRes.butterflyScores[n] || 50,
+        cascadeScore: fusionRes.cascadeScores[n] || 50,
+        chainScore: chainRes.resonanceSpectrum[n] || 50
+      }
     });
   }
 
@@ -344,7 +403,8 @@ export async function computeInterDrawComplexDynamics(
     butterfly: butterflyMetrics,
     cascade: cascadeMetrics,
     chainReaction: chainReactionMetrics,
-    compositeDynamicScore: Array.from(compositeScores),
+    fusionWeights: fusionRes.weights,
+    compositeDynamicScore: compositeScores,
     topDynamicCandidates,
     timestamp: Date.now()
   };

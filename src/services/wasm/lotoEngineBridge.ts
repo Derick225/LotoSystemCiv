@@ -876,6 +876,184 @@ export function computeChainReactionResonanceHpc(
   };
 }
 
+export interface Differentiable4PhenomenaFusionResult {
+  fusedScores: Float64Array;
+  butterflyScores: Float64Array;
+  cascadeScores: Float64Array;
+  weights: {
+    wDomino: number;
+    wButterfly: number;
+    wCascade: number;
+    wChain: number;
+    entropy: number;
+  };
+  candidateBreakdowns: Record<number, { dominoScore: number; butterflyScore: number; cascadeScore: number; chainScore: number }>;
+}
+
+/**
+ * Fusion Continuement Différentiable C^∞ des 4 Phénomènes Physiques Inter-Tirages
+ * 1. Domino (Advection Cinétique)
+ * 2. Papillon (Attracteur dans l'Espace des Phases)
+ * 3. Cascade (Diffusion du Noyau de Chaleur Graph Heat Kernel exp(-tL))
+ * 4. Réaction en Chaîne (Résonance SOC d'Interférence)
+ */
+export function computeDifferentiable4PhenomenaFusionHpc(
+  dominoEnergies: Float64Array | number[],
+  resonanceSpectrum: Float64Array | number[],
+  phaseAttractor: { velocity: number; acceleration: number; lyapunovExponent: number; sensitivityRegime: number },
+  heatKernelDiffusionMatrix: Float64Array | number[],
+  numDrawNodes: number,
+  targetNodeIdx: number,
+  recentDrawsFlat: Int32Array | number[],
+  drawsCount: number,
+  hurstExponent: number
+): Differentiable4PhenomenaFusionResult {
+  const domArr = dominoEnergies instanceof Float64Array ? dominoEnergies : new Float64Array(dominoEnergies);
+  const resArr = resonanceSpectrum instanceof Float64Array ? resonanceSpectrum : new Float64Array(resonanceSpectrum);
+  const diffMatrix = heatKernelDiffusionMatrix instanceof Float64Array ? heatKernelDiffusionMatrix : new Float64Array(heatKernelDiffusionMatrix);
+  const drawsFlat = recentDrawsFlat instanceof Int32Array ? recentDrawsFlat : new Int32Array(recentDrawsFlat);
+
+  // 1. Vecteur Papillon B_n (Espace des phases : vitesse, accélération, Lyapunov)
+  const butterflyScores = new Float64Array(91);
+  const rawPhaseForces = new Float64Array(91);
+  let sumPhase = 0;
+
+  for (let n = 1; n <= 90; n++) {
+    const theta = (2.0 * Math.PI * n) / 90.0 + phaseAttractor.velocity * 0.1;
+    const force = Math.cos(theta) * phaseAttractor.velocity + Math.sin(2.0 * theta) * phaseAttractor.acceleration + phaseAttractor.lyapunovExponent * 5.0;
+    rawPhaseForces[n] = force;
+    sumPhase += force;
+  }
+  const meanPhase = sumPhase / 90.0;
+  let varPhase = 0;
+  for (let n = 1; n <= 90; n++) {
+    varPhase += Math.pow(rawPhaseForces[n] - meanPhase, 2);
+  }
+  const stdPhase = Math.sqrt(varPhase / 90.0) || 1e-6;
+
+  for (let n = 1; n <= 90; n++) {
+    const z = (rawPhaseForces[n] - meanPhase) / stdPhase;
+    butterflyScores[n] = Math.round((100.0 / (1.0 + Math.exp(-z))) * 10.0) / 10.0;
+  }
+
+  // 2. Vecteur Cascade C_n (Diffusion du Noyau de Chaleur Graph Heat Kernel exp(-tL))
+  const cascadeScores = new Float64Array(91);
+  const rawHeatEnergies = new Float64Array(91);
+  const winCols = 5;
+  const actualDraws = Math.min(drawsCount, Math.floor(drawsFlat.length / winCols));
+  const safeTargetIdx = targetNodeIdx >= 0 && targetNodeIdx < numDrawNodes ? targetNodeIdx : 0;
+  let sumHeat = 0;
+
+  for (let d = 0; d < actualDraws; d++) {
+    const sourceNodeIdx = d % Math.max(1, numDrawNodes);
+    const diffusivity = numDrawNodes > 0 && diffMatrix.length >= numDrawNodes * numDrawNodes
+      ? diffMatrix[safeTargetIdx * numDrawNodes + sourceNodeIdx] || 0.1
+      : 1.0 / Math.max(1, numDrawNodes);
+
+    const recencyDecay = 1.0 / (1.0 + d * 0.15);
+    const weight = diffusivity * recencyDecay;
+
+    for (let col = 0; col < winCols; col++) {
+      const num = drawsFlat[d * winCols + col];
+      if (num >= 1 && num <= 90) {
+        rawHeatEnergies[num] += weight;
+      }
+    }
+  }
+
+  for (let n = 1; n <= 90; n++) sumHeat += rawHeatEnergies[n];
+  const meanHeat = sumHeat / 90.0;
+  let varHeat = 0;
+  for (let n = 1; n <= 90; n++) {
+    varHeat += Math.pow(rawHeatEnergies[n] - meanHeat, 2);
+  }
+  const stdHeat = Math.sqrt(varHeat / 90.0) || 1e-6;
+
+  for (let n = 1; n <= 90; n++) {
+    const z = (rawHeatEnergies[n] - meanHeat) / stdHeat;
+    cascadeScores[n] = Math.round((100.0 / (1.0 + Math.exp(-z))) * 10.0) / 10.0;
+  }
+
+  // 3. Calcul des Statistiques & Contrastes
+  const getStats = (arr: Float64Array) => {
+    let sum = 0;
+    for (let n = 1; n <= 90; n++) sum += arr[n] || 50.0;
+    const mean = sum / 90.0;
+    let varVal = 0;
+    for (let n = 1; n <= 90; n++) varVal += Math.pow((arr[n] || 50.0) - mean, 2);
+    const std = Math.sqrt(varVal / 90.0) || 1e-6;
+    return { mean, std, contrast: std / Math.max(1e-3, mean) };
+  };
+
+  const statsD = getStats(domArr);
+  const statsB = getStats(butterflyScores);
+  const statsC = getStats(cascadeScores);
+  const statsR = getStats(resArr);
+
+  const sens = Math.min(1.0, Math.max(0.0, phaseAttractor.sensitivityRegime));
+  const qD = statsD.contrast * (1.2 - 0.4 * sens);
+  const qB = statsB.contrast * (0.6 + 0.8 * sens);
+  const qC = statsC.contrast * (1.1 - 0.3 * sens);
+  const qR = statsR.contrast * (0.7 + 0.6 * sens);
+
+  const tau = Math.max(0.05, 0.5 / Math.max(0.01, hurstExponent));
+
+  const eD = Math.exp(qD / tau);
+  const eB = Math.exp(qB / tau);
+  const eC = Math.exp(qC / tau);
+  const eR = Math.exp(qR / tau);
+  const sumExp = eD + eB + eC + eR;
+
+  const wDomino = Math.round((eD / sumExp) * 10000) / 10000;
+  const wButterfly = Math.round((eB / sumExp) * 10000) / 10000;
+  const wCascade = Math.round((eC / sumExp) * 10000) / 10000;
+  const wChain = Math.round((eR / sumExp) * 10000) / 10000;
+
+  const weightsList = [wDomino, wButterfly, wCascade, wChain];
+  let entropy = 0;
+  for (const w of weightsList) {
+    if (w > 0) entropy -= w * Math.log(w);
+  }
+  entropy = Math.round(entropy * 1000) / 1000;
+
+  // 4. Fusion Continue Fused Score & Candidate Breakdowns
+  const fusedScores = new Float64Array(91);
+  const candidateBreakdowns: Record<number, { dominoScore: number; butterflyScore: number; cascadeScore: number; chainScore: number }> = {};
+
+  for (let n = 1; n <= 90; n++) {
+    const sD = domArr[n] || 50.0;
+    const sB = butterflyScores[n] || 50.0;
+    const sC = cascadeScores[n] || 50.0;
+    const sR = resArr[n] || 50.0;
+
+    const fused = wDomino * sD + wButterfly * sB + wCascade * sC + wChain * sR;
+    const scoreVal = Math.round(Math.min(99.9, Math.max(1.0, fused)) * 10) / 10;
+    fusedScores[n] = scoreVal;
+
+    candidateBreakdowns[n] = {
+      dominoScore: Math.round(sD * 10) / 10,
+      butterflyScore: Math.round(sB * 10) / 10,
+      cascadeScore: Math.round(sC * 10) / 10,
+      chainScore: Math.round(sR * 10) / 10
+    };
+  }
+
+  return {
+    fusedScores,
+    butterflyScores,
+    cascadeScores,
+    weights: {
+      wDomino,
+      wButterfly,
+      wCascade,
+      wChain,
+      entropy
+    },
+    candidateBreakdowns
+  };
+}
+
+
 export interface AcoOptimizationHpcResult {
   bestNumbers: number[];
   bestScore: number;

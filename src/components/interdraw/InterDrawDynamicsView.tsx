@@ -90,18 +90,68 @@ export const InterDrawDynamicsView: React.FC<InterDrawDynamicsViewProps> = ({
       </div>
 
       {/* 2. NUMÉROS PILOTES ISSUS DE LA FUSION DES DYNAMIQUES */}
-      <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl">
-        <div className="flex justify-between items-center mb-4">
+      <div className="bg-white/80 dark:bg-slate-900/80 p-6 rounded-3xl border border-slate-200 dark:border-white/10 backdrop-blur-xl shadow-xl space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div className="flex items-center gap-2">
-            <Sparkles size={16} className="text-amber-500" />
+            <Sparkles size={18} className="text-amber-500 animate-pulse" />
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-900 dark:text-white">
-              Top 10 Numéros Émergents (Fusion Différentiable des 4 Phénomènes)
+              Top 10 Numéros Émergents (Fusion Différentiable C^∞ des 4 Phénomènes)
             </h3>
           </div>
           <span className="text-[11px] font-mono text-slate-400">
             Cible : {targetDraw}
           </span>
         </div>
+
+        {/* PONDÉRATION ADAPTATIVE DES 4 PHÉNOMÈNES */}
+        {dynamics.fusionWeights && (
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/80 dark:border-white/5 space-y-2">
+            <div className="flex justify-between items-center text-[10px] font-bold font-mono text-slate-500 dark:text-slate-400">
+              <span>Répartition Variationnelle Softmax (T = {dynamics.butterfly.phaseAttractor.fractalHurst ? (0.5 / Math.max(0.01, dynamics.butterfly.phaseAttractor.fractalHurst)).toFixed(2) : '1.00'})</span>
+              <span>Entropie : {dynamics.fusionWeights.entropy.toFixed(3)} nats</span>
+            </div>
+            <div className="h-2 w-full bg-slate-200 dark:bg-slate-700/60 rounded-full overflow-hidden flex">
+              <div
+                className="bg-amber-500 transition-all duration-500"
+                style={{ width: `${(dynamics.fusionWeights.wDomino * 100).toFixed(1)}%` }}
+                title={`1. Domino (Advection): ${(dynamics.fusionWeights.wDomino * 100).toFixed(1)}%`}
+              />
+              <div
+                className="bg-sky-500 transition-all duration-500"
+                style={{ width: `${(dynamics.fusionWeights.wButterfly * 100).toFixed(1)}%` }}
+                title={`2. Papillon (Attracteur): ${(dynamics.fusionWeights.wButterfly * 100).toFixed(1)}%`}
+              />
+              <div
+                className="bg-purple-500 transition-all duration-500"
+                style={{ width: `${(dynamics.fusionWeights.wCascade * 100).toFixed(1)}%` }}
+                title={`3. Cascade (Heat Kernel): ${(dynamics.fusionWeights.wCascade * 100).toFixed(1)}%`}
+              />
+              <div
+                className="bg-rose-500 transition-all duration-500"
+                style={{ width: `${(dynamics.fusionWeights.wChain * 100).toFixed(1)}%` }}
+                title={`4. Réaction en Chaîne (SOC): ${(dynamics.fusionWeights.wChain * 100).toFixed(1)}%`}
+              />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] font-mono">
+              <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                <span>1. Domino: <b>{(dynamics.fusionWeights.wDomino * 100).toFixed(1)}%</b></span>
+              </div>
+              <div className="flex items-center gap-1.5 text-sky-600 dark:text-sky-400">
+                <span className="w-2 h-2 rounded-full bg-sky-500" />
+                <span>2. Papillon: <b>{(dynamics.fusionWeights.wButterfly * 100).toFixed(1)}%</b></span>
+              </div>
+              <div className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400">
+                <span className="w-2 h-2 rounded-full bg-purple-500" />
+                <span>3. Cascade: <b>{(dynamics.fusionWeights.wCascade * 100).toFixed(1)}%</b></span>
+              </div>
+              <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
+                <span>4. Chaîne: <b>{(dynamics.fusionWeights.wChain * 100).toFixed(1)}%</b></span>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-5 md:grid-cols-10 gap-2.5">
           {topDynamicCandidates.map((c, idx) => {
@@ -136,18 +186,23 @@ export const InterDrawDynamicsView: React.FC<InterDrawDynamicsViewProps> = ({
                   </div>
                   <div className="flex flex-wrap gap-0.5 justify-center mt-1">
                     {c.flags.includes('DOMINO_IMPULSE') && (
-                      <span className="px-1 py-0.2 rounded text-[8px] bg-amber-500/20 text-amber-600 dark:text-amber-400 font-mono font-bold" title="Impulsion cinétique domino">
+                      <span className="px-1 py-0.2 rounded text-[8px] bg-amber-500/20 text-amber-600 dark:text-amber-400 font-mono font-bold" title="1. Impulsion cinétique domino">
                         DOM
                       </span>
                     )}
-                    {c.flags.includes('AVALANCHE_RESONANCE') && (
-                      <span className="px-1 py-0.2 rounded text-[8px] bg-rose-500/20 text-rose-600 dark:text-rose-400 font-mono font-bold" title="Avalanche critique">
-                        SOC
+                    {c.flags.includes('BUTTERFLY_ATTRACTOR') && (
+                      <span className="px-1 py-0.2 rounded text-[8px] bg-sky-500/20 text-sky-600 dark:text-sky-400 font-mono font-bold" title="2. Attracteur papillon en espace des phases">
+                        BUT
                       </span>
                     )}
                     {c.flags.includes('CASCADE_CONDUCTOR') && (
-                      <span className="px-1 py-0.2 rounded text-[8px] bg-purple-500/20 text-purple-600 dark:text-purple-400 font-mono font-bold" title="Conducteur de cascade">
+                      <span className="px-1 py-0.2 rounded text-[8px] bg-purple-500/20 text-purple-600 dark:text-purple-400 font-mono font-bold" title="3. Conducteur de cascade (Heat Kernel)">
                         CAS
+                      </span>
+                    )}
+                    {c.flags.includes('AVALANCHE_RESONANCE') && (
+                      <span className="px-1 py-0.2 rounded text-[8px] bg-rose-500/20 text-rose-600 dark:text-rose-400 font-mono font-bold" title="4. Avalanche critique SOC & résonance">
+                        SOC
                       </span>
                     )}
                   </div>

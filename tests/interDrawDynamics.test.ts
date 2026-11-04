@@ -168,7 +168,47 @@ describe('DYNAMIQUES COMPLEXES INTER-TIRAGES SELON AGENTS.md', () => {
     });
   });
 
-  describe('6. Intégration de Bout en Bout dans le Rapport Inter-Tirages', () => {
+  describe('6. Fusion Continuement Différentiable C^∞ des 4 Phénomènes', () => {
+    it('calcule la répartition softmax des 4 poids et génère le Top 10 avec breakdowns', async () => {
+      const netMatrix = await generateNetworkInterconnectionMatrix('quotidien');
+      const report = await computeInterDrawComplexDynamics(
+        'Fortune',
+        'quotidien',
+        mockHistTarget,
+        mockHistPred,
+        netMatrix
+      );
+
+      expect(report.fusionWeights).toBeDefined();
+      if (report.fusionWeights) {
+        const { wDomino, wButterfly, wCascade, wChain, entropy } = report.fusionWeights;
+        const totalW = wDomino + wButterfly + wCascade + wChain;
+        expect(totalW).toBeCloseTo(1.0, 3);
+        expect(wDomino).toBeGreaterThan(0);
+        expect(wButterfly).toBeGreaterThan(0);
+        expect(wCascade).toBeGreaterThan(0);
+        expect(wChain).toBeGreaterThan(0);
+        expect(entropy).toBeGreaterThan(0);
+      }
+
+      expect(report.topDynamicCandidates.length).toBe(10);
+      for (const cand of report.topDynamicCandidates) {
+        expect(cand.number).toBeGreaterThanOrEqual(1);
+        expect(cand.number).toBeLessThanOrEqual(90);
+        expect(cand.score).toBeGreaterThanOrEqual(1.0);
+        expect(cand.score).toBeLessThanOrEqual(99.9);
+        expect(cand.breakdown).toBeDefined();
+        if (cand.breakdown) {
+          expect(cand.breakdown.dominoScore).toBeGreaterThanOrEqual(0);
+          expect(cand.breakdown.butterflyScore).toBeGreaterThanOrEqual(0);
+          expect(cand.breakdown.cascadeScore).toBeGreaterThanOrEqual(0);
+          expect(cand.breakdown.chainScore).toBeGreaterThanOrEqual(0);
+        }
+      }
+    });
+  });
+
+  describe('7. Intégration de Bout en Bout dans le Rapport Inter-Tirages', () => {
     it('generateInterDrawReport intègre automatiquement complexDynamics pour le Réseau Hebdomadaire', async () => {
       const report = await generateInterDrawReport('National', 'hebdomadaire', true);
 
