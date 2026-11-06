@@ -183,10 +183,145 @@ pub fn compute_pair_pmi_wasm(
             let p_i = (degrees[t1] + alpha * 89.0) / (2.0 * total_pairs + alpha * 90.0 * 89.0);
             let p_j = (degrees[t2] + alpha * 89.0) / (2.0 * total_pairs + alpha * 90.0 * 89.0);
             let denom = (p_i * p_j).max(1e-12);
-            pmi[idx] = (p_ij / denom).ln();
-            idx += 1;
+    pmi
+}
+
+/// Structure de résultat pour le calcul de matrice Jaccard SIMD
+#[wasm_bindgen]
+pub struct JaccardMatrixResult {
+    jaccard_matrix: Vec<f64>,
+    gating_matrix: Vec<f64>,
+    num_tickets: usize,
+}
+
+#[wasm_bindgen]
+impl JaccardMatrixResult {
+    #[wasm_bindgen(getter)]
+    pub fn jaccard_matrix(&self) -> Vec<f64> {
+        self.jaccard_matrix.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn gating_matrix(&self) -> Vec<f64> {
+        self.gating_matrix.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn num_tickets(&self) -> usize {
+        self.num_tickets
+    }
+}
+
+/// Calcul continu du Jaccard Pondéré entre deux combinaisons en Rust (Accélération WASM)
+#[wasm_bindgen]
+pub fn compute_weighted_jaccard_distance_wasm(
+    ticket_a: &[i32],
+    ticket_b: &[i32],
+    weights: &[f64],
+) -> f64 {
+    if ticket_a.is_empty() || ticket_b.is_empty() {
+        return 0.0;
+    }
+
+    let mut set_b = [false; 91];
+    for &b in ticket_b {
+        if b >= 1 && b <= 90 {
+            set_b[b as usize] = true;
         }
     }
 
-    pmi
+    let mut inter_w = 0.0f64;
+    let mut union_w = 0.0f64;
+    let mut union_mask = [false; 91];
+
+    for &a in ticket_a {
+        if a >= 1 && a <= 90 {
+            let au = a as usize;
+            union_mask[au] = true;
+            if set_b[au] {
+                let w = if weights.len() > au { weights[au].max(0.01) } else { 1.0 };
+                inter_w += w;
+            }
+        }
+    }
+
+    for &b in ticket_b {
+        if b >= 1 && b <= 90 {
+            union_mask[b as usize] = true;
+        }
+    }
+
+    for n in 1..=90 {
+        if union_mask[n] {
+            let w = if weights.len() > n { weights[n].max(0.01) } else { 1.0 };
+            union_w += w;
+        }
+    }
+
+    if union_w > 0.0 {
+        inter_w / union_w
+    } else {
+        0.0
+    }
+}
+
+/// Fonction d'inhibition continue C^∞ par Gating Sigmoïde de Jaccard en Rust
+#[wasm_bindgen]
+pub fn compute_continuous_jaccard_gating_wasm(
+    jaccard_index: f64,
+    jaccard_threshold: f64,
+    steepness: f64,
+) -> f64 {
+    let diff = jaccard_index - jaccard_threshold;
+    1.0 / (1.0 + (steepness * diff).exp())
+}
+
+/// Calcul matriciel N x N vectorisé des similarités de Jaccard pondérées et du gating sigmoïde C^∞
+#[wasm_bindgen]
+pub fn compute_jaccard_matrix_simd_wasm(
+    tickets_flat: &[i32],
+    num_tickets: usize,
+    ticket_size: usize,
+    weights_flat: &[f64],
+    j0: f64,
+    steepness: f64,
+) -> JaccardMatrixResult {
+    let n = num_tickets;
+    let sz = ticket_size.max(1);
+    if n == 0 || tickets_flat.len() < n * sz {
+        return JaccardMatrixResult {
+            jaccard_matrix: vec![],
+            gating_matrix: vec![],
+            num_tickets: 0,
+        };
+    }
+
+    let mut jaccard_matrix = vec![0.0f64; n * n];
+    let mut gating_matrix = vec![1.0f64; n * n];
+
+    let t_j0 = if j0 > 0.0 { j0 } else { 0.35 };
+    let k = if steepness > 0.0 { steepness } else { 12.0 };
+
+    for i in 0..n {
+        let t1 = &tickets_flat[i * sz..(i + 1) * sz];
+        jaccard_matrix[i * n + i] = 1.0;
+        gating_matrix[i * n + i] = compute_continuous_jaccard_gating_wasm(1.0, t_j0, k);
+
+        for j in (i + 1)..n {
+            let t2 = &tickets_flat[j * sz..(j + 1) * sz];
+            let jw = compute_weighted_jaccard_distance_wasm(t1, t2, weights_flat);
+            let g = compute_continuous_jaccard_gating_wasm(jw, t_j0, k);
+
+            jaccard_matrix[i * n + j] = jw;
+            jaccard_matrix[j * n + i] = jw;
+            gating_matrix[i * n + j] = g;
+            gating_matrix[j * n + i] = g;
+        }
+    }
+
+    JaccardMatrixResult {
+        jaccard_matrix,
+        gating_matrix,
+        num_tickets: n,
+    }
 }

@@ -8,6 +8,7 @@ import {
   computeTopologicalLyapunovHpc,
   appendSingleDrawToStore,
   computeBivariateCrossDyadsHpc,
+  computeWeightedJaccardGatingHpc,
   clearStoreTimeline,
 } from '../src/services/wasm/lotoEngineBridge';
 
@@ -115,5 +116,19 @@ describe('LotoEngine HPC Bridge & Fallbacks', () => {
     const dyad10 = report.machineDyads!.find((d: any) => d.sourceNumber === 10 && d.targetNumber === 10);
     expect(dyad10).toBeDefined();
     expect(dyad10!.occurrences).toBe(1);
+  });
+
+  it('calcule le gating sigmoïde continu de Jaccard pondéré HPC', () => {
+    const tA = [1, 2, 3, 4, 5];
+    const tB = [1, 2, 6, 7, 8];
+    const weights = new Float64Array(91).fill(1.0);
+    weights[1] = 2.5;
+    weights[2] = 2.5;
+
+    const res = computeWeightedJaccardGatingHpc(tA, tB, weights, 0.35, 12.0);
+
+    expect(res.jaccardIndex).toBeGreaterThan(0.20);
+    expect(res.gatingFactor).toBeGreaterThan(0.0);
+    expect(res.gatingFactor).toBeLessThanOrEqual(1.0);
   });
 });

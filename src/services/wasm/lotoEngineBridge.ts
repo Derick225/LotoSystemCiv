@@ -2340,6 +2340,48 @@ export function generateDiversifiedPortfolioHpc(
 }
 
 /**
+ * Calcul Haute Performance (HPC) du Gating Sigmoïde Continu par Jaccard Pondéré
+ * Assure la transition C^∞ sans rupture de seuil pour les contraintes anti-monoculture.
+ */
+export function computeWeightedJaccardGatingHpc(
+  ticketA: number[] | Int32Array,
+  ticketB: number[] | Int32Array,
+  ballWeights?: Float64Array | number[],
+  jaccardThreshold: number = 0.35,
+  steepness: number = 12.0
+): { jaccardIndex: number; gatingFactor: number } {
+  const arrA = Array.from(ticketA);
+  const arrB = Array.from(ticketB);
+  const setB = new Set(arrB);
+
+  let interWeight = 0;
+  let unionWeight = 0;
+
+  const getW = (n: number) => {
+    if (!ballWeights) return 1.0;
+    return Math.max(0.01, Number(ballWeights[n]) || 1.0);
+  };
+
+  const unionSet = new Set([...arrA, ...arrB]);
+
+  for (const n of arrA) {
+    if (setB.has(n)) interWeight += getW(n);
+  }
+  for (const n of unionSet) {
+    unionWeight += getW(n);
+  }
+
+  const jaccardIndex = unionWeight > 0 ? interWeight / unionWeight : 0;
+  const diff = jaccardIndex - jaccardThreshold;
+  const gatingFactor = 1.0 / (1.0 + Math.exp(steepness * diff));
+
+  return {
+    jaccardIndex,
+    gatingFactor
+  };
+}
+
+/**
  * 12. Identification du Réseau Hermétique (AGENTS.md)
  * Associe chaque tirage à son réseau ('hebdomadaire' vs 'quotidien').
  */
