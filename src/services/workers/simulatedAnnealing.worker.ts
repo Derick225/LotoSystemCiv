@@ -330,27 +330,7 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
       top5Energy += Math.tanh(nodeEnergy);
     });
 
-    // Calcul de l'indice de Jaccard pondéré continu C^∞ pour pénaliser la monoculture
-    let jaccardOverlap = 0;
-    let jaccardUnion = 0;
-    const top5Set = new Set(top5);
-
-    for (const pw of prevWinners) {
-      if (top5Set.has(pw)) {
-        jaccardOverlap += Math.max(0.01, candidateScores[pw] || 1.0);
-      }
-    }
-    const unionSet = new Set([...top5, ...prevWinners]);
-    for (const un of unionSet) {
-      jaccardUnion += Math.max(0.01, candidateScores[un] || 1.0);
-    }
-
-    const jaccardRatio = jaccardUnion > 0 ? jaccardOverlap / jaccardUnion : 0;
-    // Gating sigmoïde C^∞ (J0 = 0.35, k = 12.0)
-    const jaccardGatingFactor = 1.0 / (1.0 + Math.exp(12.0 * (jaccardRatio - 0.35)));
-
-    const baseEnergyTerm = 2.0 * Math.pow(5.0, globalSimilarityScore) * (targetSize / 5.0) + top5Energy - 2.0;
-    totalScore += baseEnergyTerm * jaccardGatingFactor;
+    totalScore += 2.0 * Math.pow(5.0, globalSimilarityScore) * (targetSize / 5.0) + top5Energy - 2.0;
   }
 
   return totalScore;

@@ -230,108 +230,63 @@ export const calculateGeneticDiversityIndex = (
 };
 
 /**
- * CALCUL CONTINU DU JACCARD PONDÉRÉ (WEIGHTED JACCARD INDEX)
- * J_w(A, B) = sum_{n in A inter B} w(n) / sum_{n in A union B} w(n)
- * où w(n) est le poids d'activation ou de confiance du numéro n (défaut: 1.0)
- */
-export const computeWeightedJaccardIndex = (
-  numbersA: number[],
-  numbersB: number[],
-  weights?: Record<number, number> | Float64Array | number[]
-): number => {
-  if (!numbersA || !numbersB || numbersA.length === 0 || numbersB.length === 0) return 0;
-
-  const setB = new Set(numbersB);
-  let intersectionWeight = 0;
-  let unionWeight = 0;
-
-  const getW = (n: number): number => {
-    if (!weights) return 1.0;
-    if (weights instanceof Float64Array || Array.isArray(weights)) {
-      return Math.max(0.01, Number(weights[n]) || 1.0);
-    }
-    return Math.max(0.01, Number(weights[n]) || 1.0);
-  };
-
-  const unionSet = new Set([...numbersA, ...numbersB]);
-
-  for (const n of numbersA) {
-    if (setB.has(n)) {
-      intersectionWeight += getW(n);
-    }
-  }
-
-  for (const n of unionSet) {
-    unionWeight += getW(n);
-  }
-
-  return unionWeight > 0 ? intersectionWeight / unionWeight : 0;
-};
-
-/**
- * FONCTION D'INHIBITION CONTINUE PAR GATING SIGMOÏDE C^∞
- * G_Jaccard(J) = 1 / (1 + exp(k * (J - J_0)))
- * - J_0 : seuil central de similarité de Jaccard (par défaut 0.35)
- * - k : pente d'inhibition continue (par défaut 12.0)
- */
-export const computeContinuousJaccardGating = (
-  jaccardIndex: number,
-  jaccardThreshold: number = 0.35,
-  steepness: number = 12.0
-): number => {
-  const diff = jaccardIndex - jaccardThreshold;
-  const expVal = Math.exp(steepness * diff);
-  return 1.0 / (1.0 + expVal);
-};
-
-/**
- * FILTRE DE DIVERSITÉ GÉNÉTIQUE ET GATING SIGMOÏDE CONTINU JACCARD SUR TICKETS MULTIPLES
+ * FILTRE DE DIVERSITÉ GÉNÉTIQUE ET D'ENTROPIE DE SHANNON SUR TICKETS MULTIPLES
  * Élimine la redondance excessive entre suggestions de combinaisons multiples en
  * évaluant la matrice de corrélation / chevauchement et l'entropie globale du pool.
  */
 export const filterDiverseCombinations = <T extends { numbers: number[]; score?: number; nexusScore?: number }>(
   tickets: T[],
   maxSelect?: number,
-  maxAllowedOverlap: number = Math.floor(5 * 0.5), // Default: half of draw size (5/2=2)
-  ballWeights?: Record<number, number>
+  maxAllowedOverlap: number = Math.floor(5 * 0.5) // Default: half of draw size (5/2=2)
 ): T[] => {
   if (!tickets || tickets.length <= 1) return tickets || [];
 
   const getScore = (t: T) => t.nexusScore ?? t.score ?? 0;
+  
+  // Trier par score décroissant initial
+  const sorted = [...tickets].sort((a, b) => getScore(b) - getScore(a));
+  const selected: T[] = [sorted[0]];
 
-  const pool = [...tickets];
-  const selected: T[] = [];
-  const candidateScores = new Map<T, number>();
+  for (let i = 1; i < sorted.length; i++) {
+    if (maxSelect && selected.length >= maxSelect) break;
 
-  for (const t of pool) {
-    candidateScores.set(t, getScore(t));
-  }
+    const candidate = sorted[i];
+    const candSet = new Set(candidate.numbers);
 
-  // Seuil continu J_0 dérivé adaptativement de maxAllowedOverlap (ex: 2.0 / 8.0 = 0.25)
-  const drawSize = pool[0]?.numbers?.length || 5;
-  const targetJ0 = Math.max(0.1, maxAllowedOverlap / Math.max(1, 2 * drawSize - maxAllowedOverlap));
-
-  while (pool.length > 0 && (!maxSelect || selected.length < maxSelect)) {
-    // Trier les candidats par score effectif (après gating sigmoïde)
-    pool.sort((a, b) => (candidateScores.get(b) || 0) - (candidateScores.get(a) || 0));
-    const bestCandidate = pool.shift()!;
-
-    selected.push(bestCandidate);
-
-    // Re-scorer de façon continue les candidats restants selon leur similarité de Jaccard maximale avec la sélection actuelle
-    for (const cand of pool) {
-      let maxJaccard = 0;
-      for (const sel of selected) {
-        const jw = computeWeightedJaccardIndex(cand.numbers, sel.numbers, ballWeights);
-        if (jw > maxJaccard) maxJaccard = jw;
+    let maxOverlap = 0;
+    for (const sel of selected) {
+      const overlap = sel.numbers.filter(n => candSet.has(n)).length;
+      if (overlap > maxOverlap) {
+        maxOverlap = overlap;
       }
+    }
 
-      // Atténuation continue C^∞ par porte sigmoïde
-      const gatingFactor = computeContinuousJaccardGating(maxJaccard, targetJ0, 12.0);
-      const originalScore = getScore(cand);
-      const effectiveScore = originalScore * gatingFactor;
+    if (maxOverlap <= maxAllowedOverlap) {
+      selected.push(candidate);
+    } else {
+      // Calculer l'entropie de Shannon globale si l'on inclut ce ticket
+      const combinedNumbers = [...selected.flatMap(s => s.numbers), ...candidate.numbers];
+      const freqMap: Record<number, number> = {};
+      combinedNumbers.forEach(n => { freqMap[n] = (freqMap[n] || 0) + 1; });
 
-      candidateScores.set(cand, effectiveScore);
+      const total = combinedNumbers.length;
+      let shannonEntropy = 0;
+      Object.values(freqMap).forEach(count => {
+        const p = count / total;
+        if (p > 0) shannonEntropy -= p * Math.log2(p);
+      });
+
+      const maxEntropy = Math.log2(Math.min(90, Object.keys(freqMap).length));
+      const normalizedEntropy = maxEntropy > 0 ? shannonEntropy / maxEntropy : 1.0;
+
+      // Entropy threshold derived from information theory:
+      // A pool of K tickets over D=90 numbers has max entropy log2(min(90, uniqueNumbers)).
+      // We require at least 1 - 1/sqrt(numSelected+1) normalized entropy to accept a ticket.
+      const numSelected = selected.length;
+      const entropyThreshold = 1.0 - 1.0 / Math.sqrt(numSelected + 1);
+      if (normalizedEntropy > entropyThreshold && maxOverlap < candidate.numbers.length) {
+        selected.push(candidate);
+      }
     }
   }
 
