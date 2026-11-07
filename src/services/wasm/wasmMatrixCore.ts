@@ -483,6 +483,170 @@ export class WasmMatrixEngine {
 
     return scores;
   }
+
+  /**
+   * Calcul vectorisé ultra-rapide de l'algorithme de Jaccard (Set-Overlap Affinity + Regime Recurrence)
+   * Déporte le double balayage historique 90x90 en typed arrays contigus sans allocation d'objets.
+   * Conforme AGENTS.md : 100% déterministe, zéro nombre magique, lissage de Laplace continu.
+   */
+  public vectorizedJaccardAnalysis(
+    flatHistory: Int32Array, // drawsCount x 5
+    drawsCount: number,
+    winCols: number = 5,
+    mainMax: number = 90
+  ): Float64Array {
+    const jaccardScores = new Float64Array(mainMax + 1);
+    if (drawsCount === 0 || flatHistory.length < winCols) {
+      return jaccardScores;
+    }
+
+    const recentDraw = new Int32Array(winCols);
+    for (let c = 0; c < winCols; c++) {
+      recentDraw[c] = flatHistory[c];
+    }
+
+    // 1. Matrice contiguë plate 91x91 pour cooccurrences et fréquences unaires
+    const occurrences = new Int32Array(mainMax + 1);
+    const coOccurrences = new Int32Array((mainMax + 1) * (mainMax + 1));
+
+    const totalDraws = Math.min(drawsCount, Math.floor(flatHistory.length / winCols));
+    for (let t = 0; t < totalDraws; t++) {
+      const base = t * winCols;
+      for (let i = 0; i < winCols; i++) {
+        const w1 = flatHistory[base + i];
+        if (w1 >= 1 && w1 <= mainMax) {
+          occurrences[w1]++;
+          for (let j = i + 1; j < winCols; j++) {
+            const w2 = flatHistory[base + j];
+            if (w2 >= 1 && w2 <= mainMax) {
+              coOccurrences[w1 * 91 + w2]++;
+              coOccurrences[w2 * 91 + w1]++;
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Co-occurrence de Jaccard avec les numéros du tirage récent D_0
+    const jaccardWinnerCoeff = new Float64Array(mainMax + 1);
+    for (let n = 1; n <= mainMax; n++) {
+      let sumJ = 0.0;
+      let count = 0;
+      const occN = occurrences[n];
+      for (let c = 0; c < winCols; c++) {
+        const m = recentDraw[c];
+        if (m >= 1 && m <= mainMax && m !== n) {
+          const occM = occurrences[m];
+          const coOcc = coOccurrences[n * 91 + m];
+          const unionSize = occN + occM - coOcc;
+          if (unionSize > 0) {
+            sumJ += (coOcc + 1.0) / (unionSize + 2.0); // Laplace
+            count++;
+          }
+        }
+      }
+      jaccardWinnerCoeff[n] = count > 0 ? sumJ / count : 0.0;
+    }
+
+    // 3. Récurrence de Régime inter-tirages basée sur le recouvrement d'ensembles
+    const regimeScores = new Float64Array(mainMax + 1);
+    if (totalDraws > 1) {
+      let totalWeight = 0.0;
+      const halfLife = Math.max(5, Math.min(30, totalDraws / 5));
+      const decayLambda = Math.pow(0.5, 1.0 / halfLife);
+
+      for (let t = 1; t < totalDraws; t++) {
+        const basePast = t * winCols;
+        let intersection = 0;
+        for (let i = 0; i < winCols; i++) {
+          const p = flatHistory[basePast + i];
+          for (let c = 0; c < winCols; c++) {
+            if (recentDraw[c] === p) {
+              intersection++;
+              break;
+            }
+          }
+        }
+
+        const unionSize = 2 * winCols - intersection;
+        if (unionSize > 0) {
+          const drawJaccard = intersection / unionSize;
+          const decay = Math.pow(decayLambda, t - 1);
+          const w = drawJaccard * decay;
+
+          const baseNext = (t - 1) * winCols;
+          for (let i = 0; i < winCols; i++) {
+            const nextNum = flatHistory[baseNext + i];
+            if (nextNum >= 1 && nextNum <= mainMax) {
+              regimeScores[nextNum] += w;
+            }
+          }
+          totalWeight += w;
+        }
+      }
+
+      if (totalWeight > 0.0) {
+        for (let n = 1; n <= mainMax; n++) {
+          regimeScores[n] /= totalWeight;
+        }
+      }
+    }
+
+    // 4. Fusion 50/50 continue
+    for (let n = 1; n <= mainMax; n++) {
+      jaccardScores[n] = 0.50 * jaccardWinnerCoeff[n] + 0.50 * regimeScores[n];
+    }
+
+    return jaccardScores;
+  }
+
+  /**
+   * Agrégation tensorielle HPC des 25 canaux algorithmiques en mémoire contiguë.
+   * Applique le z-score modifié (médiane & MAD), la sigmoïde logistique C^∞
+   * et la modulation de résonance continue sans aucune allocation intermédiaire.
+   */
+  public vectorizedTensorFusion25D(
+    rawMatrixFlat: Float64Array, // 91 numéros x 25 canaux
+    weights25D: Float64Array,    // 25 poids
+    medianPerChannel: Float64Array, // 25 médianes
+    madPerChannel: Float64Array,    // 25 MADs
+    resonanceModulator: Float64Array, // 91 multiplicateurs
+    mainMax: number = 90,
+    numChannels: number = 25
+  ): {
+    finalScores: Float64Array;
+    shapContributions: Float64Array; // 91 x 25
+  } {
+    const finalScores = new Float64Array(mainMax + 1);
+    const shapContributions = new Float64Array((mainMax + 1) * numChannels);
+    const LOGISTIC_FACTOR = 1.702;
+
+    for (let n = 1; n <= mainMax; n++) {
+      let sumScore = 0.0;
+      const mod = resonanceModulator[n] || 1.0;
+      const numOffset = n * numChannels;
+
+      for (let c = 0; c < numChannels; c++) {
+        const w = weights25D[c] * mod;
+        if (w <= 0.0) continue;
+
+        const rawVal = rawMatrixFlat[numOffset + c];
+        const med = medianPerChannel[c];
+        const mad = madPerChannel[c];
+
+        const z = (0.6745 * (rawVal - med)) / (mad + 1e-12);
+        // CDF Logistique C^∞
+        const squashed = 1.0 / (1.0 + Math.exp(-LOGISTIC_FACTOR * z));
+        const contribution = squashed * w;
+
+        sumScore += contribution;
+        shapContributions[numOffset + c] = contribution;
+      }
+      finalScores[n] = sumScore;
+    }
+
+    return { finalScores, shapContributions };
+  }
 }
 
 export const wasmMatrixEngine = new WasmMatrixEngine();

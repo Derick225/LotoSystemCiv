@@ -107,21 +107,32 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
     const subPast = past.slice(0, contextSize);
     const candidateScores = new Float64Array(91);
 
-    // Définition dynamique des 24 canaux algorithmiques
+    // Définition dynamique des 25 canaux algorithmiques
     const wFreq = w.frequency ?? w.freq ?? 0;
     const wGap = w.gap ?? w.gaps ?? 0;
     const wMarkov = w.markov ?? 0;
     const wMom = w.momentum ?? 0;
     const wBayes = w.bayes ?? w.temporalBayes ?? 0;
-    const wSpec = w.spectral ?? w.inter_monthly_resonance ?? 0;
-    const wAffinity = w.affinity ?? w.network ?? 0;
+    const wSpec = w.spectral ?? 0;
+    const wAffinity = w.affinity ?? 0;
     const wSpatial = w.spatial ?? 0;
     const wFractal = w.fractal ?? 0;
-    const wGapPattern = w.gap_pattern ?? w.gap_cadence ?? w.gap_trend ?? 0;
+    const wGapPattern = w.gap_pattern ?? 0;
     const wIsolation = w.isolation_anomaly ?? 0;
     const wMachine = w.machine_transfer ?? 0;
     const wEcho = w.echo_state ?? 0;
-    const wAco = w.aco_optimization ?? 0;
+    const wTemporal = w.temporal ?? 0;
+    const wShadow = w.shadow_probability ?? w.shadow ?? 0;
+    const wNetwork = w.network_correlation ?? w.network ?? 0;
+    const wGapSequence = w.gap_sequence ?? 0;
+    const wDerivedNeighbor = w.derived_neighbor ?? 0;
+    const wSequencePattern = w.sequence_pattern ?? 0;
+    const wGapCadence = w.gap_cadence ?? 0;
+    const wGapTrend = w.gap_trend ?? 0;
+    const wInterMonthly = w.inter_monthly_resonance ?? 0;
+    const wGapBand = w.gap_band_sequence ?? 0;
+    const wInterDraw = w.inter_draw_resonance ?? 0;
+    const wJaccard = w.jaccard ?? 0;
 
     const prevWinners = subPast[0]?.gagnants || [];
     const prevSet = new Set(prevWinners.filter(n => n >= 1 && n <= 90));
@@ -168,7 +179,7 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
         scoreN += (markovSum / Math.max(1, prevWinners.length)) * 20.0 * wMarkov;
       }
 
-      // 5. Spectrale & Ondelettes
+      // 5. Spectrale
       if (wSpec > 0.0001) {
         const theta = (2.0 * Math.PI * n * 5.0) / 90.0;
         const specVal = (Math.cos(theta) + 1.0) * 50.0;
@@ -182,7 +193,7 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
         scoreN += (likelihood / (likelihood + prior)) * 100.0 * wBayes;
       }
 
-      // 7. Affinité & Réseau
+      // 7. Affinité
       if (wAffinity > 0.0001 && prevSet.size > 0) {
         let aff = 0;
         for (const pw of prevSet) {
@@ -207,7 +218,7 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
 
       // 9. Processus de Hawkes & Motif d'écart
       if (wGapPattern > 0.0001) {
-        let hawkes = 0.055; // Baseline mu_0 = 5/90
+        let hawkes = 0.055;
         for (let k = 0; k < Math.min(15, subPast.length); k++) {
           if (subPast[k].gagnants.includes(n)) {
             hawkes += Math.exp(-0.15 * (k + 1)) * 0.65;
@@ -230,10 +241,114 @@ const evaluate = (w: AlgoWeights, history: DrawResultLite[], depth: number): num
         scoreN += (machineFreq[n] / Math.max(1, H_sub)) * 100.0 * wMachine;
       }
 
-      // 12. Echo State & ACO
-      if ((wEcho > 0.0001 || wAco > 0.0001)) {
-        const comboWeight = wEcho + wAco;
-        scoreN += (freqMap[n] * 0.5 + (91 - n) * 0.1) * comboWeight;
+      // 12. Echo State
+      if (wEcho > 0.0001) {
+        scoreN += (freqMap[n] * 0.5 + (91 - n) * 0.1) * wEcho;
+      }
+
+      // 13. Temporel
+      if (wTemporal > 0.0001) {
+        let tempAcc = 0;
+        for (let k = 0; k < Math.min(10, subPast.length); k++) {
+          if (subPast[k].gagnants.includes(n)) tempAcc += Math.exp(-k / 5.0);
+        }
+        scoreN += tempAcc * 30.0 * wTemporal;
+      }
+
+      // 14. Ombre topologique
+      if (wShadow > 0.0001) {
+        let neighborHits = 0;
+        for (const pw of prevSet) {
+          if (Math.abs(pw - n) <= 2) neighborHits++;
+        }
+        scoreN += Math.exp(-neighborHits) * 50.0 * wShadow;
+      }
+
+      // 15. Corrélation Réseau
+      if (wNetwork > 0.0001) {
+        let netDeg = 0;
+        for (let c = 1; c <= 90; c++) netDeg += pairCooc[n * 91 + c];
+        scoreN += (netDeg / Math.max(1, H_sub)) * 10.0 * wNetwork;
+      }
+
+      // 16. Séquences d'Écarts
+      if (wGapSequence > 0.0001) {
+        let g = 0;
+        for (let k = 0; k < subPast.length; k++) {
+          if (subPast[k].gagnants.includes(n)) break;
+          g++;
+        }
+        scoreN += (1.0 / (1.0 + Math.exp(-0.2 * (g - 18)))) * 100.0 * wGapSequence;
+      }
+
+      // 17. Voisin Dérivé & Symétries
+      if (wDerivedNeighbor > 0.0001 && prevSet.size > 0) {
+        let dScore = 0;
+        for (const pw of prevSet) {
+          if (Math.abs(pw - n) === 1) dScore += 40.0;
+          if (pw + n === 91) dScore += 50.0;
+        }
+        scoreN += dScore * wDerivedNeighbor;
+      }
+
+      // 18. Motifs de Séquence
+      if (wSequencePattern > 0.0001) {
+        scoreN += (freqMap[n] / (H_sub + 1)) * 80.0 * wSequencePattern;
+      }
+
+      // 19. Cadence d'Écarts
+      if (wGapCadence > 0.0001) {
+        scoreN += (Math.cos((n * Math.PI) / 45.0) + 1.0) * 35.0 * wGapCadence;
+      }
+
+      // 20. Tendance des Écarts
+      if (wGapTrend > 0.0001) {
+        let gapCurr = 0;
+        for (let k = 0; k < subPast.length; k++) {
+          if (subPast[k].gagnants.includes(n)) break;
+          gapCurr++;
+        }
+        scoreN += Math.min(100.0, gapCurr * 3.5) * wGapTrend;
+      }
+
+      // 21. Résonance Inter-Mensuelle
+      if (wInterMonthly > 0.0001) {
+        const theta18 = (2.0 * Math.PI * (n % 18)) / 18.0;
+        scoreN += (Math.cos(theta18) + 1.0) * 45.0 * wInterMonthly;
+      }
+
+      // 22. Transition Bandes d'Écarts
+      if (wGapBand > 0.0001) {
+        scoreN += (freqMap[n] > 0 ? 60.0 : 25.0) * wGapBand;
+      }
+
+      // 23. Résonance Inter-Tirages
+      if (wInterDraw > 0.0001 && prevSet.size > 0) {
+        let interScore = 0;
+        if (prevSet.has(n)) interScore += 50.0;
+        if (prevSet.has(91 - n)) interScore += 40.0;
+        scoreN += interScore * wInterDraw;
+      }
+
+      // 24. Fractal
+      if (wFractal > 0.0001) {
+        scoreN += (freqMap[n] / (H_sub + 1)) * 60.0 * wFractal;
+      }
+
+      // 25. Similitude de Jaccard
+      if (wJaccard > 0.0001 && prevSet.size > 0) {
+        let jaccardAcc = 0;
+        let countLw = 0;
+        for (const pw of prevSet) {
+          const cooc = pairCooc[pw * 91 + n];
+          const union = freqMap[pw] + freqMap[n] - cooc;
+          if (union > 0) {
+            jaccardAcc += (cooc + 1.0) / (union + 2.0);
+            countLw++;
+          }
+        }
+        const avgJ = countLw > 0 ? jaccardAcc / countLw : 0;
+        scoreN += avgJ * 100.0 * wJaccard;
       }
 
       candidateScores[n] = scoreN;

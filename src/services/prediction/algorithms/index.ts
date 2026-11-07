@@ -19,6 +19,7 @@ import { interMonthlyResonancePlugin } from './interMonthlyResonance';
 import { gapRangeSequencePlugin } from './gapRangeSequence';
 import { machineTransferPlugin } from './machineTransfer';
 import { interDrawResonancePlugin } from './interDrawResonance';
+import { jaccardPlugin } from './jaccard';
 import { 
   shadowProbabilityPlugin, 
   networkCorrelationPlugin, 
@@ -60,6 +61,7 @@ export const initCoreAlgorithms = () => {
   registerAlgorithm(gapRangeSequencePlugin);
   registerAlgorithm(machineTransferPlugin);
   registerAlgorithm(interDrawResonancePlugin);
+  registerAlgorithm(jaccardPlugin);
 };
 
 // Exécution immédiate de l'initialisation

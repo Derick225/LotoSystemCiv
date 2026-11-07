@@ -281,7 +281,22 @@ export const getStrategyName = (weights: AlgoWeights): string => {
     [AlgoKey.AFFINITY]: 'Affinité Symbiotique',
     [AlgoKey.SPATIAL]: 'Géométrie Spatiale',
     [AlgoKey.TEMPORAL]: 'Modélisation Temporelle',
-    [AlgoKey.FRACTAL]: 'Mémoire Multi-échelle'
+    [AlgoKey.FRACTAL]: 'Mémoire Multi-échelle',
+    [AlgoKey.SHADOW_PROBABILITY]: 'Probabilités Fantômes & Ombre',
+    [AlgoKey.NETWORK_CORRELATION]: 'Centralité de Réseau',
+    [AlgoKey.ECHO_STATE]: 'Réservoir Echo State (RC)',
+    [AlgoKey.GAP_SEQUENCE]: 'Champ Moyen d\'Ising',
+    [AlgoKey.DERIVED_NEIGHBOR]: 'Diffusion & Symétries Dérivées',
+    [AlgoKey.GAP_PATTERN]: 'Processus de Hawkes Auto-excité',
+    [AlgoKey.SEQUENCE_PATTERN]: 'Entropie de Permutation Locale',
+    [AlgoKey.GAP_CADENCE]: 'Harmoniques de Cadence',
+    [AlgoKey.GAP_TREND]: 'Accélération de Tendance',
+    [AlgoKey.INTER_MONTHLY_RESONANCE]: 'Ondelettes Multi-Échelles (T_0=18)',
+    [AlgoKey.ISOLATION_ANOMALY]: 'Anomalie d\'Isolement',
+    [AlgoKey.GAP_BAND_SEQUENCE]: 'Transitions par Déciles',
+    [AlgoKey.MACHINE_TRANSFER]: 'Transfert Symbiotique Machine',
+    [AlgoKey.INTER_DRAW_RESONANCE]: 'Résonance Inter-Tirages Réseau',
+    [AlgoKey.JACCARD]: 'Similitude d\'Intersection de Jaccard',
   };
   return strategies[topAlgo] || `Hybride (${topAlgo})`;
 };

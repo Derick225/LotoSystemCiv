@@ -28,6 +28,7 @@ export const LABELS_MAP: Record<AlgoKey, string> = {
   [AlgoKey.GAP_BAND_SEQUENCE]: 'Transition de Bandes d\'Écart',
   [AlgoKey.MACHINE_TRANSFER]: 'Transfert Machine',
   [AlgoKey.INTER_DRAW_RESONANCE]: 'Résonance Inter-Tirages',
+  [AlgoKey.JACCARD]: 'Similitude de Jaccard',
 };
 
 export const ALGO_CATEGORIES = [
@@ -37,7 +38,7 @@ export const ALGO_CATEGORIES = [
   },
   {
     name: "Mathématique & Structural",
-    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY, AlgoKey.ISOLATION_ANOMALY, AlgoKey.SEQUENCE_PATTERN, AlgoKey.INTER_MONTHLY_RESONANCE]
+    keys: [AlgoKey.SPECTRAL, AlgoKey.FRACTAL, AlgoKey.TEMPORAL, AlgoKey.SHADOW_PROBABILITY, AlgoKey.ISOLATION_ANOMALY, AlgoKey.SEQUENCE_PATTERN, AlgoKey.INTER_MONTHLY_RESONANCE, AlgoKey.JACCARD]
   },
   {
     name: "Dynamiques Avancées",

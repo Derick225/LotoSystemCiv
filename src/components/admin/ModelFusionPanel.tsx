@@ -95,6 +95,7 @@ const CATEGORY_MAP: Record<string, { label: string; keys: AlgoKey[]; color: stri
       AlgoKey.TEMPORAL,
       AlgoKey.ECHO_STATE,
       AlgoKey.NETWORK_CORRELATION,
+      AlgoKey.JACCARD,
     ],
     color: "emerald",
   },

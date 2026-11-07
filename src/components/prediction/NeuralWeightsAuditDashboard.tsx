@@ -264,6 +264,24 @@ const ALGO_REGISTRY: LayerMeta[] = [
     formula: "Anomaly(n) = Exp(-dist(n, Attracteurs))",
     iconName: "Zap",
   },
+  {
+    key: AlgoKey.INTER_DRAW_RESONANCE,
+    label: "Résonance Inter-Tirages Réseau",
+    category: "markov_point",
+    categoryLabel: "Couche 3 : Transitions & Processus Ponctuels",
+    description: "Transitions Markov et cooccurrences au sein du réseau hermétique de tirages.",
+    formula: "Res(A, B) = Cov(D_A, D_B) / (sigma_A * sigma_B)",
+    iconName: "Network",
+  },
+  {
+    key: AlgoKey.JACCARD,
+    label: "Similitude de Jaccard",
+    category: "markov_point",
+    categoryLabel: "Couche 3 : Transitions & Processus Ponctuels",
+    description: "Coefficient d'intersection d'ensembles et récurrence de régimes de tirage.",
+    formula: "J(A, B) = |A ∩ B| / |A ∪ B|",
+    iconName: "Network",
+  },
 ];
 
 // Comptages dérivés du registre réel (jamais codés en dur : ils suivent le registre).

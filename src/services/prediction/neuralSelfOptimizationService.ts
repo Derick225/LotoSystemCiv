@@ -151,11 +151,19 @@ export const computeFastHistoricalFeatures = (
   const rawShadow = new Float64Array(91);
   const rawInterMonthly = new Float64Array(91);
   const rawInterDraw = new Float64Array(91);
+  const rawJaccard = new Float64Array(91);
+  const rawEchoState = new Float64Array(91);
+  const rawGapSequence = new Float64Array(91);
+  const rawGapPattern = new Float64Array(91);
+  const rawSequencePattern = new Float64Array(91);
+  const rawDerivedNeighbor = new Float64Array(91);
+  const rawNetwork = new Float64Array(91);
 
   const occurrenceTimes: number[][] = Array.from({ length: 91 }, () => []);
   const counts = new Float64Array(91);
   const shortEma = new Float64Array(91);
   const longEma = new Float64Array(91);
+  const coocMatrix = Array.from({ length: 91 }, () => new Float32Array(91));
 
   // 1. Parcours temporel des occurrences
   for (let t = 0; t < depth; t++) {
@@ -164,13 +172,22 @@ export const computeFastHistoricalFeatures = (
     const wShort = Math.exp(-t / 4.0);
     const wLong = Math.exp(-t / 18.0);
 
-    for (const n of winners) {
+    for (let i = 0; i < winners.length; i++) {
+      const n = winners[i];
       if (n >= 1 && n <= 90) {
         counts[n] += 1;
         rawFreq[n] += wDecay;
         shortEma[n] += wShort;
         longEma[n] += wLong;
         occurrenceTimes[n].push(t);
+
+        for (let j = i + 1; j < winners.length; j++) {
+          const m = winners[j];
+          if (m >= 1 && m <= 90) {
+            coocMatrix[n][m] += wDecay;
+            coocMatrix[m][n] += wDecay;
+          }
+        }
       }
     }
   }
@@ -506,6 +523,76 @@ export const computeFastHistoricalFeatures = (
 
     // INTER_DRAW_RESONANCE : Résonance croisée à lag-2 et voisinage harmonique
     rawInterDraw[b] = 0.5 * rawMarkov[b] + 0.5 * rawAffinity[b];
+
+    // JACCARD : Indice d'intersection et recouvrement d'ensembles avec le dernier tirage
+    let jaccardNumSum = 0;
+    let jaccardCount = 0;
+    for (const lw of lastDrawWinners) {
+      if (lw >= 1 && lw <= 90 && lw !== b) {
+        const cooc = coocMatrix[lw]?.[b] || 0;
+        const union = (counts[lw] || 0) + (counts[b] || 0) - cooc;
+        if (union > 0) {
+          jaccardNumSum += (cooc + 1.0) / (union + 2.0);
+          jaccardCount++;
+        }
+      }
+    }
+    rawJaccard[b] = jaccardCount > 0 ? jaccardNumSum / jaccardCount : 0.0;
+
+    // NETWORK_CORRELATION : Degré et centralité dans le graphe de co-occurrence
+    let networkDeg = 0;
+    for (let c = 1; c <= 90; c++) {
+      if (c !== b) networkDeg += coocMatrix[b]?.[c] || 0;
+    }
+    rawNetwork[b] = networkDeg / 90.0;
+
+    // DERIVED_NEIGHBOR : Diffusion topologique (+-1 voisin circulaire, miroir 91-b, complément 90-b)
+    let derivedEnergy = 0;
+    for (const lw of lastDrawWinners) {
+      const circDist = Math.min(Math.abs(b - lw), 90 - Math.abs(b - lw));
+      if (circDist <= 2) derivedEnergy += Math.exp(-circDist);
+      const mirror = getMirrorBall(lw);
+      if (b === mirror) derivedEnergy += 1.5;
+      const comp = 91 - lw;
+      if (b === comp) derivedEnergy += 1.2;
+    }
+    rawDerivedNeighbor[b] = derivedEnergy;
+
+    // ECHO_STATE : Résonance dynamique oscillatoire du réservoir
+    let echoVal = 0;
+    for (let t = 0; t < Math.min(depth, 10); t++) {
+      if ((pastHistory[t]?.gagnants || []).includes(b)) {
+        const theta = (2.0 * Math.PI * (t + 1) * b) / 90.0;
+        echoVal += Math.exp(-t / 4.0) * (Math.cos(theta) + 1.0);
+      }
+    }
+    rawEchoState[b] = echoVal;
+
+    // GAP_PATTERN : Processus de Hawkes auto-excité sur les événements d'écart
+    let hawkesExcitation = 0;
+    for (let t = 0; t < Math.min(depth, 15); t++) {
+      if ((pastHistory[t]?.gagnants || []).includes(b)) {
+        hawkesExcitation += Math.exp(-0.15 * (t + 1));
+      }
+    }
+    rawGapPattern[b] = 1.0 / (1.0 + Math.exp(-2.0 * hawkesExcitation));
+
+    // GAP_SEQUENCE : Champ moyen d'Ising sur l'écart courant vs espérance
+    const gapDev = currentGaps[b] - (90.0 / 5.0);
+    rawGapSequence[b] = 1.0 / (1.0 + Math.exp(-0.2 * gapDev));
+
+    // SEQUENCE_PATTERN : Entropie et régularité des intervalles de tirages
+    let intervalVar = 0;
+    const intervalsB = occurrenceTimes[b] || [];
+    if (intervalsB.length >= 2) {
+      let sumD = 0;
+      for (let k = 0; k < intervalsB.length - 1; k++) {
+        const delta = intervalsB[k + 1] - intervalsB[k];
+        sumD += Math.abs(delta - 18.0);
+      }
+      intervalVar = sumD / (intervalsB.length - 1);
+    }
+    rawSequencePattern[b] = 1.0 / (1.0 + intervalVar / 18.0);
   }
 
   // Normalisation [0, 1] individuelle de chaque canal actif
@@ -530,6 +617,13 @@ export const computeFastHistoricalFeatures = (
     [AlgoKey.SHADOW_PROBABILITY]: normalizeChannel90(rawShadow),
     [AlgoKey.INTER_MONTHLY_RESONANCE]: normalizeChannel90(rawInterMonthly),
     [AlgoKey.INTER_DRAW_RESONANCE]: normalizeChannel90(rawInterDraw),
+    [AlgoKey.JACCARD]: normalizeChannel90(rawJaccard),
+    [AlgoKey.NETWORK_CORRELATION]: normalizeChannel90(rawNetwork),
+    [AlgoKey.DERIVED_NEIGHBOR]: normalizeChannel90(rawDerivedNeighbor),
+    [AlgoKey.ECHO_STATE]: normalizeChannel90(rawEchoState),
+    [AlgoKey.GAP_PATTERN]: normalizeChannel90(rawGapPattern),
+    [AlgoKey.GAP_SEQUENCE]: normalizeChannel90(rawGapSequence),
+    [AlgoKey.SEQUENCE_PATTERN]: normalizeChannel90(rawSequencePattern),
   };
 
   const result: Record<number, Record<AlgoKey, number>> = {};

@@ -3931,3 +3931,46 @@ export function computePearsonCorrelationMatrixHpc(
   const average = countCorr > 0 ? parseFloat((sumCorr / countCorr).toFixed(4)) : 0;
   return { matrix, average };
 }
+
+/**
+ * 29. Calcul Vectorisé de Jaccard HPC (Set-Overlap + Régime Inter-Tirages)
+ * Exécute la simulation matricielle continue sans allocation dynamique en boucle.
+ */
+export function computeVectorizedJaccardHpc(
+  flatHistory: Int32Array | number[],
+  drawsCount: number,
+  winCols: number = 5,
+  mainMax: number = 90
+): Float64Array {
+  const flat = flatHistory instanceof Int32Array ? flatHistory : new Int32Array(flatHistory);
+  return wasmMatrixEngine.vectorizedJaccardAnalysis(flat, drawsCount, winCols, mainMax);
+}
+
+/**
+ * 30. Fusion Tensorielle 25D Vectorisée HPC (Scoring des 25 canaux)
+ * Évalue simultanément les 90 numéros sur les 25 canaux tensoriels avec application de la
+ * CDF logistique normale standard et projection sur simplexe marginal.
+ */
+export function computeTensorFusion25DHpc(
+  rawMatrixFlat: Float64Array,
+  weights25D: Float64Array,
+  medianPerChannel: Float64Array,
+  madPerChannel: Float64Array,
+  resonanceModulator: Float64Array,
+  mainMax: number = 90,
+  numChannels: number = 25
+): {
+  finalScores: Float64Array;
+  shapContributions: Float64Array;
+} {
+  return wasmMatrixEngine.vectorizedTensorFusion25D(
+    rawMatrixFlat,
+    weights25D,
+    medianPerChannel,
+    madPerChannel,
+    resonanceModulator,
+    mainMax,
+    numChannels
+  );
+}
+

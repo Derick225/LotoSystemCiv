@@ -223,27 +223,29 @@ export async function generatePlatinumPredictionCore(
     const dynamicSieveIntensity = sigmoid(1.5 * ((snrDna * 10.0) - 1.0));
     const sieveIntensityPercent = Math.round(dynamicSieveIntensity * 100);
 
-    // 2. VECTORISATION STANDARDISÉE DES TENSEURS DE BASE
-    const rawFreqVector = new Float64Array(MAX_NUM + 1);
-    const rawGapVector = new Float64Array(MAX_NUM + 1);
-    const rawMomentumVector = new Float64Array(MAX_NUM + 1);
-    const rawSpectralVector = new Float64Array(MAX_NUM + 1);
-    const rawMarkovVector = new Float64Array(MAX_NUM + 1);
-    const rawBayesVector = new Float64Array(MAX_NUM + 1);
-    const rawFractalVector = new Float64Array(MAX_NUM + 1);
-    const rawSpatialVector = new Float64Array(MAX_NUM + 1);
+    // 2. VECTORISATION STANDARDISÉE DE L'ENSEMBLE DES TENSEURS ALGORITHMIQUES DU REGISTRE
+    const allAlgoKeys = Object.values(AlgoKey);
+    const rawVectors: Record<AlgoKey, Float64Array> = {} as any;
+    allAlgoKeys.forEach((k) => {
+      rawVectors[k] = new Float64Array(MAX_NUM + 1);
+    });
 
     for (let i = 1; i <= MAX_NUM; i++) {
         const bd = breakdowns[i] || {};
-        rawFreqVector[i] = bd.frequency || (localFeatures.freqMap[i] * (100 / history.length)) || 0;
-        const currentGap = localFeatures.gapsMap[i] || 0;
-        rawGapVector[i] = bd.gap || (currentGap > 0 ? (history.length / currentGap) : 0);
-        rawMomentumVector[i] = bd.momentum || (localFeatures.momentumMap[i] * 10) || 0;
-        rawSpectralVector[i] = bd.spectral || (Array.isArray(metrics?.spectral) ? metrics.spectral.find((s: any) => s.number === i)?.energy : 0) || 0;
-        rawMarkovVector[i] = bd.markov || (localFeatures.markovMap[i] * 10) || 0;
-        rawBayesVector[i] = bd.bayes || 0;
-        rawFractalVector[i] = bd.fractal || 0;
-        rawSpatialVector[i] = bd.spatial || 0;
+        allAlgoKeys.forEach((k) => {
+          let val = bd[k];
+          if (val === undefined || Number.isNaN(val)) {
+            if (k === AlgoKey.FREQUENCY) val = (localFeatures.freqMap[i] * (100 / history.length)) || 0;
+            else if (k === AlgoKey.GAPS) {
+              const currentGap = localFeatures.gapsMap[i] || 0;
+              val = currentGap > 0 ? (history.length / currentGap) : 0;
+            } else if (k === AlgoKey.MOMENTUM) val = (localFeatures.momentumMap[i] * 10) || 0;
+            else if (k === AlgoKey.MARKOV) val = (localFeatures.markovMap[i] * 10) || 0;
+            else if (k === AlgoKey.SPECTRAL) val = (Array.isArray(metrics?.spectral) ? metrics.spectral.find((s: any) => s.number === i)?.energy : 0) || 0;
+            else val = 0;
+          }
+          rawVectors[k][i] = val;
+        });
     }
 
     // 2. MODÉLISATION HAWKES SPATIO-TEMPORELLE 2D CONTINUE (GRILLE 9x10 & MEMOIRE MULTI-LAGS)
@@ -251,20 +253,25 @@ export async function generatePlatinumPredictionCore(
     if (hawkes2DReport) {
         hawkes2DReport.nodes.forEach(node => {
             if (node.number >= 1 && node.number <= MAX_NUM) {
-                rawSpatialVector[node.number] += node.spatialNeighborhoodExcitation * 10.0;
-                rawMomentumVector[node.number] += node.temporalExcitation * 10.0;
+                rawVectors[AlgoKey.SPATIAL][node.number] += node.spatialNeighborhoodExcitation * 10.0;
+                rawVectors[AlgoKey.MOMENTUM][node.number] += node.temporalExcitation * 10.0;
             }
         });
     }
 
-    const stdFreq = standardizeVector(rawFreqVector);
-    const stdGap = standardizeVector(rawGapVector);
-    const stdMomentum = standardizeVector(rawMomentumVector);
-    const stdSpectral = standardizeVector(rawSpectralVector);
-    const stdMarkov = standardizeVector(rawMarkovVector);
-    const stdBayes = standardizeVector(rawBayesVector);
-    const stdFractal = standardizeVector(rawFractalVector);
-    const stdSpatial = standardizeVector(rawSpatialVector);
+    const stdVectors: Record<AlgoKey, Float64Array> = {} as any;
+    allAlgoKeys.forEach((k) => {
+      stdVectors[k] = standardizeVector(rawVectors[k]);
+    });
+
+    const stdFreq = stdVectors[AlgoKey.FREQUENCY];
+    const stdGap = stdVectors[AlgoKey.GAPS];
+    const stdMomentum = stdVectors[AlgoKey.MOMENTUM];
+    const stdSpectral = stdVectors[AlgoKey.SPECTRAL];
+    const stdMarkov = stdVectors[AlgoKey.MARKOV];
+    const stdBayes = stdVectors[AlgoKey.BAYES];
+    const stdFractal = stdVectors[AlgoKey.FRACTAL];
+    const stdSpatial = stdVectors[AlgoKey.SPATIAL];
 
     onProgress?.(70, "Agrégation non-linéaire tensorielle & Couplage thermodynamique...");
 
@@ -278,16 +285,13 @@ export async function generatePlatinumPredictionCore(
     let maxQuantAi = Number.EPSILON;
 
     for (let i = 1; i <= MAX_NUM; i++) {
-        const sumVal = (
-            stdFreq[i] * (weights[AlgoKey.FREQUENCY] ?? 1.0) +
-            stdGap[i] * (weights[AlgoKey.GAPS] ?? 1.0) +
-            stdMomentum[i] * (weights[AlgoKey.MOMENTUM] ?? 1.0) +
-            stdSpectral[i] * (weights[AlgoKey.SPECTRAL] ?? 1.0) +
-            stdMarkov[i] * (weights[AlgoKey.MARKOV] ?? 1.0) +
-            stdBayes[i] * (weights[AlgoKey.BAYES] ?? 1.0) +
-            stdFractal[i] * (weights[AlgoKey.FRACTAL] ?? 1.0) +
-            stdSpatial[i] * (weights[AlgoKey.SPATIAL] ?? 1.0)
-        );
+        let sumVal = 0;
+        allAlgoKeys.forEach((k) => {
+          const w = weights[k] ?? 1.0;
+          if (w > 0) {
+            sumVal += stdVectors[k][i] * w;
+          }
+        });
         rawSums[i] = sumVal;
         if (sumVal > maxRawSum) maxRawSum = sumVal;
 
@@ -367,9 +371,9 @@ export async function generatePlatinumPredictionCore(
         normalizedVector = normalizeVector(filteredVector);
     }
 
-    const normalizedMomentum = normalizeVector(rawMomentumVector);
-    const normalizedGap = normalizeVector(rawGapVector);
-    const normalizedSpectral = normalizeVector(rawSpectralVector);
+    const normalizedMomentum = normalizeVector(rawVectors[AlgoKey.MOMENTUM]);
+    const normalizedGap = normalizeVector(rawVectors[AlgoKey.GAPS]);
+    const normalizedSpectral = normalizeVector(rawVectors[AlgoKey.SPECTRAL]);
 
     // 5. ANALYSE STATISTIQUE DU RÉGIME CONTINU (FILTRE DE KALMAN STOCHASTIQUE EKF & DÉTECTION DE RUPTURE)
     onProgress?.(80, "Analyse d'entropie du régime & Filtrage de Kalman EKF...");
@@ -736,16 +740,10 @@ export async function generatePlatinumPredictionCore(
             transition: Number((pTransition * 100).toFixed(1)),
             chaotic: Number((pChaotic * 100).toFixed(1))
         },
-        channelScores: {
-            [AlgoKey.FREQUENCY]: Array.from(stdFreq),
-            [AlgoKey.GAPS]: Array.from(stdGap),
-            [AlgoKey.MOMENTUM]: Array.from(stdMomentum),
-            [AlgoKey.SPECTRAL]: Array.from(stdSpectral),
-            [AlgoKey.MARKOV]: Array.from(stdMarkov),
-            [AlgoKey.BAYES]: Array.from(stdBayes),
-            [AlgoKey.FRACTAL]: Array.from(stdFractal),
-            [AlgoKey.SPATIAL]: Array.from(stdSpatial)
-        },
+        channelScores: allAlgoKeys.reduce((acc, k) => {
+          acc[k] = Array.from(stdVectors[k]);
+          return acc;
+        }, {} as Partial<Record<AlgoKey, number[]>>),
         markowitzPortfolio,
         kalmanRegimeState: kalmanRegime,
         spatioTemporalHawkes: hawkes2DReport || undefined,

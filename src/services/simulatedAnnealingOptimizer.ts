@@ -23,7 +23,7 @@ export const runSimulatedAnnealingOptimization = async (
     throw new Error(`Historique insuffisant pour le recuit simulé (minimum absolu de 5 tirages requis).`);
   }
 
-  // Garantie des 24 canaux algorithmiques actifs si incomplet
+  // Garantie des 25 canaux algorithmiques actifs si incomplet
   const fullBaseWeights: AlgoWeights = { ...DEFAULT_ALGO_WEIGHTS, ...(baseWeights || {}) };
 
   // Métriques de régime stochastique déterministes

@@ -618,6 +618,36 @@ export const evaluateAlgoEmpiricalProof = (
     const topInterDraw = [...numIndices].sort((a, b) => interDrawScores[b] - interDrawScores[a]).slice(0, 10);
     hits[AlgoKey.INTER_DRAW_RESONANCE] += topInterDraw.filter(n => actualDraw.includes(n)).length * tWeight;
     trials[AlgoKey.INTER_DRAW_RESONANCE] += 10 * tWeight;
+
+    // 25. Canal JACCARD (Similitude d'intersection d'ensembles et récurrence de régimes)
+    const jaccardScores = new Float32Array(91);
+    if (lastWinners.length > 0) {
+      const coocCounts = new Int32Array(91);
+      const subWindow = Math.min(subT, 40);
+      for (let s = 0; s < subWindow; s++) {
+        const drawNums = subHistory[s].gagnants;
+        const hasOverlap = drawNums.some(n => lastWinners.includes(n));
+        if (hasOverlap) {
+          drawNums.forEach(n => {
+            if (n >= 1 && n <= 90 && !lastWinners.includes(n)) {
+              coocCounts[n]++;
+            }
+          });
+        }
+      }
+      for (let n = 1; n <= 90; n++) {
+        if (!lastWinners.includes(n)) {
+          const intersection = coocCounts[n];
+          const union = subFreq[n] + lastWinners.length * (subWindow / Math.max(1, subT)) - intersection;
+          if (union > 0) {
+            jaccardScores[n] = (intersection + 1.0) / (union + 2.0);
+          }
+        }
+      }
+    }
+    const topJaccard = [...numIndices].sort((a, b) => jaccardScores[b] - jaccardScores[a]).slice(0, 10);
+    hits[AlgoKey.JACCARD] += topJaccard.filter(n => actualDraw.includes(n)).length * tWeight;
+    trials[AlgoKey.JACCARD] += 10 * tWeight;
   }
 
   // Taille d'échantillon effective de Kish pour séries pondérées exponentiellement
@@ -627,7 +657,7 @@ export const evaluateAlgoEmpiricalProof = (
   const hasMachine = drawHasMachineNumbers(drawName, sample);
 
   // --- PASSE 1 : statistiques brutes par canal (z-score, p-value bilatérale, profondeur) ---
-  // Sous H0 (aucun pouvoir prédictif réel), les 24 canaux produisent des z-scores ~N(0,1) : la moitié
+  // Sous H0 (aucun pouvoir prédictif réel), les canaux produisent des z-scores ~N(0,1) : la moitié
   // dépassent 0 par pur bruit. L'ancien test `proofScore > 0` les "boostait" donc à tort (fléau des
   // comparaisons multiples). On calcule d'abord les statistiques individuelles, puis on corrige.
   interface ChannelStat { z: number; rate: number; pTwo: number; depth: number; tested: boolean; }
@@ -732,6 +762,7 @@ export const ALGO_DISPLAY_NAMES: Record<AlgoKey, string> = {
   [AlgoKey.GAP_BAND_SEQUENCE]: "Dynamique par Déciles",
   [AlgoKey.MACHINE_TRANSFER]: "Transfert Machine",
   [AlgoKey.INTER_DRAW_RESONANCE]: "Résonance Inter-Tirages",
+  [AlgoKey.JACCARD]: "Similitude de Jaccard (Set Overlap)",
 };
 
 export interface AlgoWeightProofItem {

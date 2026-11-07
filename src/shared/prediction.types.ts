@@ -34,7 +34,8 @@ export enum AlgoKey {
     ISOLATION_ANOMALY = 'isolation_anomaly',
     GAP_BAND_SEQUENCE = 'gap_band_sequence',
     MACHINE_TRANSFER = 'machine_transfer',
-    INTER_DRAW_RESONANCE = 'inter_draw_resonance'
+    INTER_DRAW_RESONANCE = 'inter_draw_resonance',
+    JACCARD = 'jaccard'
 }
 
 export type AlgoWeights = Record<AlgoKey, number>;
@@ -61,7 +62,7 @@ export const RETIRED_REDUNDANT_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([]
 export const RETIRED_PSEUDOSCIENCE_ALGOS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([]);
 
 /**
- * Union des canaux retirés. Désormais vide : les 24 canaux algorithmiques de l'architecture
+ * Union des canaux retirés. Désormais vide : les 25 canaux algorithmiques de l'architecture
  * sont tous mathématiquement rigoureux, orthogonaux et actifs dans l'ensemble.
  */
 export const RETIRED_ALGO_WEIGHT_KEYS: ReadonlySet<AlgoKey> = new Set<AlgoKey>([
