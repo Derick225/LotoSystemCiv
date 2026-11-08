@@ -52,6 +52,7 @@ import {
   InertiaCalibrationModifiers,
 } from "../../services/prediction/systemInertiaEngine";
 import { computeRobustHurst } from "../../services/mathCore";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 // Custom Type-Safe Tooltip for the Phase Portrait
 const CustomTooltip = ({ active, payload }: any) => {
@@ -127,13 +128,17 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   // Hurst mesuré sur l'historique PROPRE au tirage (estimateur R/S robuste) : source primaire.
   // computeRobustHurst exige au moins 10 échantillons pour mesurer quoi que ce soit ; en deçà on
   // ne prétend pas connaître l'exposant.
+  const pureHistory = useMemo(() => {
+    return drawName ? purifyHistoryForDraw(drawName, history) : history;
+  }, [drawName, history]);
+
   const measuredHurst = useMemo(() => {
-    if (history.length < 10) return null;
-    const signal = history
+    if (pureHistory.length < 10) return null;
+    const signal = pureHistory
       .slice(0, 20)
       .flatMap((draw) => (Array.isArray(draw?.gagnants) ? draw.gagnants : []));
     return signal.length >= 10 ? computeRobustHurst(signal) : null;
-  }, [history]);
+  }, [pureHistory]);
 
   const storeHurst =
     typeof globalRegime?.hurst === "number" ? globalRegime.hurst : null;
@@ -277,7 +282,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
 
   // Handle complete, deterministic system optimization calculations
   const triggerOptimization = () => {
-    if (history.length < 10) {
+    if (pureHistory.length < 10) {
       showToast(
         "Historique insuffisant pour calibrer l'inertie stochastique (min. 10 tirages requis).",
         "error",
@@ -303,7 +308,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
   // Advanced retroactive backtesting simulation (Time-Machine simulation)
   const runInertiaBacktest = async () => {
     audioEngine.play("click");
-    if (history.length < 12) {
+    if (pureHistory.length < 12) {
       showToast(
         "Dataset insuffisant pour rétropoler l'inertie (min. 12 tirages requis).",
         "error",
@@ -316,7 +321,7 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
 
     try {
       const result = await runDeterministicInertiaBacktest(
-        history,
+        pureHistory,
         drawName,
         currentModifiers,
         hurst
@@ -334,6 +339,8 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
     }
   };
 
+  const navigateToModule = useNexusStore((state) => state.navigateToModule);
+
   const handleSavePrimaryTicket = async () => {
     if (!optimizedVector) return;
     audioEngine.play("click");
@@ -341,13 +348,36 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
       await saveTicket({
         numbers: optimizedVector.primary,
         drawName,
-        strategy: `Inertie Système Optimisée (${optimizedVector.globalStability}%)`,
+        strategy: `Inertie Système Optimisée Primaire (${optimizedVector.globalStability}%)`,
       });
       audioEngine.play("success");
       showToast("Ticket d'inertie optimal mémorisé avec succès.", "success");
     } catch (e) {
       showToast("Erreur lors de l'enregistrement.", "error");
     }
+  };
+
+  const handleSaveSecondaryTicket = async () => {
+    if (!optimizedVector || optimizedVector.secondary.length < 5) return;
+    audioEngine.play("click");
+    try {
+      await saveTicket({
+        numbers: optimizedVector.secondary.slice(0, 5),
+        drawName,
+        strategy: `Inertie Système Couverture Amortie Top 5 (${optimizedVector.globalStability}%)`,
+      });
+      audioEngine.play("success");
+      showToast("Ticket de couverture amortie mémorisé avec succès.", "success");
+    } catch (e) {
+      showToast("Erreur lors de l'enregistrement.", "error");
+    }
+  };
+
+  const handleExportToCoveringDesigns = () => {
+    if (!optimizedVector) return;
+    audioEngine.play("click");
+    navigateToModule("Combinations");
+    showToast("Vecteur d'inertie projeté vers le Générateur Combinatoire.", "info");
   };
 
   const resetControls = () => {
@@ -850,12 +880,28 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
                   <div className="text-[8px] font-mono text-slate-400 bg-black/40 p-2 rounded-lg border border-white/5 select-all overflow-x-auto">
                     <code>{optimizedVector.equationUsed}</code>
                   </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      onClick={handleSavePrimaryTicket}
+                      className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-lg shadow-cyan-500/10"
+                    >
+                      <ShieldCheck size={13} />
+                      <span>Ticket Primaire (5)</span>
+                    </button>
+                    <button
+                      onClick={handleSaveSecondaryTicket}
+                      className="w-full py-2.5 bg-indigo-600/80 hover:bg-indigo-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-lg shadow-indigo-500/10"
+                    >
+                      <Layers size={13} />
+                      <span>Couverture (Top 5)</span>
+                    </button>
+                  </div>
                   <button
-                    onClick={handleSavePrimaryTicket}
-                    className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-lg shadow-cyan-500/10"
+                    onClick={handleExportToCoveringDesigns}
+                    className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-cyan-500/30 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer"
                   >
-                    <ShieldCheck size={13} />
-                    <span>Mémoriser le Ticket d'Inertie</span>
+                    <ArrowUpRight size={13} />
+                    <span>Transférer au Réducteur Simplex (Covering)</span>
                   </button>
                 </div>
               </motion.div>

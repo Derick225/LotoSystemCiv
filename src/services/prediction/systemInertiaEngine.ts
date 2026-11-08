@@ -13,6 +13,7 @@
  */
 
 import { combinations, binomialUpperTail } from "../../utils/mathUtils";
+import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 export interface SystemInertiaMetrics {
   drawName: string;
@@ -139,8 +140,9 @@ export const computeSystemInertiaMetrics = (
   drawName: string,
   hurstExponent: number = 0.5
 ): SystemInertiaMetrics => {
-  const safeMaxNum = discoverSafeMaxNum(history);
-  const sampleSize = Array.isArray(history) ? history.length : 0;
+  const cleanHistory = drawName ? purifyHistoryForDraw(drawName, history) : history;
+  const safeMaxNum = discoverSafeMaxNum(cleanHistory);
+  const sampleSize = Array.isArray(cleanHistory) ? cleanHistory.length : 0;
 
   if (sampleSize === 0) {
     const p0 = 5 / safeMaxNum;
@@ -192,7 +194,7 @@ export const computeSystemInertiaMetrics = (
   }
 
   for (let s = 0; s < sampleSize; s++) {
-    const draw = history[s];
+    const draw = cleanHistory[s];
     if (Array.isArray(draw?.gagnants)) {
       const g = draw.gagnants;
       totalBallsRecorded += g.length;
@@ -273,8 +275,8 @@ export const computeSystemInertiaMetrics = (
   let sumJaccard = 0;
   const jaccardValues: number[] = [];
   for (let s = 0; s < sampleSize - 1; s++) {
-    const drawA = history[s]?.gagnants;
-    const drawB = history[s + 1]?.gagnants;
+    const drawA = cleanHistory[s]?.gagnants;
+    const drawB = cleanHistory[s + 1]?.gagnants;
     if (Array.isArray(drawA) && Array.isArray(drawB) && drawA.length > 0 && drawB.length > 0) {
       const setA = new Set(drawA);
       let intersection = 0;
@@ -301,7 +303,7 @@ export const computeSystemInertiaMetrics = (
   const jaccardInertiaRatio = meanJaccardInertia / Math.max(1e-6, theoreticalJaccardInertia);
 
   // 5. Calcul du tenseur Jaccard individuel par boule J_n
-  const rawLastWinners: number[] = Array.isArray(history[0]?.gagnants) ? history[0].gagnants : [];
+  const rawLastWinners: number[] = Array.isArray(cleanHistory[0]?.gagnants) ? cleanHistory[0].gagnants : [];
   const lastDrawWinners = new Set<number>(rawLastWinners);
   const recentWindowLen = Math.max(1, Math.min(sampleSize, Math.round(meanGap)));
   const ballJaccardIndices: Record<number, number> = {};
@@ -580,12 +582,13 @@ export const runDeterministicInertiaBacktest = async (
   modifiers: InertiaCalibrationModifiers,
   hurstExponent: number = 0.5
 ): Promise<InertiaBacktestResult> => {
+  const cleanHistory = drawName ? purifyHistoryForDraw(drawName, history) : history;
   const minRequired = 12;
-  if (!Array.isArray(history) || history.length < minRequired) {
+  if (!Array.isArray(cleanHistory) || cleanHistory.length < minRequired) {
     throw new Error(`Historique insuffisant pour le rétro-audit (min. ${minRequired} tirages requis).`);
   }
 
-  const trialsCount = Math.min(10, history.length - 8);
+  const trialsCount = Math.min(10, cleanHistory.length - 8);
   const topSize = 5;
   const detailsList: any[] = [];
   let totalPrimaryHits = 0;
@@ -598,8 +601,8 @@ export const runDeterministicInertiaBacktest = async (
   let winnersCountSum = 0;
 
   for (let j = trialsCount; j >= 1; j--) {
-    const targetDraw = history[j - 1];
-    const historicalWindow = history.slice(j);
+    const targetDraw = cleanHistory[j - 1];
+    const historicalWindow = cleanHistory.slice(j);
 
     const sliceMetrics = computeSystemInertiaMetrics(historicalWindow, drawName, hurstExponent);
     const scores = computeInertiaVectorScores(sliceMetrics, modifiers);
@@ -685,7 +688,7 @@ export const runDeterministicInertiaBacktest = async (
   }
 
   // Gain empirique mesuré de la calibration EN VIGUEUR, rapporté à l'espérance du hasard pur.
-  const fullMetrics = computeSystemInertiaMetrics(history, drawName, hurstExponent);
+  const fullMetrics = computeSystemInertiaMetrics(cleanHistory, drawName, hurstExponent);
   const expectedHitsByChance =
     topSize * ((winnersCountSum / Math.max(1, trialsCount)) / Math.max(1, fullMetrics.safeMaxNum));
   const empiricalGain = primaryHitsAvg / Math.max(Number.EPSILON, expectedHitsByChance);
