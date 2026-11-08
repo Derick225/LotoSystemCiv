@@ -60,6 +60,8 @@ export interface WheelDiagnostics {
   schonheimLowerBound: number;
   compressionRatio: number; // 0 to 100%
   meanEntropy: number;
+  simplexExpectation?: number; // Somme des espérances marginales du portefeuille
+  averageTicketScore?: number; // Score composite moyen issu des 25 canaux
 }
 
 export const calculateSchonheimBound = (v: number, k: number, t: number): number => {
@@ -76,7 +78,8 @@ export const generateAbbreviatedWheel = (
   bankers: number[] = [],
   ticketSize: number = 5,
   guarantee: number = 3,
-  mode: "reduced" | "entropy_optimal" = "reduced"
+  mode: "reduced" | "entropy_optimal" | "nexus_simplex" = "reduced",
+  marginalProbabilities?: Record<number, number> | Float64Array
 ): { tickets: number[][]; diagnostics: WheelDiagnostics } => {
   const kNeeded = ticketSize - bankers.length;
   const filteredPool = numbers.filter(n => !bankers.includes(n));
@@ -120,8 +123,35 @@ export const generateAbbreviatedWheel = (
   const allWinningScenarios = generateFullWheel(filteredPool, guarantee).map(c => c.join('-'));
   let candidateTickets = generateFullWheel(filteredPool, kNeeded);
   
-  // Mode Entropy-Optimal : Pré-ordonnancement par entropie de Shannon et dispersion
-  if (mode === "entropy_optimal") {
+  // Mode Nexus Simplex 25 Canaux : Pré-ordonnancement par probabilité marginale et synergie inter-numéros
+  if (mode === "nexus_simplex" && marginalProbabilities) {
+    const getProb = (n: number): number => {
+      if (marginalProbabilities instanceof Float64Array) {
+        return marginalProbabilities[n] || (5.0 / 90.0);
+      }
+      return (marginalProbabilities as Record<number, number>)[n] ?? (5.0 / 90.0);
+    };
+
+    candidateTickets.sort((tA, tB) => {
+      // Espérance marginale log-odds continue du ticket
+      const logOddsA = tA.reduce((sum, n) => sum + Math.log(Math.max(1e-6, getProb(n))), 0);
+      const logOddsB = tB.reduce((sum, n) => sum + Math.log(Math.max(1e-6, getProb(n))), 0);
+
+      // Variance des écarts pour éviter les groupements pathologiques
+      const gapsA = tA.slice(1).map((val, i) => val - tA[i]);
+      const meanGapA = gapsA.reduce((s, g) => s + g, 0) / (gapsA.length || 1);
+      const varA = gapsA.reduce((s, g) => s + Math.pow(g - meanGapA, 2), 0) / (gapsA.length || 1);
+
+      const gapsB = tB.slice(1).map((val, i) => val - tB[i]);
+      const meanGapB = gapsB.reduce((s, g) => s + g, 0) / (gapsB.length || 1);
+      const varB = gapsB.reduce((s, g) => s + Math.pow(g - meanGapB, 2), 0) / (gapsB.length || 1);
+
+      // Maximise la vraisemblance marginale composite tout en régularisant l'espace des phases
+      const scoreA = logOddsA - 0.05 * Math.sqrt(varA);
+      const scoreB = logOddsB - 0.05 * Math.sqrt(varB);
+      return scoreB - scoreA;
+    });
+  } else if (mode === "entropy_optimal") {
     candidateTickets.sort((tA, tB) => {
       // Variance des écarts consécutifs
       const gapsA = tA.slice(1).map((val, i) => val - tA[i]);
@@ -178,6 +208,20 @@ export const generateAbbreviatedWheel = (
   const coverageRatio = totalScenarios > 0 ? (coveredScenarios.size / totalScenarios) * 100 : 100;
   const compressionRatio = totalFull > 0 ? ((totalFull - selectedTickets.length) / totalFull) * 100 : 0;
 
+  // Calcul des métriques simplex d'espérance marginale
+  let simplexExpectation = 0;
+  if (marginalProbabilities) {
+    const getProb = (n: number): number => {
+      if (marginalProbabilities instanceof Float64Array) {
+        return marginalProbabilities[n] || (5.0 / 90.0);
+      }
+      return (marginalProbabilities as Record<number, number>)[n] ?? (5.0 / 90.0);
+    };
+    selectedTickets.forEach((t) => {
+      simplexExpectation += t.reduce((sum, num) => sum + getProb(num), 0);
+    });
+  }
+
   return {
     tickets: selectedTickets,
     diagnostics: {
@@ -192,6 +236,8 @@ export const generateAbbreviatedWheel = (
       schonheimLowerBound: schonheimBound,
       compressionRatio: parseFloat(compressionRatio.toFixed(2)),
       meanEntropy: parseFloat((1.0 - 1.0 / (selectedTickets.length || 1)).toFixed(3)),
+      simplexExpectation: parseFloat(simplexExpectation.toFixed(3)),
+      averageTicketScore: selectedTickets.length > 0 ? parseFloat((simplexExpectation / selectedTickets.length).toFixed(3)) : undefined,
     }
   };
 };

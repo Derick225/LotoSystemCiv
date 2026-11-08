@@ -12,6 +12,9 @@ import {
   Cell,
 } from "recharts";
 
+import { LABELS_MAP } from "../hooks/useAlgorithmSync";
+import { AlgoKey } from "../shared/prediction.types";
+
 export const ExplainabilityDrawer: React.FC = () => {
   const inspectingNumber = useNexusStore((state) => state.inspectingNumber);
   const setInspectingNumber = useNexusStore(
@@ -27,10 +30,14 @@ export const ExplainabilityDrawer: React.FC = () => {
   const shapData = useMemo(() => {
     if (!expData?.shapValues) return [];
     return Object.entries(expData.shapValues)
-      .map(([algo, val]) => ({
-        algo,
-        val: Number(val) || 0,
-      }))
+      .map(([algo, val]) => {
+        const friendlyName = (LABELS_MAP as Record<string, string>)[algo] || algo;
+        return {
+          algo: friendlyName,
+          rawKey: algo,
+          val: Number(val) || 0,
+        };
+      })
       .sort((a, b) => b.val - a.val);
   }, [expData]);
 

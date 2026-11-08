@@ -58,6 +58,8 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const nexusLoading = useNexusStore((state) => state.loading);
 
+  const lastPrediction = useNexusStore((state) => state.lastPrediction);
+
   // Mode Switcher
   const [mode, setMode] = useState<"auto" | "manual">("auto");
 
@@ -67,8 +69,8 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
     Array(12).fill({ val: "", isBanker: false }),
   );
   const [systemType, setSystemType] = useState<
-    "full" | "reduced" | "entropy_optimal"
-  >("entropy_optimal");
+    "full" | "reduced" | "entropy_optimal" | "nexus_simplex"
+  >("nexus_simplex");
   const [guarantee, setGuarantee] = useState<3 | 4 | 5>(3);
 
   // Filters
@@ -204,7 +206,42 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
         setWheelDiagnostics(null);
       } else {
         const wheelMode =
-          systemType === "entropy_optimal" ? "entropy_optimal" : "reduced";
+          systemType === "nexus_simplex"
+            ? "nexus_simplex"
+            : systemType === "entropy_optimal"
+              ? "entropy_optimal"
+              : "reduced";
+
+        // Extraction des probabilités marginales calibrées des 25 canaux
+        const marginalProbMap: Record<number, number> = {};
+        if (lastPrediction?.explainabilityData) {
+          for (let n = 1; n <= 90; n++) {
+            const exp = lastPrediction.explainabilityData[n];
+            if (typeof exp?.calibratedProbability === "number") {
+              marginalProbMap[n] = exp.calibratedProbability;
+            }
+          }
+        }
+        
+        if (Object.keys(marginalProbMap).length === 0 && lastPrediction?.breakdown) {
+          // Calcul de la somme des scores 25D par numéro
+          const sums: number[] = new Array(91).fill(0);
+          let grandSum = 0;
+          for (let n = 1; n <= 90; n++) {
+            const bd = lastPrediction.breakdown[n];
+            if (bd) {
+              const s = Object.values(bd).reduce((acc: number, v: any) => acc + (Number(v) || 0), 0);
+              sums[n] = s;
+              grandSum += s;
+            }
+          }
+          if (grandSum > 0) {
+            for (let n = 1; n <= 90; n++) {
+              marginalProbMap[n] = (sums[n] / grandSum) * 5.0;
+            }
+          }
+        }
+
         if (uniqueBankers.length > 0) {
           const subPool = pool.filter((n) => !uniqueBankers.includes(n));
           const subSize = 5 - uniqueBankers.length;
@@ -216,6 +253,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
               ? subSize
               : Math.max(2, guarantee - uniqueBankers.length),
             wheelMode,
+            marginalProbMap
           );
           baseTickets = subTickets.map((t) =>
             [...uniqueBankers, ...t].sort((a, b) => a - b),
@@ -228,6 +266,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
             5,
             guarantee,
             wheelMode,
+            marginalProbMap
           );
           baseTickets = tickets;
           setWheelDiagnostics(diagnostics);
@@ -578,22 +617,29 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
                       <label className="text-[10px] font-black text-slate-400 uppercase">
                         Système
                       </label>
-                      <div className="grid grid-cols-3 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl gap-1">
+                      <div className="grid grid-cols-4 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl gap-1">
+                        <button
+                          onClick={() => setSystemType("nexus_simplex")}
+                          className={`py-2 text-[10px] font-bold rounded-lg transition ${systemType === "nexus_simplex" ? "bg-indigo-600 shadow text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                          title="Couverture combinatoire pondérée par les probabilités marginales des 25 canaux"
+                        >
+                          Nexus 25D
+                        </button>
                         <button
                           onClick={() => setSystemType("entropy_optimal")}
-                          className={`py-2 text-[11px] font-bold rounded-lg transition ${systemType === "entropy_optimal" ? "bg-indigo-600 shadow text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                          className={`py-2 text-[10px] font-bold rounded-lg transition ${systemType === "entropy_optimal" ? "bg-indigo-600 shadow text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
                         >
                           Entropique
                         </button>
                         <button
                           onClick={() => setSystemType("reduced")}
-                          className={`py-2 text-[11px] font-bold rounded-lg transition ${systemType === "reduced" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                          className={`py-2 text-[10px] font-bold rounded-lg transition ${systemType === "reduced" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
                         >
                           Réduit
                         </button>
                         <button
                           onClick={() => setSystemType("full")}
-                          className={`py-2 text-[11px] font-bold rounded-lg transition ${systemType === "full" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
+                          className={`py-2 text-[10px] font-bold rounded-lg transition ${systemType === "full" ? "bg-white dark:bg-slate-700 shadow text-indigo-600 dark:text-white" : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"}`}
                         >
                           Intégral
                         </button>
@@ -714,6 +760,20 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
                       </span>
                     </div>
                   </div>
+
+                  {typeof wheelDiagnostics.simplexExpectation === "number" && (
+                    <div className="bg-indigo-950/40 p-3 rounded-xl border border-indigo-500/20">
+                      <div className="text-[10px] text-indigo-300 font-sans uppercase font-bold">
+                        Espérance Simplex 25D
+                      </div>
+                      <div className="text-sm font-black text-indigo-400 mt-1">
+                        {wheelDiagnostics.simplexExpectation.toFixed(2)}{" "}
+                        <span className="text-[10px] text-indigo-300/70 font-normal">
+                          (Moy: {wheelDiagnostics.averageTicketScore?.toFixed(2) ?? "n/d"}/ticket)
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

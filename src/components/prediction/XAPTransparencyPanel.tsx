@@ -45,7 +45,7 @@ import { NeuralWeightsAuditDashboard } from "./NeuralWeightsAuditDashboard";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
 import { audioEngine } from "../../utils/audioEngine";
-import { ACTIVE_ALGO_COUNT } from "../../shared/prediction.types";
+import { ACTIVE_ALGO_COUNT, AlgoKey } from "../../shared/prediction.types";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 
 
@@ -60,24 +60,38 @@ interface XAPTransparencyPanelProps {
 type XAPTab = "number_breakdown" | "neural_weights" | "stochastic_factors" | "synergy_matrix";
 
 const LABELS_FRIENDLY: Record<string, string> = {
-  frequency: "Fréquence Classique",
-  gaps: "Théorie des Écarts",
-  markov: "Chaînes de Markov",
-  spectral: "Analyse Spectrale FFT",
+  [AlgoKey.FREQUENCY]: "Fréquence Classique",
+  [AlgoKey.GAPS]: "Théorie des Écarts",
+  [AlgoKey.MARKOV]: "Chaînes de Markov",
+  [AlgoKey.SPECTRAL]: "Analyse Spectrale FFT",
+  [AlgoKey.BAYES]: "Inférence Bayésienne",
+  [AlgoKey.MOMENTUM]: "Momentum Cinétique",
+  [AlgoKey.AFFINITY]: "Affinité Fréquentielle",
+  [AlgoKey.SPATIAL]: "Topologie Spatiale 9x10",
+  [AlgoKey.TEMPORAL]: "Décroissance Temporelle",
+  [AlgoKey.FRACTAL]: "Dimensions Fractales (Hurst)",
+  [AlgoKey.SHADOW_PROBABILITY]: "Probabilité Ombre / Réfraction",
+  [AlgoKey.NETWORK_CORRELATION]: "Corrélation de Réseau",
+  [AlgoKey.ECHO_STATE]: "Réseau Echo State (ESN)",
+  [AlgoKey.GAP_SEQUENCE]: "Champ Moyen d'Ising (Spins)",
+  [AlgoKey.DERIVED_NEIGHBOR]: "Voisinage Topologique & Miroir",
+  [AlgoKey.GAP_PATTERN]: "Excitation Hawkes (Processus Ponctuel)",
+  [AlgoKey.SEQUENCE_PATTERN]: "Entropie de Permutation Locale",
+  [AlgoKey.GAP_CADENCE]: "Stabilité de Cadence d'Écarts",
+  [AlgoKey.GAP_TREND]: "Tendance et Accélération d'Écarts",
+  [AlgoKey.INTER_MONTHLY_RESONANCE]: "Ondelettes Ricker (Cycles 18)",
+  [AlgoKey.ISOLATION_ANOMALY]: "Anomalie d'Isolation (Espace d'États)",
+  [AlgoKey.GAP_BAND_SEQUENCE]: "Transitions de Bandes d'Écarts",
+  [AlgoKey.MACHINE_TRANSFER]: "Transfert Machine ➔ Gagnants",
+  [AlgoKey.INTER_DRAW_RESONANCE]: "Résonance Inter-Tirages Hermétique",
+  [AlgoKey.JACCARD]: "Similitude d'Ensembles (Jaccard)",
+  // Alias de rétrocompatibilité pour clés historiques
   quantum: "Interférence Quantique",
   hawkes: "Auto-Excitation Hawkes",
-  spatial: "Topologie Spatiale",
   harmonic: "Résonance Harmonique",
-  bayes: "Inférence Bayésienne",
-  fractal: "Dimensions Fractales",
   entropy: "Entropie de Shannon",
   machine: "Transfert Machine",
   machineTransfer: "Transfert Machine",
-  decisionTree: "Forêt de Décision",
-  deepKernel: "Noyau RKHS Hilbert",
-  darwinism: "Darwinisme Neural",
-  neuralDarwinism: "Darwinisme Neural",
-  temporal: "Mémoire Temporelle",
   stochastic: "Stochastique de Poisson",
 };
 
