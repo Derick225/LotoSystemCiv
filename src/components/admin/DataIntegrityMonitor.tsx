@@ -30,10 +30,12 @@ export interface IntegrityAnomaly {
   id: string;
   drawName: string;
   date: string;
-  category: "duplicate" | "invalid_numbers" | "machine_mismatch" | "date_anomaly" | "order_anomaly";
+  category: "duplicate" | "invalid_numbers" | "machine_mismatch" | "machine_missing" | "date_anomaly";
   description: string;
   canAutoFix: boolean;
   fixedPayload?: Partial<DrawResult>;
+  /** Ligne d'origine : indispensable pour ne réécrire que le champ corrigé sans effacer les autres. */
+  original?: DrawResult;
 }
 
 export interface IntegrityFactors {
@@ -185,20 +187,8 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         });
       }
 
-      // Check if winning numbers are unsorted (detects if sorting is needed)
-      const isSorted = gagnants.every((val, idx) => idx === 0 || val >= gagnants[idx - 1]);
-      if (!isSorted && gagnants.length === 5 && uniqueWin.size === 5 && invalidNums.length === 0) {
-        const sorted = [...gagnants].sort((a, b) => a - b);
-        anomalies.push({
-          id: d.id,
-          drawName: targetDraw,
-          date: d.date,
-          category: "order_anomaly",
-          description: `Numéros gagnants non triés [${gagnants.join(", ")}]`,
-          canAutoFix: true,
-          fixedPayload: { gagnants: sorted },
-        });
-      }
+      // NB : l'ordre des numéros gagnants est celui du tirage (conservé tel que publié par
+      // l'API). Un tableau "non trié" n'est PAS une anomalie : il n'est donc ni signalé ni "réparé".
 
       // 3. Check Machine Numbers Compliance
       const mac = Array.isArray(d.machine) ? d.machine : [];
@@ -210,7 +200,17 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
           category: "machine_mismatch",
           description: `Tirage sans machine comportant des numéros machine (${mac.length})`,
           canAutoFix: true,
-          fixedPayload: { machine: undefined },
+          fixedPayload: { machine: [] },
+          original: d,
+        });
+      } else if (!requiresNoMachine && mac.length === 0) {
+        anomalies.push({
+          id: d.id,
+          drawName: targetDraw,
+          date: d.date,
+          category: "machine_missing",
+          description: "Numéros machine absents (non publiés par la source)",
+          canAutoFix: false,
         });
       } else if (!requiresNoMachine && mac.length > 0 && mac.length !== 5) {
         anomalies.push({
@@ -267,12 +267,14 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
     // Un tirage portant plusieurs anomalies reste UN tirage invalide (jamais décompté
     // plusieurs fois : l'ancienne soustraction du nombre d'anomalies pouvait rendre
     // le compteur négatif, masqué par un Math.max(0, …)).
-    const drawsWithAnomaly = new Set(anomalies.map((a) => a.id)).size;
+    // Les machines absentes sont une lacune de la source : signalées mais hors score.
+    const scoringAnomalies = anomalies.filter((a) => a.category !== "machine_missing");
+    const drawsWithAnomaly = new Set(scoringAnomalies.map((a) => a.id)).size;
     const validCount = data.length - drawsWithAnomaly;
     const health = computeContinuousHealthScore(
       data.length,
       Math.max(0, validCount),
-      anomalies.length,
+      scoringAnomalies.length,
       shannonEntropy,
       lastGapDays
     );
@@ -318,8 +320,8 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         let measuredCount = 0;
         const breakdown: { name: string; count: number; health: number | null }[] = [];
 
-        // Échantillon des 5 premiers tirages du réseau (charge réseau maîtrisée)
-        const sampleDraws = family.drawNames.slice(0, 5);
+        // Tous les tirages du réseau sont audités (un échantillon faussait le score global)
+        const sampleDraws = family.drawNames;
         for (const dName of sampleDraws) {
           const res = await analyzeSingleDrawIntegrity(dName);
           familyDrawsTotal += res.totalDraws;
@@ -402,17 +404,20 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
     try {
       for (const item of repairables) {
-        if (item.fixedPayload) {
-          await updateResult(drawName, {
-            id: item.id,
-            drawName,
-            date: item.date,
-            gagnants: item.fixedPayload.gagnants || [],
-            machine: item.fixedPayload.machine,
-            version: 1,
-          });
-          repairedCount++;
+        const original = item.original;
+        // Garde-fou : on ne réécrit jamais une ligne dont on ne connaît pas les gagnants d'origine.
+        if (!item.fixedPayload || !original || !Array.isArray(original.gagnants) || original.gagnants.length !== 5) {
+          continue;
         }
+        await updateResult(item.drawName, {
+          id: item.id,
+          drawName: item.drawName,
+          date: item.date,
+          gagnants: original.gagnants,
+          machine: item.fixedPayload.machine ?? [],
+          version: original.version ?? 1,
+        });
+        repairedCount++;
       }
       audioEngine.play("success");
       showToast(`${repairedCount} anomalies réparées et normalisées.`, "success");
@@ -652,9 +657,9 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                   >
                     <option value="all">Toutes les catégories</option>
                     <option value="duplicate">Doublons de dates</option>
-                    <option value="order_anomaly">Numéros non triés</option>
                     <option value="invalid_numbers">Numéros invalides</option>
                     <option value="machine_mismatch">Incohérences Machine</option>
+                    <option value="machine_missing">Machine absente</option>
                     <option value="date_anomaly">Dates invalides</option>
                   </select>
                 </div>

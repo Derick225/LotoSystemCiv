@@ -76,7 +76,7 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     "balance" | "safe" | "growth"
   >("balance");
   const [selectedMetric, setSelectedMetric] = useState<
-    "entropy" | "benford" | "brier"
+    "entropy" | "brier"
   >("entropy");
 
   useEffect(() => {
@@ -249,7 +249,6 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     return [...allReports].slice(-10).map((r, i) => ({
       name: r.drawName || `T-${allReports.length - 1 - i}`,
       entropy: typeof r.shannon_entropy === "number" ? r.shannon_entropy : null,
-      benford: typeof r.benfordCompliance === "number" ? r.benfordCompliance : null,
       brier: typeof r.brier_score === "number" ? r.brier_score : null,
     }));
   }, [allReports]);
@@ -257,7 +256,7 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
   const hasChartData = useMemo(
     () =>
       chartData.some(
-        (d) => d.entropy !== null || d.benford !== null || d.brier !== null,
+        (d) => d.entropy !== null || d.brier !== null,
       ),
     [chartData],
   );
@@ -526,12 +525,6 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                   Entropie
                 </button>
                 <button
-                  onClick={() => setSelectedMetric("benford")}
-                  className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "benford" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
-                >
-                  Conformité Benford
-                </button>
-                <button
                   onClick={() => setSelectedMetric("brier")}
                   className={`px-3 py-1.5 rounded-lg transition-all ${selectedMetric === "brier" ? "bg-indigo-500 text-white shadow" : "text-slate-500 hover:text-slate-300"}`}
                 >
@@ -614,18 +607,6 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                       strokeWidth={2.5}
                       fillOpacity={0.1}
                       fill="#f59e0b"
-                      connectNulls={false}
-                    />
-                  )}
-                  {selectedMetric === "benford" && (
-                    <Area
-                      name="Conformité Benford (0-1)"
-                      type="monotone"
-                      dataKey="benford"
-                      stroke="#6366f1"
-                      strokeWidth={2.5}
-                      fillOpacity={1}
-                      fill="url(#metricGrad)"
                       connectNulls={false}
                     />
                   )}

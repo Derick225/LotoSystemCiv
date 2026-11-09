@@ -74,6 +74,8 @@ Deno.serve(async (req) => {
     unknown: new Set<string>(),
     missing: [] as Array<{ draw_name: string; date: string }>,
     cancelled_inferred: 0,
+    caught_up: 0,
+    snapshots_cancelled: 0,
     http_errors: [] as Array<{ month: string; status: number | string }>,
     errors: [] as string[],
   }
@@ -207,6 +209,38 @@ Deno.serve(async (req) => {
         log.errors.push(`${monthParam}: ${(e as Error).message}`)
       }
     }
+
+    // Rattrapage : snapshots PENDING dont le résultat existe déjà (écrit par un autre chemin),
+    // ou dont le tirage est annulé.
+    try {
+      const { data: pendings } = await supabase.from('prediction_snapshots')
+        .select('id, draw_name, target_date').eq('status', 'PENDING').lte('target_date', today).limit(40)
+      const drawsToLearn = new Set<string>()
+      for (const snap of pendings || []) {
+        if (Date.now() - startedAt.getTime() > MAX_EXECUTION_TIME) { log.errors.push('timeout avant la fin du rattrapage'); break }
+        const { data: res } = await supabase.from('draw_results').select('id')
+          .eq('draw_name', snap.draw_name).eq('date', snap.target_date).maybeSingle()
+        if (res) {
+          await supabase.functions.invoke('forensic-autopsy', { body: { snapshotId: snap.id, drawResultId: res.id } })
+            .catch((e: unknown) => console.error(`rattrapage autopsy ${snap.id}:`, e))
+          drawsToLearn.add(snap.draw_name)
+          log.caught_up++
+          continue
+        }
+        const { data: canc } = await supabase.from('draw_cancellations').select('draw_name')
+          .eq('draw_name', snap.draw_name).eq('date', snap.target_date).maybeSingle()
+        if (canc) {
+          const { error } = await supabase.from('prediction_snapshots').update({ status: 'CANCELLED' }).eq('id', snap.id).eq('status', 'PENDING')
+          if (!error) log.snapshots_cancelled++
+        }
+      }
+      for (const name of drawsToLearn) {
+        await supabase.functions.invoke('self-learn', { body: { drawName: name } })
+          .catch((e: unknown) => console.error('self-learn rattrapage:', e))
+      }
+    } catch (e) {
+      log.errors.push(`rattrapage: ${(e as Error).message}`)
+    }
   } catch (e) {
     log.errors.push((e as Error).message)
   }
@@ -226,6 +260,8 @@ Deno.serve(async (req) => {
     unknown_draw_names: [...log.unknown],
     missing: log.missing,
     cancelled_inferred: log.cancelled_inferred,
+    autopsies_caught_up: log.caught_up,
+    snapshots_cancelled: log.snapshots_cancelled,
     http_errors: log.http_errors,
     error: log.errors.length ? log.errors.join(' | ').slice(0, 2000) : null,
     duration_ms: Date.now() - startedAt.getTime(),
@@ -233,6 +269,6 @@ Deno.serve(async (req) => {
 
   return json({
     success: status !== 'error', status, fetched: log.fetched_draws, upserted: log.upserted,
-    cancelled_inferred: log.cancelled_inferred, missing_pending: log.missing.length, log_id: logRow?.id ?? null,
+    cancelled_inferred: log.cancelled_inferred, caught_up: log.caught_up, snapshots_cancelled: log.snapshots_cancelled, missing_pending: log.missing.length, log_id: logRow?.id ?? null,
   }, status === 'error' ? 500 : 200)
 })

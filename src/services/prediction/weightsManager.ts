@@ -1519,11 +1519,17 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
       const timer = setTimeout(async () => {
         pendingWeightsRemoteTimers.delete(drawName);
         try {
-          await supabase
+          const { error } = await supabase
             .from('model_weights_config')
             .upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() });
-        } catch {
-          // Silenced background sync error
+          // Le client Supabase ne lève pas d'exception sur un refus RLS : l'erreur doit être lue,
+          // sinon les poids restent locaux sans aucun signal (cas des comptes non admin).
+          if (error) {
+            logger.warn({ drawName, code: error.code, message: error.message },
+              '[weightsManager] Poids non synchronisés vers Supabase (conservés en local)');
+          }
+        } catch (err) {
+          logger.warn({ drawName, err }, '[weightsManager] Échec réseau de la synchronisation des poids');
         }
       }, 2500);
       pendingWeightsRemoteTimers.set(drawName, timer);

@@ -16,7 +16,6 @@ import { NeuralSelfOptimizationPanel } from "../genomic/NeuralSelfOptimizationPa
 import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
 import { ForensicAuditLogsView } from "../genomic/ForensicAuditLogsView";
 import { DrawDnaHistoryViewer } from "../prediction/DrawDnaHistoryViewer";
-import { ModelFusionPanel } from "../admin/ModelFusionPanel";
 import {
   Target,
   Trash2,
@@ -48,8 +47,6 @@ import {
   Dna,
   Flame,
   BrainCircuit,
-  GitMerge,
-  GitBranch,
   Upload,
   ChevronLeft,
   ChevronRight,
@@ -188,6 +185,7 @@ const REPORTS_PER_PAGE = 12;
 export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; initialSubView?: string }> = React.memo(
   ({ drawName, initialTab, initialSubView }) => {
     const { showToast } = useToast();
+    const navigateToModule = useNexusStore((state) => state.navigateToModule);
     const history = useNexusStore((state) => state.history);
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const activeSubTab = useNexusStore((state) => state.activeSubTab);
@@ -217,16 +215,12 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
     // Sous-vues internes pour une ergonomie optimale
     const [auditSubView, setAuditSubView] = useState<"table" | "logs">("table");
     const [closedLoopSubView, setClosedLoopSubView] = useState<"autopsy" | "neural_opt" | "expert_bias">("autopsy");
-    const [dnaSubView, setDnaSubView] = useState<"reference" | "fusion" | "lineage" | "drift_heatmap" | "sieve_radar" | "history_dna">(() => {
+    const [dnaSubView, setDnaSubView] = useState<"reference" | "drift_heatmap" | "sieve_radar" | "history_dna">(() => {
       if (initialSubView === "history_dna" || initialTab === "dna_history" || initialTab === "history_dna") {
         return "history_dna";
       }
-      if (initialSubView === "fusion" || initialTab === "fusion" || initialTab === "tripartite_fusion") {
-        return "fusion";
-      }
-      if (initialSubView === "lineage" || initialTab === "dna_lineage" || initialTab === "lineage") {
-        return "lineage";
-      }
+      // Fusion tripartite et Lignée ADN vivent désormais uniquement dans Admin > Fusion Modèles
+      // (même composant ModelFusionPanel : ils étaient dupliqués ici).
       if (initialTab === "DRIFT_HEATMAP") return "drift_heatmap";
       if (initialTab === "SIEVE_RADAR") return "sieve_radar";
       return "reference";
@@ -240,12 +234,12 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
       if (sub === "DNA_AUDITOR" || sub === "DNA") {
         setActiveTab("dna_drift");
         setDnaSubView("reference");
-      } else if (sub === "FUSION" || sub === "MODEL_FUSION" || sub === "TRIPARTITE_FUSION" || sub === "DARWIN") {
-        setActiveTab("dna_drift");
-        setDnaSubView("fusion");
-      } else if (sub === "LINEAGE" || sub === "DNA_LINEAGE" || sub === "GENEALOGIE") {
-        setActiveTab("dna_drift");
-        setDnaSubView("lineage");
+      } else if (
+        sub === "FUSION" || sub === "MODEL_FUSION" || sub === "TRIPARTITE_FUSION" || sub === "DARWIN" ||
+        sub === "LINEAGE" || sub === "DNA_LINEAGE" || sub === "GENEALOGIE"
+      ) {
+        // Redirection des anciens liens profonds vers l'unique emplacement de ces modules
+        navigateToModule("admin", "fusion");
       } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP" || sub === "DRIFT" || sub === "DNA_DRIFT") {
         setActiveTab("dna_drift");
         setDnaSubView("drift_heatmap");
@@ -1472,34 +1466,6 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
               <button
                 onClick={() => {
                   audioEngine.play("click");
-                  setDnaSubView("fusion");
-                }}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                  dnaSubView === "fusion"
-                    ? "bg-purple-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <GitMerge size={13} />
-                Fusion Tripartite & Darwinisme
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setDnaSubView("lineage");
-                }}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                  dnaSubView === "lineage"
-                    ? "bg-cyan-600 text-white shadow-sm"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                <GitBranch size={13} />
-                Lignée & Généalogie ADN
-              </button>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
                   setDnaSubView("drift_heatmap");
                 }}
                 className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
@@ -1542,8 +1508,6 @@ export const ForensicHub: React.FC<{ drawName: string; initialTab?: string; init
             </div>
 
             {dnaSubView === "reference" && <DnaReferenceAuditor drawName={drawName} />}
-            {dnaSubView === "fusion" && <ModelFusionPanel selectedDrawName={drawName} initialTab="tripartite_fusion" />}
-            {dnaSubView === "lineage" && <ModelFusionPanel selectedDrawName={drawName} initialTab="dna_lineage" />}
             {dnaSubView === "drift_heatmap" && <SubAlgorithmDriftHeatmap drawName={drawName} />}
             {dnaSubView === "sieve_radar" && <UnifiedDnaSieveRadar drawName={drawName} />}
             {dnaSubView === "history_dna" && <DrawDnaHistoryViewer drawName={drawName} history={history} />}
