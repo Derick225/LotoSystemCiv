@@ -1,397 +1,53 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { useNexusStore } from "../../store/useNexusStore";
+import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Activity,
   Gauge,
-  Cpu,
   Sliders,
   Play,
-  Award,
   RotateCcw,
   ShieldCheck,
   Waves,
   Info,
-  Target,
-  Compass,
   Sparkles,
-  AlertCircle,
   CheckCircle2,
   History,
   Zap,
   Layers,
   ArrowUpRight,
 } from "lucide-react";
-import {
-  ScatterChart,
-  Scatter,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
 import { audioEngine } from "../../utils/audioEngine";
-import { useToast } from "../ui/Toast";
-import { saveTicket } from "../../services/userPreferencesService";
-import {
-  computeSystemInertiaMetrics,
-  computeInertiaVectorScores,
-  resolveOptimizedInertiaVector,
-  runDeterministicInertiaBacktest,
-  getPersistedInertiaCalibration,
-  savePersistedInertiaCalibration,
-  resetPersistedInertiaCalibration,
-  DEFAULT_INERTIA_CALIBRATION,
-  INERTIA_DAMPING_DOMAIN,
-  SystemInertiaMetrics,
-  InertiaOscillatorScore,
-  InertiaResolvedVector,
-  InertiaBacktestResult,
-  InertiaCalibrationModifiers,
-} from "../../services/prediction/systemInertiaEngine";
-import { computeRobustHurst } from "../../services/mathCore";
-import { purifyHistoryForDraw } from "../../utils/arrayUtils";
+import { INERTIA_DAMPING_DOMAIN } from "../../services/prediction/systemInertiaEngine";
+import { useInertiaCybernetics } from "../../hooks/useInertiaCybernetics";
+import { InertiaPhaseSpacePlot } from "../inertia/InertiaPhaseSpacePlot";
+import { InertiaTimeMachineReport } from "../inertia/InertiaTimeMachineReport";
 
-// Custom Type-Safe Tooltip for the Phase Portrait
-const CustomTooltip = ({ active, payload }: any) => {
-  if (active && payload && payload.length) {
-    const data = payload[0].payload;
-    return (
-      <div className="bg-slate-950/95 text-white p-4 rounded-2xl border border-cyan-500/20 shadow-2xl backdrop-blur-md text-[10px] space-y-1.5 font-mono max-w-[240px]">
-        <div className="flex items-center justify-between">
-          <p className="font-sans font-black text-xs text-cyan-400 flex items-center gap-1.5">
-            <Target size={13} className="text-cyan-400" />
-            Numéro {String(data.num).padStart(2, "0")}
-          </p>
-          <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-cyan-300 font-bold">
-            Z = {data.zScore > 0 ? `+${data.zScore}` : data.zScore}
-          </span>
-        </div>
-        <div className="h-px bg-white/10 my-1" />
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[9px]">
-          <span className="text-slate-400">Score d'Inertie :</span>
-          <span className="text-right font-black text-cyan-300">
-            {data.score}%
-          </span>
-          <span className="text-slate-400">Potentiel U(g) :</span>
-          <span className="text-right text-slate-200">{data.x}</span>
-          <span className="text-slate-400">Attraction A(f) :</span>
-          <span className="text-right text-slate-200">{data.y}</span>
-          <span className="text-slate-400">Indice Jaccard J :</span>
-          <span className="text-right text-emerald-400 font-mono font-bold">{(data.jaccard * 100).toFixed(1)}%</span>
-          <span className="text-slate-400">Cohérence C(H) :</span>
-          <span className="text-right text-indigo-300">{data.coherence}</span>
-          <span className="text-slate-400">Amortiss. Δ(ζ) :</span>
-          <span className="text-right text-pink-400">{data.damping}</span>
-        </div>
-      </div>
-    );
-  }
-  return null;
-};
-
-export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
-  drawName,
-}) => {
-  const { showToast } = useToast();
-  const history = useNexusStore((state) => state.history);
-  const globalRegime = useNexusStore((state) => state.regime);
-
-  // Interactive cybernetic calibration state variables
-  const [viscosityGain, setViscosityGain] = useState<number>(1.0);
-  const [massGain, setMassGain] = useState<number>(1.0);
-  const [couplingGain, setCouplingGain] = useState<number>(1.0);
-  const [jaccardGain, setJaccardGain] = useState<number>(1.0);
-  const [dampingRatio, setDampingRatio] = useState<number>(0.5); // ζ: Physical damping coefficient
-
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const [optimizedVector, setOptimizedVector] = useState<InertiaResolvedVector | null>(null);
-
-  // Backtesting stats state for retroactive audits
-  const [isBacktesting, setIsBacktesting] = useState<boolean>(false);
-  const [backtestStats, setBacktestStats] = useState<InertiaBacktestResult | null>(null);
-
-  // Load persisted calibration for active draw on mount / draw change (Tirage Isolation Rule)
-  useEffect(() => {
-    const saved = getPersistedInertiaCalibration(drawName);
-    setViscosityGain(saved.viscosityGain);
-    setMassGain(saved.massGain);
-    setCouplingGain(saved.couplingGain);
-    setJaccardGain(saved.jaccardGain ?? 1.0);
-    setDampingRatio(saved.dampingRatio);
-    setOptimizedVector(null);
-    setBacktestStats(null);
-  }, [drawName]);
-
-  // Hurst mesuré sur l'historique PROPRE au tirage (estimateur R/S robuste) : source primaire.
-  // computeRobustHurst exige au moins 10 échantillons pour mesurer quoi que ce soit ; en deçà on
-  // ne prétend pas connaître l'exposant.
-  const pureHistory = useMemo(() => {
-    return drawName ? purifyHistoryForDraw(drawName, history) : history;
-  }, [drawName, history]);
-
-  const measuredHurst = useMemo(() => {
-    if (pureHistory.length < 10) return null;
-    const signal = pureHistory
-      .slice(0, 20)
-      .flatMap((draw) => (Array.isArray(draw?.gagnants) ? draw.gagnants : []));
-    return signal.length >= 10 ? computeRobustHurst(signal) : null;
-  }, [pureHistory]);
-
-  const storeHurst =
-    typeof globalRegime?.hurst === "number" ? globalRegime.hurst : null;
-  // Aucune valeur inventée : soit une mesure locale, soit le régime global mesuré, soit le régime
-  // neutre documenté (H = 0.5 ≡ marche aléatoire) — signalé comme tel dans l'interface.
-  const hurst = measuredHurst ?? storeHurst ?? 0.5;
-  const hurstIsMeasured = measuredHurst !== null || storeHurst !== null;
-
-  // 100% Deterministic Statistical Computation based on the active history (Tirage Isolation)
-  const computedMetrics: SystemInertiaMetrics = useMemo(() => {
-    return computeSystemInertiaMetrics(history, drawName, hurst);
-  }, [history, drawName, hurst]);
-
-  const currentModifiers = useMemo(() => ({
+export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({ drawName }) => {
+  const {
     viscosityGain,
     massGain,
     couplingGain,
     jaccardGain,
     dampingRatio,
-  }), [viscosityGain, massGain, couplingGain, jaccardGain, dampingRatio]);
-
-  // Régime d'amortissement dérivé continûment de ζ : la frontière critique est ζ = 1 exactement,
-  // la bande de tolérance est le demi-pas du curseur (résolution de l'action réellement offerte).
-  const dampingRegime = useMemo(() => {
-    if (Math.abs(dampingRatio - 1.0) < INERTIA_DAMPING_DOMAIN.step / 2) {
-      return {
-        label: "(Critique)",
-        color: "text-cyan-400",
-        note: "ζ = 1.0 : Amortissement critique. Convergence optimale sans sur-oscillation.",
-      };
-    }
-    return dampingRatio < 1.0
-      ? {
-          label: "(Sous-Amorti)",
-          color: "text-emerald-400",
-          note: "ζ < 1.0 : Régime oscillatoire pseudo-périodique. Cible la résonance cyclique des retours.",
-        }
-      : {
-          label: "(Sur-Amorti)",
-          color: "text-amber-400",
-          note: "ζ > 1.0 : Dissipation thermique continue. Pénalise exponentiellement les grands écarts.",
-        };
-  }, [dampingRatio]);
-
-  // Verdict du balayage ζ, strictement dérivé des hits rétro-actifs mesurés (aucune reformulation
-  // du curseur). `atGridPoint` compare sur la grille réelle du curseur (demi-pas de tolérance).
-  const dampingSweepVerdict = useMemo(() => {
-    if (!backtestStats) return null;
-    const deltaHits = backtestStats.bestDampingHits - backtestStats.currentDampingHits;
-    return {
-      deltaHits,
-      improved: deltaHits > 0,
-      atGridPoint:
-        Math.abs(dampingRatio - backtestStats.bestDamping) <
-        INERTIA_DAMPING_DOMAIN.step / 2,
-    };
-  }, [backtestStats, dampingRatio]);
-
-  // Helper to update state and persist for the active draw
-  const updateAndPersistModifiers = useCallback((patch: Partial<InertiaCalibrationModifiers>) => {
-    const nextModifiers: InertiaCalibrationModifiers = {
-      viscosityGain: patch.viscosityGain !== undefined ? patch.viscosityGain : viscosityGain,
-      massGain: patch.massGain !== undefined ? patch.massGain : massGain,
-      couplingGain: patch.couplingGain !== undefined ? patch.couplingGain : couplingGain,
-      jaccardGain: patch.jaccardGain !== undefined ? patch.jaccardGain : jaccardGain,
-      dampingRatio: patch.dampingRatio !== undefined ? patch.dampingRatio : dampingRatio,
-    };
-
-    if (patch.viscosityGain !== undefined) setViscosityGain(patch.viscosityGain);
-    if (patch.massGain !== undefined) setMassGain(patch.massGain);
-    if (patch.couplingGain !== undefined) setCouplingGain(patch.couplingGain);
-    if (patch.jaccardGain !== undefined) setJaccardGain(patch.jaccardGain);
-    if (patch.dampingRatio !== undefined) setDampingRatio(patch.dampingRatio);
-
-    savePersistedInertiaCalibration(drawName, nextModifiers);
-  }, [drawName, viscosityGain, massGain, couplingGain, jaccardGain, dampingRatio]);
-
-  // High fidelity phase space coordinate dataset for Recharts
-  const oscillatorScores: InertiaOscillatorScore[] = useMemo(() => {
-    return computeInertiaVectorScores(computedMetrics, currentModifiers);
-  }, [computedMetrics, currentModifiers]);
-
-  const scatterData = useMemo(() => {
-    return oscillatorScores.map((item) => ({
-      num: item.num,
-      x: item.restoringPotential, // Restoring Potential mapped horizontally
-      y: item.phaseAttraction,    // Phase Attraction mapped vertically
-      score: item.score,
-      coherence: item.fractalCoherence,
-      jaccard: item.jaccardIndex,
-      damping: item.dampingCorrection,
-      zScore: item.zScore,
-      action: item.hamiltonianAction,
-    }));
-  }, [oscillatorScores]);
-
-  // Cybernetic Calibration Presets
-  const applyPreset = useCallback((type: "neutral" | "trend" | "critical" | "underdamped") => {
-    audioEngine.play("click");
-    switch (type) {
-      case "neutral":
-        updateAndPersistModifiers({ viscosityGain: 1.0, massGain: 1.0, couplingGain: 1.0, jaccardGain: 1.0, dampingRatio: 0.5 });
-        showToast(`Profil appliqué : Équilibre Harmonique Standard (${drawName})`, "info");
-        break;
-      case "trend":
-        updateAndPersistModifiers({ viscosityGain: 1.75, massGain: 1.5, couplingGain: 0.7, jaccardGain: 1.5, dampingRatio: 0.35 });
-        showToast(`Profil appliqué : Persistance Forte & Tendance Jaccard (${drawName})`, "info");
-        break;
-      case "critical":
-        updateAndPersistModifiers({ viscosityGain: 0.8, massGain: 1.0, couplingGain: 1.6, jaccardGain: 0.8, dampingRatio: 1.0 });
-        showToast(`Profil appliqué : Amortissement Critique (${drawName})`, "info");
-        break;
-      case "underdamped":
-        updateAndPersistModifiers({ viscosityGain: 1.2, massGain: 1.8, couplingGain: 1.2, jaccardGain: 1.6, dampingRatio: 0.2 });
-        showToast(`Profil appliqué : Sous-Amorti Résonant (${drawName})`, "info");
-        break;
-    }
-  }, [drawName, updateAndPersistModifiers, showToast]);
-
-  // Handler to apply the optimal damping factor (ζ_optimal) from Time Machine directly to the engine
-  const handleApplyOptimalDamping = () => {
-    if (!backtestStats) return;
-    // Aucune amélioration mesurée => rien à appliquer : on refuse de persister une valeur que le
-    // balayage n'a pas départagée favorablement sur la fenêtre causale de rétro-audit.
-    if (backtestStats.bestDampingHits <= backtestStats.currentDampingHits) {
-      audioEngine.play("error");
-      showToast(
-        `Aucune amélioration mesurée : sur les ${backtestStats.dampingCandidatesEvaluated} valeurs de ζ balayées, aucune ne dépasse les ${backtestStats.currentDampingHits} hits de la calibration en vigueur. Calibration inchangée.`,
-        "info"
-      );
-      return;
-    }
-    const optimalZeta = backtestStats.bestDamping;
-    audioEngine.play("success");
-    updateAndPersistModifiers({ dampingRatio: optimalZeta });
-    showToast(
-      `ζ = ${optimalZeta.toFixed(2)} appliqué et mémorisé pour ${drawName} (+${backtestStats.bestDampingHits - backtestStats.currentDampingHits} hits rétro-actifs mesurés).`,
-      "success"
-    );
-  };
-
-  // Handle complete, deterministic system optimization calculations
-  const triggerOptimization = () => {
-    if (pureHistory.length < 10) {
-      showToast(
-        "Historique insuffisant pour calibrer l'inertie stochastique (min. 10 tirages requis).",
-        "error",
-      );
-      audioEngine.play("error");
-      return;
-    }
-
-    audioEngine.play("scan");
-    setIsOptimizing(true);
-
-    // Calcul synchrone déterministe : aucun délai artificiel ne conditionne le résultat.
-    const resolved = resolveOptimizedInertiaVector(
-      oscillatorScores,
-      computedMetrics,
-    );
-    setOptimizedVector(resolved);
-    setIsOptimizing(false);
-    audioEngine.play("success");
-    showToast("Optimisation de l'inertie de système achevée.", "success");
-  };
-
-  // Advanced retroactive backtesting simulation (Time-Machine simulation)
-  const runInertiaBacktest = async () => {
-    audioEngine.play("click");
-    if (pureHistory.length < 12) {
-      showToast(
-        "Dataset insuffisant pour rétropoler l'inertie (min. 12 tirages requis).",
-        "error",
-      );
-      return;
-    }
-
-    setIsBacktesting(true);
-    audioEngine.play("loading");
-
-    try {
-      const result = await runDeterministicInertiaBacktest(
-        pureHistory,
-        drawName,
-        currentModifiers,
-        hurst
-      );
-      setBacktestStats(result);
-      audioEngine.play("success");
-      showToast(
-        `Rétro-audit de l'inertie complété sur ${result.trials} tirages réels antérieurs.`,
-        "success",
-      );
-    } catch (err: any) {
-      showToast("Échec du rétro-audit : " + err.message, "error");
-    } finally {
-      setIsBacktesting(false);
-    }
-  };
-
-  const navigateToModule = useNexusStore((state) => state.navigateToModule);
-
-  const handleSavePrimaryTicket = async () => {
-    if (!optimizedVector) return;
-    audioEngine.play("click");
-    try {
-      await saveTicket({
-        numbers: optimizedVector.primary,
-        drawName,
-        strategy: `Inertie Système Optimisée Primaire (${optimizedVector.globalStability}%)`,
-      });
-      audioEngine.play("success");
-      showToast("Ticket d'inertie optimal mémorisé avec succès.", "success");
-    } catch (e) {
-      showToast("Erreur lors de l'enregistrement.", "error");
-    }
-  };
-
-  const handleSaveSecondaryTicket = async () => {
-    if (!optimizedVector || optimizedVector.secondary.length < 5) return;
-    audioEngine.play("click");
-    try {
-      await saveTicket({
-        numbers: optimizedVector.secondary.slice(0, 5),
-        drawName,
-        strategy: `Inertie Système Couverture Amortie Top 5 (${optimizedVector.globalStability}%)`,
-      });
-      audioEngine.play("success");
-      showToast("Ticket de couverture amortie mémorisé avec succès.", "success");
-    } catch (e) {
-      showToast("Erreur lors de l'enregistrement.", "error");
-    }
-  };
-
-  const handleExportToCoveringDesigns = () => {
-    if (!optimizedVector) return;
-    audioEngine.play("click");
-    navigateToModule("Combinations");
-    showToast("Vecteur d'inertie projeté vers le Générateur Combinatoire.", "info");
-  };
-
-  const resetControls = () => {
-    audioEngine.play("click");
-    resetPersistedInertiaCalibration(drawName);
-    setViscosityGain(DEFAULT_INERTIA_CALIBRATION.viscosityGain);
-    setMassGain(DEFAULT_INERTIA_CALIBRATION.massGain);
-    setCouplingGain(DEFAULT_INERTIA_CALIBRATION.couplingGain);
-    setJaccardGain(DEFAULT_INERTIA_CALIBRATION.jaccardGain);
-    setDampingRatio(DEFAULT_INERTIA_CALIBRATION.dampingRatio);
-    setOptimizedVector(null);
-    setBacktestStats(null);
-    showToast(`Paramètres d'inertie réinitialisés pour ${drawName}.`, "info");
-  };
+    isOptimizing,
+    optimizedVector,
+    isBacktesting,
+    backtestStats,
+    setBacktestStats,
+    hurstIsMeasured,
+    computedMetrics,
+    dampingRegime,
+    dampingSweepVerdict,
+    scatterData,
+    updateAndPersistModifiers,
+    applyPreset,
+    handleApplyOptimalDamping,
+    triggerOptimization,
+    runInertiaBacktest,
+    resetControls,
+    handleSavePrimaryTicket,
+    handleSaveSecondaryTicket,
+    handleExportToCoveringDesigns,
+  } = useInertiaCybernetics(drawName);
 
   return (
     <div className="space-y-6" id="system-inertia-optimizer-root">
@@ -483,25 +139,25 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => applyPreset("neutral")}
-              className="px-3 py-1 bg-slate-900/80 hover:bg-cyan-950/60 text-slate-300 hover:text-cyan-300 border border-white/10 hover:border-cyan-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+              className="px-3 py-1 bg-slate-900/80 hover:bg-cyan-950/60 text-slate-300 hover:text-cyan-300 border border-white/10 hover:border-cyan-500/30 rounded-xl text-[9px] font-mono font-bold transition-all cursor-pointer"
             >
               Harmonique Neutre (ζ=0.5)
             </button>
             <button
               onClick={() => applyPreset("trend")}
-              className="px-3 py-1 bg-slate-900/80 hover:bg-indigo-950/60 text-slate-300 hover:text-indigo-300 border border-white/10 hover:border-indigo-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+              className="px-3 py-1 bg-slate-900/80 hover:bg-indigo-950/60 text-slate-300 hover:text-indigo-300 border border-white/10 hover:border-indigo-500/30 rounded-xl text-[9px] font-mono font-bold transition-all cursor-pointer"
             >
               Persistance &amp; Tendance (α+, β+)
             </button>
             <button
               onClick={() => applyPreset("critical")}
-              className="px-3 py-1 bg-slate-900/80 hover:bg-amber-950/60 text-slate-300 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+              className="px-3 py-1 bg-slate-900/80 hover:bg-amber-950/60 text-slate-300 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 rounded-xl text-[9px] font-mono font-bold transition-all cursor-pointer"
             >
               Amortissement Critique (ζ=1.0)
             </button>
             <button
               onClick={() => applyPreset("underdamped")}
-              className="px-3 py-1 bg-slate-900/80 hover:bg-pink-950/60 text-slate-300 hover:text-pink-300 border border-white/10 hover:border-pink-500/30 rounded-xl text-[9px] font-mono font-bold transition-all"
+              className="px-3 py-1 bg-slate-900/80 hover:bg-pink-950/60 text-slate-300 hover:text-pink-300 border border-white/10 hover:border-pink-500/30 rounded-xl text-[9px] font-mono font-bold transition-all cursor-pointer"
             >
               Sous-Amorti Résonant (ζ=0.2)
             </button>
@@ -701,100 +357,11 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
           </div>
         </div>
 
-        {/* 2. Interactive phase space portrait map */}
-        <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-white/5 shadow-xl flex flex-col justify-between">
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-xs font-black uppercase tracking-widest text-slate-300 flex items-center gap-2 mb-1 font-sans">
-                <Compass size={14} className="text-cyan-400" />
-                Portrait d'Espace de Phase [U(g) vs A(f)]
-              </h3>
-              <p className="text-[10px] text-slate-500 leading-normal">
-                Projection 2D des attracteurs d'inertie : Potentiel de renouvellement $U_n$ (axe X) vs Attraction de phase $A_n$ (axe Y).
-              </p>
-            </div>
-
-            {/* Interactive Recharts Scatter plot */}
-            <div className="h-[220px] w-full mt-2 relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart
-                  margin={{ top: 10, right: 10, bottom: 20, left: -20 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="rgba(255,255,255,0.03)"
-                  />
-                  <XAxis
-                    type="number"
-                    dataKey="x"
-                    name="Potentiel U(g)"
-                    domain={[0, 1]}
-                    stroke="#475569"
-                    style={{ fontSize: 8, fontFamily: "monospace" }}
-                    tickFormatter={(v) => `U:${v.toFixed(1)}`}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="y"
-                    name="Attraction A(f)"
-                    domain={[0, 1]}
-                    stroke="#475569"
-                    style={{ fontSize: 8, fontFamily: "monospace" }}
-                    tickFormatter={(v) => `A:${v.toFixed(1)}`}
-                  />
-                  <RechartsTooltip
-                    cursor={{
-                      strokeDasharray: "3 3",
-                      stroke: "rgba(6,182,212,0.2)",
-                    }}
-                    content={<CustomTooltip />}
-                  />
-                  <Scatter name="Oscillateurs d'Inertie" data={scatterData}>
-                    {scatterData.map((entry) => {
-                      const isPrimary = optimizedVector?.primary.includes(entry.num);
-                      const isSecondary = optimizedVector?.secondary.includes(entry.num);
-
-                      let color = "rgba(100, 116, 139, 0.45)";
-                      let radius = 4;
-
-                      if (isPrimary) {
-                        color = "#06b6d4"; // Cyan Primaire
-                        radius = 9;
-                      } else if (isSecondary) {
-                        color = "#818cf8"; // Indigo Secondaire
-                        radius = 6.5;
-                      } else if (entry.score > 70) {
-                        color = "rgba(236, 72, 153, 0.5)";
-                        radius = 5.5;
-                      }
-
-                      return (
-                        <Cell
-                          key={`ball-cell-${entry.num}`}
-                          fill={color}
-                          r={radius}
-                          className="transition-all duration-300 cursor-pointer hover:stroke-white hover:stroke-1"
-                        />
-                      );
-                    })}
-                  </Scatter>
-                </ScatterChart>
-              </ResponsiveContainer>
-              <div className="absolute top-2 right-2 flex gap-3 text-[8px] font-mono select-none bg-slate-950/80 px-2 py-1 rounded-lg border border-white/5">
-                <span className="flex items-center gap-1 text-cyan-300">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400" /> Primaire
-                </span>
-                <span className="flex items-center gap-1 text-indigo-300">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400" /> Couverture
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <p className="text-[9px] text-slate-500 text-center leading-normal mt-2 italic font-mono">
-            Survolez un oscillateur pour extraire sa signature de rappel, son Z-score et son action hamiltonienne.
-          </p>
-        </div>
+        {/* 2. Interactive phase space portrait map (Memoized) */}
+        <InertiaPhaseSpacePlot
+          scatterData={scatterData}
+          optimizedVector={optimizedVector}
+        />
 
         {/* 3. Output results side panel */}
         <div className="bg-slate-900/40 p-6 rounded-[2rem] border border-white/5 shadow-xl flex flex-col justify-between">
@@ -928,205 +495,25 @@ export const InertiaOptimizerTab: React.FC<{ drawName: string }> = ({
         </div>
       </div>
 
-      {/* Backtesting Dashboard display */}
+      {/* Backtesting Dashboard display (Memoized Component) */}
       <AnimatePresence>
         {backtestStats && (
           <motion.div
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 15 }}
-            className="bg-slate-900/80 backdrop-blur-md rounded-[2rem] p-6 border border-cyan-500/20 space-y-6 shadow-2xl"
           >
-            <div className="flex justify-between items-start border-b border-white/10 pb-3">
-              <div>
-                <h4 className="text-xs font-black text-pink-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
-                  <CheckCircle2 size={15} /> Rétro-Audit Temporel de l'Inertie (Time Machine)
-                </h4>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-sans">
-                  Évaluation empirique rétroactive étape par étape sur les{" "}
-                  <strong>{backtestStats.trials}</strong> tirages réels précédents sans biais prospectif.
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  audioEngine.play("click");
-                  setBacktestStats(null);
-                }}
-                className="text-slate-400 hover:text-white text-[10px] font-bold uppercase tracking-wider font-mono px-3 py-1 bg-slate-950/60 rounded-lg hover:bg-slate-950 border border-white/10 cursor-pointer"
-              >
-                Fermer le Diagnostic
-              </button>
-            </div>
-
-            {/* Backtest Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Summary Card */}
-              <div className="bg-slate-950/60 p-4 rounded-2xl border border-white/5 space-y-3 flex flex-col justify-between">
-                <div>
-                  <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider block">
-                    Performance Empirique
-                  </span>
-                  <h5 className="text-lg font-black text-white tracking-tight mt-0.5">
-                    Validation Rétro-Active
-                  </h5>
-                </div>
-                <div className="space-y-1.5 bg-white/5 p-3 rounded-xl border border-white/5">
-                  <div className="flex justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">Taux de Succès (≥1) :</span>
-                    <strong className="text-emerald-400 font-black">
-                      {backtestStats.successRate}%
-                    </strong>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">Hasard pur (≥1) :</span>
-                    <strong className="text-slate-300 font-black">
-                      {backtestStats.nullSuccessRate}%
-                    </strong>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">Hits Moyens :</span>
-                    <strong className="text-cyan-400 font-black">
-                      {backtestStats.primaryHitsAvg} / 5
-                    </strong>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">Gain vs Hasard :</span>
-                    <strong className="text-amber-400 font-black">
-                      {backtestStats.empiricalGain}x
-                    </strong>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-mono">
-                    <span className="text-slate-400">p-value (≥1 bon) :</span>
-                    <strong className="text-slate-200 font-black">
-                      {backtestStats.successPValue === null
-                        ? "n/d"
-                        : backtestStats.successPValue.toFixed(3)}
-                    </strong>
-                  </div>
-                </div>
-                <span className="text-[8px] font-mono text-slate-500 leading-normal block">
-                  Rétropolation déterministe isolée respectant la causalité temporelle stricte.
-                  {backtestStats.successPValue === null
-                    ? " p-value non calculable sur cet échantillon."
-                    : " p-value unilatérale exacte sous tirage équitable, référence hypergéométrique exacte ci-dessus."}
-                </span>
-              </div>
-
-              {/* Detailed retro events listing */}
-              <div className="lg:col-span-3 bg-slate-950/40 p-4 rounded-xl border border-white/5 space-y-3 max-h-[190px] overflow-y-auto">
-                <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider block pb-1 border-b border-white/5">
-                  Détail Chronologique des Évaluations Rétro-Actives
-                </span>
-                <div className="space-y-2">
-                  {backtestStats.details.map((trial, idx) => (
-                    <div
-                      key={`ret-tr-${idx}`}
-                      className="flex justify-between items-center text-[10px] pb-1.5 border-b border-white/5 last:border-b-0"
-                    >
-                      <span className="font-bold text-slate-300 font-mono truncate max-w-[120px]">
-                        {trial.drawDate}
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-slate-500 font-mono text-[9px]">
-                          Gagnants :
-                        </span>
-                        <div className="flex gap-1">
-                          {trial.winners.map((win: number) => {
-                            const isHit = trial.matched.includes(win);
-                            return (
-                              <span
-                                key={`win-node-${win}`}
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${
-                                  isHit
-                                    ? "bg-cyan-500 text-slate-950 border border-cyan-300 font-black"
-                                    : "bg-slate-900 border border-white/5 text-slate-400"
-                                }`}
-                              >
-                                {String(win).padStart(2, "0")}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </div>
-                      <span
-                        className={`font-mono text-xs font-black ${
-                          trial.hits > 0 ? "text-emerald-400" : "text-slate-600"
-                        }`}
-                      >
-                        +{trial.hits} Hit{trial.hits > 1 ? "s" : ""}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-gradient-to-r from-pink-950/30 via-slate-900/60 to-cyan-950/30 rounded-2xl border border-pink-500/30 flex flex-col md:flex-row items-start md:items-center justify-between text-[10px] gap-4 shadow-xl">
-              <div className="space-y-1.5 max-w-xl">
-                <div className="flex items-center gap-2">
-                  <span className="p-1 bg-pink-500/20 text-pink-300 rounded-md">
-                    <Zap size={13} />
-                  </span>
-                  <span className="font-sans font-black uppercase tracking-wider text-white text-[11px]">
-                    Calibration Auto-Adaptative du Second Ordre
-                  </span>
-                  <span className="text-[9px] font-mono text-cyan-300 bg-slate-950 px-2 py-0.5 rounded border border-cyan-500/20">
-                    {drawName}
-                  </span>
-                </div>
-                <p className="text-slate-300 text-[10px] leading-relaxed">
-                  Balayage exhaustif des{" "}
-                  <strong className="text-cyan-300">{backtestStats.dampingCandidatesEvaluated}</strong>{" "}
-                  valeurs de ζ de la grille ({INERTIA_DAMPING_DOMAIN.min.toFixed(2)} →{" "}
-                  {INERTIA_DAMPING_DOMAIN.max.toFixed(2)}) sur la fenêtre rétro-active de{" "}
-                  <strong className="text-cyan-300">{drawName}</strong> : optimum mesuré à{" "}
-                  <strong className="text-pink-400 font-mono">
-                    ζ = {backtestStats.bestDamping.toFixed(2)}
-                  </strong>{" "}
-                  ({backtestStats.bestDampingHits} hits) contre{" "}
-                  <strong className="font-mono text-slate-300">{backtestStats.currentDampingHits}</strong>{" "}
-                  hits à la calibration en vigueur (ζ = {dampingRatio.toFixed(2)}).
-                  {dampingSweepVerdict && dampingSweepVerdict.improved
-                    ? ` Gain mesuré : +${dampingSweepVerdict.deltaHits} hit(s) rétro-actif(s).`
-                    : " Aucun gain mesuré sur cette fenêtre : l'écart au hasard pur n'est pas distinguable ici."}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
-                <div className="flex flex-col items-end">
-                  <span className="text-[8px] font-mono uppercase text-slate-400 tracking-wider">
-                    Amortissement mesuré
-                  </span>
-                  <span className="font-mono font-black text-pink-400 text-sm tracking-wider">
-                    ζ_balayage = {backtestStats.bestDamping.toFixed(2)}
-                  </span>
-                </div>
-
-                {dampingSweepVerdict?.atGridPoint ? (
-                  <div className="px-4 py-2.5 bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-emerald-950/30">
-                    <CheckCircle2 size={14} className="text-emerald-400" />
-                    <span>ζ_balayage Actif &amp; Mémorisé</span>
-                  </div>
-                ) : dampingSweepVerdict?.improved ? (
-                  <button
-                    id="btn-apply-optimal-damping"
-                    onClick={handleApplyOptimalDamping}
-                    className="px-5 py-2.5 bg-gradient-to-r from-pink-600 via-purple-600 to-cyan-600 hover:from-pink-500 hover:to-cyan-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 transition-all duration-300 hover:scale-105 shadow-xl shadow-pink-600/30 border border-pink-400/40 cursor-pointer active:scale-95"
-                    title={`Appliquer ζ = ${backtestStats.bestDamping.toFixed(2)} (mesuré à ${backtestStats.bestDampingHits} hits contre ${backtestStats.currentDampingHits} actuellement) et le mémoriser pour ${drawName}`}
-                  >
-                    <Zap size={14} className="text-white" />
-                    <span>
-                      Appliquer ζ_balayage ({backtestStats.bestDamping.toFixed(2)}) au Moteur
-                    </span>
-                  </button>
-                ) : (
-                  <div className="px-4 py-2.5 bg-slate-950/70 border border-white/10 text-slate-400 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center gap-2">
-                    <AlertCircle size={14} className="text-slate-500" />
-                    <span>Aucun gain mesuré — calibration conservée</span>
-                  </div>
-                )}
-              </div>
-            </div>
+            <InertiaTimeMachineReport
+              backtestStats={backtestStats}
+              drawName={drawName}
+              dampingRatio={dampingRatio}
+              dampingSweepVerdict={dampingSweepVerdict}
+              onClose={() => {
+                audioEngine.play("click");
+                setBacktestStats(null);
+              }}
+              onApplyOptimalDamping={handleApplyOptimalDamping}
+            />
           </motion.div>
         )}
       </AnimatePresence>

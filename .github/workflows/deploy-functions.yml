@@ -31,8 +31,7 @@ jobs:
           for dir in supabase/functions/*; do
             if [ -d "$dir" ] && [ "$(basename "$dir")" != "_shared" ]; then
               func_name=$(basename "$dir")
-              echo "Deploying Supabase Edge Function: $func_name"
-              supabase functions deploy "$func_name" --project-ref ${{ secrets.SUPABASE_PROJECT_ID }} --no-verify-jwt
+              supabase functions deploy "$func_name" --project-ref ${{ secrets.SUPABASE_PROJECT_ID }} --no-verify-jwt --yes
             fi
           done
         env:

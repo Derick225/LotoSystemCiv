@@ -14,6 +14,7 @@ import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
 import { parseDateSafely } from "../../utils/dateUtils";
 import { deriveSeedFromHistory } from "../../utils/deterministicSeed";
 import { drawHasMachineNumbers } from "../../constants";
+import { computeTensorFusion25DHpc } from "../wasm/lotoEngineBridge";
 
 export interface ScoredNumber {
   num: number;
