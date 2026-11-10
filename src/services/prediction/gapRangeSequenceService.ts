@@ -162,7 +162,7 @@ export interface GapRangeSequenceReport {
  * L'écart théorique avant sortie suit une loi géométrique P(G = k) = (1 - p)^k * p.
  */
 const P_SINGLE =
-  LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS; // 5/90 = 1/18
+  (LOTTERY_CONSTANTS?.NUMBERS_PER_DRAW ?? 5) / (LOTTERY_CONSTANTS?.TOTAL_NUMBERS ?? 90); // 5/90 = 1/18
 
 // Quantile Gaussien z75 (bande centrale ~50%) — borne d'intervalle honnête, non arbitraire
 const Z_GAUSS_75 = 0.67449;

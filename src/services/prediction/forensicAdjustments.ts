@@ -108,7 +108,6 @@ export const applyForensicAdjustments = async (
           if (opp.bestAlgo) {
             const algoKey = opp.bestAlgo as AlgoKey;
             if (!dynamicWeightModifiers[num]) dynamicWeightModifiers[num] = {};
-            // Modifier amplitude = 1/numAlgos ensures scale-invariance across algo count
             const numAlgos = Object.keys(AlgoKey).length || 1;
             dynamicWeightModifiers[num][algoKey] = (dynamicWeightModifiers[num][algoKey] || 0) + (1.0 / numAlgos) * ageDecay;
           }

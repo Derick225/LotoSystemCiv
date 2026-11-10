@@ -159,9 +159,18 @@ export const recordModelDnaVersion = async (
       const existingRaw = window.localStorage.getItem(storageKey);
       let existingList: ModelDnaRecord[] = existingRaw ? JSON.parse(existingRaw) : [];
 
-      // Dédoublonnage sur empreinte ADN
-      existingList = existingList.filter(r => r.dnaFingerprint !== fingerprint);
-      existingList.unshift(newRecord);
+      // Dédoublonnage idempotent par version et id (préserve les configurations de poids identiques à des dates distinctes)
+      existingList = existingList.filter(
+        r => r.version !== newRecord.version && r.id !== newRecord.id
+      );
+      existingList.push(newRecord);
+
+      // Tri chronologique rigoureux décroissant (le plus récent en tête) pour garantir la conformité temporelle
+      existingList.sort((a, b) => {
+        const tA = new Date(a.timestamp || 0).getTime();
+        const tB = new Date(b.timestamp || 0).getTime();
+        return tB - tA;
+      });
 
       // Limite historique déterministe (garde les 60 derniers points d'évolution)
       if (existingList.length > 60) {
@@ -178,10 +187,17 @@ export const recordModelDnaVersion = async (
       console.error('[ModelDnaKnowledgeBase] Erreur lors de la persistance ADN:', e);
     }
   } else {
-    // In-memory fallback
+    // In-memory fallback avec tri chronologique décroissant et dédoublonnage par version
     const existing = DNA_IN_MEMORY_STORAGE.get(drawName) || [];
-    const filtered = existing.filter(r => r.dnaFingerprint !== fingerprint);
-    filtered.unshift(newRecord);
+    const filtered = existing.filter(
+      r => r.version !== newRecord.version && r.id !== newRecord.id
+    );
+    filtered.push(newRecord);
+    filtered.sort((a, b) => {
+      const tA = new Date(a.timestamp || 0).getTime();
+      const tB = new Date(b.timestamp || 0).getTime();
+      return tB - tA;
+    });
     if (filtered.length > 60) filtered.pop();
     DNA_IN_MEMORY_STORAGE.set(drawName, filtered);
   }

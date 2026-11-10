@@ -223,6 +223,8 @@ export const handleScenarioADegradedPrediction = (context: PredictionRuntimeCont
 
   return {
     drawName: context.drawName,
+    pipeline: 'degraded',
+    expectedLift: 1.0,
     suggestedNumbers: selected,
     candidates,
     confidence: calibratedConfidence,

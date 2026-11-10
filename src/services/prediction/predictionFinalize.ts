@@ -210,30 +210,20 @@ export const finalizePredictionPayload = async (
 
   // Preuve out-of-fold évaluée AVANT toute exposition de probabilités : ce rapport pilote
   // le shrinkage λ appliqué plus bas. Aucune probabilité n'est publiée sans ce contrôle.
-  const walkForwardCalibration = computeWalkForwardCalibrationHpc(context.drawName, 15);
+  // Utilisation de l'historique causal borné pour éliminer toute fuite de données futures.
+  const boundedHistory = context.history.slice(0, context.validTemporalDepth);
+  const walkForwardCalibration = computeWalkForwardCalibrationHpc(context.drawName, 15, boundedHistory);
   const skillEstimate = deriveSkillShrinkage(walkForwardCalibration);
   
   const calibratedParams = await getCalibratedHyperparameters(context.drawName, currentEntropy);
   const plattA = calibratedParams.sigmoid_slope;
   const plattB = calibratedParams.sigmoid_intercept;
   
-  const rawX = (averageScore - PLATT_SCORE_STANDARDIZATION.CENTER) / PLATT_SCORE_STANDARDIZATION.SCALE;
-  const plattCalibratedProbability = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
-  
-  let calibratedConfidence = plattCalibratedProbability * 100.0 * calibratedParams.boosting_multiplier;
-  
   // Matrice de Confiance Dynamique par Profil Cyclique (Attracteur de Lyapunov vs Dispersion Stochastique)
   const cyclicPhaseProfile = calculateCyclicPhaseProfileMatrix(
     context.history,
     enhancedMetrics?.topologicalLyapunov as Record<number, number>
   );
-  calibratedConfidence *= cyclicPhaseProfile.confidenceModulator;
-
-  if (shrinkageApplied) {
-    calibratedConfidence *= shrinkageFactor;
-  }
-  
-  const finalConfidence = Math.round(Math.max(1, Math.min(99, calibratedConfidence)));
 
   // Calcul du diagnostic de dérive temporelle du taux d'apprentissage
   const driftLearning = calculateTemporalDriftLearningRate(context.history, 1.0 / Math.sqrt(Math.max(10, context.history.length)), 10);
@@ -334,11 +324,21 @@ export const finalizePredictionPayload = async (
 
   const edgeSummary = summarizePredictionEdge(probabilityVector, selection);
 
-  // Note honnête : la preuve out-of-fold est citée avec son incertitude, jamais transformée
-  // en promesse de gain. λ = 0 est une égalité exacte, pas un seuil de décision.
-  const skillEvidenceNote = skillEstimate.source === 'none'
-    ? "Aucune preuve out-of-fold disponible : probabilités marginales ramenées à l'équiprobabilité 5/90 (λ=0)."
-    : `Skill out-of-fold mesuré (${skillEstimate.source}, n=${skillEstimate.evidenceDraws}) : BSS=${skillEstimate.pointEstimate.toFixed(4)}, σ=${Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty.toFixed(4) : 'n/d'}, rétention λ=${skillEstimate.shrinkage.toFixed(4)}${skillEstimate.shrinkage === 0 ? " → probabilités marginales ramenées à l'équiprobabilité 5/90" : ''}.`;
+  // Indicateurs statistiques objectifs et honnêtes (AGENTS.md & Audit):
+  const sumSelectedProbs = selection.reduce((sum, n) => sum + (numberProbabilities[n] || (5.0 / DOMAIN_SIZE)), 0);
+  const meanSelectedProb = selection.length > 0 ? sumSelectedProbs / selection.length : 5.0 / DOMAIN_SIZE;
+  const uniformMarginal = 5.0 / DOMAIN_SIZE; // 5.0 / 90.0 ≈ 0.0555556
+  const expectedLift = parseFloat((meanSelectedProb / uniformMarginal).toFixed(3));
+
+  // Confiance statistique honnête :
+  // Sur du bruit pur ou sans preuve empirique (λ = 0), la confiance marginale vaut exactement l'équiprobabilité (5/90 ~ 6%, lift 1.00x).
+  // Lorsque λ > 0, elle reflète la probabilité marginale attendue des numéros choisis, sans gonflage artificiel.
+  const finalConfidence = Math.max(1, Math.min(99, Math.round(meanSelectedProb * 100)));
+
+  // Note honnête : la preuve out-of-fold est citée avec son incertitude, jamais transformée en promesse de gain.
+  const skillEvidenceNote = skillEstimate.shrinkage === 0
+    ? "Aucun avantage prouvé (distribution neutre 5/90, lift 1.00x)."
+    : `Skill out-of-fold mesuré (${skillEstimate.source}, n=${skillEstimate.evidenceDraws}) : BSS=${skillEstimate.pointEstimate.toFixed(4)}, σ=${Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty.toFixed(4) : 'n/d'}, rétention λ=${skillEstimate.shrinkage.toFixed(4)}, lift=${expectedLift.toFixed(2)}x.`;
   const confidenceNote = `${HONEST_NOTE} ${skillEvidenceNote}`;
 
   // Calcul continu et objectif de l'alignement de réalité (Reality Alignment)
@@ -367,7 +367,25 @@ export const finalizePredictionPayload = async (
   const wDiv = REALITY_ALIGNMENT_WEIGHTS.DIVERSITY;
   const normSumLikelihood = sumLikelihood * 100.0;
   const normParityLikelihood = parityLikelihood * 100.0;
-  const normDiversity = diversityMetrics?.diversityScore ? diversityMetrics.diversityScore : 80.0;
+
+  // Diversité calculée sans valeur inventée (élimination du fallback arbitraire 80.0)
+  let normDiversity = 100.0;
+  if (diversityMetrics && Number.isFinite(diversityMetrics.diversityScore)) {
+    normDiversity = diversityMetrics.diversityScore <= 1.0 
+      ? diversityMetrics.diversityScore * 100.0 
+      : diversityMetrics.diversityScore;
+  } else if (selection.length > 1) {
+    let sumDist = 0;
+    let pairs = 0;
+    for (let i = 0; i < selection.length; i++) {
+      for (let j = i + 1; j < selection.length; j++) {
+        sumDist += Math.abs(selection[i] - selection[j]) / (DOMAIN_SIZE - 1.0);
+        pairs++;
+      }
+    }
+    normDiversity = pairs > 0 ? (sumDist / pairs) * 100.0 : 100.0;
+  }
+  normDiversity = Math.max(0, Math.min(100, normDiversity));
 
   const realityAlignment = Math.round(
     Math.max(10, Math.min(99,
@@ -391,12 +409,7 @@ export const finalizePredictionPayload = async (
     (Math.max(0, 100.0 - stabilityScore) * (1.0 - (diversityMetrics?.meanSimilarity ?? 0.5))).toFixed(2)
   );
 
-  // Intervalle de cohérence (HONNÊTE) : `finalConfidence` est un indicateur interne déterministe,
-  // PAS une proportion empirique. L'ancien intervalle de Wald binomial (p ± 1.96·√(p(1−p)/n)) était
-  // donc invalide — il traitait un score de cohérence comme une fréquence d'échantillon et introduisait
-  // la constante magique 1.96. On borne plutôt la bande par l'incertitude ÉPISTÉMIQUE réelle du modèle
-  // (désaccord interne déjà calculé ci-dessus) : moins le vecteur est stable/divers, plus la bande est large.
-  const coherenceHalfWidth = Math.max(0, Math.min(99, epistemicUncertainty));
+  const coherenceHalfWidth = parseFloat(((epistemicUncertainty / 100.0) * finalConfidence).toFixed(1));
   const ciLower = Math.max(1, Math.round(finalConfidence - coherenceHalfWidth));
   const ciUpper = Math.min(99, Math.round(finalConfidence + coherenceHalfWidth));
 
@@ -411,9 +424,6 @@ export const finalizePredictionPayload = async (
   // ============================================================================
   // SCÉNARIOS DE SIMULATION PROBABILISTES DÉTERMINISTES (SCÉNARIO D SYNTHESIZER)
   // ============================================================================
-  // Les scénarios dérivés partagent le MÊME calibrage que le vecteur primaire : leur indicateur de
-  // cohérence est recalculé sur la moyenne des scores de leurs propres membres, jamais dérivé par
-  // un multiplicateur arbitraire de `finalConfidence`.
   const scenarioCalibration: ScenarioCoherenceCalibration = {
     plattSlope: plattA,
     plattIntercept: plattB,
@@ -436,6 +446,8 @@ export const finalizePredictionPayload = async (
 
   return {
     drawName: context.drawName,
+    pipeline: context.pipelineMode || 'full',
+    expectedLift,
     suggestedNumbers: selection,
     candidates,
     confidence: finalConfidence,

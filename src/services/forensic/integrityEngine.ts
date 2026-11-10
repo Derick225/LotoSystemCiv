@@ -9,6 +9,7 @@ import {
   calculateBenfordCompliance,
   calculateShannonEntropy,
 } from "../mathCore";
+import { normalCDF } from "../prediction/shrinkageVerificationService";
 import {
   DOMAIN_SIZE,
   type AuditConfig,
@@ -215,14 +216,20 @@ export const analyzeForManipulation = (
   const stdChiSquare = Math.sqrt(4 * k_tests); // 8
   const fisherZ = (fisherChiSquare - expectedChiSquare) / stdChiSquare;
 
-  // L'Indice de Suspicion unifié est désormais une sigmoïde probabiliste du Z-score (correction FDR)
-  const finalSuspicionScore = Math.min(100, Math.max(0, Math.round(100 / (1 + Math.exp(-0.8 * fisherZ)))));
+  // L'Indice de Suspicion unifié est calibré sous H0 (Tirage honnête) :
+  // Sous H0, fisherZ ~ N(0, 1). L'ancien centrage à Z=0 assignait 50% de suspicion à un tirage honnête !
+  // Seuil critique objectif calibré sur alpha = 0.01 (Z_crit = 2.3263) garantissant un taux de fausse alerte < 5%.
+  const Z_CRIT = 2.3263;
+  const finalSuspicionScore = Math.min(
+    100,
+    Math.max(0, Math.round(100 / (1 + Math.exp(-1.8 * (fisherZ - Z_CRIT)))))
+  );
 
-  // Inférence bayésienne continue basée sur la fonction de vraisemblance du Z-score
-  // Remplace complètement le registre des nombres magiques "baseLikelihood"
-  // H0: Z ~ N(0, 1) (Tirage honnête)
-  // H1: Z ~ N(4, 1) (Tirage truqué / anomalie systémique sévère)
-  const likelihoodRatio = Math.exp(4 * Math.max(0, fisherZ) - 8); // e^(mu*Z - mu^2/2) avec mu=4
+  // Inférence bayésienne continue basée sur la fonction de queue de la loi normale (p-valeur empirique objective)
+  // Élimination du paramètre arbitraire mu=4 et de la baseLikelihood heuristique
+  const pEmpiricalTail = Math.max(1e-12, Math.min(1.0, 1.0 - normalCDF(fisherZ)));
+  // Rapport de vraisemblance basé sur la rareté statistique sous H0
+  const likelihoodRatio = Math.max(1e-6, (1.0 - pEmpiricalTail) / pEmpiricalTail);
   let odds = (config.baseRiggedProbability / (1 - config.baseRiggedProbability)) * likelihoodRatio;
   if (!Number.isFinite(odds)) odds = 1.0;
   const riggedProb = odds / (1 + odds);

@@ -217,6 +217,8 @@ export interface Prediction {
     maxLiftVsUniform: number;
   };
   simulationScenarios?: SimulationScenarioItem[];
+  pipeline?: 'full' | 'simplified' | 'degraded';
+  expectedLift?: number;
 }
 
 export interface SimulationScenarioItem {

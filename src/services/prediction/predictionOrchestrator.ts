@@ -1,6 +1,6 @@
 import { packHistory } from '../workers/zeroCopy';
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
-import { AlgoKey } from "../../shared/prediction.types";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { getAlgoWeights, normalizeWeights, computeChronologicalAlgoReinforcement } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
@@ -51,6 +51,7 @@ export interface PredictionRuntimeContext {
   isForensicOptimized: boolean;
   useSpatioTemporalHawkes: boolean;
   useCloudEngine?: boolean;
+  pipelineMode?: 'full' | 'simplified' | 'degraded';
   onProgress?: (progress: number, message: string) => void;
   preloadedForensicReports?: ForensicReport[];
   contentHash: string;
@@ -123,6 +124,7 @@ export { computeAdvancedMetrics };
  * Pipeline local modulaire de prédiction
  */
 export const runLocalPredictionPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
+  context.pipelineMode = 'full';
   context.onProgress?.(5, "Initialisation de l'ADN algorithmique...");
   initializeLcgForDraw(context.drawName);
   await yieldToUi();
@@ -182,6 +184,7 @@ export const runLocalPredictionPipeline = async (context: PredictionRuntimeConte
  * Pipeline local simplifié (Scénario de secours extrême)
  */
 export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeContext): Promise<Prediction> => {
+  context.pipelineMode = 'simplified';
   context.onProgress?.(10, "Lancement du pipeline Local Simplifié...");
   await yieldToUi();
   initializeLcgForDraw(context.drawName);
@@ -241,24 +244,25 @@ export const runLocalSimplifiedPipeline = async (context: PredictionRuntimeConte
 };
 
 export const resolvePredictionWeights = async (context: PredictionRuntimeContext): Promise<AlgoWeights> => {
+  const boundedHistory = context.history.slice(0, context.validTemporalDepth);
   // 1. Poids de base (soit forcés, soit entraînés pour ce tirage, soit égaux par défaut)
   const initialWeights = context.weightsToUse || (await getAlgoWeights(context.drawName));
 
   // 2. Renforcement chronologique basé sur l'analyse de l'historique et des subsistances du tirage sélectionné
   let weights = computeChronologicalAlgoReinforcement(
     context.drawName,
-    context.history.slice(0, context.validTemporalDepth),
+    boundedHistory,
     initialWeights
   );
   
-  // 3. Entraînement continu Micro-SGD propre au tirage actif
-  if (!context.skipTraining && context.history.length >= 10) {
-    const currentEntropyResult = calculateShannonEntropy(context.history);
+  // 3. Entraînement continu Micro-SGD propre au tirage actif (sur l'historique causal borné, sans altération des poids persistés)
+  if (!context.skipTraining && boundedHistory.length >= 10) {
+    const currentEntropyResult = calculateShannonEntropy(boundedHistory);
     const currentEntropy = currentEntropyResult.normalized;
     weights = await applyDeterministicMicroSgd(
       context.drawName,
       weights,
-      context.history,
+      boundedHistory,
       currentEntropy,
       undefined,
       context.useSpatioTemporalHawkes
@@ -266,7 +270,7 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
   }
 
   // 4. Règle d'or : Les noms de tirage qui n'ont pas de numéro machines ne doivent pas avoir l'algorithme "Transfert Machine"
-  const hasMachine = drawHasMachineNumbers(context.drawName, context.history);
+  const hasMachine = drawHasMachineNumbers(context.drawName, boundedHistory);
   if (!hasMachine) {
     (weights as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;
   }
@@ -535,16 +539,21 @@ export const selectPredictionNumbers = async (
       { meanScore: parseFloat(meanScore.toFixed(2)), stdDevScore: parseFloat(stdDevScore.toFixed(2)), cvScore: parseFloat(cvScore.toFixed(4)), shrinkageFactor },
       "[predictionOrchestrator] Instabilité/Tension des scores détectée. Application d'un shrinkage continu différentiable."
     );
+    // Vrai shrinkage empirique de James-Stein vers la moyenne : s' = μ + f · (s - μ)
     sortedScores.forEach(s => {
-      s.score = s.score * shrinkageFactor;
+      s.score = meanScore + shrinkageFactor * (s.score - meanScore);
     });
+    sortedScores.sort((a, b) => b.score - a.score);
   }
 
   // --- DÉTECTION DYNAMIQUE DU RÉGIME DE JEU (RÉGULATION THERMODYNAMIQUE & DIVERGENCE JENSEN-SHANNON / WASSERSTEIN) ---
-  const thermoRegime = calculateThermodynamicRegime(context.history);
-  const structuralDrift = driftDetector.evaluateStructuralDrift(context.history, context.drawName);
+  const boundedHistory = context.validTemporalDepth 
+    ? context.history.slice(0, context.validTemporalDepth)
+    : context.history;
+  const thermoRegime = calculateThermodynamicRegime(boundedHistory);
+  const structuralDrift = driftDetector.evaluateStructuralDrift(boundedHistory, context.drawName);
   const empiricalCalibration = generateEmpiricalCalibration(
-    context.history, 
+    boundedHistory, 
     thermoRegime.hurst, 
     thermoRegime.entropy
   );
@@ -567,7 +576,7 @@ export const selectPredictionNumbers = async (
     features.affinityMap,
     empiricalCalibration,
     outsiderCount,
-    context.history[0]?.gagnants,
+    boundedHistory[0]?.gagnants,
     regimeStateNormalized,
     thermoRegime.hurst
   );
@@ -927,9 +936,9 @@ export const runNativeRustPrediction = async (
   return runNativePredictionHpc({
     flatWinners: flat,
     numDraws: history.length,
-    frequencyWeight: weights?.frequency ?? 1.2,
-    gapWeight: weights?.gap ?? 0.8,
-    markovWeight: weights?.markov ?? 0.5,
-    hurstWeight: weights?.fractal ?? 0.3,
+    frequencyWeight: weights?.frequency ?? DEFAULT_ALGO_WEIGHTS[AlgoKey.FREQUENCY],
+    gapWeight: weights?.gap ?? DEFAULT_ALGO_WEIGHTS[AlgoKey.GAPS],
+    markovWeight: weights?.markov ?? DEFAULT_ALGO_WEIGHTS[AlgoKey.MARKOV],
+    hurstWeight: weights?.fractal ?? DEFAULT_ALGO_WEIGHTS[AlgoKey.FRACTAL],
   });
 };

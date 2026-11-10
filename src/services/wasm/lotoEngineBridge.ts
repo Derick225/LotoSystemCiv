@@ -2550,11 +2550,11 @@ const UNIFORM_BRIER_BENCHMARK = (5.0 * 85.0) / (90.0 * 90.0);
  */
 export function computeWalkForwardCalibrationHpc(
   drawName: string,
-  windowSize: number = 15
+  windowSize: number = 15,
+  historyOverride?: any[]
 ): CalibrationReportHpc {
   const normName = drawName.trim().toUpperCase();
   const wSize = Math.max(4, Math.min(30, windowSize));
-  const store = getOrCreateNativeStoreInstance();
 
   const defaultDeciles: DecileCalibrationBucket[] = Array.from({ length: 10 }, (_, i) => ({
     decile: i + 1,
@@ -2563,35 +2563,54 @@ export function computeWalkForwardCalibrationHpc(
     count: 0,
   }));
 
-  if (store && typeof store.compute_walk_forward_calibration === 'function') {
-    try {
-      const rep = store.compute_walk_forward_calibration(normName, wSize);
-      if (rep) {
-        return {
-          brierScore: readWasmField<number>(rep, 'brier_score', UNIFORM_BRIER_BENCHMARK),
-          brierSkillScore: readWasmField<number>(rep, 'brier_skill_score', 0.0),
-          plattAlpha: readWasmField<number>(rep, 'platt_alpha', 1.0),
-          plattBeta: readWasmField<number>(rep, 'platt_beta', 0.0),
-          empiricalReliabilityScore: readWasmField<number>(rep, 'empirical_reliability_score', 50.0),
-          evaluatedWindows: readWasmField<number>(rep, 'evaluated_windows', 0),
-          calibrationQualityLabel: readWasmField<string>(rep, 'calibration_quality_label', 'DIFFUSION_EQUIPROBABLE_NEUTRE'),
-          logLoss: readWasmField<number>(rep, 'log_loss', 0.0),
-          ece: readWasmField<number>(rep, 'ece', 0.0),
-          liftVsRandom: readWasmField<number>(rep, 'lift_vs_random', 1.0),
-          meanHits: readWasmField<number>(rep, 'mean_hits', 0.0),
-          holdoutBrierSkillScore: readWasmField<number>(rep, 'holdout_brier_skill_score', 0.0),
-          holdoutDraws: readWasmField<number>(rep, 'holdout_draws', 0),
-          blockBootstrapBssMean: readWasmField<number>(rep, 'block_bootstrap_bss_mean', 0.0),
-          blockBootstrapBssStd: readWasmField<number>(rep, 'block_bootstrap_bss_std', 0.0),
-          decileCalibration: defaultDeciles,
-        };
-      }
-    } catch {}
+  // Si aucun historique spécifique n'est fourni, tenter d'interroger le store natif WASM
+  if (!historyOverride || historyOverride.length === 0) {
+    const store = getOrCreateNativeStoreInstance();
+    if (store && typeof store.compute_walk_forward_calibration === 'function') {
+      try {
+        const rep = store.compute_walk_forward_calibration(normName, wSize);
+        if (rep) {
+          return {
+            brierScore: readWasmField<number>(rep, 'brier_score', UNIFORM_BRIER_BENCHMARK),
+            brierSkillScore: readWasmField<number>(rep, 'brier_skill_score', 0.0),
+            plattAlpha: readWasmField<number>(rep, 'platt_alpha', 1.0),
+            plattBeta: readWasmField<number>(rep, 'platt_beta', 0.0),
+            empiricalReliabilityScore: readWasmField<number>(rep, 'empirical_reliability_score', 50.0),
+            evaluatedWindows: readWasmField<number>(rep, 'evaluated_windows', 0),
+            calibrationQualityLabel: readWasmField<string>(rep, 'calibration_quality_label', 'DIFFUSION_EQUIPROBABLE_NEUTRE'),
+            logLoss: readWasmField<number>(rep, 'log_loss', 0.0),
+            ece: readWasmField<number>(rep, 'ece', 0.0),
+            liftVsRandom: readWasmField<number>(rep, 'lift_vs_random', 1.0),
+            meanHits: readWasmField<number>(rep, 'mean_hits', 0.0),
+            holdoutBrierSkillScore: readWasmField<number>(rep, 'holdout_brier_skill_score', 0.0),
+            holdoutDraws: readWasmField<number>(rep, 'holdout_draws', 0),
+            blockBootstrapBssMean: readWasmField<number>(rep, 'block_bootstrap_bss_mean', 0.0),
+            blockBootstrapBssStd: readWasmField<number>(rep, 'block_bootstrap_bss_std', 0.0),
+            decileCalibration: defaultDeciles,
+          };
+        }
+      } catch {}
+    }
   }
 
-  // Fallback déterministe C^∞
-  const timeline = fallbackStoreTimelines.get(normName);
-  const history = timeline?.history || [];
+  // Historique causal borné (sans fuite de données futures)
+  let history: FallbackDraw[] = [];
+  if (historyOverride && historyOverride.length > 0) {
+    const raw = historyOverride.map((d: any) => ({
+      timestamp: typeof d.date === 'string' ? new Date(d.date).getTime() / 1000 : (d.timestamp || 0),
+      winners: (d.gagnants || d.winners || []).slice(0, 5),
+      machine: (d.machine || []).slice(0, 5),
+      mask: 0n,
+    }));
+    // S'assurer de l'ordre chronologique croissant (du plus ancien au plus récent)
+    // Dans context.history, index 0 est le plus récent : on inverse pour l'analyse walk-forward
+    history = (raw.length > 1 && raw[0].timestamp >= raw[raw.length - 1].timestamp)
+      ? [...raw].reverse()
+      : [...raw];
+  } else {
+    const timeline = fallbackStoreTimelines.get(normName);
+    history = timeline?.history || [];
+  }
   const totalDraws = history.length;
 
   if (totalDraws < 8) {

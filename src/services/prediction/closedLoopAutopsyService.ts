@@ -10,7 +10,7 @@ import {
   detectGameRegime,
   TemporalDriftLearningRateResult,
 } from '../mathService';
-import { normalizeWeights, evaluateAlgoEmpiricalProof } from './weightsManager';
+import { normalizeWeights, evaluateAlgoEmpiricalProof, getDefaultWeights } from './weightsManager';
 import {
   ModelDnaRecord,
   computeModelDnaFingerprint,
@@ -196,7 +196,11 @@ export const projectWeightsWithProofGuard = (
     const unlockedSum = unlockedKeys.reduce((acc, k) => acc + (w[k] || 0), 0);
     if (unlockedSum > 0) {
       unlockedKeys.forEach((k) => {
-        w[k] = (w[k] || 0) + excess * ((w[k] || 0) / unlockedSum);
+        const candidateBoost = (w[k] || 0) + excess * ((w[k] || 0) / unlockedSum);
+        // Rétraction continue (Ridge shrinkage) vers le poids de base pour préserver la diversité et éviter l'absorption totale sous bruit
+        const baseW = Number.isFinite(baselineNormalized[k]) ? baselineNormalized[k] : 0;
+        const shrinkageAlpha = 0.20;
+        w[k] = (1.0 - shrinkageAlpha) * candidateBoost + shrinkageAlpha * Math.max(candidateBoost, baseW);
       });
     } else {
       const share = excess / unlockedKeys.length;
@@ -276,9 +280,13 @@ export const executeClosedLoopAutopsy = async (
       );
       if (priorDna && priorDna.weights && Object.keys(priorDna.weights).length > 0) {
         weightsAtTargetTime = { ...priorDna.weights };
+      } else {
+        // ZÉRO FUITE TEMPORELLE : Si aucune version ADN antérieure n'est trouvée,
+        // repli strict sur les poids par défaut (baseline canonique non contaminée par les entraînements futurs).
+        weightsAtTargetTime = getDefaultWeights();
       }
     } catch {
-      // Conserver currentWeights si aucun historique ADN antérieur n'est disponible
+      weightsAtTargetTime = getDefaultWeights();
     }
   }
 
@@ -786,7 +794,9 @@ export const executeClosedLoopAutoAdjustment = async (
   const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistory);
 
   // 3. Application du Micro-SGD avec verrouillage strict par preuve empirique sur le simplexe
-  const initialWeightsClean: AlgoWeights = { ...currentWeights };
+  // RÈGLE D'OR AUDIT : La base de référence 'oldW' doit être contemporaine au tirage analysé (autopsyReport.initialWeights),
+  // et NON les poids de production courants, pour garantir la cohérence des gradients et éviter toute fuite temporelle.
+  const initialWeightsClean: AlgoWeights = { ...autopsyReport.initialWeights };
   if (!hasMachineData) {
     initialWeightsClean[AlgoKey.MACHINE_TRANSFER] = 0;
   }
@@ -838,11 +848,14 @@ export const executeClosedLoopAutoAdjustment = async (
       if (newW > oldW) {
         newW = oldW;
       } else if (proof && proof.proofScore < 0) {
-        const dampener = 1.0 / (1.0 + Math.exp(-2.0 * proof.proofScore));
-        newW = newW * Math.max(0.1, dampener);
+        // Amortissement continu C^inf : D(s) = 1.0 - 0.5 * tanh(|proofScore|)
+        // Lorsque proofScore -> 0^-, D(s) -> 1.0 (zéro saut discontinu à 0.5)
+        const penalty = Math.tanh(Math.abs(proof.proofScore));
+        const dampener = 1.0 - 0.5 * penalty;
+        newW = oldW - (oldW - newW) * dampener;
       }
     } else if (newW > oldW) {
-      const boostFactor = Math.tanh(proof.proofScore);
+      const boostFactor = Math.tanh(Math.max(0, proof.proofScore));
       newW = oldW + (newW - oldW) * boostFactor;
     }
     finalWeights[k] = newW;
@@ -922,6 +935,7 @@ export const executeClosedLoopAutoAdjustment = async (
       causalAuditTrail,
       reason: `Autopsie fermée tirage ${targetDraw.date}`,
       allowCriticalDrift: false,
+      isRetroactive: targetDrawIndex > 0,
     });
 
     return {

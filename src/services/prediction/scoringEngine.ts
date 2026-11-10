@@ -459,7 +459,10 @@ export const calculateScores = (
     Object.keys(effectiveWeights).forEach((k) => {
       const key = k as AlgoKey;
       let baseWeight = Number(effectiveWeights[key]) || 0;
-      const weightModifier = context.advancedMetrics?.dynamicWeightModifiers?.[num]?.[key] || 0;
+      const rawWeightModifier = context.advancedMetrics?.dynamicWeightModifiers?.[num]?.[key] || 0;
+      const proofMetric = (context as any).proofMap?.[key] || (context as any).proofMetrics?.[key];
+      const hasProof = proofMetric ? (proofMetric.hasProof && proofMetric.proofScore > 0) : true;
+      const weightModifier = hasProof ? rawWeightModifier : 0;
       const cyclicModifier = cyclicProfile.algoWeightModifiers[key] || 0.0;
       
       // La base prend l'Exponentielle de manière continue (modifiers + phase cyclique)

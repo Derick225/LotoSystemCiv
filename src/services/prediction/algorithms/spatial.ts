@@ -52,7 +52,8 @@ export const spatialPlugin: AlgorithmPlugin = {
     
     let proximityStats = { median: 0.3, iqr: 0.1 };
     const proxValues = Object.values(ctx.advancedMetrics?.proximityDiagnostic || {}).filter((v): v is number => typeof v === 'number' && v > 0);
-    if (proxValues.length > 0) {
+    const hasActiveProximity = proxValues.length > 0;
+    if (hasActiveProximity) {
       const sortedProx = [...proxValues].sort((a, b) => a - b);
       const medianProx = sortedProx[Math.floor(sortedProx.length / 2)] || 0;
       const q1Prox = sortedProx[Math.floor(sortedProx.length * 0.25)] || 0;
@@ -61,7 +62,7 @@ export const spatialPlugin: AlgorithmPlugin = {
     }
     
     ctx.pluginCache = ctx.pluginCache || {};
-    ctx.pluginCache[AlgoKey.SPATIAL] = { sigma, spatialStats, proximityStats };
+    ctx.pluginCache[AlgoKey.SPATIAL] = { sigma, spatialStats, proximityStats, hasActiveProximity };
   },
 
   evaluate(num: number, ctx: AlgorithmContext) {
@@ -72,6 +73,7 @@ export const spatialPlugin: AlgorithmPlugin = {
       sigma: number;
       spatialStats: { median: number; iqr: number };
       proximityStats: { median: number; iqr: number };
+      hasActiveProximity: boolean;
     };
     
     // 1. Composante cluster spatial
@@ -96,20 +98,23 @@ export const spatialPlugin: AlgorithmPlugin = {
     }
 
     // 2. Diagnostic de Proximité (Proximity Diagnostic)
-    const proximityVal = (ctx.advancedMetrics?.proximityDiagnostic as Record<number, number>)?.[num] || 0.0;
-    const { median: medP, iqr: iqrP } = cache.proximityStats;
-    const slopeProx = 1.0 / iqrP;
-    const normProximity = 100.0 / (1.0 + Math.exp(-slopeProx * (proximityVal - medP)));
+    let baseFused: number;
+    let normProximity = 50.0;
+    const safeNormSpatial = Math.max(Number.EPSILON, normSpatial);
+
+    if (cache.hasActiveProximity) {
+      const proximityVal = (ctx.advancedMetrics?.proximityDiagnostic as Record<number, number>)?.[num] || 0.0;
+      const { median: medP, iqr: iqrP } = cache.proximityStats;
+      const slopeProx = 1.0 / iqrP;
+      normProximity = 100.0 / (1.0 + Math.exp(-slopeProx * (proximityVal - medP)));
+      const safeNormProximity = Math.max(Number.EPSILON, normProximity);
+      baseFused = Math.sqrt(safeNormSpatial * safeNormProximity);
+    } else {
+      baseFused = safeNormSpatial;
+    }
 
     // Fusion continue et intégration de l'anomalie spatio-topologique
     const anomalyBoost = (ctx.advancedMetrics?.anomalyDetection as Record<number, number>)?.[num] || 0.0;
-    
-    // Moyenne géométrique continue des deux signaux normaux
-    const safeNormSpatial = Math.max(Number.EPSILON, normSpatial);
-    const safeNormProximity = Math.max(Number.EPSILON, normProximity);
-    const baseFused = Math.sqrt(safeNormSpatial * safeNormProximity);
-    
-    // VIOLATION CORRIGÉE : Borner l'impact de l'anomalie pour éviter les explosions de signaux (impact max de +50%)
     const boundedAnomalyMultiplier = 1.0 + Math.min(0.5, anomalyBoost / 100.0);
     const fused = baseFused * boundedAnomalyMultiplier;
     

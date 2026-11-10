@@ -37,6 +37,8 @@ export interface OptimizationRequest {
   causalAuditTrail?: string[];
   reason?: string;
   allowCriticalDrift?: boolean;
+  isRetroactive?: boolean;
+  skipLiveWeightsUpdate?: boolean;
 }
 
 export interface OptimizationResponse {
@@ -154,6 +156,7 @@ export async function applyOptimizedWeights(
 
   // 5. Persistance atomique (Poids + Base de connaissances ADN) avec restauration transactionnelle en cas d'erreur
   const timestamp = new Date().toISOString();
+  const finalTimestamp = (request as any).targetDrawDate || timestamp;
   const calculatedPerformance = {
     score: performance.score,
     relativeGain: performance.relativeGain,
@@ -171,9 +174,12 @@ export async function applyOptimizedWeights(
       : `[Application Directe] Delta=${(maxDelta * 100).toFixed(2)}% <= Seuil=${(criticalThreshold * 100).toFixed(2)}%`,
   ].filter(Boolean);
 
-  const finalTimestamp = request.timestamp || timestamp;
+  const isRetroactive = Boolean(request.isRetroactive || request.skipLiveWeightsUpdate);
 
-  await saveAlgoWeights(drawName, appliedWeights);
+  // RÈGLE D'OR AUDIT : Une autopsie rétroactive (as-of / antidatée) ne doit JAMAIS écraser les poids de production en vigueur !
+  if (!isRetroactive) {
+    await saveAlgoWeights(drawName, appliedWeights);
+  }
 
   let dnaRecord: ModelDnaRecord;
   try {
@@ -194,19 +200,23 @@ export async function applyOptimizedWeights(
       causalAuditTrail: fullAuditTrail,
     });
   } catch (dnaErr) {
-    // Rollback atomique des poids en cas d'échec de l'archivage ADN
-    await saveAlgoWeights(drawName, normalizedCurrent).catch(() => {});
+    // Rollback atomique des poids en cas d'échec de l'archivage ADN (seulement si poids actifs modifiés)
+    if (!isRetroactive) {
+      await saveAlgoWeights(drawName, normalizedCurrent).catch(() => {});
+    }
     throw dnaErr;
   }
 
-  // 6. Synchronisation mémoire immédiate du Store Nexus (sans réécriture disque redondante)
-  try {
-    const store = useNexusStore.getState();
-    if (store.drawName === drawName) {
-      useNexusStore.setState({ globalWeights: appliedWeights });
+  // 6. Synchronisation mémoire immédiate du Store Nexus (seulement pour une mise à jour en temps réel)
+  if (!isRetroactive) {
+    try {
+      const store = useNexusStore.getState();
+      if (store.drawName === drawName) {
+        useNexusStore.setState({ globalWeights: appliedWeights });
+      }
+    } catch (err) {
+      logger.debug({ err }, '[OptimizationController] Notification store non bloquante');
     }
-  } catch (err) {
-    logger.debug({ err }, '[OptimizationController] Notification store non bloquante');
   }
 
   // 8. Déclenchement des événements réactifs universels

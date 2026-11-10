@@ -2,7 +2,7 @@ import { DrawResult, AlgoWeights } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { EnhancedMetrics } from "./metrics.types";
 import { logger } from "../../utils/logger";
-import { normalizeWeights, evaluateAlgoEmpiricalProof, saveAlgoWeights } from "./weightsManager";
+import { normalizeWeights, evaluateAlgoEmpiricalProof } from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { calculateScores } from "./scoringEngine";
 import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
