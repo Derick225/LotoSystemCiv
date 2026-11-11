@@ -301,7 +301,8 @@ export function useInertiaCybernetics(drawName: string) {
         pureHistory,
         drawName,
         currentModifiers,
-        hurst
+        hurst,
+        25
       );
       setBacktestStats(result);
       audioEngine.play("success");

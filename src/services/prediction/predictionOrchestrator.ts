@@ -30,6 +30,7 @@ import { SHRINKAGE_CALIBRATION } from "./calibrationConstants";
 import { calculatePoissonScores, calculateBayesianScore, calculateTemporalScores, calculateDigitalRootAnalysis, calculateResistanceScores, calculateGapVelocityScores, calculateLeaderSuccession, calculateAiIntuition, calculateFractalResonance, calculateSpatialHotSpots, calculateCoOccurrenceScores, calculateAnomalyScores, calculateHawkesExcitation, calculateTopologicalLyapunov } from '../advancedMathService';
 import { calculateSpatioTemporalHawkes } from '../../utils/engine/hawkesEngine';
 import { calculateDnaSieveWeights } from '../temporalAnalysisService';
+import { getPersistedInertiaCalibration, DEFAULT_INERTIA_CALIBRATION } from './systemInertiaEngine';
 
 const TICKET_SIZE = 5;
 
@@ -411,7 +412,18 @@ export const applyPredictionDnaSieve = (
   
   // Pondération dynamique (sans constantes fixes) selon la qualité du signal (SNR)
   const signalWeight = 2.0 * (1.0 / (1.0 + Math.exp(-snr * Math.PI)) - 0.5);
-  const inertiaWeight = 1.0 - signalWeight;
+  const rawInertiaWeight = 1.0 - signalWeight;
+
+  // Modulation différentiable par la calibration d'inertie persistée du tirage (Tirage Isolation & AGENTS.md)
+  const inertiaCalib = context.drawName
+    ? getPersistedInertiaCalibration(context.drawName)
+    : DEFAULT_INERTIA_CALIBRATION;
+  const dampingRatio = typeof inertiaCalib?.dampingRatio === "number" && Number.isFinite(inertiaCalib.dampingRatio)
+    ? inertiaCalib.dampingRatio
+    : 0.5;
+  const dampingModulator = Math.max(0.2, Math.min(1.8, 2.0 * dampingRatio));
+  const effectiveInertiaWeight = Math.min(1.0, Math.max(0.0, rawInertiaWeight * dampingModulator));
+  const effectiveSignalWeight = 1.0 - effectiveInertiaWeight;
 
   const sievedScores = scores.map(sn => {
     const num = sn.num;
@@ -427,8 +439,8 @@ export const applyPredictionDnaSieve = (
     multipliersRecord[num] = parseFloat(dnaMult.toFixed(3));
     affinityRecord[num] = Math.round(dnaAff);
 
-    // Tamisage différentiable continu par l'ADN algorithmique du moment
-    const modulationFactor = inertiaWeight + signalWeight * dnaMult;
+    // Tamisage différentiable continu par l'ADN algorithmique du moment modulé par l'inertie
+    const modulationFactor = effectiveInertiaWeight + effectiveSignalWeight * dnaMult;
     const modulatedScore = sn.score * modulationFactor;
 
     return {

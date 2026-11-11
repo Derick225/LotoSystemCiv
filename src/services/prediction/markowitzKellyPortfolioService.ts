@@ -10,17 +10,20 @@
 
 import { PlatinumScenario } from '../../types';
 
+export const RESPONSIBLE_GAMING_NOTICE =
+  "AVERTISSEMENT JEU RESPONSABLE : Les tirages de loterie constituent des jeux de hasard à espérance mathématique négative (E[R] < 0). Aucune méthode algorithmique ne permet de garantir un gain monétaire. Les pondérations de Markowitz constituent uniquement un modèle théorique de diversification géométrique du risque entre les scénarios.";
+
 export interface ScenarioAllocation {
   id: string;
   name: string;
   color: string;
-  /** Fraction de Kelly optimale brute (peut être négative si répulsif avant projection) */
+  /** Fraction de Kelly optimale brute (0 si E[R] <= 0) */
   rawKellyFraction: number;
   /** Poids Markowitz normalisé sur le simplexe unitaire ∈ [0, 1] (somme = 1.0) */
   markowitzWeight: number;
-  /** Budget alloué recommandé en unités de devise */
+  /** Budget alloué recommandé (strictement 0 si aucune preuve empirique out-of-fold) */
   allocatedBudget: number;
-  /** Rendement attendu estimé */
+  /** Rendement attendu estimé réel (négatif en l'absence de preuve) */
   expectedReturn: number;
   /** Volatilité propre estimée */
   volatility: number;
@@ -31,16 +34,20 @@ export interface MarkowitzPortfolioReport {
   allocations: ScenarioAllocation[];
   /** Matrice de covariance empirique K x K */
   covarianceMatrix: number[][];
-  /** Rendement espéré global du portefeuille */
+  /** Rendement espéré global du portefeuille (E[R] <= 0 sous H0) */
   portfolioExpectedReturn: number;
   /** Volatilité globale du portefeuille σ_p = √(w^T Σ w) */
   portfolioVolatility: number;
   /** Ratio de Sharpe du portefeuille (R_p - r_f) / σ_p */
   portfolioSharpeRatio: number;
-  /** Fraction de Kelly globale amortie ∈ [0, 1] */
+  /** Fraction de Kelly globale amortie (0 si E[R] <= 0) */
   globalKellyLeverage: number;
   /** Budget total optimisé distribué */
   totalBudgetDistributed: number;
+  /** Avertissement légal et éthique de jeu responsable */
+  responsibleGamingNotice: string;
+  /** Indicateur d'avantage statistique hors échantillon prouvé */
+  hasProvenEdge: boolean;
 }
 
 /**
@@ -93,15 +100,26 @@ function invertRegularizedCovariance(matrix: number[][], lambda: number): number
 }
 
 /**
- * Calcule l'allocation optimale de Markowitz et le critère de Kelly continu multi-scénarios
+ * Calcule l'allocation optimale de Markowitz et le critère de Kelly continu multi-scénarios.
+ * RÈGLE ABSOLUE AGENTS.md & JEU RESPONSABLE :
+ * Les loteries sont à espérance négative (E[R] <= 0). Aucun avantage positif n'est fabriqué artificiellement.
+ * Si le modèle n'a pas de preuve empirique out-of-fold (λ = 0), Kelly = 0 et aucune mise d'argent n'est recommandée.
  */
 export function computeMarkowitzKellyPortfolio(params: {
   scenarios: PlatinumScenario[];
-  totalBankroll: number;
-  riskAversion?: number; // gamma continu, défaut calculé sur la volatilité
+  totalBankroll?: number;
+  riskAversion?: number;
   unitBet?: number;
+  empiricalSkillShrinkage?: number;
+  empiricalLift?: number;
 }): MarkowitzPortfolioReport {
-  const { scenarios, totalBankroll, unitBet = 200 } = params;
+  const {
+    scenarios,
+    totalBankroll = 50000,
+    unitBet = 200,
+    empiricalSkillShrinkage = 0.0,
+    empiricalLift = 1.0,
+  } = params;
   const K = scenarios.length;
 
   if (K === 0) {
@@ -113,32 +131,44 @@ export function computeMarkowitzKellyPortfolio(params: {
       portfolioSharpeRatio: 0,
       globalKellyLeverage: 0,
       totalBudgetDistributed: 0,
+      responsibleGamingNotice: RESPONSIBLE_GAMING_NOTICE,
+      hasProvenEdge: false,
     };
   }
 
-  // 1. Estimation des probabilités de succès et rendements espérés par scénario
-  // p_i dérivé continûment de l'indice de densité relative
+  // 1. Estimation rigoureuse des probabilités théoriques exactes (Hypergéométrique 5/90)
+  // P(X >= 2) = (C(5,2)*C(85,3) + C(5,3)*C(85,2) + C(5,4)*C(85,1) + C(5,5)*C(85,0)) / C(90,5)
+  // = (10*98770 + 10*3570 + 5*85 + 1) / 43949268 = 1023826 / 43949268 ≈ 0.0232956
+  const theoreticalNullP = 1023826 / 43949268;
+
+  // Taux de retour joueur commercial moyen (RTP ~ 55% sur la table de gains 5/90)
+  const baseCommercialRtp = 0.55;
+  const nominalOddsB = baseCommercialRtp / theoreticalNullP; // Cotes commerciales réalistes (~23.6x)
+
   const expectedReturns = new Float64Array(K);
   const probabilities = new Float64Array(K);
-  // Probabilité théorique équitable de faire au moins 2 bons numéros sur 5/90 (~0.0224)
-  const theoreticalNullP = (10 * 98770) / 43949268;
-  // Multiplicateur net moyen de gain pour 2 bons numéros (environ 2.4x le montant misé)
-  const avgOdds = 1.0 / theoreticalNullP;
-  const netOddsB = Math.max(1.0, avgOdds - 1.0);
+
+  // Modulation uniquement si preuve empirique hors échantillon avérée (λ > 0)
+  const hasProvenEdge = empiricalSkillShrinkage > 0.02 && empiricalLift > (1.0 / baseCommercialRtp);
 
   for (let i = 0; i < K; i++) {
     const scen = scenarios[i];
-    // Densité relative normalisée ∈ [0, 1]
-    const relativeNorm = scen.relativeIndex / 100.0;
-    // Probabilité bayésienne continue lissée par la densité relative
-    const p = theoreticalNullP * (0.8 + 0.4 * relativeNorm);
+    // Densité relative normalisée ∈ [0, 1] par rapport au centroïde des scénarios
+    const relativeNorm = (scen.relativeIndex || 50) / 100.0;
+    
+    // Si λ > 0, on module la probabilité par le lift mesuré hors échantillon et l'écart relatif
+    // Si λ = 0 (bruit pur / non prouvé), probabilité = theoreticalNullP exacte (E[R] <= 0)
+    const liftFactor = hasProvenEdge ? Math.max(1.0, 1.0 + empiricalSkillShrinkage * (empiricalLift - 1.0)) : 1.0;
+    const edgeModulation = 1.0 + empiricalSkillShrinkage * (relativeNorm - 0.5) * 0.2;
+    const p = Math.max(1e-5, Math.min(0.5, theoreticalNullP * liftFactor * edgeModulation));
     probabilities[i] = p;
-    // Espérance de gain net par unité misée : E[R] = b*p - (1-p)
-    expectedReturns[i] = netOddsB * p - (1.0 - p);
+
+    // Espérance réelle par unité misée : E[R] = b * p - (1 - p)
+    // Sous H0 (sans edge), E[R] ≈ 0.55 - 1.0 = -0.45 (espérance strictement négative de la loterie)
+    expectedReturns[i] = (nominalOddsB * p) - (1.0 - p);
   }
 
-  // 2. Construction de la matrice de covariance empirique continue K x K
-  // Cov(s_i, s_j) = (overlap(s_i, s_j) / 5) * sqrt(Var_i * Var_j)
+  // 2. Construction de la matrice de covariance continue K x K basée sur le chevauchement des combinaisons
   const covMatrix: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));
   let traceSum = 0;
 
@@ -161,63 +191,57 @@ export function computeMarkowitzKellyPortfolio(params: {
         });
         const lenA = Math.max(1, numsA.length);
         const lenB = Math.max(1, numsB.length);
-        const overlapRatio = intersection / Math.sqrt(lenA * lenB); // ∈ [0, 1]
+        const overlapRatio = intersection / Math.sqrt(lenA * lenB);
         const pB = probabilities[j];
         const varB = Math.max(1e-4, pB * (1.0 - pB));
-        // Covariance proportionnelle au chevauchement stochastique
         covMatrix[i][j] = overlapRatio * Math.sqrt(varA * varB);
       }
     }
   }
 
-  // 3. Régularisation continue de Tikhonov (dérivée de la trace moyenne / SNR)
+  // 3. Régularisation continue de Tikhonov
   const avgVariance = traceSum / K;
   const tikhonovLambda = Math.max(1e-6, avgVariance * 0.1);
   const invCov = invertRegularizedCovariance(covMatrix, tikhonovLambda);
 
-  // 4. Vecteur de Kelly multi-actifs non contraint : f* = Σ^-1 * R
-  const unconstrainedKelly = new Float64Array(K);
+  // 4. Vecteur de Markowitz (Portefeuille à Variance Minimale & Diversification Maximale)
+  // On minimise w^T Σ w sous contrainte sum(w) = 1 : w_mvp = Σ^-1 * 1 / (1^T Σ^-1 1)
+  const onesInvCov = new Float64Array(K);
+  let onesSum = 0;
   for (let i = 0; i < K; i++) {
-    let sum = 0;
+    let rowSum = 0;
     for (let j = 0; j < K; j++) {
-      sum += invCov[i][j] * expectedReturns[j];
+      rowSum += invCov[i][j];
     }
-    unconstrainedKelly[i] = sum;
-  }
-
-  // 5. Projection continue sur le simplexe de Markowitz via Softmax tempérée (Zéro seuil binaire)
-  // Température thermodynamique dérivée de l'écart-type des rendements
-  let meanKelly = 0;
-  for (let i = 0; i < K; i++) meanKelly += unconstrainedKelly[i];
-  meanKelly /= K;
-
-  let varKelly = 0;
-  for (let i = 0; i < K; i++) varKelly += Math.pow(unconstrainedKelly[i] - meanKelly, 2);
-  const stdKelly = Math.sqrt(varKelly / K) + 1e-4;
-
-  const temperature = Math.max(0.1, stdKelly * 2.0);
-  const expWeights = new Float64Array(K);
-  let expSum = 0;
-
-  for (let i = 0; i < K; i++) {
-    const z = (unconstrainedKelly[i] - meanKelly) / temperature;
-    const e = Math.exp(Math.min(20.0, Math.max(-20.0, z)));
-    expWeights[i] = e;
-    expSum += e;
+    onesInvCov[i] = rowSum;
+    onesSum += rowSum;
   }
 
   const markowitzWeights = new Float64Array(K);
+  // Normalisation sur le simplexe unitaire positif via Softmax de variance minimale
+  let expSum = 0;
+  const tempScores = new Float64Array(K);
   for (let i = 0; i < K; i++) {
-    markowitzWeights[i] = expWeights[i] / (expSum || 1.0);
+    // Score proportionnel à l'inverse de la variance marginale
+    const val = onesSum !== 0 ? onesInvCov[i] / onesSum : 1.0 / K;
+    tempScores[i] = val;
+  }
+  const meanMvp = tempScores.reduce((a, b) => a + b, 0) / K;
+  for (let i = 0; i < K; i++) {
+    const e = Math.exp(Math.max(-10, Math.min(10, (tempScores[i] - meanMvp) * 5.0)));
+    markowitzWeights[i] = e;
+    expSum += e;
+  }
+  for (let i = 0; i < K; i++) {
+    markowitzWeights[i] /= (expSum || 1.0);
   }
 
-  // 6. Calcul des métriques globales du portefeuille
+  // 5. Calcul des métriques globales du portefeuille
   let portExpectedReturn = 0;
   for (let i = 0; i < K; i++) {
     portExpectedReturn += markowitzWeights[i] * expectedReturns[i];
   }
 
-  // Variance globale w^T Σ w
   let portVariance = 0;
   for (let i = 0; i < K; i++) {
     for (let j = 0; j < K; j++) {
@@ -227,13 +251,17 @@ export function computeMarkowitzKellyPortfolio(params: {
   const portVolatility = Math.sqrt(Math.max(1e-8, portVariance));
   const portSharpe = portVolatility > 0 ? portExpectedReturn / portVolatility : 0;
 
-  // Fraction de Kelly globale fractionnaire continue (amortissement par la volatilité)
-  const unconstrainedGlobalKelly = Math.max(0.01, Math.min(1.0, portExpectedReturn / (portVariance + 1e-6)));
-  // Amortissement continu demi-Kelly pour protection contre la ruine stochastique
-  const globalKellyLeverage = parseFloat((unconstrainedGlobalKelly * 0.5).toFixed(3));
+  // 6. Critère de Kelly mathématiquement strict :
+  // Levier f* = E[R] / b. Si E[R] <= 0 (jeu défavorable sans avantage prouvé), f* = 0 STRICTEMENT.
+  let globalKellyLeverage = 0.0;
+  if (hasProvenEdge && portExpectedReturn > 0) {
+    const unconstrained = Math.min(0.10, portExpectedReturn / nominalOddsB);
+    globalKellyLeverage = parseFloat((unconstrained * 0.5).toFixed(3)); // Demi-Kelly prudent
+  }
 
-  // Budget global alloué au panier de scénarios
-  const totalAllocatedBudget = Math.min(totalBankroll * globalKellyLeverage, totalBankroll * 0.15); // Max 15% du capital
+  const totalAllocatedBudget = globalKellyLeverage > 0
+    ? Math.min(totalBankroll * globalKellyLeverage, totalBankroll * 0.10)
+    : 0;
 
   // 7. Allocation finale par scénario
   const allocations: ScenarioAllocation[] = [];
@@ -243,15 +271,16 @@ export function computeMarkowitzKellyPortfolio(params: {
     const s = scenarios[i];
     const w = markowitzWeights[i];
     const rawBudget = totalAllocatedBudget * w;
-    // Arrondi au multiple le plus proche de unitBet (minimum unitBet si poids significatif)
-    const budgetRounded = Math.max(0, Math.round(rawBudget / unitBet) * unitBet);
+    const budgetRounded = totalAllocatedBudget > 0
+      ? Math.max(unitBet, Math.round(rawBudget / unitBet) * unitBet)
+      : 0;
     budgetSum += budgetRounded;
 
     allocations.push({
       id: s.id,
       name: s.name,
       color: s.color,
-      rawKellyFraction: parseFloat(unconstrainedKelly[i].toFixed(4)),
+      rawKellyFraction: globalKellyLeverage > 0 ? parseFloat((globalKellyLeverage * w).toFixed(4)) : 0.0,
       markowitzWeight: parseFloat(w.toFixed(4)),
       allocatedBudget: budgetRounded,
       expectedReturn: parseFloat(expectedReturns[i].toFixed(4)),
@@ -267,5 +296,8 @@ export function computeMarkowitzKellyPortfolio(params: {
     portfolioSharpeRatio: parseFloat(portSharpe.toFixed(3)),
     globalKellyLeverage,
     totalBudgetDistributed: budgetSum,
+    responsibleGamingNotice: RESPONSIBLE_GAMING_NOTICE,
+    hasProvenEdge,
   };
 }
+

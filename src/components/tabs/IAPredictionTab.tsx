@@ -99,6 +99,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
   const useCloudEngine = useNexusStore((state) => state.useCloudEngine);
   const setUseCloudEngine = useNexusStore((state) => state.setUseCloudEngine);
+  const forcedOutsiderCount = useNexusStore((state) => state.forcedOutsiderCount);
+  const setForcedOutsiderCount = useNexusStore((state) => state.setForcedOutsiderCount);
 
   // Switch between 'inference' (direct mode), 'backtest' (retrospective audit) and 'audit_log' (local journal)
   const [activeMode, setActiveMode] = useState<
@@ -286,17 +288,9 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         : 0;
 
       const engineType: "local" | "cloud" =
-        item.engineType ||
-        item.prediction?.engineType ||
-        (item.prediction?.isLocalFallback
-          ? "local"
-          : item.prediction?.aiRationale ||
-              item.prediction?.aiStrategicAdvice ||
-              (item.prediction?.mathModelSummary &&
-                (item.prediction.mathModelSummary.includes("Cloud") ||
-                  item.prediction.mathModelSummary.includes("Gemini")))
-            ? "cloud"
-            : "local");
+        item.engineType === "cloud" || item.prediction?.engineType === "cloud"
+          ? "cloud"
+          : "local";
 
       return {
         item,
@@ -457,7 +451,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   // Continuous Parameters for deterministic control
   const [skipTraining, setSkipTraining] = useState<boolean>(false); // default to false (enable active learning)
   const [adversarialMode, setAdversarialMode] = useState<boolean>(false); // default to false
-  const [forcedOutsiderCount, setForcedOutsiderCount] = useState<number>(2); // default to 2 outsidery candidates
 
   // State for Inférence Directe
   const [loading, setLoading] = useState(false);
@@ -526,9 +519,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     const hDiff = hurst - 0.5;
     const eDiff = entropy - 3.0;
 
-    const persistenceProb = 1.0 / (1.0 + Math.exp(-35.0 * hDiff));
+    // Pente continue tempérée (AGENTS.md : pas de bifurcation abrupte)
+    const persistenceProb = 1.0 / (1.0 + Math.exp(-6.0 * hDiff));
     const antipersistenceProb = 1.0 - persistenceProb;
-    const neutralityProb = Math.exp(-150.0 * Math.pow(hDiff, 2)); // Cloche gaussienne centrée sur 0
+    const neutralityProb = Math.exp(-18.0 * Math.pow(hDiff, 2)); // Cloche gaussienne continue
 
     let rationale = `[CONVERGENCE CYBERNÉTIQUE LOCALE] L'analyse du tirage ${drawName} (Régime: ${regime}) montre un exposant de Hurst de ${hurst.toFixed(4)} et une entropie de ${entropy.toFixed(4)}. `;
 
@@ -539,9 +533,9 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       rationale += `Le paysage d'inférence est dominé par une composante de ${(persistenceProb * 100).toFixed(1)}% de stabilité d'inertie persistante et ${(antipersistenceProb * 100).toFixed(1)}% de transition stochastique. `;
     }
 
-    const chaosProb = 1.0 / (1.0 + Math.exp(-20.0 * eDiff));
+    const chaosProb = 1.0 / (1.0 + Math.exp(-4.0 * eDiff));
     const orderProb = 1.0 - chaosProb;
-    const eNeutralityProb = Math.exp(-50.0 * Math.pow(eDiff, 2));
+    const eNeutralityProb = Math.exp(-10.0 * Math.pow(eDiff, 2));
 
     if (eNeutralityProb > 0.6) {
       rationale += `L'entropie se maintient à un équilibre thermodynamique stable. `;
@@ -683,8 +677,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           predictionData.analysis ||
           "Inférence hybride complétée à partir de la matrice d'alignement.",
         mathModelSummary: isLocalFallback
-          ? "Inférence IA • Secours Local (Cloud Non Configuré)"
-          : "Inférence Cloud IA • Oracle Gemini Pro + Supabase Edge Engine",
+          ? "Inférence Locale Neuro-Vectorielle HPC (Rust / WASM)"
+          : "Inférence Cloud IA • Oracle Gemini + Supabase Edge Engine",
         xapExp: predictionData.xapExp,
         realityAlignment: predictionData.realityAlignment,
         adversarialApplied: predictionData.adversarialApplied,
@@ -1070,14 +1064,16 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wider text-fuchsia-400 block">
-                      Moteur Cloud IA
+                      {useCloudEngine ? "Moteur Cloud IA" : "Moteur Neuro-Vectoriel HPC"}
                     </span>
                     <span className="px-1.5 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 text-[8px] font-black uppercase border border-fuchsia-500/30">
-                      Gemini Pro + Edge
+                      {useCloudEngine ? "Gemini Cloud" : "Inférence Native"}
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-400 block leading-normal">
-                    Délègue l'inférence neuronale et le raisonnement sémantique aux serveurs Cloud haute performance.
+                    {useCloudEngine
+                      ? "Délègue l'inférence neuronale et le raisonnement sémantique aux serveurs Cloud haute performance."
+                      : "Exécution déterministe haute fidélité en local via le moteur vectoriel et les 25 canaux stochastiques."}
                   </span>
                 </div>
               </div>

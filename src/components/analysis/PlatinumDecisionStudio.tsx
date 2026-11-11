@@ -38,6 +38,7 @@ import {
   generateLonaciTicketReference,
 } from "../../services/lonaciReceiptPdfService";
 import { LonaciReceiptModal } from "./LonaciReceiptModal";
+import { RESPONSIBLE_GAMING_NOTICE } from "../../services/prediction/markowitzKellyPortfolioService";
 
 interface PlatinumDecisionStudioProps {
   result: PlatinumResult;
@@ -135,11 +136,15 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
     return { ticket, relativeIndex, dominantName };
   }, [scenarioA, scenarioB, morphAlpha]);
 
-  // Kelly Optimal Allocation (Base Tirage Unique)
+  // Kelly Optimal Allocation (Base Tirage Unique - AGENTS.md : Zéro avantage fabriqué)
   const kellyMetrics = useMemo(() => {
-    const portfolioKelly = result.markowitzPortfolio?.globalKellyLeverage ?? 0.05;
-    const optimalFraction = Math.min(0.20, Math.max(0.01, portfolioKelly));
-    const recommendedStake = Math.max(100, Math.round((bankroll * optimalFraction) / 100) * 100);
+    const portfolioKelly = result.markowitzPortfolio?.globalKellyLeverage ?? 0.0;
+    const hasProvenEdge = result.markowitzPortfolio?.hasProvenEdge ?? false;
+    // Si aucun avantage hors échantillon n'est prouvé (E[R] <= 0), le critère de Kelly est STRICTEMENT 0
+    const optimalFraction = hasProvenEdge ? Math.min(0.20, Math.max(0.0, portfolioKelly)) : 0.0;
+    const recommendedStake = optimalFraction > 0
+      ? Math.max(100, Math.round((bankroll * optimalFraction) / 100) * 100)
+      : 0;
 
     // Cote officielle LONACI
     const payoutTable = LOTO_PAYOUTS[gameMode];
@@ -167,16 +172,16 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
       label,
       potentialGain,
       expectedValue,
+      hasProvenEdge,
     };
   }, [bankroll, betType, gameMode, result.markowitzPortfolio]);
 
   // Modélisation Mathématique de la Rafale Multi-Tirages (ZÉRO NOMBRE MAGIQUE — AGENTS.md)
   const burstCalculations = useMemo(() => {
     const drawsCount = Math.max(1, selectedBurstDraws.length);
-    const totalBurstBudget = Math.max(
-      100 * drawsCount,
-      Math.round((bankroll * kellyMetrics.optimalFraction) / 100) * 100
-    );
+    const totalBurstBudget = kellyMetrics.hasProvenEdge
+      ? Math.max(100 * drawsCount, Math.round((bankroll * kellyMetrics.optimalFraction) / 100) * 100)
+      : 0;
 
     // Shannon entropy normalisée issue des allocations du portefeuille ou 0.65 continu
     let entropy = 0.65;
@@ -218,7 +223,9 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
       // Stratégie 3 : Martingale régulée par Kelly (Fractional Recovery avec plafond de ruine)
       // Base calibrée pour absorber les pertes cumulées
       let cumLoss = 0;
-      const baseStake = Math.max(100, Math.round((totalBurstBudget / (drawsCount * 1.8)) / 100) * 100);
+      const baseStake = totalBurstBudget > 0
+        ? Math.max(100, Math.round((totalBurstBudget / (drawsCount * 1.8)) / 100) * 100)
+        : 0;
       const ceiling = Math.round(bankroll * 0.15); // Plafond maximal de sécurité
 
       for (let i = 0; i < drawsCount; i++) {
@@ -227,7 +234,9 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
           cumLoss += baseStake;
         } else {
           const needed = (cumLoss + baseStake) / (kellyMetrics.odds - 1);
-          const stake = Math.min(ceiling, Math.max(baseStake, Math.round(needed / 100) * 100));
+          const stake = baseStake > 0
+            ? Math.min(ceiling, Math.max(baseStake, Math.round(needed / 100) * 100))
+            : 0;
           weights.push(stake);
           cumLoss += stake;
         }
@@ -243,7 +252,9 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
       if (burstStrategy === "MARTINGALE") {
         stake = weights[i];
       } else {
-        stake = Math.max(100, Math.round((totalBurstBudget * weights[i]) / 100) * 100);
+        stake = totalBurstBudget > 0
+          ? Math.max(100, Math.round((totalBurstBudget * weights[i]) / 100) * 100)
+          : 0;
       }
       const potentialWin = stake * kellyMetrics.odds;
       totalStakeSum += stake;
@@ -267,7 +278,7 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
       drawsCount,
       averageStake: Math.round(totalStakeSum / drawsCount),
     };
-  }, [selectedBurstDraws, bankroll, kellyMetrics.optimalFraction, kellyMetrics.odds, burstStrategy, result.markowitzPortfolio]);
+  }, [selectedBurstDraws, bankroll, kellyMetrics.optimalFraction, kellyMetrics.odds, kellyMetrics.hasProvenEdge, burstStrategy, result.markowitzPortfolio]);
 
   const activeTicketNumbers = morphedResult?.ticket || scenarioA?.numbers || [];
 
@@ -315,6 +326,10 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
   const handleRecordExpense = async () => {
     try {
       audioEngine.play("click");
+      if (!kellyMetrics.hasProvenEdge || kellyMetrics.recommendedStake === 0) {
+        showToast("Simulation théorique : Aucune mise d'argent n'est enregistrée car E[R] ≤ 0 (Critère de Kelly = 0%).", "info");
+        return;
+      }
       if (playMode === "SINGLE") {
         recordBetExpense({
           amount: kellyMetrics.recommendedStake,
@@ -888,15 +903,30 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
               </div>
             </div>
 
+            {/* Avertissement Jeu Responsable & Invariance E[R] <= 0 (AGENTS.md) */}
+            {!kellyMetrics.hasProvenEdge && (
+              <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-3.5 space-y-1.5 text-xs text-amber-200">
+                <div className="flex items-center gap-2 font-bold text-amber-300">
+                  <ShieldCheck size={16} className="text-amber-400 shrink-0" />
+                  <span>Jeu Responsable : Avantage Statistique Non Prouvé (E[R] ≤ 0)</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  En l'absence de preuve empirique hors-échantillon (λ = 0), le critère mathématique de Kelly prescrit une mise monétaire de <strong>0 FCFA</strong>. Les pondérations de Markowitz constituent uniquement une diversification géométrique théorique du risque entre les scénarios.
+                </p>
+              </div>
+            )}
+
             {/* Métriques de Risque & Rendement */}
             <div className="grid grid-cols-2 gap-3 pt-2 font-mono">
               <div className="bg-slate-950/60 p-3.5 rounded-2xl border border-white/5 space-y-1">
                 <span className="text-[9px] text-slate-400 block uppercase">Mise Recommandée (Tirage)</span>
-                <span className="text-lg font-black text-emerald-400">
+                <span className={`text-lg font-black ${kellyMetrics.recommendedStake > 0 ? "text-emerald-400" : "text-slate-400"}`}>
                   {kellyMetrics.recommendedStake.toLocaleString()} FCFA
                 </span>
                 <span className="text-[9px] text-slate-500 block">
-                  {(kellyMetrics.optimalFraction * 100).toFixed(1)}% du capital
+                  {kellyMetrics.recommendedStake > 0
+                    ? `${(kellyMetrics.optimalFraction * 100).toFixed(1)}% du capital`
+                    : "0.0% (Mise monétaire déconseillée)"}
                 </span>
               </div>
 

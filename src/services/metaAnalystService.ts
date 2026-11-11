@@ -110,40 +110,42 @@ const computeVectorEntropy = (vector: Float64Array): number => {
 const greedyDeterministicSelection = (
     vector: Float64Array,
     count: number,
-    phaseShift: number = 0.0,
+    scenarioOffset: number = 0,
     entropy: number = 0.5
 ): number[] => {
-    const candidates: { n: number; score: number; raw: number }[] = [];
-    
-    // Paramètres d'exploration dynamique continûment dérivés de l'entropie de Shannon
-    const dynamicAmp = 0.05 + 0.20 * entropy;
-    const dynamicFreq = (2.0 * Math.PI / MAX_NUM) * (1.0 + 0.5 * entropy);
+    const candidates: { n: number; score: number }[] = [];
     
     for (let i = 1; i <= MAX_NUM; i++) {
         const rawScore = vector[i];
         if (rawScore > 0) {
-            const harmonic = Math.sin(i * dynamicFreq + phaseShift);
-            const modulation = 1.0 + dynamicAmp * harmonic;
-            const adjustedScore = rawScore * modulation;
-            candidates.push({ n: i, score: adjustedScore, raw: rawScore });
+            candidates.push({ n: i, score: rawScore });
         }
     }
     
-    // Tri déterministe avec multi-niveaux de tie-breaking sans aléatoire
+    // Tri déterministe par score décroissant avec bris d'égalité LCG invariant (AGENTS.md)
     candidates.sort((a, b) => {
         if (Math.abs(b.score - a.score) > 1e-6) {
             return b.score - a.score;
         }
-        if (Math.abs(b.raw - a.raw) > 1e-6) {
-            return b.raw - a.raw;
-        }
-        // Hachage LCG déterministe invariant
         const hashA = (a.n * 2654435761) >>> 0;
         const hashB = (b.n * 2654435761) >>> 0;
         return hashB - hashA;
     });
+
+    // Dérivation continue de l'espacement orbital dérivé de l'entropie de Shannon (Zéro nombre magique)
+    const stride = Math.max(1, Math.round(1.0 + entropy * 1.5));
+    const startIdx = Math.min(Math.max(0, candidates.length - count), Math.max(0, Math.floor(scenarioOffset * stride)));
+    const picked: number[] = [];
     
-    return candidates.slice(0, count).map(c => c.n).sort((a, b) => a - b);
+    for (let idx = startIdx; idx < candidates.length && picked.length < count; idx++) {
+        picked.push(candidates[idx].n);
+    }
+    // Complétion si nécessaire par les meilleurs candidats non encore sélectionnés
+    for (let idx = 0; idx < candidates.length && picked.length < count; idx++) {
+        if (!picked.includes(candidates[idx].n)) picked.push(candidates[idx].n);
+    }
+    
+    return picked.slice(0, count).sort((a, b) => a - b);
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -287,7 +289,7 @@ export async function generatePlatinumPredictionCore(
     for (let i = 1; i <= MAX_NUM; i++) {
         let sumVal = 0;
         allAlgoKeys.forEach((k) => {
-          const w = weights[k] ?? 1.0;
+          const w = weights[k] ?? 0.0;
           if (w > 0) {
             sumVal += stdVectors[k][i] * w;
           }
@@ -351,7 +353,7 @@ export async function generatePlatinumPredictionCore(
             if (n >= 1 && n <= MAX_NUM) consensusVector[n] += maxRawSum * safeExp(-idx / (masterPred.candidates.length || 1));
         });
         for (let i = 1; i <= MAX_NUM; i++) {
-            if (consensusVector[i] === 0) consensusVector[i] = 1.0 + Math.abs(Math.sin((i * Math.PI) / MAX_NUM));
+            if (consensusVector[i] === 0) consensusVector[i] = 1.0;
         }
     }
 
@@ -460,7 +462,7 @@ export async function generatePlatinumPredictionCore(
         alphaVector[i] = (normalizedVector[i] * 0.4) + ((mrrPriors + 2.0) * 0.3 * (1.0 + dnaAffScore * 0.5));
     }
     const normAlpha = normalizeVector(alphaVector);
-    const alphaNumbers = greedyDeterministicSelection(normAlpha, DRAW_SIZE, 0.0, entropyScore);
+    const alphaNumbers = greedyDeterministicSelection(normAlpha, DRAW_SIZE, 0, entropyScore);
     const alphaIndex = computeScenarioIndex(alphaNumbers, normAlpha);
     scenarioDrafts.push({
         id: 'alpha',
@@ -483,8 +485,7 @@ export async function generatePlatinumPredictionCore(
         betaVector[i] = (normalizedVector[i] * 0.6) + ((stdSpectral[i] + 2.0) * 0.4);
     }
     const normBeta = normalizeVector(betaVector);
-    const betaPhase = (Math.PI / 4.0) * freqPhase;
-    const betaNumbers = greedyDeterministicSelection(normBeta, DRAW_SIZE, betaPhase, entropyScore);
+    const betaNumbers = greedyDeterministicSelection(normBeta, DRAW_SIZE, 1, entropyScore);
     const betaIndex = computeScenarioIndex(betaNumbers, normBeta);
     scenarioDrafts.push({
         id: 'beta',
@@ -508,8 +509,7 @@ export async function generatePlatinumPredictionCore(
         gammaVector[i] = (normalizedVector[i] * (1.0 - gammaRatio) * 0.4) + (momentumComp * 0.3) + (sieveAccComp * 0.3);
     }
     const normGamma = normalizeVector(gammaVector);
-    const gammaPhase = (Math.PI / 2.0) * freqPhase;
-    const gammaNumbers = greedyDeterministicSelection(normGamma, DRAW_SIZE, gammaPhase, entropyScore);
+    const gammaNumbers = greedyDeterministicSelection(normGamma, DRAW_SIZE, 2, entropyScore);
     const gammaIndex = computeScenarioIndex(gammaNumbers, normGamma);
     scenarioDrafts.push({
         id: 'gamma',
@@ -532,8 +532,7 @@ export async function generatePlatinumPredictionCore(
         deltaVector[i] = (normalizedVector[i] * (1.0 - deltaRatio)) + (normalizedGap[i] * deltaRatio);
     }
     const normDelta = normalizeVector(deltaVector);
-    const deltaPhase = (3.0 * Math.PI / 4.0) * freqPhase;
-    const deltaNumbers = greedyDeterministicSelection(normDelta, DRAW_SIZE, deltaPhase, entropyScore);
+    const deltaNumbers = greedyDeterministicSelection(normDelta, DRAW_SIZE, 3, entropyScore);
     const deltaIndex = computeScenarioIndex(deltaNumbers, normDelta);
     scenarioDrafts.push({
         id: 'delta',
@@ -584,8 +583,8 @@ export async function generatePlatinumPredictionCore(
                 const driftScore = drift.driftScore || 0;
                 const driftActivation = sigmoid(0.2 * (driftScore - 15.0));
                 for (let i = 1; i <= MAX_NUM; i++) {
-                    const deterministicNoise = 4.0 * (1.0 + Math.sin(driftScore * i));
-                    const correction = driftActivation * deterministicNoise * recencyWeight * gain;
+                    const deterministicGain = (1.0 + sigmoid(driftScore - 10.0));
+                    const correction = driftActivation * deterministicGain * recencyWeight * gain;
                     if (drift.direction === 'underestimating') epsilonVector[i] += correction;
                     else if (drift.direction === 'overestimating') epsilonVector[i] -= correction * 0.5;
                 }
@@ -596,8 +595,7 @@ export async function generatePlatinumPredictionCore(
     }
 
     const normEpsilon = normalizeVector(epsilonVector);
-    const epsilonPhase = Math.PI * freqPhase;
-    const epsilonNumbers = greedyDeterministicSelection(normEpsilon, DRAW_SIZE, epsilonPhase, entropyScore);
+    const epsilonNumbers = greedyDeterministicSelection(normEpsilon, DRAW_SIZE, 4, entropyScore);
     const epsilonIndex = computeScenarioIndex(epsilonNumbers, normEpsilon);
     scenarioDrafts.push({
         id: 'epsilon',
@@ -649,8 +647,7 @@ export async function generatePlatinumPredictionCore(
     }
 
     const normZeta = normalizeVector(zetaVector);
-    const zetaPhase = (7.0 * Math.PI / 4.0) * freqPhase; // Phase anti-symétrique orthogonale
-    const zetaNumbers = greedyDeterministicSelection(normZeta, DRAW_SIZE, zetaPhase, entropyScore);
+    const zetaNumbers = greedyDeterministicSelection(normZeta, DRAW_SIZE, 5, entropyScore);
     const zetaIndex = computeScenarioIndex(zetaNumbers, normZeta);
     scenarioDrafts.push({
         id: 'zeta',
@@ -668,7 +665,10 @@ export async function generatePlatinumPredictionCore(
 
     // 7. COHÉRENCE GLOBALE ET FINALISATION
     onProgress?.(95, "Calcul de la cohérence et finalisation...");
+    const skillShrinkage = masterPred?.empiricalSkill?.shrinkage ?? 0;
+    const empiricalLift = masterPred?.empiricalSkill?.liftVsUniform ?? 1.0;
     const coherence = Math.round((1.0 - entropyScore) * 100);
+    const confidence = masterPred?.confidence ?? Math.round((5.0 / 90.0) * 100);
 
     // Remplissage sécurisé déterministe si un scénario est incomplet
     const defaultNumbers = masterPred?.suggestedNumbers || [];
@@ -687,13 +687,11 @@ export async function generatePlatinumPredictionCore(
         }
     });
 
-    // Bandes de risque RELATIVES : terciles des indices mesurés (aucun seuil absolu).
-    const sortedIndices = scenarioDrafts.map(s => s.relativeIndex).sort((a, b) => a - b);
-    const lowerBand = sortedIndices[Math.floor(sortedIndices.length / 3)];
-    const upperBand = sortedIndices[Math.floor((2 * sortedIndices.length) / 3)];
-    const scenarios: PlatinumScenario[] = scenarioDrafts.map(s => ({
+    // Tri des scénarios par indice relatif décroissant pour assignation de terciles de risque ordonnés (2 LOW, 2 MEDIUM, 2 HIGH)
+    scenarioDrafts.sort((a, b) => b.relativeIndex - a.relativeIndex);
+    const scenarios: PlatinumScenario[] = scenarioDrafts.map((s, idx) => ({
         ...s,
-        risk: s.relativeIndex >= upperBand ? 'LOW' : s.relativeIndex >= lowerBand ? 'MEDIUM' : 'HIGH'
+        risk: (idx < 2 ? 'LOW' : idx < 4 ? 'MEDIUM' : 'HIGH') as 'LOW' | 'MEDIUM' | 'HIGH'
     }));
 
     // Calcul de la concordance moyenne de l'ADN
@@ -701,19 +699,21 @@ export async function generatePlatinumPredictionCore(
     for (let i = 1; i <= MAX_NUM; i++) sumDnaAff += dnaAffinity[i] ?? 50;
     const dnaConcordanceMean = Math.round(sumDnaAff / MAX_NUM);
 
-    // ID Déterministe
+    // ID Déterministe invariant (ZÉRO Date.now() pour reproductibilité stricte)
     const seed = `${drawName}_${entropyScore.toFixed(4)}_${scenarios.map(s => s.numbers.join(',')).join('|')}`;
     let hashVal = 0;
     for (let i = 0; i < seed.length; i++) {
         hashVal = (hashVal << 5) - hashVal + seed.charCodeAt(i);
         hashVal |= 0;
     }
-    const deterministicId = `platinum_pred_${Math.abs(hashVal)}_${Date.now()}`;
+    const deterministicId = `platinum_pred_${Math.abs(hashVal).toString(16)}_${history[0]?.id || 'root'}`;
 
-    // Optimisation de Portefeuille Markowitz & Critère de Kelly Continu Multi-Scénarios
+    // Optimisation de Portefeuille Markowitz & Critère de Kelly Continu Multi-Scénarios (sans edge fabriqué)
     const markowitzPortfolio = computeMarkowitzKellyPortfolio({
         scenarios,
         totalBankroll: 50000,
+        empiricalSkillShrinkage: skillShrinkage,
+        empiricalLift,
     });
 
     onProgress?.(100, "Analyse Platinum complétée !");
@@ -722,7 +722,7 @@ export async function generatePlatinumPredictionCore(
         id: deterministicId,
         drawName,
         timestamp: Date.now(),
-        confidence: coherence,
+        confidence,
         consensusVector: Array.from(normalizedVector),
         scenarios,
         coherence,
@@ -797,6 +797,14 @@ export const performPlatinumAudit = (
         };
     });
 
+    const verdict = bestHits >= 3
+        ? "Succès Majeur (≥3)"
+        : bestHits === 2
+        ? "Alignement Supérieur au Hasard (2)"
+        : bestHits === 1
+        ? "Bruit de Fond Indiscernable (1 hit attendu à 83% au hasard)"
+        : "Divergence Complète (0)";
+
     return {
         predictionId: prediction.id,
         date: actualResult.date,
@@ -805,7 +813,7 @@ export const performPlatinumAudit = (
         bestScore: bestHits,
         syncScore: Math.round((bestHits / DRAW_SIZE) * 100),
         timelinePerformance: performances,
-        verdict: bestHits >= 3 ? "Succès Confirmé" : bestHits >= 1 ? "Signal Partiel" : "Divergence"
+        verdict
     };
 };
 

@@ -96,7 +96,11 @@ export interface InertiaBacktestResult {
   nullSuccessRate: number;
   // p-value unilatérale exacte du taux de succès (≥1 bon numéro) sous tirage équitable.
   successPValue: number | null;
+  // p-value corrigée par Bonferroni selon le nombre d'hypothèses de damping testées
+  bonferroniCorrectedPValue?: number | null;
   empiricalGain: number;
+  holdoutTrials?: number;
+  holdoutHitsAvg?: number;
 }
 
 /**
@@ -580,7 +584,8 @@ export const runDeterministicInertiaBacktest = async (
   history: any[],
   drawName: string,
   modifiers: InertiaCalibrationModifiers,
-  hurstExponent: number = 0.5
+  hurstExponent: number = 0.5,
+  maxTrials: number = 10
 ): Promise<InertiaBacktestResult> => {
   const cleanHistory = drawName ? purifyHistoryForDraw(drawName, history) : history;
   const minRequired = 12;
@@ -588,7 +593,7 @@ export const runDeterministicInertiaBacktest = async (
     throw new Error(`Historique insuffisant pour le rétro-audit (min. ${minRequired} tirages requis).`);
   }
 
-  const trialsCount = Math.min(10, cleanHistory.length - 8);
+  const trialsCount = Math.min(maxTrials, cleanHistory.length - 8);
   const topSize = 5;
   const detailsList: any[] = [];
   let totalPrimaryHits = 0;
@@ -656,14 +661,19 @@ export const runDeterministicInertiaBacktest = async (
   let bestTotalHits = -1;
   let bestStability = -Infinity;
 
+  // Partitionnement in-sample (optimisation) vs out-of-sample (holdout de validation)
+  const inSampleCount = trialsCount >= 14 ? Math.floor(trialsCount * 0.70) : trialsCount;
+  const inSampleRecords = trialRecords.slice(0, inSampleCount);
+  const holdoutRecords = trialRecords.slice(inSampleCount);
+
   for (let i = 0; i < candidateList.length; i++) {
     const zeta = candidateList[i];
     const candidateModifiers: InertiaCalibrationModifiers = { ...modifiers, dampingRatio: zeta };
 
     let candidateHits = 0;
     let stabilitySum = 0;
-    for (let t = 0; t < trialRecords.length; t++) {
-      const rec = trialRecords[t];
+    for (let t = 0; t < inSampleRecords.length; t++) {
+      const rec = inSampleRecords[t];
       const scores = computeInertiaVectorScores(rec.sliceMetrics, candidateModifiers);
       scores.sort((a, b) => b.score - a.score);
       const top = scores.slice(0, topSize);
@@ -671,7 +681,7 @@ export const runDeterministicInertiaBacktest = async (
       stabilitySum += top.reduce((acc, x) => acc + x.score, 0) / topSize;
     }
 
-    // Objectif primaire : hits rétro-actifs. Départage continu : stabilité moyenne du top 5
+    // Objectif primaire : hits rétro-actifs in-sample. Départage continu : stabilité moyenne du top 5
     // (précision énergétique), puis écart minimal à la calibration en vigueur (moindre changement).
     const isBetter =
       candidateHits > bestTotalHits ||
@@ -684,6 +694,19 @@ export const runDeterministicInertiaBacktest = async (
       bestDamping = zeta;
       bestTotalHits = candidateHits;
       bestStability = stabilitySum;
+    }
+  }
+
+  // Évaluation out-of-sample (holdout) du meilleur amortissement retenu
+  let holdoutHits = 0;
+  if (holdoutRecords.length > 0) {
+    const bestModifiers: InertiaCalibrationModifiers = { ...modifiers, dampingRatio: bestDamping };
+    for (let t = 0; t < holdoutRecords.length; t++) {
+      const rec = holdoutRecords[t];
+      const scores = computeInertiaVectorScores(rec.sliceMetrics, bestModifiers);
+      scores.sort((a, b) => b.score - a.score);
+      const top = scores.slice(0, topSize);
+      holdoutHits += top.filter((x) => rec.winners.includes(x.num)).length;
     }
   }
 
@@ -701,6 +724,10 @@ export const runDeterministicInertiaBacktest = async (
   const pZeroHit = totalCombos > 0 ? zeroHitCombos / totalCombos : 0;
   const pAtLeastOneHit = Math.min(1, Math.max(0, 1 - pZeroHit));
   const rawPValue = binomialUpperTail(successTrialsCount, trialsCount, pAtLeastOneHit);
+  const bonferroniCorrectedPValue =
+    Number.isFinite(rawPValue) && trialsCount > 0
+      ? parseFloat(Math.min(1.0, candidateList.length * rawPValue).toFixed(4))
+      : null;
 
   return {
     trials: trialsCount,
@@ -713,7 +740,10 @@ export const runDeterministicInertiaBacktest = async (
     dampingCandidatesEvaluated: candidateList.length,
     nullSuccessRate: parseFloat((pAtLeastOneHit * 100).toFixed(2)),
     successPValue: Number.isFinite(rawPValue) && trialsCount > 0 ? parseFloat(rawPValue.toFixed(4)) : null,
+    bonferroniCorrectedPValue,
     empiricalGain: parseFloat(empiricalGain.toFixed(2)),
+    holdoutTrials: holdoutRecords.length,
+    holdoutHitsAvg: holdoutRecords.length > 0 ? parseFloat((holdoutHits / holdoutRecords.length).toFixed(2)) : undefined,
   };
 };
 
@@ -730,16 +760,30 @@ const getInertiaStorageKey = (drawName: string): string => {
   return `lotopro_inertia_calib_${sanitized}`;
 };
 
+const fallbackInertiaMemoryStore = new Map<string, string>();
+
+const getInertiaStorage = (): { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void; removeItem: (k: string) => void } => {
+  if (typeof window !== "undefined" && window.localStorage) {
+    return window.localStorage;
+  }
+  if (typeof globalThis !== "undefined" && (globalThis as any).localStorage) {
+    return (globalThis as any).localStorage;
+  }
+  return {
+    getItem: (k: string) => fallbackInertiaMemoryStore.get(k) ?? null,
+    setItem: (k: string, v: string) => fallbackInertiaMemoryStore.set(k, v),
+    removeItem: (k: string) => fallbackInertiaMemoryStore.delete(k),
+  };
+};
+
 /**
  * Récupère la calibration d'inertie persistée pour un tirage spécifique (Tirage Isolation Rule).
  */
 export const getPersistedInertiaCalibration = (drawName: string): InertiaCalibrationModifiers => {
   try {
-    if (typeof window === "undefined" || !window.localStorage) {
-      return { ...DEFAULT_INERTIA_CALIBRATION };
-    }
+    const storage = getInertiaStorage();
     const key = getInertiaStorageKey(drawName);
-    const raw = window.localStorage.getItem(key);
+    const raw = storage.getItem(key);
     if (!raw) return { ...DEFAULT_INERTIA_CALIBRATION };
     const parsed = JSON.parse(raw);
     return {
@@ -763,9 +807,9 @@ export const savePersistedInertiaCalibration = (
   modifiers: InertiaCalibrationModifiers
 ): void => {
   try {
-    if (typeof window === "undefined" || !window.localStorage) return;
+    const storage = getInertiaStorage();
     const key = getInertiaStorageKey(drawName);
-    window.localStorage.setItem(key, JSON.stringify(modifiers));
+    storage.setItem(key, JSON.stringify(modifiers));
   } catch (e) {
     console.warn(`[InertiaStorage] Erreur écriture calibration pour ${drawName}:`, e);
   }
@@ -776,9 +820,9 @@ export const savePersistedInertiaCalibration = (
  */
 export const resetPersistedInertiaCalibration = (drawName: string): void => {
   try {
-    if (typeof window === "undefined" || !window.localStorage) return;
+    const storage = getInertiaStorage();
     const key = getInertiaStorageKey(drawName);
-    window.localStorage.removeItem(key);
+    storage.removeItem(key);
   } catch (e) {
     console.warn(`[InertiaStorage] Erreur réinitialisation calibration pour ${drawName}:`, e);
   }

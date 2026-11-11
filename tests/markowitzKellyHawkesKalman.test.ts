@@ -92,16 +92,31 @@ describe('Axe 2 : Modélisation Mathématique & Algorithmique (Rigueur AGENTS.md
 
       expect(sumWeights).toBeCloseTo(1.0, 3);
       expect(report.portfolioVolatility).toBeGreaterThan(0);
-      expect(report.globalKellyLeverage).toBeGreaterThan(0);
-      expect(report.globalKellyLeverage).toBeLessThanOrEqual(1.0);
+      // Sous H0 (sans preuve empirique), le critère de Kelly est strictement 0 (E[R] <= 0)
+      expect(report.globalKellyLeverage).toBe(0);
+      expect(report.hasProvenEdge).toBe(false);
+      expect(report.totalBudgetDistributed).toBe(0);
+      expect(report.responsibleGamingNotice).toContain("AVERTISSEMENT JEU RESPONSABLE");
+
+      // Avec une preuve empirique hors échantillon (lambda > 0 et lift > 1/RTP)
+      const reportWithEdge = computeMarkowitzKellyPortfolio({
+        scenarios: mockScenarios,
+        totalBankroll: 100000,
+        unitBet: 200,
+        empiricalSkillShrinkage: 0.8,
+        empiricalLift: 2.5,
+      });
+      expect(reportWithEdge.globalKellyLeverage).toBeGreaterThan(0);
+      expect(reportWithEdge.globalKellyLeverage).toBeLessThanOrEqual(1.0);
+      expect(reportWithEdge.hasProvenEdge).toBe(true);
 
       // Vérification que les budgets alloués sont des multiples du ticket unitaire (200)
       let sumBudgets = 0;
-      report.allocations.forEach((alloc) => {
+      reportWithEdge.allocations.forEach((alloc) => {
         expect(alloc.allocatedBudget % 200).toBe(0);
         sumBudgets += alloc.allocatedBudget;
       });
-      expect(sumBudgets).toBe(report.totalBudgetDistributed);
+      expect(sumBudgets).toBe(reportWithEdge.totalBudgetDistributed);
     });
 
     it('génère une matrice de covariance semi-définie positive K x K cohérente avec les chevauchements', () => {

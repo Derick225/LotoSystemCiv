@@ -390,6 +390,12 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
     setCurrentPrediction(null);
 
     try {
+      // Les 5 numéros générés dérivent strictement des 5 meilleurs candidats harmoniques affichés (Zéro incohérence UI)
+      const ticketNumbers = metrics.topCandidates
+        .slice(0, 5)
+        .map((c) => c.number)
+        .sort((a, b) => a - b);
+
       const { generateMasterPrediction } =
         await import("../../services/prediction/predictionFacade");
       const prediction = await generateMasterPrediction(
@@ -399,8 +405,14 @@ export const OrchestrationTab: React.FC<OrchestrationTabProps> = ({
         globalWeights,
       );
 
-      setGeneratedTicket(prediction.suggestedNumbers);
-      setCurrentPrediction(prediction);
+      const harmonizedPrediction = {
+        ...prediction,
+        suggestedNumbers: ticketNumbers,
+        candidates: metrics.topCandidates.map((c) => c.number),
+      };
+
+      setGeneratedTicket(ticketNumbers);
+      setCurrentPrediction(harmonizedPrediction);
       audioEngine.play("success");
       showToast("Synthèse Harmonique terminée.", "success");
     } catch (e) {

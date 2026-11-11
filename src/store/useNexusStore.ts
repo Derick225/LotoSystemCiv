@@ -54,6 +54,9 @@ interface NexusState {
   temporalDepth: number;
   // Portée de la matrice de transition inter-tirages 90×90 (partagée entre onglets, persistée)
   interDrawMatrixScope: TransitionScope;
+  // Posture stratégique connectée aux paramètres d'inférence (Zéro paramètre décoratif)
+  activeStrategicPosture: "balance" | "safe" | "growth";
+  forcedOutsiderCount: number;
 
   // Data State
   history: DrawResult[];
@@ -99,6 +102,8 @@ interface NexusState {
   setUseSpatioTemporalHawkes: (use: boolean) => void;
   setTemporalDepth: (depth: number) => void;
   setInterDrawMatrixScope: (scope: TransitionScope) => void;
+  setStrategicPosture: (posture: "balance" | "safe" | "growth") => void;
+  setForcedOutsiderCount: (count: number) => void;
   setLastPrediction: (pred: Prediction | null) => void;
   setSmartInsights: (insights: SmartInsight[]) => void;
   setCalibration: (cal: CalibrationData | null) => void;
@@ -143,6 +148,8 @@ export const useNexusStore = create<NexusState>()(
       useCloudEngine: false,
       temporalDepth: 100,
       interDrawMatrixScope: "NETWORK",
+      activeStrategicPosture: "balance",
+      forcedOutsiderCount: 1,
 
       history: [],
       stats: [],
@@ -334,6 +341,12 @@ export const useNexusStore = create<NexusState>()(
       setTemporalDepth: (depth) => set({ temporalDepth: depth }),
       setInterDrawMatrixScope: (scope) =>
         set({ interDrawMatrixScope: scope === "IMMEDIATE" ? "IMMEDIATE" : "NETWORK" }),
+      setStrategicPosture: (posture) => {
+        const forcedOutsider = posture === "safe" ? 0 : posture === "growth" ? 2 : 1;
+        set({ activeStrategicPosture: posture, forcedOutsiderCount: forcedOutsider });
+      },
+      setForcedOutsiderCount: (count) =>
+        set({ forcedOutsiderCount: Math.max(0, Math.min(5, Math.round(count))) }),
       setLastPrediction: (pred) => set({ lastPrediction: pred }),
       setSmartInsights: (insights) => set({ smartInsights: insights }),
       setCalibration: (cal) => set({ calibration: cal }),
@@ -441,6 +454,8 @@ export const useNexusStore = create<NexusState>()(
         useCloudEngine: state.useCloudEngine,
         temporalDepth: state.temporalDepth,
         interDrawMatrixScope: state.interDrawMatrixScope,
+        activeStrategicPosture: state.activeStrategicPosture,
+        forcedOutsiderCount: state.forcedOutsiderCount,
       }),
       storage:
         typeof window !== "undefined"
@@ -475,6 +490,8 @@ export const useNexusUseCloudEngine = () => useNexusStore((s) => s.useCloudEngin
 export const useNexusUseSpatioTemporalHawkes = () => useNexusStore((s) => s.useSpatioTemporalHawkes);
 export const useNexusTemporalDepth = () => useNexusStore((s) => s.temporalDepth);
 export const useNexusInterDrawMatrixScope = () => useNexusStore((s) => s.interDrawMatrixScope);
+export const useNexusStrategicPosture = () => useNexusStore((s) => s.activeStrategicPosture);
+export const useNexusForcedOutsiderCount = () => useNexusStore((s) => s.forcedOutsiderCount);
 
 // Data selectors
 export const useNexusHistory = () => useNexusStore((s) => s.history);
@@ -516,6 +533,8 @@ export const useNexusActions = () =>
     setUseSpatioTemporalHawkes: s.setUseSpatioTemporalHawkes,
     setTemporalDepth: s.setTemporalDepth,
     setInterDrawMatrixScope: s.setInterDrawMatrixScope,
+    setStrategicPosture: s.setStrategicPosture,
+    setForcedOutsiderCount: s.setForcedOutsiderCount,
     setLastPrediction: s.setLastPrediction,
     setSmartInsights: s.setSmartInsights,
     setCalibration: s.setCalibration,

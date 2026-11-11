@@ -58,6 +58,9 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
   const lastPrediction = useNexusStore((state) => state.lastPrediction);
   const globalRegime = useNexusStore((state) => state.regime);
   const globalWeights = useNexusStore((state) => state.globalWeights);
+  const activePolicy = useNexusStore((state) => state.activeStrategicPosture);
+  const setStrategicPosture = useNexusStore((state) => state.setStrategicPosture);
+  const forcedOutsiderCount = useNexusStore((state) => state.forcedOutsiderCount);
 
   const [synthesis, setSynthesis] = useState<{
     synthesis: string;
@@ -72,9 +75,6 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
   // States for simple and precise dataset tracking
   const [reports, setReports] = useState<ForensicReport[]>([]);
   const [allReports, setAllReports] = useState<ForensicReport[]>([]);
-  const [activePolicy, setActivePolicy] = useState<
-    "balance" | "safe" | "growth"
-  >("balance");
   const [selectedMetric, setSelectedMetric] = useState<
     "entropy" | "brier"
   >("entropy");
@@ -447,7 +447,7 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                     key={p}
                     onClick={() => {
                       audioEngine.play("click");
-                      setActivePolicy(p);
+                      setStrategicPosture(p);
                     }}
                     className={`px-3 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${
                       activePolicy === p
@@ -462,6 +462,12 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                         : "Spéculatif"}
                   </button>
                 ))}
+              </div>
+              <div className="mt-2.5 flex items-center justify-between text-[10px] font-mono bg-slate-950/70 px-3 py-1.5 rounded-xl border border-white/5">
+                <span className="text-slate-400">Paramètre d'Inférence Actif :</span>
+                <span className="text-emerald-400 font-bold">
+                  {forcedOutsiderCount} outsider{forcedOutsiderCount > 1 ? "s" : ""} forcé{forcedOutsiderCount > 1 ? "s" : ""}
+                </span>
               </div>
             </div>
           </div>

@@ -296,16 +296,21 @@ export const calculateFusion = (
   // ============================================================================
   // FILTRAGE DE KALMAN TENSORIEL (FUSION MULTI-CAPTEURS PAR INVERSE-VARIANCE)
   // ============================================================================
-  // Chaque moteur (Logic, Physics, Intuition) est modélisé comme un capteur.
-  // La variance de l'historique des signaux quantifie le bruit d'observation.
+  // Chaque moteur (Logic, Physics, Intuition) est modélisé comme un capteur d'inférence.
+  // La dispersion des scores intra-vecteur (variance d'échantillon avec correction de Bessel)
+  // quantifie le bruit d'observation instantané du capteur.
   
   const medianP = getMedian(vPython.map(v => v.score));
   const medianQ = getMedian(vQuantum.map(v => v.score));
   const medianO = getMedian(vOracle.map(v => v.score));
 
-  const varP = Math.max(1.0, vPython.reduce((sum, v) => sum + Math.pow(v.score - medianP, 2), 0) / Math.max(1, vPython.length));
-  const varQ = Math.max(1.0, vQuantum.reduce((sum, v) => sum + Math.pow(v.score - medianQ, 2), 0) / Math.max(1, vQuantum.length));
-  const varO = Math.max(1.0, vOracle.reduce((sum, v) => sum + Math.pow(v.score - medianO, 2), 0) / Math.max(1, vOracle.length));
+  const besselP = Math.max(1, vPython.length - 1);
+  const besselQ = Math.max(1, vQuantum.length - 1);
+  const besselO = Math.max(1, vOracle.length - 1);
+
+  const varP = Math.max(1.0, vPython.reduce((sum, v) => sum + Math.pow(v.score - medianP, 2), 0) / besselP);
+  const varQ = Math.max(1.0, vQuantum.reduce((sum, v) => sum + Math.pow(v.score - medianQ, 2), 0) / besselQ);
+  const varO = Math.max(1.0, vOracle.reduce((sum, v) => sum + Math.pow(v.score - medianO, 2), 0) / besselO);
 
   const stdP = Math.sqrt(varP);
   const stdQ = Math.sqrt(varQ);
