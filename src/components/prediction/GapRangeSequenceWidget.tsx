@@ -252,7 +252,26 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     }
 
     const empiricalProb = totalBalls > 0 ? totalHits / totalBalls : 0;
-    const lift = empiricalProb / theoreticalProb;
+    // Rétraction bayésienne vers la référence H0 théorique selon la taille d'échantillon
+    const priorSampleSize = 20 * 5; // 20 tirages antérieurs (100 boules)
+    const shrinkageLambda = totalBalls / (totalBalls + priorSampleSize);
+    const shrunkProb =
+      shrinkageLambda * empiricalProb + (1 - shrinkageLambda) * theoreticalProb;
+    const lift = shrunkProb / theoreticalProb;
+    const stdErr = Math.sqrt(
+      (shrunkProb * (1 - shrunkProb)) / Math.max(1, totalBalls)
+    );
+    const liftCiLower = Math.max(0, (shrunkProb - 1.96 * stdErr) / theoreticalProb);
+    const liftCiUpper = (shrunkProb + 1.96 * stdErr) / theoreticalProb;
+    const zScore = stdErr > 0 ? (shrunkProb - theoreticalProb) / stdErr : 0;
+
+    const meanCandScore =
+      report.selectionSynthesis.allCandidates.length > 0
+        ? report.selectionSynthesis.allCandidates.reduce(
+            (acc, c) => acc + c.compositeScore,
+            0
+          ) / report.selectionSynthesis.allCandidates.length
+        : 50;
 
     const currentBalls: Array<{
       number: number;
@@ -264,7 +283,8 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         if (item.currentGap >= minG && item.currentGap <= maxG) {
           currentBalls.push({
             ...item,
-            microScore: candidateMap.get(item.number)?.compositeScore ?? 50,
+            microScore:
+              candidateMap.get(item.number)?.compositeScore ?? meanCandScore,
           });
         }
       }
@@ -277,15 +297,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       minG,
       maxG,
       theoreticalProb,
-      empiricalProb,
+      empiricalProb: shrunkProb,
+      rawEmpiricalProb: empiricalProb,
       lift,
-      expectedPerDraw: empiricalProb * 5,
+      liftCiLower,
+      liftCiUpper,
+      zScore,
+      expectedPerDraw: shrunkProb * 5,
       hitsPerDraw,
       currentBalls,
     };
   }, [report, customMinGap, customMaxGap, candidateMap]);
 
-  // 2. Trajectory Simulator (Order-2 Bi-gram Explorer)
+  // 2. Trajectory Simulator (Order-2 Bi-gram Explorer avec Shrinkage James-Stein)
   const simulatedTrajectory = useMemo(() => {
     if (!report) return null;
     const chrono = [...report.recentFootprints].reverse();
@@ -314,12 +338,16 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       }
     }
 
+    // Shrinkage bayésien James-Stein : la pondération de l'ordre 2 croît avec matchOccurrences
+    // Évite d'attribuer arbitrairement 65% de poids à un bi-gramme observé 1 seule fois
+    const lambdaM2 = matchOccurrences / (matchOccurrences + 8);
+
     const distribution = GAP_RANGE_BINS.map((bin) => {
       const m1Prob = report.transitionMatrixOrder1[simCurrBin]?.[bin.id] ?? 0;
       const m2Raw =
         totalNextBalls > 0 ? nextCounts[bin.id] / totalNextBalls : m1Prob;
       const blended =
-        matchOccurrences > 0 ? 0.65 * m2Raw + 0.35 * m1Prob : m1Prob;
+        matchOccurrences > 0 ? lambdaM2 * m2Raw + (1 - lambdaM2) * m1Prob : m1Prob;
       return {
         bin,
         prob: blended,
@@ -335,7 +363,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     };
   }, [report, simPrevBin, simCurrBin]);
 
-  // 3. Historical Backtest Precision Metrics
+  // 3. Historical Backtest Precision Metrics avec Ligne de Base Chance H0
   const backtestMetrics = useMemo(() => {
     if (!report || report.recentFootprints.length < 6) return null;
     const footprints = [...report.recentFootprints].reverse();
@@ -345,6 +373,9 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     let top1SuccessDraws = 0;
     let top3CoveredBalls = 0;
     let totalEvaluatedBalls = 0;
+    let sumH0Top1Chance = 0;
+    let sumH0Top3Chance = 0;
+
     const drawEvaluations: Array<{
       date: string;
       predictedTopBins: GapBinId[];
@@ -369,6 +400,19 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
       const top1Hit = targetFp.binCounts[rankedBins[0]] > 0;
       if (top1Hit) top1SuccessDraws++;
 
+      const pTop1 =
+        GAP_RANGE_BINS.find((b) => b.id === rankedBins[0])?.theoreticalProb ??
+        0.25;
+      const pTop3 = rankedBins.reduce(
+        (acc, id) =>
+          acc +
+          (GAP_RANGE_BINS.find((b) => b.id === id)?.theoreticalProb ?? 0),
+        0
+      );
+      // Chance H0 d'avoir >= 1 boule dans la tranche #1 en 5 tirages indépendants
+      sumH0Top1Chance += 1 - Math.pow(1 - pTop1, 5);
+      sumH0Top3Chance += pTop3;
+
       const covered =
         targetFp.binCounts[rankedBins[0]] +
         targetFp.binCounts[rankedBins[1]] +
@@ -388,10 +432,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     return {
       evalCount,
       top1SuccessRate: (top1SuccessDraws / evalCount) * 100,
+      top1H0ChanceRate: (sumH0Top1Chance / evalCount) * 100,
       top3BallCoverageRate:
         totalEvaluatedBalls > 0
           ? (top3CoveredBalls / totalEvaluatedBalls) * 100
           : 0,
+      top3H0ChanceRate: (sumH0Top3Chance / evalCount) * 100,
       avgBallsCoveredPerDraw: top3CoveredBalls / evalCount,
       recentEvaluations: drawEvaluations.reverse().slice(0, 8),
     };
@@ -926,7 +972,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                 const isSelected = activeBinForecast?.bin.id === f.bin.id;
                 const pct = Math.round(f.blendedProb * 1000) / 10;
                 const basePct = Math.round(f.poolOccupancyProb * 1000) / 10;
-                const isOver = f.liftOverTheoretical >= 1.08;
+                const isOver = f.liftOverTheoretical >= 1.08 && f.zScore >= 1.96;
                 const isDroughtAlert = f.droughtPressureIndex >= 0.65;
 
                 return (
@@ -1352,9 +1398,14 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Transition Matrix Order 1 */}
           <div className="lg:col-span-7 space-y-3 overflow-x-auto">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Matrice de Transition Markovienne (Dominante T → Répartition T+1)
-            </h4>
+            <div className="space-y-0.5">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Matrice de Transition Markovienne (Dominante T → Répartition T+1)
+              </h4>
+              <p className="text-[10px] text-slate-400">
+                Cellules grisées : variations non significatives (|z| &lt; 1.96 vs modèle nul H0 indépendant).
+              </p>
+            </div>
             <table className="w-full text-left border-collapse text-[11px]">
               <thead>
                 <tr>
@@ -1373,55 +1424,105 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                 </tr>
               </thead>
               <tbody>
-                {GAP_RANGE_BINS.map((rowBin) => (
-                  <tr
-                    key={rowBin.id}
-                    className="border-b border-slate-100 dark:border-slate-800/60"
-                  >
-                    <td className="p-2 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                      <span
-                        className="inline-block w-2 h-2 rounded-full mr-1.5"
-                        style={{ backgroundColor: rowBin.color }}
-                      />
-                      {rowBin.shortLabel}
+                {/* Ligne de base H0 inconditionnelle */}
+                <tr className="bg-slate-100/60 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-700 font-semibold text-[10px]">
+                  <td className="p-2 text-slate-500 font-mono">
+                    Réf. H0 (Indép.)
+                  </td>
+                  {GAP_RANGE_BINS.map((colBin) => (
+                    <td
+                      key={colBin.id}
+                      className="p-2 text-center font-mono text-slate-500 dark:text-slate-400"
+                      title={`Référence théorique H0 pour ${colBin.shortLabel}: ${(
+                        colBin.theoreticalProb * 100
+                      ).toFixed(1)}%`}
+                    >
+                      {Math.round(colBin.theoreticalProb * 100)}%
                     </td>
-                    {GAP_RANGE_BINS.map((colBin) => {
-                      const prob =
-                        report.transitionMatrixOrder1[rowBin.id][colBin.id];
-                      const pct = Math.round(prob * 100);
-                      const intensity = Math.min(1, prob / 0.35);
-                      return (
-                        <td
-                          key={colBin.id}
-                          onClick={() => {
-                            setSimCurrBin(rowBin.id);
-                            setSelectedBinId(colBin.id);
-                          }}
-                          className="p-2 text-center font-mono font-bold rounded transition-transform hover:scale-105 cursor-pointer"
-                          style={{
-                            backgroundColor: `rgba(99, 102, 241, ${
-                              intensity * 0.38
-                            })`,
-                          }}
-                          title={`De ${rowBin.shortLabel} vers ${colBin.shortLabel}: ${(
-                            prob * 100
-                          ).toFixed(1)}%`}
-                        >
-                          {pct}%
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                  ))}
+                </tr>
+
+                {GAP_RANGE_BINS.map((rowBin) => {
+                  const rowN =
+                    report.transitionRowTotalsOrder1?.[rowBin.id] ?? 0;
+                  const rowTransitions = Math.max(1, Math.round(rowN / 5));
+
+                  return (
+                    <tr
+                      key={rowBin.id}
+                      className="border-b border-slate-100 dark:border-slate-800/60"
+                    >
+                      <td className="p-2 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                        <span
+                          className="inline-block w-2 h-2 rounded-full mr-1.5"
+                          style={{ backgroundColor: rowBin.color }}
+                        />
+                        {rowBin.shortLabel}{' '}
+                        <span className="text-[9px] font-mono font-normal text-slate-400">
+                          (N={rowTransitions})
+                        </span>
+                      </td>
+                      {GAP_RANGE_BINS.map((colBin) => {
+                        const p0 = colBin.theoreticalProb;
+                        const prob =
+                          report.transitionMatrixOrder1[rowBin.id][colBin.id];
+                        const pct = Math.round(prob * 100);
+                        const se = Math.sqrt(
+                          (p0 * (1 - p0)) / Math.max(1, rowTransitions)
+                        );
+                        const z = se > 0 ? (prob - p0) / se : 0;
+                        const isSignificant =
+                          Math.abs(z) >= 1.96 && rowTransitions >= 3;
+                        const intensity = Math.min(1, prob / 0.35);
+
+                        return (
+                          <td
+                            key={colBin.id}
+                            onClick={() => {
+                              setSimCurrBin(rowBin.id);
+                              setSelectedBinId(colBin.id);
+                            }}
+                            className={`p-2 text-center font-mono font-bold rounded transition-transform hover:scale-105 cursor-pointer ${
+                              isSignificant
+                                ? 'text-indigo-900 dark:text-indigo-100'
+                                : 'text-slate-400 dark:text-slate-500 opacity-60'
+                            }`}
+                            style={{
+                              backgroundColor: isSignificant
+                                ? `rgba(99, 102, 241, ${intensity * 0.42})`
+                                : 'transparent',
+                            }}
+                            title={`De ${rowBin.shortLabel} vers ${
+                              colBin.shortLabel
+                            }: ${(prob * 100).toFixed(1)}% | z = ${z.toFixed(
+                              2
+                            )} ${
+                              isSignificant
+                                ? '(Significatif p < 0.05)'
+                                : '(Non significatif vs H0)'
+                            }`}
+                          >
+                            {pct}%
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {/* Historical Sequence Analog Matches (1-Wasserstein + 4D DNA) */}
           <div className="lg:col-span-5 space-y-3">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Échos Topologiques 1-Wasserstein & ADN 4D
-            </h4>
+            <div className="space-y-0.5">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Échos Topologiques 1-Wasserstein & ADN 4D
+              </h4>
+              <p className="text-[10px] text-slate-400">
+                Similarité métrique Earth-Mover (W1) & spectrale. Indice de distance non probabiliste.
+              </p>
+            </div>
             <div className="space-y-2.5 max-h-[340px] overflow-y-auto pr-1">
               {report.historicalMatches.map((m, idx) => (
                 <div
@@ -1526,32 +1627,31 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                   <div className="grid grid-cols-3 gap-2.5">
                     <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
                       <span className="text-[10px] text-slate-400 block">
-                        Fréquence Observée
+                        Fréquence (Bayes)
                       </span>
                       <span className="text-base font-black font-mono text-slate-900 dark:text-white">
                         {(customRangeAnalysis.empiricalProb * 100).toFixed(1)}%
                       </span>
                       <span className="text-[9px] text-slate-400 block">
-                        Théorique :{' '}
+                        Brute : {(customRangeAnalysis.rawEmpiricalProb * 100).toFixed(1)}% • H0 :{' '}
                         {(customRangeAnalysis.theoreticalProb * 100).toFixed(1)}%
                       </span>
                     </div>
                     <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
                       <span className="text-[10px] text-slate-400 block">
-                        Lift Empirique
+                        Lift Rétracté (IC 95%)
                       </span>
                       <span
                         className={`text-base font-black font-mono ${
-                          customRangeAnalysis.lift >= 1.05
+                          customRangeAnalysis.lift >= 1.05 && Math.abs(customRangeAnalysis.zScore) >= 1.96
                             ? 'text-emerald-600 dark:text-emerald-400'
                             : 'text-slate-900 dark:text-white'
                         }`}
                       >
                         {customRangeAnalysis.lift.toFixed(2)}×
                       </span>
-                      <span className="text-[9px] text-slate-400 block">
-                        Espérance :{' '}
-                        {customRangeAnalysis.expectedPerDraw.toFixed(2)} / tirage
+                      <span className="text-[9px] text-slate-400 block font-mono">
+                        [{customRangeAnalysis.liftCiLower.toFixed(2)}× – {customRangeAnalysis.liftCiUpper.toFixed(2)}×] • z={customRangeAnalysis.zScore.toFixed(2)}
                       </span>
                     </div>
                     <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
@@ -1727,7 +1827,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                       {backtestMetrics.top1SuccessRate.toFixed(0)}%
                     </span>
                     <span className="text-[9px] text-slate-400 block">
-                      Au moins 1 boule dans Top 1
+                      Au moins 1 boule (Réf H0 : {backtestMetrics.top1H0ChanceRate.toFixed(0)}%)
                     </span>
                   </div>
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
@@ -1738,7 +1838,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                       {backtestMetrics.top3BallCoverageRate.toFixed(1)}%
                     </span>
                     <span className="text-[9px] text-slate-400 block">
-                      Des boules gagnantes capturées
+                      Boules capturées (Réf H0 : {backtestMetrics.top3H0ChanceRate.toFixed(1)}%)
                     </span>
                   </div>
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">

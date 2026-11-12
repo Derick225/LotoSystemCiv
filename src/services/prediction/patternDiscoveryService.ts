@@ -1,5 +1,6 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
+import { benjaminiHochberg } from '../../utils/mathUtils';
 import { LOTTERY_CONSTANTS } from '../lotteryService';
 
 export type PatternType = 'PAIR' | 'TRIPLET' | 'TRANSITION_CHAIN' | 'PHASE_MOTIF' | 'QUAD';
@@ -46,6 +47,10 @@ export interface RecurringSequencePattern {
   meanCycleInterval: number;       // Average distance in cycles between occurrences
   cyclePhasePreference: CyclePhase; // Phase within cycle where pattern most often fires
   phaseDistribution: { early: number; mid: number; late: number }; // Percentage in each phase
+  isPhaseSignificant?: boolean;    // Statistical chi-square test vs uniform (1/3, 1/3, 1/3)
+  phaseChiSquare?: number;         // Chi-square goodness-of-fit statistic
+  isPeriodicitySignificant?: boolean; // Under-dispersion test vs geometric H0 variance
+  dispersionIndex?: number;        // Var(Interval) / Var_H0(Geometric)
   transitionConfidence?: number;   // For transition chains: P(Target in cycle C+1 | Sequence in cycle C)
   activeAlertStatus: 'PRIMED' | 'TRIGGERED' | 'DORMANT'; // Is precursor active in current cycle
   completionCandidates?: number[]; // If partially active in current cycle, missing numbers to complete
@@ -659,21 +664,24 @@ export const patternDiscoveryService = {
       const cyclesSinceLastCompleted = Math.max(0, numCyclesForStats - 1 - lastCompletedSeen);
       const cyclesAgo = isFullyInActive ? 0 : cyclesSinceLastCompleted + 1;
 
-      // Renewal hazard peaks when cyclesSinceLastCompleted + 1 approaches meanInterval
+      // Sous l'hypothèse nulle H0 géométrique sans mémoire, l'intervalle entre occurrences
+      // suit une loi géométrique de paramètre p = expUnionProb : E0[T] = 1/p, Var0(T) = (1 - p)/p^2.
+      const pGeo = Math.max(1e-4, Math.min(0.99, expUnionProb));
+      const geoVariance = (1 - pGeo) / (pGeo * pGeo);
+      const dispersionIndex = intervalVariance / Math.max(1e-4, geoVariance);
+      const isPeriodicitySignificant = intervals.length >= 2 && dispersionIndex < 0.75;
+
       const currentCycleLag = cyclesSinceLastCompleted + 1;
       const gaussianLagResonance = Math.exp(
         -Math.pow(currentCycleLag - meanInterval, 2) / (2 * (intervalVariance + 1.0))
       );
-      // Sans intervalles mesurés (support < 3, i.e. < 2 intervalles), aucune périodicité
-      // n'est démontrable : le hazard retombe sur le H0 géométrique sans mémoire
-      // (probabilité d'union exacte par cycle) au lieu d'une résonance gaussienne
-      // auto-réalisatrice (lag == moyenne extrapolée depuis une occurrence unique).
-      const hasMeasuredPeriodicity = intervals.length >= 2;
-      const renewalHazard = hasMeasuredPeriodicity
+      // Le hazard de renouvellement ne s'élève au-dessus du modèle nul H0 géométrique sans mémoire
+      // que si la dispersion des intervalles est statistiquement sous-dispersée (isPeriodicitySignificant).
+      const renewalHazard = isPeriodicitySignificant
         ? Math.min(99, 100 * gaussianLagResonance * (0.55 + 0.45 * (regularityIndex / 100)))
         : Math.min(99, 100 * expUnionProb);
 
-      // Phase distribution & continuous phase alignment with current cycle progress
+      // Répartition par phase et test du Chi-deux d'adéquation contre l'uniforme H0: (1/3, 1/3, 1/3)
       const totalPhases = Math.max(
         Number.EPSILON,
         phaseCounts.early + phaseCounts.mid + phaseCounts.late
@@ -682,18 +690,29 @@ export const patternDiscoveryService = {
       const midPct = (phaseCounts.mid / totalPhases) * 100;
       const latePct = (phaseCounts.late / totalPhases) * 100;
 
+      const expectedPhaseCount = totalPhases / 3;
+      const phaseChiSquare =
+        expectedPhaseCount > 0
+          ? (Math.pow(phaseCounts.early - expectedPhaseCount, 2) +
+              Math.pow(phaseCounts.mid - expectedPhaseCount, 2) +
+              Math.pow(phaseCounts.late - expectedPhaseCount, 2)) /
+            expectedPhaseCount
+          : 0;
+      // Seuil critique Chi-deux (ddl = 2, alpha = 0.10 -> 4.605, alpha = 0.05 -> 5.991)
+      const isPhaseSignificant = totalPhases >= 3 && phaseChiSquare >= 4.605;
+
       let prefPhase: CyclePhase = 'MID';
       if (earlyPct >= midPct && earlyPct >= latePct) prefPhase = 'EARLY';
       else if (latePct >= earlyPct && latePct >= midPct) prefPhase = 'LATE';
 
-      // Continuous dot-product alignment normalized against uniform (33.33%)
+      // Alignement de phase continu par produit scalaire contre l'uniforme
       const rawPhaseDot =
         (earlyPct / 100) * activePhaseWeights.early +
         (midPct / 100) * activePhaseWeights.mid +
         (latePct / 100) * activePhaseWeights.late;
       const phaseAlignment = logisticScore100((rawPhaseDot - 1 / 3) * 6.0);
 
-      // Active cycle priming & O(1) exact Bayesian conditional completion probability
+      // Amorçage actif du cycle courant & probabilité exacte H0 combinatoire de complétion
       const activePresent = seq.filter((n) => activeCycle.allNumbers.has(n));
       const missing = seq.filter((n) => !activeCycle.allNumbers.has(n));
 
@@ -722,23 +741,44 @@ export const patternDiscoveryService = {
         conditionalCompletionRate = Math.min(99, rawCond * 100);
       }
 
+      // Condition de mise en alerte PRIMED :
+      // - Une paire (2 boules) n'est PAS déclarée amorcée sur une seule boule sans enrichissement statistique
+      // - Un triplet (3 boules) avec 2 boules déjà sorties constitue un précurseur avéré
+      const isPrimedEligible =
+        seq.length === 2
+          ? activePresent.length === 1 && (zScore >= 1.645 || (zScore > 0.5 && pmi >= 0.25))
+          : activePresent.length >= 2 ||
+            (activePresent.length === 1 && (zScore >= 1.96 || pmi >= 0.35));
+
       if (activePresent.length === seq.length) {
         activeAlertStatus = 'TRIGGERED';
         completionProb = 100;
         conditionalCompletionRate = 100;
-      } else if (activePresent.length >= Math.max(1, Math.floor(seq.length * 0.5))) {
+      } else if (isPrimedEligible && missing.length > 0) {
         activeAlertStatus = 'PRIMED';
-        const remainingWindowFactor = Math.pow(remainingDrawsInCycle / cycleLength, 0.35);
-        const zSignal =
-          (conditionalCompletionRate / 100 - 0.25) * 3.2 +
-          pmi * 0.65 +
-          sameDrawWeight * 1.1 +
-          (phaseAlignment - 50) / 45 +
-          (renewalHazard - 50) / 55;
-        completionProb = Math.min(
-          98.5,
-          Math.max(8.0, logisticScore100(zSignal) * (0.65 + 0.35 * remainingWindowFactor))
+        // Probabilité exacte H0 de complétion dans les tirages restants
+        const expMissingProb = computeExactCycleUnionProbability(
+          missing.length,
+          remainingDrawsInCycle
         );
+        let precursorCount = support;
+        if (activePresent.length === 1) {
+          precursorCount = ballCycleCounts[activePresent[0]] || support;
+        } else if (activePresent.length === 2) {
+          const pKey =
+            activePresent[0] < activePresent[1]
+              ? `${activePresent[0]}_${activePresent[1]}`
+              : `${activePresent[1]}_${activePresent[0]}`;
+          precursorCount = pairCycleMap.get(pKey)?.cycleIndices.length || support;
+        }
+
+        // Rétraction bayésienne de James-Stein vers la probabilité H0
+        const empRate = support / Math.max(1, precursorCount);
+        const shrinkageWeight = precursorCount / (precursorCount + 10);
+        const shrunkProb = shrinkageWeight * empRate + (1 - shrinkageWeight) * expMissingProb;
+
+        // Probabilité honnête calibrée sur H0 (entre 5% et 25% sur du bruit pur)
+        completionProb = Math.min(95.0, Math.max(1.0, shrunkProb * 100));
       }
 
       // Continuous Monotonic Log-Z + PMI + Simultaneity Confidence [0..100]
@@ -809,7 +849,7 @@ export const patternDiscoveryService = {
         lift: parseFloat(lift.toFixed(2)),
         confidence: parseFloat(confidence.toFixed(1)),
         zScore: parseFloat(zScore.toFixed(2)),
-        hasEmpiricalProof: zScore >= Z_GAUSS_90 || (zScore > 0.5 && pmi > 0.35),
+        hasEmpiricalProof: zScore >= 2.58 && lift >= 1.15 && (pmi > 0.2 || sameDrawCount >= 2),
         cycleOccurrences: sortedCycles,
         lastSeenCycle: cyclesAgo,
         meanCycleInterval: parseFloat(meanInterval.toFixed(1)),
@@ -819,6 +859,10 @@ export const patternDiscoveryService = {
           mid: parseFloat(midPct.toFixed(1)),
           late: parseFloat(latePct.toFixed(1)),
         },
+        isPhaseSignificant,
+        phaseChiSquare: parseFloat(phaseChiSquare.toFixed(2)),
+        isPeriodicitySignificant,
+        dispersionIndex: parseFloat(dispersionIndex.toFixed(2)),
         activeAlertStatus,
         completionCandidates: missing,
         completionProbability: parseFloat(completionProb.toFixed(1)),
@@ -1009,8 +1053,11 @@ export const patternDiscoveryService = {
         const isSourceInActiveCycle = activeCycle.allNumbers.has(entry.source);
         const isTargetInActiveCycle = activeCycle.allNumbers.has(entry.target);
 
+        const hasTransProof = zScore >= 2.33 && pmi > 0.2;
         const isPrimedForCurrentCycle =
-          (isSourceInLastCompleted || isSourceInActiveCycle) && !isTargetInActiveCycle;
+          (isSourceInLastCompleted || isSourceInActiveCycle) &&
+          !isTargetInActiveCycle &&
+          (zScore >= 1.96 || hasTransProof || pmi >= 0.35);
         const activeAlertStatus: RecurringSequencePattern['activeAlertStatus'] =
           isPrimedForCurrentCycle
             ? 'PRIMED'
@@ -1023,8 +1070,17 @@ export const patternDiscoveryService = {
           98.5,
           Math.max(5.0, logisticScore100((zProofProb - 0.5) * 3.2 + pmi * 1.1))
         );
+        // Probabilité exacte combinatoire H0 de sortie de la cible dans les tirages restants
+        const expTargetRemainingProb = computeExactCycleUnionProbability(
+          1,
+          remainingDrawsInCycle
+        );
+        const empTransRate = srcTotal > 0 ? transitions / srcTotal : targetMarginalProb;
+        const shrinkageTr = srcTotal / (srcTotal + 10);
+        const shrunkTransRate =
+          shrinkageTr * empTransRate + (1 - shrinkageTr) * expTargetRemainingProb;
         const completionProb = isPrimedForCurrentCycle
-          ? Math.min(96.5, transConf * (0.75 + 0.25 * (phaseAlignment / 100)))
+          ? Math.min(95.0, Math.max(1.0, shrunkTransRate * 100))
           : activeAlertStatus === 'TRIGGERED'
           ? 100
           : 0;
@@ -1129,6 +1185,31 @@ export const patternDiscoveryService = {
       }
     });
 
+    // Correction de Benjamini-Hochberg (FDR) sur la famille complète des motifs minés
+    // Garantit l'absence de fausses preuves empiriques sur du bruit i.i.d. sans biais
+    const pValueFamily: Record<string, number> = {};
+    allPairs.forEach((p) => {
+      pValueFamily[p.id] = Math.max(1e-12, 2 * (1 - normalCdf(Math.abs(p.zScore))));
+    });
+    allTriplets.forEach((t) => {
+      pValueFamily[t.id] = Math.max(1e-12, 2 * (1 - normalCdf(Math.abs(t.zScore))));
+    });
+    topCrossCycleTransitions.forEach((tr) => {
+      pValueFamily[tr.id] = Math.max(1e-12, 2 * (1 - normalCdf(Math.abs(tr.zScore))));
+    });
+
+    const qValues = benjaminiHochberg(pValueFamily);
+
+    allPairs.forEach((p) => {
+      p.hasEmpiricalProof = (qValues[p.id] ?? 1.0) <= 0.05 && p.lift > 1.05 && p.zScore > 0;
+    });
+    allTriplets.forEach((t) => {
+      t.hasEmpiricalProof = (qValues[t.id] ?? 1.0) <= 0.05 && t.lift > 1.05 && t.zScore > 0;
+    });
+    topCrossCycleTransitions.forEach((tr) => {
+      tr.hasEmpiricalProof = (qValues[tr.id] ?? 1.0) <= 0.05 && tr.lift > 1.05 && tr.zScore > 0;
+    });
+
     topCrossCycleTransitions.sort(
       (a, b) =>
         (b.reasoning?.compositeScore ?? b.confidence) -
@@ -1136,26 +1217,24 @@ export const patternDiscoveryService = {
     );
     const prunedTransitions = topCrossCycleTransitions.slice(0, maxPerCat);
 
-    // 7. Phase-Specific Motifs (Motifs with strong phase concentration & alignment with current phase)
+    // 7. Phase-Specific Motifs (Motifs à préférence de phase statistiquement significative par Chi-deux)
     const topPhaseMotifs = [...allPairs, ...allTriplets]
-      .filter(
-        (p) =>
-          Math.max(
-            p.phaseDistribution.early,
-            p.phaseDistribution.mid,
-            p.phaseDistribution.late
-          ) >= 50
-      )
+      .filter((p) => p.isPhaseSignificant || (p.phaseChiSquare ?? 0) >= 4.605)
       .sort(
         (a, b) =>
-          (b.reasoning?.phaseAlignment ?? 50) * b.lift -
-          (a.reasoning?.phaseAlignment ?? 50) * a.lift
+          (b.phaseChiSquare ?? 0) * (b.reasoning?.phaseAlignment ?? 50) -
+          (a.phaseChiSquare ?? 0) * (a.reasoning?.phaseAlignment ?? 50)
       )
       .slice(0, maxPerCat);
 
-    // 8. Periodic Resonance Patterns (Motifs whose renewal hazard peaks in the current cycle)
+    // 8. Periodic Resonance Patterns (Motifs sous-dispersés démontrant une régularité périodique vs H0 géométrique)
     const topPeriodicResonancePatterns = [...allPairs, ...allTriplets]
-      .filter((p) => (p.reasoning?.renewalHazard ?? 0) >= 58 && p.activeAlertStatus !== 'TRIGGERED')
+      .filter(
+        (p) =>
+          (p.isPeriodicitySignificant || (p.dispersionIndex !== undefined && p.dispersionIndex < 0.80)) &&
+          (p.reasoning?.renewalHazard ?? 0) >= 25 &&
+          p.activeAlertStatus !== 'TRIGGERED'
+      )
       .sort(
         (a, b) =>
           (b.reasoning?.renewalHazard ?? 0) * (b.reasoning?.regularityIndex ?? 50) -
@@ -1392,17 +1471,19 @@ export const patternDiscoveryService = {
         if (selectedSeven.includes(cand.number)) continue;
         const ev = ballEvidence[cand.number];
 
-        // 1. Base convergence utility
+        // 1. Utilité de convergence de base
         const baseUtility = cand.convergenceScore;
 
-        // 2. Submodular marginal coverage gain (new motifs covered that aren't already covered)
+        // 2. Gain de couverture marginale sous-modulaire (théorie de l'information)
         let newPatternsCovered = 0;
         ev.coveredPatternIds.forEach((pid) => {
           if (!coveredPatternsGlobal.has(pid)) newPatternsCovered++;
         });
-        const coverageUtility = Math.log1p(newPatternsCovered) * 18.0;
+        const coverageGainRatio =
+          newPatternsCovered / Math.max(1, coveredPatternsGlobal.size + 1);
+        const coverageUtility = Math.log1p(coverageGainRatio) * (baseUtility * 0.35);
 
-        // 3. Pairwise PMI / co-occurrence synergy with already selected balls in the ticket
+        // 3. Synergie intra-ticket par information mutuelle (PMI) et co-occurrences intra-tirage réelles
         let pairwiseSynergy = 0;
         selectedSeven.forEach((alreadyPicked) => {
           const wPartner = ev.partnerWeights.get(alreadyPicked) || 0;
@@ -1411,15 +1492,15 @@ export const patternDiscoveryService = {
               ? `${cand.number}_${alreadyPicked}`
               : `${alreadyPicked}_${cand.number}`;
           const sameDrawHits = sameDrawPairCounts.get(pKey) || 0;
-          pairwiseSynergy += wPartner * 12.0 + sameDrawHits * 4.5;
+          pairwiseSynergy += wPartner * 2.2 + sameDrawHits * 1.5;
         });
 
-        // 4. Smooth decade diversity regularization (avoids crowding 4 balls in the same decade)
+        // 4. Régularisation continue de diversité des dizaines (pénalité douce d'encombrement)
         const candDecade = Math.floor((cand.number - 1) / 10);
         const sameDecadeCount = selectedSeven.filter(
           (x) => Math.floor((x - 1) / 10) === candDecade
         ).length;
-        const decadeRegularizer = Math.exp(-0.55 * sameDecadeCount);
+        const decadeRegularizer = Math.exp(-Math.pow(sameDecadeCount, 1.5) / 3.0);
 
         const marginalUtility =
           (baseUtility + coverageUtility + pairwiseSynergy) * (0.7 + 0.3 * decadeRegularizer);
@@ -1477,8 +1558,31 @@ export const patternDiscoveryService = {
       ).toFixed(1)
     );
 
+    // Confiance honnête et calibrée de la sélection 5 boules :
+    // Sous l'hypothèse nulle H0 (bruit i.i.d.), la probabilité qu'un ticket de 5 boules contienne
+    // au moins 1 numéro gagnant dans une loterie 5/90 est exactement 1 - C(85,5)/C(90,5) = 25.4%.
+    // L'indice de cohérence interne n'est mis à l'échelle au-delà de cette ligne de base
+    // que proportionnellement à la présence d'évidences statistiques réelles (max z >= 1.645).
+    const selectedMotifs = highPrecisionMotifs.filter((m) =>
+      optimalFive.some((n) => m.sequence.includes(n))
+    );
+    const provenSelectedMotifs = selectedMotifs.filter(
+      (m) => m.hasEmpiricalProof
+    );
+    const maxPatternZ =
+      provenSelectedMotifs.length > 0
+        ? Math.max(...provenSelectedMotifs.map((m) => m.zScore))
+        : 0;
+    const baselineH0SelectionConf = 25.4;
+    const internalConfScore =
+      0.55 * meanConv + 0.25 * pairwiseSynergyScore + 0.2 * phaseCoherenceScore;
+    const zEvidenceGain = Math.max(0, Math.min(1, (maxPatternZ - 1.96) / 2.5));
+
     const selectionConfidence = parseFloat(
-      Math.min(99, 0.55 * meanConv + 0.25 * pairwiseSynergyScore + 0.2 * phaseCoherenceScore).toFixed(1)
+      (
+        baselineH0SelectionConf +
+        (Math.min(95, internalConfScore) - baselineH0SelectionConf) * zEvidenceGain
+      ).toFixed(1)
     );
 
     const selectionRationale: string[] = [

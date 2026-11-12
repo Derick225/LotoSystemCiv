@@ -141,6 +141,7 @@ export interface GapRangeSequenceReport {
   bins: GapRangeBin[];
   recentFootprints: DrawGapFootprint[]; // Last 25 draws (0 = newest)
   transitionMatrixOrder1: Record<GapBinId, Record<GapBinId, number>>;
+  transitionRowTotalsOrder1?: Record<GapBinId, number>;
   binForecasts: GapBinTransitionStats[];
   topPredictedBins: GapBinId[];
   predictedNextMeanGap: {
@@ -344,13 +345,33 @@ export function allocateHamiltonHareQuotas(
   probs: Record<GapBinId, number>,
   poolSizes: Record<GapBinId, number>,
   binIds: GapBinId[],
-  targetTotal: number = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW
+  targetTotal: number = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW,
+  baselineProbs?: Record<GapBinId, number>,
+  sampleSize: number = 25
 ): Record<GapBinId, number> {
   const quotas = createEmptyBinCounts();
+
+  // Redistribution et rétraction vers H0 : si un profil baseline H0 est fourni
+  // et qu'aucune tranche ne présente de déviation statistique significative (|z| >= 1.96),
+  // allouer selon les quotas H0 (5 * n_b / 90) pour éviter d'inventer des biais sur du bruit.
+  let effectiveProbs = { ...probs };
+  if (baselineProbs) {
+    let maxZ = 0;
+    for (const b of binIds) {
+      const p0 = baselineProbs[b] || 0;
+      const se = Math.sqrt(Math.max(1e-6, (p0 * (1 - p0)) / Math.max(1, sampleSize)));
+      const z = Math.abs((probs[b] || 0) - p0) / se;
+      if (z > maxZ) maxZ = z;
+    }
+    if (maxZ < 1.96) {
+      effectiveProbs = { ...baselineProbs };
+    }
+  }
+
   let sumProb = 0;
   for (const b of binIds) {
     if ((poolSizes[b] || 0) > 0) {
-      sumProb += Math.max(0, probs[b] || 0);
+      sumProb += Math.max(0, effectiveProbs[b] || 0);
     }
   }
 
@@ -368,15 +389,22 @@ export function allocateHamiltonHareQuotas(
       remainders.push({ id: b, rem: -1, prob: 0 });
       continue;
     }
-    const exactQuota = ((probs[b] || 0) / sumProb) * targetTotal;
+    const exactQuota = ((effectiveProbs[b] || 0) / sumProb) * targetTotal;
     const floorQuota = Math.min(cap, Math.floor(exactQuota));
     quotas[b] = floorQuota;
     allocated += floorQuota;
     const rem = floorQuota < cap ? exactQuota - floorQuota : -1;
-    remainders.push({ id: b, rem, prob: probs[b] || 0 });
+    remainders.push({ id: b, rem, prob: effectiveProbs[b] || 0 });
   }
 
-  remainders.sort((a, b) => b.rem - a.rem || b.prob - a.prob);
+  // Redistribution des reliquats proportionnellement aux probabilités (prob * rem)
+  // plutôt que par l'ordre brut du reste qui favorise arbitrairement les tranches rares à fort reliquat fractionnaire
+  remainders.sort(
+    (a, b) =>
+      b.prob * Math.max(0, b.rem) - a.prob * Math.max(0, a.rem) ||
+      b.prob - a.prob ||
+      b.rem - a.rem
+  );
 
   let safety = 0;
   while (allocated < targetTotal && safety < 20) {
@@ -1013,7 +1041,9 @@ export const gapRangeSequenceService = {
       blendedProbs,
       poolSizes,
       binIds,
-      LOTTERY_CONSTANTS.NUMBERS_PER_DRAW
+      LOTTERY_CONSTANTS.NUMBERS_PER_DRAW,
+      poolBaselineProb,
+      Math.max(1, transRowTotals1[currentDom1] / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW)
     );
 
     // 9. Micro-Scoring Intra-Tranche des 90 Boules (Résonance de Hazard Individuel + Affinité + Continuité aux Frontières)
@@ -1352,22 +1382,31 @@ export const gapRangeSequenceService = {
     ).size;
     const decadeDiversity = (uniqueDecades / 5) * 100;
 
+    // Confiance calibrée de la sélection : sous l'hypothèse nulle H0 (tirages i.i.d.), la probabilité
+    // qu'un ticket de 5 boules contienne au moins 1 numéro gagnant dans un tirage 5/90 est
+    // exactement 1 - C(85,5)/C(90,5) = 25.4%.
+    // L'indice de confiance interne (cohérence + quotas + diversité) n'est pondéré au-delà de cette
+    // ligne de base que proportionnellement à l'évidence statistique réelle (max |z| >= 1.645).
+    const maxTrancheZ = Math.max(0, ...binForecasts.map((f) => Math.abs(f.zScore)));
+    const baselineH0Confidence = 25.4;
+    const internalCoherence =
+      0.55 * meanComposite + 0.25 * quotaFidelity + 0.20 * decadeDiversity;
+    const zEvidenceFactor = Math.max(0, Math.min(1, (maxTrancheZ - 1.645) / 2.5));
+
     const selectionConfidence = Math.min(
       98.5,
-      0.55 * meanComposite + 0.25 * quotaFidelity + 0.20 * decadeDiversity
+      baselineH0Confidence +
+        (Math.min(95, internalCoherence) - baselineH0Confidence) * zEvidenceFactor
     );
 
-    // Top 3 tranches recommandées (triées par score combiné quota + probabilité + lift)
+    // Top 3 tranches recommandées (triées par évidence statistique standardisée zScore,
+    // départagées par probabilité fusionnée et quotas d'allocation)
     const sortedForecasts = [...binForecasts].sort((a, b) => {
-      const scoreA =
-        a.optimalQuotaBalls * 0.45 +
-        a.blendedProb * 2.5 +
-        a.liftOverTheoretical * 0.35;
-      const scoreB =
-        b.optimalQuotaBalls * 0.45 +
-        b.blendedProb * 2.5 +
-        b.liftOverTheoretical * 0.35;
-      return scoreB - scoreA;
+      return (
+        b.zScore - a.zScore ||
+        b.blendedProb - a.blendedProb ||
+        b.optimalQuotaBalls - a.optimalQuotaBalls
+      );
     });
     const topPredictedBins = sortedForecasts.slice(0, 3).map((f) => f.bin.id);
 
@@ -1385,10 +1424,20 @@ export const gapRangeSequenceService = {
 
     let expectedMeanGapFromBins = 0;
     for (const f of binForecasts) {
-      const binMid =
-        f.bin.maxGap === Infinity
-          ? 48
-          : (f.bin.minGap + f.bin.maxGap) / 2;
+      let binMid: number;
+      if (f.bin.maxGap === Infinity) {
+        const pool40 = currentNumbersByBin[f.bin.id] || [];
+        if (pool40.length > 0) {
+          binMid = pool40.reduce((acc, x) => acc + x.currentGap, 0) / pool40.length;
+        } else {
+          // Espérance conditionnelle sous loi géométrique H0 de paramètre p = 5/90:
+          // E[X | X >= 40] = 40 + (1 - p)/p = 40 + (85/90)/(5/90) = 40 + 17 = 57
+          const pH0 = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / LOTTERY_CONSTANTS.TOTAL_NUMBERS;
+          binMid = f.bin.minGap + (1 - pH0) / pH0;
+        }
+      } else {
+        binMid = (f.bin.minGap + f.bin.maxGap) / 2;
+      }
       expectedMeanGapFromBins += f.blendedProb * binMid;
     }
 
@@ -1526,6 +1575,7 @@ export const gapRangeSequenceService = {
       bins: resolvedBins,
       recentFootprints,
       transitionMatrixOrder1,
+      transitionRowTotalsOrder1: transRowTotals1,
       binForecasts,
       topPredictedBins,
       predictedNextMeanGap: {

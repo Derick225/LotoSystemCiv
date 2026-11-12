@@ -1058,6 +1058,11 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                 <strong className="text-indigo-400 text-sm">
                   {selectedPattern.phaseDistribution.early}% Début • {selectedPattern.phaseDistribution.mid}% Milieu •{' '}
                   {selectedPattern.phaseDistribution.late}% Fin
+                  {selectedPattern.phaseChiSquare !== undefined
+                    ? ` (χ²=${selectedPattern.phaseChiSquare}${
+                        selectedPattern.isPhaseSignificant ? ' • sig.' : ' • non sig.'
+                      })`
+                    : ''}
                 </strong>
               </div>
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
