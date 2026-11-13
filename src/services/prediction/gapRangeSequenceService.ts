@@ -82,6 +82,25 @@ export type GapCandidateRole =
   | 'ÉCHO SÉQUENTIEL'
   | 'RUPTURE DE SÉCHERESSE';
 
+/**
+ * Décomposition des 5 canaux de preuve statistique standardisés (sans unité, N(0, 1) sous H0)
+ * combinés par la méthode de Stouffer pour chaque boule candidate.
+ */
+export interface StoufferChannelBreakdown {
+  /** Z-score d'excès conditionnel de la tranche lissé aux frontières par noyau Gaussien */
+  zTranche: number;
+  /** Z-score de tension inter-activation / sécheresse de tranche (loi de renouvellement) */
+  zDrought: number;
+  /** Z-score binomial exact de résonance de hasard individuel vs loi géométrique H0 */
+  zHazard: number;
+  /** Z-score binomial d'affinité conditionnelle Boule–Tranche vs occupation H0 */
+  zAffinity: number;
+  /** Z-score binomial d'écho séquentiel sur analogues W1+ADN (taille effective de Kish) */
+  zEcho: number;
+  /** Nombre de canaux actifs contribuant au dénominateur √k de Stouffer */
+  activeChannels: number;
+}
+
 export interface GapBallCandidate {
   number: number;
   currentGap: number;
@@ -89,13 +108,20 @@ export interface GapBallCandidate {
   binShortLabel: string;
   binLabel: string;
   binColor: string;
-  compositeScore: number; // Normalized [0, 100]
+  /** Percentile exact de significativité Φ(Z_Stouffer) × 100 dans (0, 100) — neutre à 50.0 sous H0 */
+  compositeScore: number;
+  /** Score combiné homogène de Stouffer Z_Stouffer = (Σ w_j Z_j) / √(Σ w_j²) en unités σ */
+  stoufferZScore: number;
+  /** p-value unilatérale supérieure P(Z ≥ Z_Stouffer) sous H0 */
+  stoufferPValue: number;
+  /** Détail des Z-scores homogènes par canal */
+  channelZScores: StoufferChannelBreakdown;
   trancheProb: number;
   trancheLift: number;
-  individualHazard: number; // Continuous renewal hazard at currentGap in [0, 1]
-  trancheAffinity: number; // Historical propensity of this ball to exit in this tranche
-  sequenceEchoScore: number; // Support from historical sequence analogs (W1 + DNA)
-  boundaryContinuityScore: number; // Smooth Gaussian kernel across adjacent tranche borders
+  individualHazard: number; // Continuous renewal hazard percentile Φ(zHazard) in (0, 1)
+  trancheAffinity: number; // Conditional tranche affinity percentile Φ(zAffinity) in (0, 1)
+  sequenceEchoScore: number; // Sequential analog echo percentile Φ(zEcho) in (0, 1)
+  boundaryContinuityScore: number; // Boundary-smoothed tranche percentile Φ(zTranche) in (0, 1)
   meanHistoricalGap: number;
   stdHistoricalGap: number;
   role: GapCandidateRole;
@@ -132,6 +158,12 @@ export interface GapRangeSelectionSynthesis {
   quotaFidelity: number; // [0, 100] alignment with blended tranche probabilities
   meanHazardResonance: number; // [0, 100]
   decadeDiversity: number; // [0, 100]
+  /** Z-score de Stouffer agrégé sur la sélection optimale de 5 boules */
+  ticketStoufferZScore?: number;
+  /** p-value unilatérale associée à ticketStoufferZScore */
+  ticketPValue?: number;
+  /** Méthode d'agrégation homogène utilisée */
+  scoringMethod?: 'STOUFFER_Z';
   allCandidates: GapBallCandidate[];
 }
 
@@ -260,6 +292,66 @@ function createEmptyBinCounts(): Record<GapBinId, number> {
     G15_24: 0,
     G25_39: 0,
     G40_PLUS: 0,
+  };
+}
+
+/**
+ * Fonction de répartition de la loi normale centrée réduite N(0, 1) : Φ(z) = P(Z ≤ z).
+ * Implémentation déterministe (approximation rationnelle d'Abramowitz & Stegun 7.1.26, précision < 1.5e-7).
+ */
+export function normalCdf(z: number): number {
+  if (!Number.isFinite(z)) return z > 0 ? 1 : 0;
+  const sign = z < 0 ? -1 : 1;
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const poly =
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t +
+      0.254829592) *
+    t;
+  const erf = 1 - poly * Math.exp(-x * x);
+  return Math.max(0, Math.min(1, 0.5 * (1 + sign * erf)));
+}
+
+/**
+ * p-value unilatérale supérieure P(Z ≥ z) = 1 - Φ(z) sous l'hypothèse nulle H0 : Z ~ N(0, 1).
+ */
+export function normalUpperPValue(z: number): number {
+  return Math.max(0, Math.min(1, 1 - normalCdf(z)));
+}
+
+/**
+ * Combinaison de Stouffer (1949) de k Z-scores homogènes sans unité :
+ *   Z_Stouffer = (Σ_j w_j · Z_j) / √(Σ_j w_j²)
+ *
+ * Garantit que tous les signaux (macro-tranche, sécheresse, hasard individuel,
+ * affinité boule-tranche, écho séquentiel) sont exprimés en écarts-types σ par rapport à H0
+ * avant d'être agrégés, éliminant tout mélange arbitraire de probabilités, ratios Lift et scores bruts.
+ */
+export function combineStoufferZScores(
+  channels: Array<{ z: number; weight?: number }>
+): { zScore: number; pValue: number; activeChannels: number } {
+  let weightedSum = 0;
+  let weightSqSum = 0;
+  let activeChannels = 0;
+
+  for (const ch of channels) {
+    const w = ch.weight ?? 1;
+    if (w > 0 && Number.isFinite(ch.z)) {
+      weightedSum += w * ch.z;
+      weightSqSum += w * w;
+      activeChannels += 1;
+    }
+  }
+
+  if (weightSqSum <= 0 || activeChannels === 0) {
+    return { zScore: 0, pValue: 0.5, activeChannels: 0 };
+  }
+
+  const zScore = weightedSum / Math.sqrt(weightSqSum);
+  return {
+    zScore,
+    pValue: normalUpperPValue(zScore),
+    activeChannels,
   };
 }
 
@@ -714,6 +806,7 @@ export const gapRangeSequenceService = {
     // 4. Analyse de Renouvellement et Pression de Sécheresse (Inter-Activation Drought) par Tranche
     const trancheDroughtDraws: Record<GapBinId, number> = createEmptyBinCounts();
     const trancheMeanInterval: Record<GapBinId, number> = createEmptyBinCounts();
+    const trancheDroughtZScore: Record<GapBinId, number> = createEmptyBinCounts();
     const trancheDroughtPressure: Record<GapBinId, number> = createEmptyBinCounts();
     const renewalRawMass: Record<GapBinId, number> = createEmptyBinCounts();
     let renewalMassSum = 0;
@@ -737,10 +830,13 @@ export const gapRangeSequenceService = {
         intervals.push(activationIndices[m] - activationIndices[m - 1]);
       }
 
-      // Espérance théorique d'inter-activation sous H0 : 1 / (1 - (1 - pi_j)^5)
+      // Moments exacts sous loi géométrique H0 : I ~ Geom(p_act) sur {1, 2, ...}
+      // E[I] = 1 / p_act, E[D_arrière] = (1 - p_act) / p_act = E[I] - 1, Var(I) = (1 - p_act) / p_act²
       const pActivePerDraw =
         1 - Math.pow(Math.max(1e-6, 1 - poolBaselineProb[id]), 5);
       const theoreticalMeanInterval = 1 / Math.max(1e-4, pActivePerDraw);
+      const theoreticalVarInterval =
+        (1 - pActivePerDraw) / Math.pow(Math.max(1e-4, pActivePerDraw), 2);
 
       const empiricalMeanInterval =
         intervals.length >= 2
@@ -754,12 +850,15 @@ export const gapRangeSequenceService = {
               (acc, v) => acc + Math.pow(v - empiricalMeanInterval, 2),
               0
             ) / intervals.length
-          : Math.pow(theoreticalMeanInterval * 0.5, 2);
+          : theoreticalVarInterval;
       const intervalStd = Math.max(0.5, Math.sqrt(intervalVar));
 
-      // Taux de hasard continu (Weibull / Logistique sur le ratio drought / meanInterval)
+      // Temps de récurrence arrière attendu (0 si activé au dernier tirage) : E[I] - 1
+      const empiricalMeanDrought = Math.max(0, empiricalMeanInterval - 1);
       const standardizedDrought =
-        (currentDrought - empiricalMeanInterval) / intervalStd;
+        (currentDrought - empiricalMeanDrought) / intervalStd;
+      trancheDroughtZScore[id] = standardizedDrought;
+
       const pressure = 1 / (1 + Math.exp(-standardizedDrought));
       trancheDroughtPressure[id] = pressure;
 
@@ -1046,8 +1145,48 @@ export const gapRangeSequenceService = {
       Math.max(1, transRowTotals1[currentDom1] / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW)
     );
 
-    // 9. Micro-Scoring Intra-Tranche des 90 Boules (Résonance de Hazard Individuel + Affinité + Continuité aux Frontières)
+    // 9. Z-Scores par Tranche (référence H0 binomiale) avant le scoring individuel par Stouffer
+    const n1ForZ = Math.max(
+      1,
+      transRowTotals1[currentDom1] / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW
+    );
+    const binZScore: Record<GapBinId, number> = createEmptyBinCounts();
+    for (const id of binIds) {
+      const bProb = blendedProbs[id];
+      const baseProb = poolBaselineProb[id];
+      const stdErr = Math.sqrt(Math.max(1e-9, (baseProb * (1 - baseProb)) / n1ForZ));
+      binZScore[id] = stdErr > 0 ? (bProb - baseProb) / stdErr : 0;
+    }
+
+    /**
+     * 10. Micro-Scoring Statistique Unifié par la Méthode de Stouffer (Z-Scores Homogènes)
+     *
+     * Remplace l'ancien mélange d'unités hétérogènes (probabilités + ratios Lift + scores de boules)
+     * par 5 tests statistiques standardisés en écarts-types N(0, 1) sous le modèle nul exact H0 :
+     *   1) zTranche  : Z-score binomial d'excès de la tranche, lissé aux frontières par combinaison
+     *                  de Stouffer pondérée par noyau Gaussien (σ² = NUMBERS_PER_DRAW / 2).
+     *   2) zDrought  : Z-score standardisé du temps d'attente inter-activation de la tranche.
+     *   3) zHazard   : Z-score binomial exact des sorties observées dans la fenêtre de Silverman
+     *                  conditionnellement à la survie vs loi géométrique H0 (p = 5/90), rétracté par √K.
+     *   4) zAffinity : Z-score binomial d'affinité historique Boule–Tranche vs occupation H0 π₀(b),
+     *                  rétracté par concentration de Dirichlet √K.
+     *   5) zEcho     : Z-score binomial sur analogues W1+ADN (taille effective de Kish n_eff) vs p₀ = 5/90.
+     *
+     * Agrégation : Z_Stouffer = (Σ w_j · Z_j) / √(Σ w_j²), puis percentile Φ(Z_Stouffer) × 100.
+     */
     const allBallCandidates: GapBallCandidate[] = [];
+    const dirichletShrinkagePrior = Math.sqrt(K);
+    const boundaryKernelVar = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW / 2; // 2.5 tirages²
+
+    // Taille effective de Kish des analogues topMatches pour le canal d'écho séquentiel
+    let echoWeightSum = 0;
+    let echoWeightSqSum = 0;
+    for (const match of topMatches) {
+      echoWeightSum += match.similarity;
+      echoWeightSqSum += match.similarity * match.similarity;
+    }
+    const seqEchoEffectiveN =
+      echoWeightSqSum > 0 ? (echoWeightSum * echoWeightSum) / echoWeightSqSum : 0;
 
     for (let num = 1; num <= 90; num++) {
       const currentGap = ballCurrentGap[num];
@@ -1055,85 +1194,21 @@ export const gapRangeSequenceService = {
       const exits = ballExitGaps[num];
       const m = exits.length;
 
-      // Statistiques d'écarts propres à la boule num
+      // Statistiques d'écarts propres à la boule num (moyenne et écart-type empiriques ou géométriques H0)
       const meanHistGap =
         m > 0
           ? exits.reduce((a, b) => a + b, 0) / m
           : (1 - P_SINGLE) / P_SINGLE; // ~17.0
+      const geometricVarH0 = (1 - P_SINGLE) / (P_SINGLE * P_SINGLE);
       const varHistGap =
         m >= 2
           ? exits.reduce((acc, g) => acc + Math.pow(g - meanHistGap, 2), 0) / m
-          : Math.pow(meanHistGap * 0.65, 2);
+          : geometricVarH0;
       const stdHistGap = Math.max(1.5, Math.sqrt(varHistGap));
 
-      // A. Densité de renouvellement par noyau Gaussien (bande passante de Silverman) + Taux de hasard discret
-      const silvermanBandwidth = Math.max(
-        1.2,
-        1.06 * stdHistGap * Math.pow(Math.max(1, m), -0.2)
-      );
-      let kernelDensity = 0;
-      let survivalCount = 0;
-      let nearExitCount = 0;
-
-      if (m > 0) {
-        for (const g of exits) {
-          const u = (currentGap - g) / silvermanBandwidth;
-          kernelDensity += Math.exp(-0.5 * u * u);
-          if (g >= Math.max(0, currentGap - 1)) {
-            survivalCount += 1;
-            if (Math.abs(g - currentGap) <= Math.max(1.5, silvermanBandwidth * 0.75)) {
-              nearExitCount += 1;
-            }
-          }
-        }
-        kernelDensity /= m;
-      } else {
-        const u = (currentGap - meanHistGap) / stdHistGap;
-        kernelDensity = Math.exp(-0.5 * u * u);
-      }
-
-      const discreteHazard =
-        survivalCount > 0
-          ? (nearExitCount + 0.5) / (survivalCount + 1.5)
-          : 1 / (1 + Math.exp(-(currentGap - meanHistGap) / stdHistGap));
-
-      const individualHazard = Math.min(
-        1,
-        0.55 * kernelDensity + 0.45 * discreteHazard
-      );
-
-      // B. Affinité conditionnelle Boule-Tranche (propension historique de cette boule à sortir dans cette tranche)
-      const hitsInCurrentBin = ballTrancheExitCounts[num][bin.id] || 0;
-      const priorBinShare = poolBaselineProb[bin.id];
-      const empiricalBinAffinity =
-        (hitsInCurrentBin + Math.sqrt(K) * priorBinShare) /
-        (m + Math.sqrt(K));
-      const trancheAffinity = Math.min(
-        1,
-        empiricalBinAffinity / Math.max(0.03, priorBinShare * 1.8)
-      );
-
-      // C. Écho Séquentiel : fréquence de sortie à un écart proche dans les analogues historiques
-      let seqEchoHits = 0;
-      let seqEchoNorm = 0;
-      for (const match of topMatches) {
-        seqEchoNorm += match.similarity;
-        for (const w of match.nextDrawFootprint.winningNumbers) {
-          if (w.number === num) {
-            seqEchoHits += match.similarity * 1.0;
-          } else if (w.binId === bin.id) {
-            const gapDiff = Math.abs(w.gapAtDraw - currentGap);
-            seqEchoHits +=
-              match.similarity * 0.35 * Math.exp(-gapDiff / Math.max(2, stdHistGap * 0.5));
-          }
-        }
-      }
-      const sequenceEchoScore =
-        seqEchoNorm > 0 ? Math.min(1, seqEchoHits / seqEchoNorm) : 0;
-
-      // D. Continuité Gaussienne aux Frontières des Tranches (AGENTS.md : Zéro discontinuité de seuil)
-      let boundaryWeightSum = 0;
-      let boundaryProbSum = 0;
+      // A. Canal zTranche : Combinaison de Stouffer pondérée par noyau Gaussien aux frontières des tranches
+      let boundaryZNumerator = 0;
+      let boundaryWeightSqSum = 0;
       for (const otherBin of resolvedBins) {
         const distToBin =
           currentGap < otherBin.minGap
@@ -1141,50 +1216,126 @@ export const gapRangeSequenceService = {
             : currentGap > otherBin.maxGap
               ? currentGap - otherBin.maxGap
               : 0;
-        const w = Math.exp(-(distToBin * distToBin) / (2 * 2.25));
-        boundaryWeightSum += w;
-        boundaryProbSum +=
-          w * (blendedProbs[otherBin.id] / Math.max(1e-4, otherBin.theoreticalProb));
+        const w = Math.exp(-(distToBin * distToBin) / (2 * boundaryKernelVar));
+        boundaryZNumerator += w * binZScore[otherBin.id];
+        boundaryWeightSqSum += w * w;
       }
-      const continuousLift =
-        boundaryWeightSum > 0 ? boundaryProbSum / boundaryWeightSum : 1.0;
-      const boundaryContinuityScore = Math.tanh(continuousLift * 0.65);
+      const zTranche =
+        boundaryWeightSqSum > 0
+          ? boundaryZNumerator / Math.sqrt(boundaryWeightSqSum)
+          : binZScore[bin.id];
+
+      // B. Canal zDrought : Tension standardisée de renouvellement de la tranche
+      const zDrought = trancheDroughtZScore[bin.id];
+
+      // C. Canal zHazard : Test binomial exact de résonance dans la fenêtre de Silverman vs loi géométrique H0
+      const silvermanBandwidth = Math.max(
+        1.2,
+        1.06 * stdHistGap * Math.pow(Math.max(1, m), -0.2)
+      );
+      const winLow = Math.max(0, Math.floor(currentGap - 1));
+      const winHigh = Math.floor(
+        currentGap + Math.max(1, Math.round(silvermanBandwidth * 0.75))
+      );
+      const winLen = Math.max(1, winHigh - winLow + 1);
+
+      let survivalCount = 0;
+      let nearExitCount = 0;
+      for (const g of exits) {
+        if (g >= winLow) {
+          survivalCount += 1;
+          if (g <= winHigh) {
+            nearExitCount += 1;
+          }
+        }
+      }
+
+      // Probabilité conditionnelle exacte sous H0 géométrique sans mémoire : 1 - (1 - p)^L_win
+      const p0Win = Math.max(
+        1e-6,
+        Math.min(1 - 1e-6, 1 - Math.pow(1 - P_SINGLE, winLen))
+      );
+      let zHazard = 0;
+      if (survivalCount > 0) {
+        const expectedNear = survivalCount * p0Win;
+        const seHazard = Math.sqrt(
+          Math.max(1e-9, survivalCount * p0Win * (1 - p0Win))
+        );
+        const rawZHazard = (nearExitCount - expectedNear) / seHazard;
+        const hazardCredibility =
+          survivalCount / (survivalCount + dirichletShrinkagePrior);
+        zHazard = hazardCredibility * rawZHazard;
+      }
+
+      // D. Canal zAffinity : Test binomial d'affinité conditionnelle Boule–Tranche vs occupation H0 π₀(b)
+      const hitsInCurrentBin = ballTrancheExitCounts[num][bin.id] || 0;
+      const priorBinShare = Math.max(1e-5, Math.min(1 - 1e-5, poolBaselineProb[bin.id]));
+      let zAffinity = 0;
+      if (m > 0) {
+        const expectedBinHits = m * priorBinShare;
+        const seAffinity = Math.sqrt(
+          Math.max(1e-9, m * priorBinShare * (1 - priorBinShare))
+        );
+        const rawZAffinity = (hitsInCurrentBin - expectedBinHits) / seAffinity;
+        const affinityCredibility = m / (m + dirichletShrinkagePrior);
+        zAffinity = affinityCredibility * rawZAffinity;
+      }
+
+      // E. Canal zEcho : Test binomial sur analogues séquentiels W1+ADN (taille effective de Kish vs p₀ = 5/90)
+      let seqEchoBallHits = 0;
+      for (const match of topMatches) {
+        if (match.nextDrawFootprint.winningNumbers.some((w) => w.number === num)) {
+          seqEchoBallHits += match.similarity;
+        }
+      }
+      let zEcho = 0;
+      if (seqEchoEffectiveN > 0 && echoWeightSum > 0) {
+        const pEchoHat = seqEchoBallHits / echoWeightSum;
+        const seEcho = Math.sqrt(
+          Math.max(1e-9, (P_SINGLE * (1 - P_SINGLE)) / seqEchoEffectiveN)
+        );
+        const rawZEcho = (pEchoHat - P_SINGLE) / seEcho;
+        const echoCredibility =
+          seqEchoEffectiveN / (seqEchoEffectiveN + dirichletShrinkagePrior);
+        zEcho = echoCredibility * rawZEcho;
+      }
+
+      // Agrégation homogène par la méthode de Stouffer (tous les canaux actifs en unités σ)
+      const stouffer = combineStoufferZScores([
+        { z: zTranche, weight: 1 },
+        { z: zDrought, weight: 1 },
+        { z: zHazard, weight: survivalCount > 0 ? 1 : 0 },
+        { z: zAffinity, weight: m > 0 ? 1 : 0 },
+        { z: zEcho, weight: seqEchoEffectiveN > 0 ? 1 : 0 },
+      ]);
+
+      const stoufferZScore = Number(stouffer.zScore.toFixed(4));
+      const stoufferPValue = Number(stouffer.pValue.toFixed(6));
+      const compositeScore = Number((normalCdf(stouffer.zScore) * 100).toFixed(1));
+
+      // Conversions percentiles Φ(Z_j) pour la rétrocompatibilité d'affichage [0, 1]
+      const individualHazard = Number(normalCdf(zHazard).toFixed(4));
+      const trancheAffinity = Number(normalCdf(zAffinity).toFixed(4));
+      const sequenceEchoScore = Number(normalCdf(zEcho).toFixed(4));
+      const boundaryContinuityScore = Number(normalCdf(zTranche).toFixed(4));
 
       const trancheProb = blendedProbs[bin.id];
       const trancheLift =
         trancheProb / Math.max(1e-5, poolBaselineProb[bin.id]);
-      const droughtBonus = trancheDroughtPressure[bin.id];
 
-      // Synthèse continue et différentiable du score composite par boule dans [0, 100]
-      const macroSignal = Math.tanh(
-        0.55 * trancheLift + 0.45 * (trancheProb * K)
-      );
-      const microSignal =
-        0.42 * individualHazard +
-        0.26 * trancheAffinity +
-        0.18 * sequenceEchoScore +
-        0.14 * boundaryContinuityScore;
-
-      const rawCombined =
-        0.48 * macroSignal +
-        0.40 * microSignal +
-        0.12 * droughtBonus * individualHazard;
-      const compositeScore = Math.max(
-        1,
-        Math.min(99.4, Math.round(rawCombined * 1000) / 10)
-      );
-
-      // Détermination du rôle analytique dominant
+      // Rôle analytique dominant déterminé par le canal Z-score maximal (aucun seuil arbitraire)
       let role: GapCandidateRole = 'ANCRE DE TRANCHE';
-      if (droughtBonus >= 0.68 && trancheLift >= 1.02) {
+      const maxChannelZ = Math.max(zTranche, zDrought, zHazard, zEcho);
+      if (maxChannelZ === zDrought && zDrought > zTranche) {
         role = 'RUPTURE DE SÉCHERESSE';
-      } else if (individualHazard >= trancheAffinity && individualHazard >= sequenceEchoScore) {
+      } else if (maxChannelZ === zHazard && survivalCount > 0) {
         role = 'RÉSONANCE HAZARD';
-      } else if (sequenceEchoScore >= 0.48) {
+      } else if (maxChannelZ === zEcho && seqEchoEffectiveN > 0) {
         role = 'ÉCHO SÉQUENTIEL';
       }
 
-      const verdict = `Écart actuel ${currentGap}t (${bin.shortLabel}, Lift ${trancheLift.toFixed(2)}×) • Résonance cycle individuel ${(individualHazard * 100).toFixed(0)}% (μ=${meanHistGap.toFixed(1)}t±${stdHistGap.toFixed(1)}) • Affinité tranche ${(trancheAffinity * 100).toFixed(0)}%.`;
+      const zSign = stoufferZScore >= 0 ? '+' : '';
+      const verdict = `Écart ${currentGap}t (${bin.shortLabel}) • Stouffer Z=${zSign}${stoufferZScore.toFixed(2)}σ (p=${stoufferPValue < 0.001 ? '<0.001' : stoufferPValue.toFixed(3)}) • Z_tr=${zTranche.toFixed(2)}, Z_haz=${zHazard.toFixed(2)}, Z_aff=${zAffinity.toFixed(2)}, Z_echo=${zEcho.toFixed(2)}.`;
 
       allBallCandidates.push({
         number: num,
@@ -1194,6 +1345,16 @@ export const gapRangeSequenceService = {
         binLabel: bin.label,
         binColor: bin.color,
         compositeScore,
+        stoufferZScore,
+        stoufferPValue,
+        channelZScores: {
+          zTranche: Number(zTranche.toFixed(4)),
+          zDrought: Number(zDrought.toFixed(4)),
+          zHazard: Number(zHazard.toFixed(4)),
+          zAffinity: Number(zAffinity.toFixed(4)),
+          zEcho: Number(zEcho.toFixed(4)),
+          activeChannels: stouffer.activeChannels,
+        },
         trancheProb,
         trancheLift,
         individualHazard,
@@ -1209,25 +1370,18 @@ export const gapRangeSequenceService = {
 
     allBallCandidates.sort(
       (a, b) =>
+        b.stoufferZScore - a.stoufferZScore ||
         b.compositeScore - a.compositeScore ||
-        b.individualHazard - a.individualHazard ||
         a.number - b.number
     );
 
-    // 10. Construction des Prévisions Détaillées par Tranche (binForecasts)
+    // 11. Construction des Prévisions Détaillées par Tranche (binForecasts)
     const binForecasts: GapBinTransitionStats[] = resolvedBins.map((bin) => {
       const id = bin.id;
       const bProb = blendedProbs[id];
       const baseProb = poolBaselineProb[id];
       const lift = bProb / Math.max(1e-5, baseProb);
-
-      // z-score sur le nombre effectif de TRANSITIONS (5 boules par tirage), pas de boules
-      const n1 = Math.max(
-        1,
-        transRowTotals1[currentDom1] / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW
-      );
-      const stdErr = Math.sqrt((baseProb * (1 - baseProb)) / n1);
-      const zScore = stdErr > 0 ? (bProb - baseProb) / stdErr : 0;
+      const zScore = binZScore[id];
 
       const topPoolCandidates = allBallCandidates
         .filter((c) => c.binId === id)
@@ -1262,16 +1416,18 @@ export const gapRangeSequenceService = {
       };
     });
 
-    // 11. Synthèse de Sélection Optimale Sous-Modulaire (5 Gagnants + 2 Réserves)
-    // Respecte les quotas de tranches Hamilton-Hare tout en maximisant la résonance individuelle et la diversité des dizaines
+    // 12. Synthèse de Sélection Optimale Sous-Modulaire en Espace Z (5 Gagnants + 2 Réserves)
+    // Respecte les quotas de tranches Hamilton-Hare tout en maximisant le score de Stouffer
+    // pénalisé continûment en unités σ par la saturation des dizaines et l'unicité des écarts.
     const selectedNumbers: number[] = [];
     const usedNumbers = new Set<number>();
     const remainingQuotas: Record<GapBinId, number> = { ...trancheQuotas };
     const decadeCounts = new Int32Array(10);
+    const diversityScaleSigma = 1 / Math.sqrt(LOTTERY_CONSTANTS.NUMBERS_PER_DRAW);
 
-    // Phase 1 : Remplir les quotas de chaque tranche par ordre de probabilité de tranche décroissante
+    // Phase 1 : Remplir les quotas de chaque tranche par ordre de significativité Z décroissante
     const binsOrderedByPriority = [...binForecasts].sort(
-      (a, b) => b.blendedProb - a.blendedProb
+      (a, b) => b.zScore - a.zScore || b.blendedProb - a.blendedProb
     );
 
     for (const bf of binsOrderedByPriority) {
@@ -1285,23 +1441,21 @@ export const gapRangeSequenceService = {
 
       for (let q = 0; q < quota && selectedNumbers.length < 5; q++) {
         let bestCand: GapBallCandidate | null = null;
-        let bestMarginalGain = -Infinity;
+        let bestMarginalZ = -Infinity;
 
         for (const cand of binCandidates) {
           if (usedNumbers.has(cand.number)) continue;
           const dec = Math.min(8, Math.floor((cand.number - 1) / 10));
-          // Pénalité continue de saturation de dizaine (sous-modularité spatiale)
-          const decadePenalty = Math.exp(-0.35 * decadeCounts[dec]);
-          // Pénalité continue si deux boules de la même tranche ont exactement le même écart
           const sameGapCount = selectedNumbers.filter(
             (sNum) => Math.abs(ballCurrentGap[sNum] - cand.currentGap) === 0
           ).length;
-          const gapSpreadFactor = Math.exp(-0.2 * sameGapCount);
 
-          const marginalGain =
-            cand.compositeScore * decadePenalty * gapSpreadFactor;
-          if (marginalGain > bestMarginalGain) {
-            bestMarginalGain = marginalGain;
+          // Utilité marginale homogène en unités σ (sans mélange d'unités ni multiplication sur Z signé)
+          const marginalZ =
+            cand.stoufferZScore -
+            (decadeCounts[dec] + sameGapCount) * diversityScaleSigma;
+          if (marginalZ > bestMarginalZ) {
+            bestMarginalZ = marginalZ;
             bestCand = cand;
           }
         }
@@ -1316,39 +1470,48 @@ export const gapRangeSequenceService = {
       }
     }
 
-    // Phase 2 : Compléter jusqu'à 5 si un quota n'a pu être honoré
-    for (const cand of allBallCandidates) {
-      if (selectedNumbers.length >= 5) break;
-      if (!usedNumbers.has(cand.number)) {
-        selectedNumbers.push(cand.number);
-        usedNumbers.add(cand.number);
+    // Phase 2 : Compléter jusqu'à 5 par utilité marginale Z si un quota n'a pu être honoré
+    while (selectedNumbers.length < 5) {
+      let bestCand: GapBallCandidate | null = null;
+      let bestMarginalZ = -Infinity;
+      for (const cand of allBallCandidates) {
+        if (usedNumbers.has(cand.number)) continue;
         const dec = Math.min(8, Math.floor((cand.number - 1) / 10));
-        decadeCounts[dec] += 1;
+        const marginalZ = cand.stoufferZScore - decadeCounts[dec] * diversityScaleSigma;
+        if (marginalZ > bestMarginalZ) {
+          bestMarginalZ = marginalZ;
+          bestCand = cand;
+        }
       }
+      if (!bestCand) break;
+      selectedNumbers.push(bestCand.number);
+      usedNumbers.add(bestCand.number);
+      const dec = Math.min(8, Math.floor((bestCand.number - 1) / 10));
+      decadeCounts[dec] += 1;
     }
 
-    // Phase 3 : Sélectionner 2 Réserves Tactiques dans les tranches complémentaires à fort Lift
+    // Phase 3 : Sélectionner 2 Réserves Tactiques en favorisant des tranches complémentaires
     const reserveTwo: number[] = [];
     const selectedBins = new Set(
       selectedNumbers.map((n) => ballCurrentBin[n]?.id)
     );
 
-    for (const cand of allBallCandidates) {
-      if (reserveTwo.length >= 2) break;
-      if (usedNumbers.has(cand.number)) continue;
-      // Favoriser une tranche non saturée ou à fort lift
-      if (!selectedBins.has(cand.binId) || reserveTwo.length === 1) {
-        reserveTwo.push(cand.number);
-        usedNumbers.add(cand.number);
-        selectedBins.add(cand.binId);
+    while (reserveTwo.length < 2) {
+      let bestCand: GapBallCandidate | null = null;
+      let bestReserveZ = -Infinity;
+      for (const cand of allBallCandidates) {
+        if (usedNumbers.has(cand.number)) continue;
+        const binOverlapPenalty = selectedBins.has(cand.binId) ? diversityScaleSigma : 0;
+        const reserveUtility = cand.stoufferZScore - binOverlapPenalty;
+        if (reserveUtility > bestReserveZ) {
+          bestReserveZ = reserveUtility;
+          bestCand = cand;
+        }
       }
-    }
-    for (const cand of allBallCandidates) {
-      if (reserveTwo.length >= 2) break;
-      if (!usedNumbers.has(cand.number)) {
-        reserveTwo.push(cand.number);
-        usedNumbers.add(cand.number);
-      }
+      if (!bestCand) break;
+      reserveTwo.push(bestCand.number);
+      usedNumbers.add(bestCand.number);
+      selectedBins.add(bestCand.binId);
     }
 
     const optimalFive = [...selectedNumbers].sort((a, b) => a - b);
@@ -1357,6 +1520,10 @@ export const gapRangeSequenceService = {
     const selectedCandObjects = optimalFive
       .map((n) => allBallCandidates.find((c) => c.number === n))
       .filter((c): c is GapBallCandidate => Boolean(c));
+
+    const ticketStouffer = combineStoufferZScores(
+      selectedCandObjects.map((c) => ({ z: c.stoufferZScore, weight: 1 }))
+    );
 
     const meanComposite =
       selectedCandObjects.reduce((acc, c) => acc + c.compositeScore, 0) /
@@ -1385,13 +1552,13 @@ export const gapRangeSequenceService = {
     // Confiance calibrée de la sélection : sous l'hypothèse nulle H0 (tirages i.i.d.), la probabilité
     // qu'un ticket de 5 boules contienne au moins 1 numéro gagnant dans un tirage 5/90 est
     // exactement 1 - C(85,5)/C(90,5) = 25.4%.
-    // L'indice de confiance interne (cohérence + quotas + diversité) n'est pondéré au-delà de cette
-    // ligne de base que proportionnellement à l'évidence statistique réelle (max |z| >= 1.645).
+    // L'indice de cohérence interne n'est pondéré au-delà de cette ligne de base que
+    // proportionnellement à l'évidence statistique réelle (max |z| >= 1.96 ou excès Stouffer FDR).
     const maxTrancheZ = Math.max(0, ...binForecasts.map((f) => Math.abs(f.zScore)));
     const baselineH0Confidence = 25.4;
     const internalCoherence =
       0.55 * meanComposite + 0.25 * quotaFidelity + 0.20 * decadeDiversity;
-    const zEvidenceFactor = Math.max(0, Math.min(1, (maxTrancheZ - 1.645) / 2.5));
+    const zEvidenceFactor = Math.max(0, Math.min(1, (maxTrancheZ - 1.96) / 2.5));
 
     const selectionConfidence = Math.min(
       98.5,
@@ -1533,10 +1700,10 @@ export const gapRangeSequenceService = {
       },
       {
         step: '04',
-        title: 'Quotas Hamilton-Hare & Micro-Sélection Sous-Modulaire',
+        title: 'Quotas Hamilton-Hare & Agrégation de Stouffer (Z-Scores)',
         detail: `Répartition optimale des 5 boules : ${quotaSummaryParts.join(
           ' + '
-        )}. À l'intérieur de chaque tranche, les boules sont départagées par leur densité de renouvellement individuelle de Silverman et leur affinité historique avec la tranche.`,
+        )}. Chaque boule est évaluée par combinaison de Stouffer sur 5 Z-scores homogènes N(0, 1) sous H0 (tranche lissée, sécheresse, hasard de Silverman, affinité tranche, écho W1) : Z_ticket=${ticketStouffer.zScore >= 0 ? '+' : ''}${ticketStouffer.zScore.toFixed(2)}σ.`,
         metricLabel: 'Fidélité Quotas',
         metricValue: `${quotaFidelity.toFixed(1)}%`,
       },
@@ -1556,17 +1723,17 @@ export const gapRangeSequenceService = {
               : 'équilibre multi-tranches'
         } (${expectedNextMean.toFixed(1)}t attendu). Les tranches ${
           top1.bin.shortLabel
-        } (${(top1.blendedProb * 100).toFixed(1)}%, Lift ${top1.liftOverTheoretical.toFixed(
+        } (${(top1.blendedProb * 100).toFixed(1)}%, z=${top1.zScore.toFixed(
           2
-        )}×, Quota ${top1.optimalQuotaBalls}) et ${
+        )}σ, Quota ${top1.optimalQuotaBalls}) et ${
           top2.bin.shortLabel
-        } (${(top2.blendedProb * 100).toFixed(1)}%, Lift ${top2.liftOverTheoretical.toFixed(
+        } (${(top2.blendedProb * 100).toFixed(1)}%, z=${top2.zScore.toFixed(
           2
-        )}×, Quota ${
+        )}σ, Quota ${
           top2.optimalQuotaBalls
-        }) concentrent la plus forte densité de sortie, conduisant à la sélection optimale [${optimalFive
+        }) concentrent la plus forte significativité statistique, conduisant à la sélection optimale [${optimalFive
           .map((n) => (n < 10 ? `0${n}` : `${n}`))
-          .join(' - ')}].`
+          .join(' - ')}] (Stouffer Z=${ticketStouffer.zScore >= 0 ? '+' : ''}${ticketStouffer.zScore.toFixed(2)}σ).`
       : 'Historique insuffisant pour établir une séquence de tranches d’écarts.';
 
     return {
@@ -1606,6 +1773,9 @@ export const gapRangeSequenceService = {
         quotaFidelity: Number(quotaFidelity.toFixed(1)),
         meanHazardResonance: Number(meanHazardResonance.toFixed(1)),
         decadeDiversity: Number(decadeDiversity.toFixed(1)),
+        ticketStoufferZScore: Number(ticketStouffer.zScore.toFixed(4)),
+        ticketPValue: Number(ticketStouffer.pValue.toFixed(6)),
+        scoringMethod: 'STOUFFER_Z',
         allCandidates: allBallCandidates,
       },
     };
@@ -1613,8 +1783,7 @@ export const gapRangeSequenceService = {
 
   /**
    * Génère un vecteur de scores [1..90] directement exploitable par le moteur de prédiction global.
-   * Combine le Lift macroscopique de la tranche, la résonance de renouvellement individuel (Silverman)
-   * et la continuité Gaussienne aux frontières des tranches.
+   * Dérivé directement du percentile de significativité Φ(Z_Stouffer) sans constantes arbitraires.
    */
   getBallScoresFromGapSequences(
     drawName: string,
@@ -1628,25 +1797,15 @@ export const gapRangeSequenceService = {
       candidateMap.set(cand.number, cand);
     }
 
-    const optimalSet = new Set(report.selectionSynthesis.optimalFive);
-    const reserveSet = new Set(report.selectionSynthesis.reserveTwo);
-
     for (let num = 1; num <= 90; num++) {
       const cand = candidateMap.get(num);
       if (!cand) {
-        scores[num] = 0.2;
+        scores[num] = 0.5;
         continue;
       }
 
-      // Normalisation continue dans [0.05, 1.0] basée sur le compositeScore et la synthèse sous-modulaire
-      const baseNormalized = cand.compositeScore / 100;
-      const synthesisBoost = optimalSet.has(num)
-        ? 1.12
-        : reserveSet.has(num)
-          ? 1.05
-          : 1.0;
-
-      scores[num] = Math.min(1.0, Math.max(0.05, baseNormalized * synthesisBoost));
+      // Significativité statistique continue Φ(Z_Stouffer) ∈ [0.05, 1.0] (neutre à 0.50 sous H0)
+      scores[num] = Math.min(1.0, Math.max(0.05, normalCdf(cand.stoufferZScore)));
     }
 
     return scores;

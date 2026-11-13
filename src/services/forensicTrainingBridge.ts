@@ -6,6 +6,11 @@ import { detectGameRegime, calculateTemporalDriftLearningRate } from './mathServ
 import { LCG } from '../utils/mathUtils';
 import { recordModelDnaVersion } from './prediction/modelDnaKnowledgeBase';
 import { applyOptimizedWeights } from './prediction/optimizationController';
+import {
+  synthesizeDnaGeneSequenceAndWeights,
+  type DnaGeneSynthesisResult,
+  type DnaGeneCodon,
+} from './prediction/dnaGeneSequenceService';
 
 const generateDeterministicId = (prefix: string, index: number, seedStr: string): string => {
   let hash = 0;
@@ -305,3 +310,69 @@ export const getTrainingRecommendations = (
 
   return recommendations.sort((a, b) => b.priority - a.priority);
 };
+
+export interface PostMortemSequencedLearningSession extends LearningSession {
+  sequenceSignature: string;
+  kendallTauShift: number;
+  epistaticCoherenceScore: number;
+  topCodons: DnaGeneCodon[];
+  synthesisResult: DnaGeneSynthesisResult;
+}
+
+/**
+ * Synthétise une session d'apprentissage complète à partir d'un ou plusieurs rapports post-mortem
+ * en pilotant conjointement l'ordre séquentiel des gènes ADN, leurs couplages épistasiques
+ * et le recalibrage de leurs poids sous garde statistique Benjamini-Hochberg.
+ */
+export const synthesizePostMortemLearningSession = async (
+  forensicReports: ForensicReport[],
+  history: DrawResult[],
+  baseWeights?: AlgoWeights
+): Promise<PostMortemSequencedLearningSession> => {
+  const referenceReport = forensicReports[0];
+  const drawName = referenceReport?.drawName || history[0]?.drawName || 'GLOBAL';
+  const currentWeights = baseWeights || (await getAlgoWeights(drawName));
+
+  const synthesis = synthesizeDnaGeneSequenceAndWeights({
+    drawName,
+    history,
+    currentWeights,
+    forensicReports,
+  });
+
+  const adjustments = synthesis.geneSequence.map((node) => ({
+    algo: node.key,
+    oldWeight: node.initialWeight,
+    newWeight: node.optimizedWeight,
+    reason: `[Rang #${node.rank}${
+      node.rankShift !== 0 ? ` (${node.rankShift > 0 ? `+${node.rankShift}` : node.rankShift})` : ''
+    } · ${node.expressionState}] ${node.rationale}`,
+  }));
+
+  const missedNumber =
+    referenceReport?.missedOpportunities?.[0]?.number ??
+    referenceReport?.combo?.[0];
+
+  const latestTs = referenceReport?.timestamp
+    ? new Date(referenceReport.timestamp).getTime()
+    : Date.now();
+  const safeTs = Number.isFinite(latestTs) ? latestTs : Date.now();
+
+  return {
+    id: generateDeterministicId(
+      'seq_session',
+      forensicReports.length + history.length,
+      `${drawName}_${synthesis.sequenceMetrics.sequenceSignature}`
+    ),
+    drawName,
+    timestamp: safeTs,
+    adjustments,
+    missedNumber,
+    sequenceSignature: synthesis.sequenceMetrics.sequenceSignature,
+    kendallTauShift: synthesis.sequenceMetrics.kendallTauShiftVsActive,
+    epistaticCoherenceScore: synthesis.sequenceMetrics.epistaticCoherenceScore,
+    topCodons: synthesis.codons.slice(0, 4),
+    synthesisResult: synthesis,
+  };
+};
+

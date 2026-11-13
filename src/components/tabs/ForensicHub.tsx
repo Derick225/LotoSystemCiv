@@ -16,6 +16,7 @@ import { NeuralSelfOptimizationPanel } from "../genomic/NeuralSelfOptimizationPa
 import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
 import { ForensicAuditLogsView } from "../genomic/ForensicAuditLogsView";
 import { DrawDnaHistoryViewer } from "../prediction/DrawDnaHistoryViewer";
+import { DnaGeneSequencerPanel } from "../genomic/DnaGeneSequencerPanel";
 import {
   BookOpen,
   Activity,
@@ -43,7 +44,7 @@ import { useForensicData } from "../../hooks/useForensicData";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import { formatDateSafely } from "../../utils/dateUtils";
-import { generateLearningSession, applyForensicAdjustments } from "../../services/forensicTrainingBridge";
+import { runUnifiedDnaGeneSequencer } from "../../services/prediction/dnaGeneSequenceService";
 import { generateMasterPrediction } from "../../services/prediction/predictionFacade";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { ForensicHubHeader } from "../forensic/ForensicHubHeader";
@@ -175,6 +176,8 @@ export const ForensicHub: React.FC<{
   const navigateToModule = useNexusStore((state) => state.navigateToModule);
   const history = useNexusStore((state) => state.history);
   const globalWeights = useNexusStore((state) => state.globalWeights);
+  const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
+  const addAgentLog = useNexusStore((state) => state.addAgentLog);
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
 
   const { reports, pendingPredictions, syncReports, refreshLocal, deleteReport, deleteReports } =
@@ -198,8 +201,11 @@ export const ForensicHub: React.FC<{
     "autopsy"
   );
   const [dnaSubView, setDnaSubView] = useState<
-    "reference" | "drift_heatmap" | "sieve_radar" | "history_dna"
+    "reference" | "gene_sequencer" | "drift_heatmap" | "sieve_radar" | "history_dna"
   >(() => {
+    if (initialSubView === "gene_sequencer" || initialTab === "GENE_SEQUENCER") {
+      return "gene_sequencer";
+    }
     if (initialSubView === "history_dna" || initialTab === "dna_history" || initialTab === "history_dna") {
       return "history_dna";
     }
@@ -218,6 +224,9 @@ export const ForensicHub: React.FC<{
     if (sub === "DNA_AUDITOR" || sub === "DNA") {
       setActiveTab("dna_drift");
       setDnaSubView("reference");
+    } else if (sub === "GENE_SEQUENCER" || sub === "SEQUENCER" || sub === "EPIGENOME") {
+      setActiveTab("dna_drift");
+      setDnaSubView("gene_sequencer");
     } else if (
       sub === "FUSION" ||
       sub === "MODEL_FUSION" ||
@@ -614,14 +623,24 @@ export const ForensicHub: React.FC<{
       audioEngine.play("click");
       const cleanHistory = purifyHistoryForDraw(drawName, history);
       const depth = computeRetroPropDepth(reports, getReportHits);
+      const scopedReports = reports.slice(0, depth);
 
-      for (const rep of reports.slice(0, depth)) {
-        const session = await generateLearningSession(rep, cleanHistory);
-        await applyForensicAdjustments(session, undefined, false);
-      }
+      const synthesis = await runUnifiedDnaGeneSequencer(drawName, cleanHistory, globalWeights, {
+        forensicReports: scopedReports,
+        applyWeights: true,
+      });
+
+      setGlobalWeights(synthesis.optimizedWeights);
+      addAgentLog({
+        id: `retro_epigenome_${Date.now()}`,
+        timestamp: new Date(),
+        action: `Rétro-propagation génomique consolidée (${drawName}) sur ${scopedReports.length} rapport(s) · ${synthesis.sequenceMetrics.sequenceSignature}`,
+        type: "AUTOTUNE",
+        impact: `Cohérence épistasique ${synthesis.sequenceMetrics.epistaticCoherenceScore}% · Δmax ${(synthesis.sequenceMetrics.maxWeightDelta * 100).toFixed(2)}%`,
+      });
 
       showToast(
-        `Rétro-propagation consolidée (${depth} rapports analysés) effectuée avec succès !`,
+        `Rétro-propagation consolidée (${scopedReports.length} rapports · ${synthesis.sequenceMetrics.sequenceSignature}) effectuée avec succès !`,
         "success"
       );
       audioEngine.play("success");
@@ -631,7 +650,7 @@ export const ForensicHub: React.FC<{
     } finally {
       setIsBatchApplying(false);
     }
-  }, [reports, drawName, history, getReportHits, showToast]);
+  }, [reports, drawName, history, globalWeights, getReportHits, setGlobalWeights, addAgentLog, showToast]);
 
   const handleExportReports = useCallback(() => {
     if (reports.length === 0) return;
@@ -905,6 +924,20 @@ export const ForensicHub: React.FC<{
             <button
               onClick={() => {
                 audioEngine.play("click");
+                setDnaSubView("gene_sequencer");
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+                dnaSubView === "gene_sequencer"
+                  ? "bg-cyan-600 text-white shadow-sm"
+                  : "text-slate-400 hover:text-white"
+              }`}
+            >
+              <Dna size={13} />
+              Séquenceur Gènes ADN
+            </button>
+            <button
+              onClick={() => {
+                audioEngine.play("click");
                 setDnaSubView("drift_heatmap");
               }}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
@@ -947,6 +980,7 @@ export const ForensicHub: React.FC<{
           </div>
 
           {dnaSubView === "reference" && <DnaReferenceAuditor drawName={drawName} />}
+          {dnaSubView === "gene_sequencer" && <DnaGeneSequencerPanel drawName={drawName} />}
           {dnaSubView === "drift_heatmap" && <SubAlgorithmDriftHeatmap drawName={drawName} />}
           {dnaSubView === "sieve_radar" && <UnifiedDnaSieveRadar drawName={drawName} />}
           {dnaSubView === "history_dna" && (

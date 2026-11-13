@@ -20,6 +20,21 @@ export interface AlgorithmicSpecialization {
   impactScore: number;
 }
 
+export interface ModelDnaCodonSummary {
+  id: string;
+  genes: AlgoKey[];
+  cohesionScore: number;
+  synergyLift: number;
+}
+
+export interface ModelDnaSequenceProfile {
+  sequenceSignature: string;
+  orderedGenes: AlgoKey[];
+  kendallTauShiftFromPrevious: number;
+  epistaticCoherenceScore?: number;
+  topCodons?: ModelDnaCodonSummary[];
+}
+
 export interface ModelDnaRecord {
   id: string;
   drawName: string;
@@ -28,6 +43,7 @@ export interface ModelDnaRecord {
   origin: ModelDnaOrigin;
   weights: AlgoWeights;
   dnaFingerprint: string;
+  sequenceProfile?: ModelDnaSequenceProfile;
   performance: {
     // Absent lorsqu'aucune mesure de performance réelle n'existe pour cette version :
     // une sauvegarde de poids manuelle n'est pas une performance mesurée.
@@ -51,6 +67,9 @@ export interface ModelEvolutionLineage {
   drawName: string;
   totalGenerations: number;
   latestVersion: string;
+  latestSequenceSignature: string | null;
+  meanKendallTauShift: number | null;
+  sequenceStabilityIndex: number | null;
   firstRecordedAt: string;
   lastUpdatedAt: string;
   overallScoreProgression: {
@@ -121,6 +140,50 @@ export const extractSpecializations = (weights: AlgoWeights): AlgorithmicSpecial
   });
 };
 
+export const extractOrderedGenesFromWeights = (weights: AlgoWeights): AlgoKey[] => {
+  return Object.entries(weights)
+    .filter(([, w]) => typeof w === 'number' && Number.isFinite(w))
+    .sort(([kA, wA], [kB, wB]) => (wB as number) - (wA as number) || kA.localeCompare(kB))
+    .map(([k]) => k as AlgoKey);
+};
+
+export const computeSequenceKendallTauShift = (
+  seqA: readonly string[],
+  seqB: readonly string[]
+): number => {
+  const rankB = new Map<string, number>();
+  seqB.forEach((g, idx) => {
+    if (!rankB.has(g)) rankB.set(g, idx);
+  });
+  const common = seqA.filter((g) => rankB.has(g));
+  const n = common.length;
+  if (n < 2) return 0;
+
+  let discordant = 0;
+  for (let i = 0; i < n; i++) {
+    const rBi = rankB.get(common[i])!;
+    for (let j = i + 1; j < n; j++) {
+      const rBj = rankB.get(common[j])!;
+      if (rBi > rBj) discordant++;
+    }
+  }
+  const totalPairs = (n * (n - 1)) / 2;
+  const normalized = Math.max(0, Math.min(1, discordant / totalPairs));
+  return parseFloat(normalized.toFixed(4));
+};
+
+const buildFallbackSequenceSignature = (
+  orderedGenes: readonly string[],
+  fingerprint: string
+): string => {
+  const head = orderedGenes
+    .slice(0, 5)
+    .map((k) => k.replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase())
+    .join('-');
+  const cleanFp = fingerprint.replace(/^dna_/, '').slice(0, 10).toUpperCase();
+  return `SEQ-[${head || 'EMPTY'}]-${cleanFp}`;
+};
+
 const DNA_IN_MEMORY_STORAGE = new Map<string, ModelDnaRecord[]>();
 
 /**
@@ -138,29 +201,82 @@ export const recordModelDnaVersion = async (
   const normalizedWeights = normalizeWeights(entry.weights);
   const fingerprint = computeModelDnaFingerprint(drawName, normalizedWeights);
   const specializations = extractSpecializations(normalizedWeights);
+  const recordId = getDeterministicUUID(`modeldna_${drawName}_${fingerprint}`);
+  const versionVal = entry.version || `v_${Date.now()}`;
+
+  // Lecture préalable pour déterminer le prédécesseur chronologique et le glissement Kendall-Tau
+  const hasLocalStorage = typeof window !== 'undefined' && Boolean(window.localStorage);
+  let existingSnapshot: ModelDnaRecord[] = [];
+  if (hasLocalStorage) {
+    try {
+      const existingRaw = window.localStorage.getItem(`lotopro_model_dna_${drawName}`);
+      existingSnapshot = existingRaw ? JSON.parse(existingRaw) : [];
+      if (!Array.isArray(existingSnapshot)) existingSnapshot = [];
+    } catch {
+      existingSnapshot = [];
+    }
+  } else {
+    existingSnapshot = DNA_IN_MEMORY_STORAGE.get(drawName) || [];
+  }
+
+  const newTsMs = new Date(timestamp || 0).getTime();
+  const priorChronological = existingSnapshot
+    .filter((r) => r.version !== versionVal && r.id !== recordId)
+    .filter((r) => new Date(r.timestamp || 0).getTime() <= newTsMs)
+    .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())[0];
+
+  const defaultOrderedGenes = extractOrderedGenesFromWeights(normalizedWeights);
+  const orderedGenes =
+    entry.sequenceProfile?.orderedGenes && entry.sequenceProfile.orderedGenes.length > 0
+      ? entry.sequenceProfile.orderedGenes
+      : defaultOrderedGenes;
+  const priorOrderedGenes = priorChronological
+    ? priorChronological.sequenceProfile?.orderedGenes &&
+      priorChronological.sequenceProfile.orderedGenes.length > 0
+      ? priorChronological.sequenceProfile.orderedGenes
+      : extractOrderedGenesFromWeights(priorChronological.weights)
+    : null;
+
+  const kendallTauShiftFromPrevious = priorOrderedGenes
+    ? computeSequenceKendallTauShift(priorOrderedGenes, orderedGenes)
+    : entry.sequenceProfile?.kendallTauShiftFromPrevious ?? 0;
+
+  const sequenceSignature =
+    entry.sequenceProfile?.sequenceSignature ||
+    buildFallbackSequenceSignature(orderedGenes, fingerprint);
+
+  const sequenceProfile: ModelDnaSequenceProfile = {
+    sequenceSignature,
+    orderedGenes,
+    kendallTauShiftFromPrevious,
+    ...(entry.sequenceProfile?.epistaticCoherenceScore !== undefined
+      ? { epistaticCoherenceScore: entry.sequenceProfile.epistaticCoherenceScore }
+      : {}),
+    ...(entry.sequenceProfile?.topCodons && entry.sequenceProfile.topCodons.length > 0
+      ? { topCodons: entry.sequenceProfile.topCodons }
+      : {}),
+  };
 
   const newRecord: ModelDnaRecord = {
-    id: getDeterministicUUID(`modeldna_${drawName}_${fingerprint}`),
+    id: recordId,
     drawName,
-    version: entry.version || `v_${Date.now()}`,
+    version: versionVal,
     timestamp,
     origin: entry.origin,
     weights: normalizedWeights,
     dnaFingerprint: fingerprint,
+    sequenceProfile,
     performance: entry.performance,
     regimeContext: entry.regimeContext,
     specializations,
     causalAuditTrail: entry.causalAuditTrail || [],
   };
 
-  if (typeof window !== 'undefined' && window.localStorage) {
+  if (hasLocalStorage) {
     try {
       const storageKey = `lotopro_model_dna_${drawName}`;
-      const existingRaw = window.localStorage.getItem(storageKey);
-      let existingList: ModelDnaRecord[] = existingRaw ? JSON.parse(existingRaw) : [];
-
       // Dédoublonnage idempotent par version et id (préserve les configurations de poids identiques à des dates distinctes)
-      existingList = existingList.filter(
+      let existingList = existingSnapshot.filter(
         r => r.version !== newRecord.version && r.id !== newRecord.id
       );
       existingList.push(newRecord);
@@ -236,6 +352,9 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
       drawName,
       totalGenerations: 0,
       latestVersion: 'v_canonical',
+      latestSequenceSignature: null,
+      meanKendallTauShift: null,
+      sequenceStabilityIndex: null,
       firstRecordedAt: new Date().toISOString(),
       lastUpdatedAt: new Date().toISOString(),
       overallScoreProgression: [],
@@ -307,10 +426,46 @@ export const getModelEvolutionLineage = async (drawName: string): Promise<ModelE
   const uniformShare = trackedAlgosCount > 0 ? 1.0 / trackedAlgosCount : 1.0;
   const stabilityIndex = Math.max(0, Math.min(100, Math.round(100.0 * Math.exp(-stdDev / uniformShare))));
 
+  const latestOrderedGenes =
+    latest.sequenceProfile?.orderedGenes && latest.sequenceProfile.orderedGenes.length > 0
+      ? latest.sequenceProfile.orderedGenes
+      : extractOrderedGenesFromWeights(latest.weights);
+  const latestSequenceSignature =
+    latest.sequenceProfile?.sequenceSignature ??
+    buildFallbackSequenceSignature(latestOrderedGenes, latest.dnaFingerprint);
+
+  // Dérive longitudinale des séquences géniques via distance de Kendall-Tau inter-générations
+  const sequenceShifts: number[] = [];
+  for (let i = 0; i < history.length - 1; i++) {
+    const newerRecord = history[i];
+    const olderRecord = history[i + 1];
+    const newerSeq =
+      newerRecord.sequenceProfile?.orderedGenes && newerRecord.sequenceProfile.orderedGenes.length > 0
+        ? newerRecord.sequenceProfile.orderedGenes
+        : extractOrderedGenesFromWeights(newerRecord.weights);
+    const olderSeq =
+      olderRecord.sequenceProfile?.orderedGenes && olderRecord.sequenceProfile.orderedGenes.length > 0
+        ? olderRecord.sequenceProfile.orderedGenes
+        : extractOrderedGenesFromWeights(olderRecord.weights);
+    sequenceShifts.push(computeSequenceKendallTauShift(olderSeq, newerSeq));
+  }
+
+  const meanKendallTauShift =
+    sequenceShifts.length > 0
+      ? parseFloat((sequenceShifts.reduce((a, b) => a + b, 0) / sequenceShifts.length).toFixed(4))
+      : null;
+  const sequenceStabilityIndex =
+    meanKendallTauShift !== null
+      ? Math.max(0, Math.min(100, Math.round(100.0 * (1.0 - meanKendallTauShift))))
+      : null;
+
   return {
     drawName,
     totalGenerations: history.length,
     latestVersion: latest.version,
+    latestSequenceSignature,
+    meanKendallTauShift,
+    sequenceStabilityIndex,
     firstRecordedAt: oldest.timestamp,
     lastUpdatedAt: latest.timestamp,
     overallScoreProgression: progression,
@@ -341,6 +496,7 @@ export const rollbackToModelDnaVersion = async (
     version: target.version,
     origin: target.origin,
     weights: target.weights,
+    sequenceProfile: target.sequenceProfile,
     performance: target.performance,
     regimeContext: target.regimeContext,
     causalAuditTrail: [

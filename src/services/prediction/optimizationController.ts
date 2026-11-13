@@ -5,7 +5,9 @@ import {
   recordModelDnaVersion,
   ModelDnaOrigin,
   ModelDnaRecord,
+  ModelDnaSequenceProfile,
   extractSpecializations,
+  extractOrderedGenesFromWeights,
   computeModelDnaFingerprint,
 } from './modelDnaKnowledgeBase';
 import { computeDrawCriticalThreshold } from './dnaAuditService';
@@ -35,6 +37,7 @@ export interface OptimizationRequest {
     entropy?: number;
   };
   causalAuditTrail?: string[];
+  sequenceProfile?: ModelDnaSequenceProfile;
   reason?: string;
   allowCriticalDrift?: boolean;
   isRetroactive?: boolean;
@@ -181,6 +184,16 @@ export async function applyOptimizedWeights(
     await saveAlgoWeights(drawName, appliedWeights);
   }
 
+  const effectiveSequenceProfile: ModelDnaSequenceProfile | undefined = request.sequenceProfile
+    ? !wasDamped && !request.useKalmanSmoothing
+      ? request.sequenceProfile
+      : {
+          ...request.sequenceProfile,
+          orderedGenes: extractOrderedGenesFromWeights(appliedWeights),
+          sequenceSignature: '',
+        }
+    : undefined;
+
   let dnaRecord: ModelDnaRecord;
   try {
     dnaRecord = await recordModelDnaVersion({
@@ -189,6 +202,7 @@ export async function applyOptimizedWeights(
       origin,
       weights: appliedWeights,
       timestamp: finalTimestamp,
+      sequenceProfile: effectiveSequenceProfile,
       performance: calculatedPerformance,
       regimeContext: regimeContext
         ? {

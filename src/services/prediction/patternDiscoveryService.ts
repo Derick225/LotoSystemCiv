@@ -176,6 +176,103 @@ const normalCdf = (z: number): number => {
 };
 
 /**
+ * Inverse de la fonction de répartition normale standard Φ⁻¹(p) (approximation de Beasley-Springer-Moro)
+ */
+const normalInvCdf = (p: number): number => {
+  const clamped = Math.max(1e-15, Math.min(1 - 1e-15, p));
+  if (clamped === 0.5) return 0;
+  const q = clamped < 0.5 ? clamped : 1 - clamped;
+  const t = Math.sqrt(-2 * Math.log(q));
+  const c0 = 2.515517;
+  const c1 = 0.802853;
+  const c2 = 0.010328;
+  const d1 = 1.432788;
+  const d2 = 0.189269;
+  const d3 = 0.001308;
+  const z = t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
+  return clamped < 0.5 ? -z : z;
+};
+
+/**
+ * Probabilité exacte de queue supérieure P(X >= k) pour X ~ Poisson(lambda),
+ * numériquement stable même pour des lambda très faibles et convertie en Z-score équivalent.
+ */
+const computePoissonUpperTailZScore = (k: number, lambda: number): number => {
+  if (k <= 0 || lambda <= 0) return 0;
+  if (k <= lambda) {
+    // Queue inférieure ou centrale : somme directe depuis 0
+    let cdfLess = 0;
+    let logFact = 0;
+    for (let j = 0; j < k; j++) {
+      if (j > 0) logFact += Math.log(j);
+      cdfLess += Math.exp(-lambda + j * Math.log(lambda) - logFact);
+    }
+    const pUpper = Math.max(1e-15, Math.min(1 - 1e-15, 1 - cdfLess));
+    return normalInvCdf(1 - pUpper);
+  }
+  // Queue supérieure : somme directe depuis k pour éviter toute perte de précision
+  let logFactK = 0;
+  for (let i = 2; i <= k; i++) logFactK += Math.log(i);
+  const logTermK = -lambda + k * Math.log(lambda) - logFactK;
+  let term = Math.exp(Math.max(-700, logTermK));
+  let sumUpper = term;
+  for (let j = k + 1; j <= k + 64; j++) {
+    term *= lambda / j;
+    sumUpper += term;
+    if (term < sumUpper * 1e-12) break;
+  }
+  const pUpper = Math.max(1e-15, Math.min(1 - 1e-15, sumUpper));
+  return Math.max(0, normalInvCdf(1 - pUpper));
+};
+
+/**
+ * Probabilité exacte de queue supérieure P(X >= k) pour X ~ Binomial(n, p),
+ * évitant la sous-estimation catastrophique de l'approximation normale pour p faible et n modéré.
+ */
+const computeBinomialUpperTailZScore = (k: number, n: number, p: number): number => {
+  if (n <= 0) return 0;
+  const clampedP = Math.max(1e-12, Math.min(1 - 1e-12, p));
+  if (k <= 0) return -3.0;
+  if (k > n) return 8.0;
+
+  let logSum = -Infinity;
+  const logAdd = (a: number, b: number): number => {
+    if (!Number.isFinite(a)) return b;
+    if (!Number.isFinite(b)) return a;
+    const m = Math.max(a, b);
+    return m + Math.log1p(Math.exp(-Math.abs(a - b)));
+  };
+
+  // log(n!) - log(j!) - log((n-j)!) via somme logarithmique directe (n <= ~500)
+  const logFact = (m: number): number => {
+    let s = 0;
+    for (let i = 2; i <= m; i++) s += Math.log(i);
+    return s;
+  };
+  const logFactN = logFact(n);
+  const logP = Math.log(clampedP);
+  const log1mP = Math.log(1 - clampedP);
+
+  if (k >= n * clampedP) {
+    for (let j = k; j <= n; j++) {
+      const logC = logFactN - logFact(j) - logFact(n - j);
+      const logTerm = logC + j * logP + (n - j) * log1mP;
+      logSum = logAdd(logSum, logTerm);
+    }
+    const pUpper = Math.max(1e-15, Math.min(1 - 1e-15, Math.exp(Math.min(0, logSum))));
+    return normalInvCdf(1 - pUpper);
+  }
+
+  for (let j = 0; j < k; j++) {
+    const logC = logFactN - logFact(j) - logFact(n - j);
+    const logTerm = logC + j * logP + (n - j) * log1mP;
+    logSum = logAdd(logSum, logTerm);
+  }
+  const pLower = Math.max(1e-15, Math.min(1 - 1e-15, Math.exp(Math.min(0, logSum))));
+  return normalInvCdf(pLower);
+};
+
+/**
  * Continuous logistic sigmoid mapped to [0, 100]
  */
 const logisticScore100 = (x: number): number => {
@@ -491,8 +588,7 @@ export const patternDiscoveryService = {
         const n1 = nums[i];
         for (let j = i + 1; j < len - 1; j++) {
           const n2 = nums[j];
-          const p12 = `${n1}_${n2}`;
-          if (!frequentPairSet.has(p12)) continue;
+          const p12Freq = frequentPairSet.has(`${n1}_${n2}`);
 
           for (let k = j + 1; k < len; k++) {
             const n3 = nums[k];
@@ -500,7 +596,7 @@ export const patternDiscoveryService = {
             const hasSameDraw = (sameDrawTripletCounts.get(tKey) || 0) >= 1;
             if (
               !hasSameDraw &&
-              (!frequentPairSet.has(`${n1}_${n3}`) || !frequentPairSet.has(`${n2}_${n3}`))
+              (!p12Freq || !frequentPairSet.has(`${n1}_${n3}`) || !frequentPairSet.has(`${n2}_${n3}`))
             ) {
               continue;
             }
@@ -570,19 +666,14 @@ export const patternDiscoveryService = {
       const sameDrawWeight = sameDrawCount / (sameDrawCount + Math.E);
       const lift = unionLift * (1 - 0.35 * sameDrawWeight) + sameDrawLift * (0.35 * sameDrawWeight);
 
-      // Exact Z-Score against Binomial(M, expUnionProb) + simultaneous draw evidence
-      const varianceUnion = Math.max(1e-6, numCyclesForStats * expUnionProb * (1 - expUnionProb));
-      const zUnion = (support - numCyclesForStats * expUnionProb) / Math.sqrt(varianceUnion);
-      // sameDrawCount compte des ÉVÉNEMENTS (co-occurrences intra-tirage, possiblement > M) :
-      // la moyenne nulle doit être le nombre attendu d'événements sur tous les tirages complétés,
-      // pas M·P(≥1 par cycle). Inversion exacte p_draw = 1-(1-p_cycle)^(1/D), variance de Poisson.
+      // Exact Binomial(M, expUnionProb) upper-tail probit + exact Poisson simultaneous draw evidence
+      const zUnion = computeBinomialUpperTailZScore(support, numCyclesForStats, expUnionProb);
       const pSameDrawPerDraw = 1 - Math.pow(1 - expSameDrawProb, 1 / Math.max(1, cycleLength));
       const expectedSameDrawEvents =
         numCyclesForStats * Math.max(1, cycleLength) * pSameDrawPerDraw;
-      const varianceSameDraw = Math.max(1e-6, expectedSameDrawEvents);
       const zSameDraw =
         sameDrawCount > 0
-          ? (sameDrawCount - expectedSameDrawEvents) / Math.sqrt(varianceSameDraw)
+          ? computePoissonUpperTailZScore(sameDrawCount, expectedSameDrawEvents)
           : 0;
       const zScore =
         zUnion * (1 - sameDrawWeight * 0.45) + Math.max(zUnion, zSameDraw) * (sameDrawWeight * 0.45);
@@ -790,15 +881,20 @@ export const patternDiscoveryService = {
         sameDrawWeight * 1.45;
       const confidence = Math.min(99.5, Math.max(2.0, logisticScore100(confidenceLogit)));
 
+      const zStrengthScore = logisticScore100(
+        (Math.log1p(Math.max(0, zScore)) - Math.log1p(2.5)) * 2.2
+      );
+      const alertReadiness =
+        activeAlertStatus === 'PRIMED' ? Math.max(confidence, completionProb) : phaseAlignment;
       const compositeScore = Math.min(
         99.5,
         Math.max(
           1.0,
-          0.36 * confidence +
-            0.20 * recencyMomentum +
-            0.16 * renewalHazard +
-            0.12 * phaseAlignment +
-            0.16 * (activeAlertStatus === 'PRIMED' ? completionProb : confidence)
+          0.32 * confidence +
+            0.22 * zStrengthScore +
+            0.18 * recencyMomentum +
+            0.14 * renewalHazard +
+            0.14 * alertReadiness
         )
       );
 
@@ -1185,20 +1281,39 @@ export const patternDiscoveryService = {
       }
     });
 
-    // Correction de Benjamini-Hochberg (FDR) sur la famille complète des motifs minés
-    // Garantit l'absence de fausses preuves empiriques sur du bruit i.i.d. sans biais
+    // Correction de Benjamini-Hochberg (FDR) sur l'univers COMPLET des hypothèses testées
+    // (toutes les C(90,2) paires + triplets candidats + transitions N*(N-1)),
+    // afin d'éviter le biais de sélection post-filtrage sur du bruit i.i.d.
     const pValueFamily: Record<string, number> = {};
     allPairs.forEach((p) => {
-      pValueFamily[p.id] = Math.max(1e-12, 2 * (1 - normalCdf(Math.abs(p.zScore))));
+      pValueFamily[p.id] = Math.max(1e-15, 2 * (1 - normalCdf(Math.abs(p.zScore))));
     });
     allTriplets.forEach((t) => {
-      pValueFamily[t.id] = Math.max(1e-12, 2 * (1 - normalCdf(Math.abs(t.zScore))));
+      pValueFamily[t.id] = Math.max(1e-15, 2 * (1 - normalCdf(Math.abs(t.zScore))));
     });
     topCrossCycleTransitions.forEach((tr) => {
-      pValueFamily[tr.id] = Math.max(1e-12, 2 * (1 - normalCdf(Math.abs(tr.zScore))));
+      pValueFamily[tr.id] = Math.max(1e-15, 2 * (1 - normalCdf(Math.abs(tr.zScore))));
     });
 
-    const qValues = benjaminiHochberg(pValueFamily);
+    const totalHypothesesPairs = (TOTAL_BALLS * (TOTAL_BALLS - 1)) / 2;
+    const totalHypothesesTriplets = Math.max(
+      allTriplets.length,
+      combinations(TOTAL_BALLS, 3)
+    );
+    const totalHypothesesTransitions =
+      options.includeTransitions !== false ? TOTAL_BALLS * (TOTAL_BALLS - 1) : 0;
+    const totalFamilySize = Math.max(
+      Object.keys(pValueFamily).length,
+      totalHypothesesPairs + totalHypothesesTriplets + totalHypothesesTransitions
+    );
+
+    const rawBhQ = benjaminiHochberg(pValueFamily);
+    const testedCount = Math.max(1, Object.keys(pValueFamily).length);
+    const familyScale = totalFamilySize / testedCount;
+    const qValues: Record<string, number> = {};
+    Object.entries(rawBhQ).forEach(([id, qVal]) => {
+      qValues[id] = Math.min(1.0, qVal * familyScale);
+    });
 
     allPairs.forEach((p) => {
       p.hasEmpiricalProof = (qValues[p.id] ?? 1.0) <= 0.05 && p.lift > 1.05 && p.zScore > 0;

@@ -480,7 +480,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
             Séquences & Patterns des Écarts par Tranches
           </h3>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
-            Modélisation bayésienne par gain d’information (Divergence KL), distance topologique Earth-Mover (1-Wasserstein) et micro-résonance de hasard individuel (noyau de Silverman) pour projeter les quotas exacts de tranches et synthétiser la sélection optimale.
+            Modélisation bayésienne par gain d’information (Divergence KL), distance topologique Earth-Mover (1-Wasserstein) et combinaison de Z-scores homogènes par la méthode de Stouffer (tranche, sécheresse, hasard de Silverman, affinité, écho W1) pour projeter les quotas Hamilton-Hare et synthétiser la sélection optimale.
           </p>
         </div>
 
@@ -629,7 +629,7 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
               </span>
             </div>
             <h4 className="text-base md:text-lg font-black tracking-tight text-white">
-              Synthèse Sous-Modulaire & Micro-Scoring Intra-Tranche (Noyau de Silverman)
+              Synthèse Sous-Modulaire &amp; Significativité Statistique (Méthode de Stouffer)
             </h4>
           </div>
 
@@ -747,8 +747,12 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                           >
                             {cand.binShortLabel} ({cand.currentGap}t)
                           </span>
-                          <span className="text-[9px] font-mono text-emerald-300 mt-0.5">
-                            {cand.compositeScore.toFixed(1)} pts
+                          <span
+                            className="text-[9px] font-mono text-emerald-300 mt-0.5"
+                            title={`Stouffer Z = ${cand.stoufferZScore >= 0 ? '+' : ''}${cand.stoufferZScore.toFixed(2)}σ (p = ${cand.stoufferPValue < 0.001 ? '<0.001' : cand.stoufferPValue.toFixed(3)}) • Percentile Φ(Z) = ${cand.compositeScore.toFixed(1)}%`}
+                          >
+                            {cand.stoufferZScore >= 0 ? '+' : ''}
+                            {cand.stoufferZScore.toFixed(2)}σ ({cand.compositeScore.toFixed(1)}%)
                           </span>
                         </>
                       )}
@@ -795,12 +799,16 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
           <div className="lg:col-span-5 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             <div className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-center">
               <span className="text-[9px] font-bold uppercase text-slate-400 block">
-                Score Moyen
+                Percentile Φ(Z)
               </span>
               <span className="text-base font-black font-mono text-emerald-400">
                 {activeSelectionMetrics.meanScore.toFixed(1)}
               </span>
-              <span className="text-[9px] text-slate-400 block">/ 100</span>
+              <span className="text-[9px] text-slate-400 block">
+                {report.selectionSynthesis.ticketStoufferZScore !== undefined
+                  ? `Z=${report.selectionSynthesis.ticketStoufferZScore >= 0 ? '+' : ''}${report.selectionSynthesis.ticketStoufferZScore.toFixed(2)}σ`
+                  : '/ 100'}
+              </span>
             </div>
             <div className="p-2.5 rounded-xl bg-slate-900/80 border border-white/10 text-center">
               <span className="text-[9px] font-bold uppercase text-slate-400 block">
@@ -909,8 +917,15 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                     </div>
 
                     <div className="text-right">
-                      <span className="text-sm font-black font-mono text-white block">
-                        {cand.compositeScore.toFixed(1)}
+                      <span
+                        className="text-sm font-black font-mono text-white block"
+                        title={`Stouffer Z = ${cand.stoufferZScore >= 0 ? '+' : ''}${cand.stoufferZScore.toFixed(2)}σ • p = ${cand.stoufferPValue < 0.001 ? '<0.001' : cand.stoufferPValue.toFixed(3)}`}
+                      >
+                        {cand.stoufferZScore >= 0 ? '+' : ''}
+                        {cand.stoufferZScore.toFixed(2)}σ
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-400 block">
+                        Φ(Z) {cand.compositeScore.toFixed(1)}%
                       </span>
                       <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-300">
                         {isSelected ? (

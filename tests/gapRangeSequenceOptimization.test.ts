@@ -4,6 +4,8 @@ import {
   GAP_RANGE_BINS,
   computeNormalizedWassersteinDistance,
   allocateHamiltonHareQuotas,
+  normalCdf,
+  combineStoufferZScores,
   GapBinId,
 } from '../src/services/prediction/gapRangeSequenceService';
 import { gapRangeSequencePlugin } from '../src/services/prediction/algorithms/gapRangeSequence';
@@ -47,6 +49,24 @@ function buildDeterministicHistory(totalDraws = 75, drawName = 'National'): Draw
 
 describe('Séquences & Patterns des Écarts par Tranches — Détection, Raisonnement & Sélection', () => {
   const binIds = GAP_RANGE_BINS.map((b) => b.id);
+
+  it('vérifie la précision de Φ(z) et de la combinaison homogène de Stouffer', () => {
+    expect(normalCdf(0)).toBeCloseTo(0.5, 6);
+    expect(normalCdf(1.959964)).toBeCloseTo(0.975, 4);
+    expect(normalCdf(-1.959964) + normalCdf(1.959964)).toBeCloseTo(1.0, 6);
+
+    const res = combineStoufferZScores([
+      { z: 2.0, weight: 1 },
+      { z: 2.0, weight: 1 },
+      { z: 2.0, weight: 1 },
+      { z: 2.0, weight: 1 },
+      { z: 99.0, weight: 0 }, // Canal inactif exclu proprement
+    ]);
+    // (2 + 2 + 2 + 2) / √4 = 4.0
+    expect(res.activeChannels).toBe(4);
+    expect(res.zScore).toBeCloseTo(4.0, 6);
+    expect(res.pValue).toBeLessThan(0.0001);
+  });
 
   it('respecte la topologie ordinale des tranches via la distance 1-Wasserstein (Earth-Mover)', () => {
     const empty = (): Record<GapBinId, number> => ({
@@ -101,7 +121,7 @@ describe('Séquences & Patterns des Écarts par Tranches — Détection, Raisonn
     expect(quotas.G1_3).toBeGreaterThanOrEqual(1);
   });
 
-  it('calcule des poids bayésiens adaptatifs par gain d’information KL et différencie les boules au sein d’une même tranche', () => {
+  it('calcule des poids bayésiens adaptatifs par gain d’information KL et combine les 5 canaux Z-scores via Stouffer', () => {
     const history = buildDeterministicHistory(80, 'National');
     const report = gapRangeSequenceService.analyzeGapRangeSequences('National', history);
 
@@ -125,13 +145,30 @@ describe('Séquences & Patterns des Écarts par Tranches — Détection, Raisonn
     expect(report.reasoning.klDivergenceMarkov1).toBeGreaterThanOrEqual(0);
     expect(report.reasoning.reasoningChain).toHaveLength(4);
 
-    // 4. Différenciation intra-tranche : les boules d'une même tranche ont des micro-scores distincts
+    // 4. Cohérence mathématique Stouffer : compositeScore == Φ(stoufferZScore) × 100
+    expect(report.selectionSynthesis.scoringMethod).toBe('STOUFFER_Z');
+    expect(report.selectionSynthesis.ticketStoufferZScore).toBeDefined();
+    expect(report.selectionSynthesis.ticketPValue).toBeDefined();
+
     const g4_7Candidates = report.selectionSynthesis.allCandidates.filter(
       (c) => c.binId === 'G4_7'
     );
     expect(g4_7Candidates.length).toBeGreaterThan(2);
-    const distinctScores = new Set(g4_7Candidates.map((c) => c.compositeScore));
-    expect(distinctScores.size).toBeGreaterThan(1);
+    const distinctZ = new Set(g4_7Candidates.map((c) => c.stoufferZScore));
+    expect(distinctZ.size).toBeGreaterThan(1);
+
+    for (const c of report.selectionSynthesis.allCandidates.slice(0, 15)) {
+      expect(c.channelZScores.activeChannels).toBeGreaterThanOrEqual(2);
+      expect(c.compositeScore).toBeCloseTo(normalCdf(c.stoufferZScore) * 100, 1);
+      expect(c.stoufferPValue).toBeCloseTo(1 - normalCdf(c.stoufferZScore), 4);
+    }
+
+    // Les boules avec signal structurel injecté (17 et 42 en cadence 5 tirages, ou 8 récurrent) doivent être hautement significatives
+    const ball17 = report.selectionSynthesis.allCandidates.find((c) => c.number === 17);
+    const ball42 = report.selectionSynthesis.allCandidates.find((c) => c.number === 42);
+    expect(ball17).toBeDefined();
+    expect(ball42).toBeDefined();
+    expect(Math.max(ball17!.stoufferZScore, ball42!.stoufferZScore)).toBeGreaterThan(1.5);
 
     // 5. Synthèse de sélection optimale (5 boules + 2 réserves disjointes)
     const { optimalFive, reserveTwo, trancheQuotas } = report.selectionSynthesis;
@@ -153,6 +190,9 @@ describe('Séquences & Patterns des Écarts par Tranches — Détection, Raisonn
 
     expect(r1.selectionSynthesis.optimalFive).toEqual(r2.selectionSynthesis.optimalFive);
     expect(r1.selectionSynthesis.reserveTwo).toEqual(r2.selectionSynthesis.reserveTwo);
+    expect(r1.selectionSynthesis.ticketStoufferZScore).toEqual(
+      r2.selectionSynthesis.ticketStoufferZScore
+    );
     expect(r1.reasoning.modelWeights).toEqual(r2.reasoning.modelWeights);
 
     const pluginOut = gapRangeSequencePlugin.execute({

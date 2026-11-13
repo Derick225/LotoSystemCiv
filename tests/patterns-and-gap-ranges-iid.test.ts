@@ -111,6 +111,15 @@ describe('Audit i.i.d. : Tranches d’Écarts & Motifs Répétitifs', () => {
 
       // Vérifier que transitionRowTotalsOrder1 est bien renseigné
       expect(report.transitionRowTotalsOrder1).toBeDefined();
+
+      // Sous H0 (tirages i.i.d.), la moyenne des Z-scores de Stouffer sur les 90 boules reste centrée autour de 0
+      const meanStoufferZ =
+        report.selectionSynthesis.allCandidates.reduce(
+          (acc, c) => acc + c.stoufferZScore,
+          0
+        ) / report.selectionSynthesis.allCandidates.length;
+      expect(Math.abs(meanStoufferZ)).toBeLessThan(0.6);
+      expect(report.selectionSynthesis.scoringMethod).toBe('STOUFFER_Z');
     });
   });
 
@@ -143,9 +152,10 @@ describe('Audit i.i.d. : Tranches d’Écarts & Motifs Répétitifs', () => {
       });
 
       // La confiance de sélection ne doit pas afficher le ~71% trompeur sur du bruit pur
-      expect(summary.recommendedSelection.selectionConfidence).toBeLessThanOrEqual(40.0);
-      expect(summary.recommendedSelection.selectionConfidence).toBeGreaterThanOrEqual(20.0);
-      expect(summary.recommendedSelection.optimalFive).toHaveLength(5);
+      expect(summary.recommendedSelection).toBeDefined();
+      expect(summary.recommendedSelection!.selectionConfidence).toBeLessThanOrEqual(40.0);
+      expect(summary.recommendedSelection!.selectionConfidence).toBeGreaterThanOrEqual(20.0);
+      expect(summary.recommendedSelection!.optimalFive).toHaveLength(5);
     });
 
     it('intègre un test du Chi-deux pour la phase et un test de dispersion pour la périodicité', () => {
@@ -217,7 +227,8 @@ describe('Audit i.i.d. : Tranches d’Écarts & Motifs Répétitifs', () => {
       expect(detectedTriplet?.hasEmpiricalProof).toBe(true);
 
       // La confiance de sélection doit être significativement supérieure au bruit pur (>= 45%)
-      expect(signalSummary.recommendedSelection.selectionConfidence).toBeGreaterThanOrEqual(45.0);
+      expect(signalSummary.recommendedSelection).toBeDefined();
+      expect(signalSummary.recommendedSelection!.selectionConfidence).toBeGreaterThanOrEqual(45.0);
     });
   });
 });

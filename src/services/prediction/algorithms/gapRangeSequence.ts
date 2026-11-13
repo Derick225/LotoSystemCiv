@@ -20,9 +20,9 @@ export const gapRangeSequencePlugin: AlgorithmPlugin & {
   category: 'advanced',
   stability: 'stable',
   mathematicalBasis:
-    'Chaînes de Markov d’ordre 1 & 2 pondérées par Divergence KL + Distance 1-Wasserstein + Noyau de Renouvellement de Silverman',
+    'Chaînes de Markov d’ordre 1 & 2 pondérées par Divergence KL + Distance 1-Wasserstein + Combinaison de Z-scores homogènes par méthode de Stouffer',
   description:
-    'Projette les quotas optimaux de tranches d’écarts (Hamilton-Hare) et départage les 90 boules par leur densité de renouvellement individuel et la continuité Gaussienne aux frontières.',
+    'Projette les quotas optimaux de tranches d’écarts (Hamilton-Hare) et agrège 5 Z-scores homogènes sous H0 via Stouffer (tranche lissée, sécheresse, hasard géométrique, affinité tranche, écho W1).',
   isStrictlyDeterministic: true,
 
   precompute(context: AlgorithmContext): void {
