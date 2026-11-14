@@ -2,6 +2,7 @@ import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { benjaminiHochberg } from '../../utils/mathUtils';
 import { LOTTERY_CONSTANTS } from '../lotteryService';
+import { mineCyclePatternsHpc } from '../wasm/lotoEngineBridge';
 
 export type PatternType = 'PAIR' | 'TRIPLET' | 'TRANSITION_CHAIN' | 'PHASE_MOTIF' | 'QUAD';
 
@@ -65,28 +66,60 @@ export type CandidateSelectionRole =
   | 'TRANSITION_CIBLE'
   | 'RESONANCE_CYCLIQUE';
 
+/**
+ * Décomposition des 5 canaux de preuve statistique standardisés (sans unité, N(0, 1) sous H0)
+ * combinés par la méthode de Stouffer pour chaque boule candidate des motifs répétitifs.
+ */
+export interface StoufferPatternChannelBreakdown {
+  /** Z-score combiné des motifs amorcés (paires/triplets) pointant vers la boule */
+  zPrimed: number;
+  /** Z-score combiné des transitions inter-cycles de Markov pointant vers la boule */
+  zTransition: number;
+  /** Z-score de résonance périodique sous-dispersée en fenêtre de retour */
+  zPeriodic: number;
+  /** Z-score multinomial d'alignement de phase avec la progression du cycle actif */
+  zPhase: number;
+  /** Z-score de synergie simultanée intra-tirage avec les boules du cycle actif */
+  zSynergy: number;
+  /** Nombre de canaux actifs contribuant au dénominateur √k de Stouffer */
+  activeChannels: number;
+}
+
 export interface PatternCandidateSelection {
   number: number;
-  convergenceScore: number;        // Continuous multi-motif convergence score [0..100]
+  /** Percentile exact Φ(Z_Stouffer) × 100 dans (0, 100) — neutre à 50.0 sous H0 */
+  convergenceScore: number;
+  /** Z-score homogène combiné par méthode de Stouffer (en unités σ) */
+  stoufferZScore?: number;
+  /** p-value unilatérale supérieure P(Z ≥ Z_Stouffer) sous H0 */
+  stoufferPValue?: number;
+  /** Détail des 5 Z-scores homogènes par canal */
+  channelZScores?: StoufferPatternChannelBreakdown;
   primedMotifsCount: number;       // Active primed pairs/triplets pointing to this ball
   transitionDriversCount: number;  // Active cross-cycle transitions pointing to this ball
   periodicMotifsCount: number;     // Periodic renewal motifs due in current cycle containing this ball
   sameDrawSynergyCount: number;    // Simultaneous intra-draw co-occurrences with active numbers
-  phaseAffinityScore: number;      // Alignment of this ball's motifs with current cycle phase [0..100]
-  synergyPartners: number[];       // Top synergistic partner balls (by PMI)
+  phaseAffinityScore: number;      // Alignment percentile Φ(zPhase) × 100 [0..100]
+  synergyPartners: number[];       // Top synergistic partner balls (by Z / PMI)
   supportingPatterns: string[];    // Human-readable labels of top supporting motifs
   selectionRole: CandidateSelectionRole;
   reasoningSummary: string;
 }
 
 export interface PatternSynthesizedSelection {
-  optimalFive: number[];           // Optimal 5-ball combination synthesized by submodular convergence + PMI
+  optimalFive: number[];           // Optimal 5-ball combination synthesized by Z-space submodular optimization
   reserveNumbers: number[];        // 2 tactical reserve numbers
   selectionConfidence: number;     // Overall confidence [0..100]
   coveredPatternsCount: number;    // Number of distinct active/periodic patterns covered
   pairwiseSynergyScore: number;    // Internal PMI / co-occurrence cohesion [0..100]
   phaseCoherenceScore: number;     // Alignment with current cycle progression [0..100]
   currentPhaseLabel: string;
+  /** Z-score de Stouffer agrégé sur la sélection optimale de 5 boules */
+  ticketStoufferZScore?: number;
+  /** p-value unilatérale supérieure associée à ticketStoufferZScore */
+  ticketPValue?: number;
+  /** Méthode d'agrégation homogène utilisée */
+  scoringMethod?: 'STOUFFER_Z';
   selectionRationale: string[];
 }
 
@@ -164,7 +197,8 @@ export const computeExactSameDrawCycleProbability = (k: number, cycleLength: num
 /**
  * Continuous Normal Cumulative Distribution Function (CDF) Φ(z)
  */
-const normalCdf = (z: number): number => {
+export const patternNormalCdf = (z: number): number => {
+  if (!Number.isFinite(z)) return z > 0 ? 1 : 0;
   const t = 1.0 / (1.0 + 0.2316419 * Math.abs(z));
   const d = 0.3989422804014327 * Math.exp(-0.5 * z * z);
   const prob =
@@ -172,7 +206,48 @@ const normalCdf = (z: number): number => {
     t *
     (0.31938153 +
       t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
-  return z > 0 ? 1.0 - prob : prob;
+  return Math.max(0, Math.min(1, z > 0 ? 1.0 - prob : prob));
+};
+
+const normalCdf = patternNormalCdf;
+
+/**
+ * p-value unilatérale supérieure P(Z ≥ z) = 1 - Φ(z) sous H0 : Z ~ N(0, 1).
+ */
+export const patternNormalUpperPValue = (z: number): number => {
+  return Math.max(0, Math.min(1, 1 - patternNormalCdf(z)));
+};
+
+/**
+ * Combinaison de Stouffer (1949) de k Z-scores homogènes sans unité :
+ *   Z_Stouffer = (Σ_j w_j · Z_j) / √(Σ_j w_j²)
+ */
+export const combinePatternStoufferZScores = (
+  channels: Array<{ z: number; weight?: number }>
+): { zScore: number; pValue: number; activeChannels: number } => {
+  let weightedSum = 0;
+  let weightSqSum = 0;
+  let activeChannels = 0;
+
+  for (const ch of channels) {
+    const w = ch.weight ?? 1;
+    if (w > 0 && Number.isFinite(ch.z)) {
+      weightedSum += w * ch.z;
+      weightSqSum += w * w;
+      activeChannels += 1;
+    }
+  }
+
+  if (weightSqSum <= 0 || activeChannels === 0) {
+    return { zScore: 0, pValue: 0.5, activeChannels: 0 };
+  }
+
+  const zScore = weightedSum / Math.sqrt(weightSqSum);
+  return {
+    zScore,
+    pValue: patternNormalUpperPValue(zScore),
+    activeChannels,
+  };
 };
 
 /**
@@ -362,96 +437,69 @@ export const patternDiscoveryService = {
       };
     }
 
-    // 1. Segment history into chronological cycles (oldest = index 0, newest = last)
+    // 1. Aplatir l'historique chronologique (ancien -> récent) en Int32Array et déléguer
+    // l'extraction combinatoire (cycles, paires, triplets Apriori, transitions) au noyau Rust/WASM HPC.
     const chronological = [...isolatedHistory].reverse();
-    const cycles: Array<{
-      cycleIndex: number;
-      draws: DrawResult[];
-      allNumbers: Set<number>;
-      numberFreq: Record<number, number>;
-      phaseNumbers: { early: Set<number>; mid: Set<number>; late: Set<number> };
-    }> = [];
-
-    const totalCycles = Math.ceil(totalDraws / cycleLength);
-
-    for (let c = 0; c < totalCycles; c++) {
-      const startIdx = c * cycleLength;
-      const endIdx = Math.min(totalDraws, (c + 1) * cycleLength);
-      const cycleDraws = chronological.slice(startIdx, endIdx);
-
-      const allNumbers = new Set<number>();
-      const numberFreq: Record<number, number> = {};
-      const early = new Set<number>();
-      const mid = new Set<number>();
-      const late = new Set<number>();
-
-      const drawsInCycle = cycleDraws.length;
-      const phaseThird = Math.max(1, drawsInCycle / 3);
-
-      cycleDraws.forEach((draw, dIdx) => {
-        const gagnants = (draw.gagnants || []).filter((n) => n >= 1 && n <= TOTAL_BALLS);
-        gagnants.forEach((n) => {
-          allNumbers.add(n);
-          numberFreq[n] = (numberFreq[n] || 0) + 1;
-
-          if (dIdx < phaseThird) {
-            early.add(n);
-          } else if (dIdx < phaseThird * 2) {
-            mid.add(n);
-          } else {
-            late.add(n);
-          }
-        });
-      });
-
-      cycles.push({
-        cycleIndex: c,
-        draws: cycleDraws,
-        allNumbers,
-        numberFreq,
-        phaseNumbers: { early, mid, late },
-      });
-    }
-
-    // Active cycle is the latest one; completed cycles are used for unbiased historical estimation
-    const activeCycle = cycles[cycles.length - 1];
-    const activeCycleNumbers = Array.from(activeCycle.allNumbers).sort((a, b) => a - b);
-    const completedCycles = cycles.length > 1 ? cycles.slice(0, cycles.length - 1) : cycles;
-    const numCyclesForStats = completedCycles.length;
-
-    // Current cycle progress ratio u in [0, 1] and continuous phase weights
-    const activeCycleProgress = activeCycle.draws.length / cycleLength;
-    const activePhaseWeights = computeContinuousPhaseWeights(activeCycleProgress);
-    const remainingDrawsInCycle = Math.max(1, cycleLength - activeCycle.draws.length);
-
-    // 2. Compute overall Shannon entropy of ball frequencies across all draws & individual cycle rates
-    const globalBallDrawCounts = new Array(TOTAL_BALLS + 1).fill(0);
-    const ballCycleCounts = new Array(TOTAL_BALLS + 1).fill(0);
-    let totalBallHits = 0;
-
-    completedCycles.forEach((cyc) => {
-      cyc.allNumbers.forEach((n) => {
-        ballCycleCounts[n]++;
-      });
-      Object.entries(cyc.numberFreq).forEach(([nStr, cnt]) => {
-        const n = Number(nStr);
-        globalBallDrawCounts[n] += cnt;
-        totalBallHits += cnt;
-      });
-    });
-
-    let rawCycleEntropy = 0;
-    if (totalBallHits > 0) {
-      for (let n = 1; n <= TOTAL_BALLS; n++) {
-        const p = globalBallDrawCounts[n] / totalBallHits;
-        if (p > 0) {
-          rawCycleEntropy -= p * Math.log2(p);
-        }
+    const flatChrono = new Int32Array(totalDraws * BALLS_PER_DRAW);
+    for (let t = 0; t < totalDraws; t++) {
+      const g = (chronological[t].gagnants || []).filter((n) => n >= 1 && n <= TOTAL_BALLS);
+      for (let c = 0; c < Math.min(BALLS_PER_DRAW, g.length); c++) {
+        flatChrono[t * BALLS_PER_DRAW + c] = g[c];
       }
     }
-    const overallCycleEntropy = parseFloat(
-      Math.min(1, Math.max(0, rawCycleEntropy / Math.log2(TOTAL_BALLS))).toFixed(4)
+
+    const hpcMining = mineCyclePatternsHpc(
+      flatChrono,
+      totalDraws,
+      BALLS_PER_DRAW,
+      cycleLength,
+      options.minSupportCycles ?? 0,
+      options.includeTransitions !== false
     );
+
+    const totalCycles = hpcMining.totalCycles;
+    const activeCycleDrawsCount = hpcMining.activeCycleDrawsCount;
+    const activeCycleNumbers = Array.from(hpcMining.activeCycleNumbers);
+    const activeNumberSet = new Set<number>(activeCycleNumbers);
+    const numCyclesForStats = hpcMining.completedCyclesCount;
+    const overallCycleEntropy = hpcMining.overallCycleEntropy;
+
+    const activeCycleProgress = activeCycleDrawsCount / cycleLength;
+    const activePhaseWeights = computeContinuousPhaseWeights(activeCycleProgress);
+    const remainingDrawsInCycle = Math.max(1, cycleLength - activeCycleDrawsCount);
+
+    const ballCycleCounts = hpcMining.ballCycleCounts;
+    const sourceBallCounts = hpcMining.sourceBallCounts;
+    const pairCycleSupports = hpcMining.pairCycleSupports;
+    const sameDrawPairCountsArr = hpcMining.sameDrawPairCounts;
+
+    const getTriangularPairIndex = (a: number, b: number): number => {
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      if (lo < 1 || hi > TOTAL_BALLS || lo === hi) return -1;
+      const m = lo - 1;
+      return m * TOTAL_BALLS - ((m * (m + 1)) >> 1) + (hi - lo - 1);
+    };
+    const getPairCycleSupport = (a: number, b: number): number => {
+      const idx = getTriangularPairIndex(a, b);
+      return idx >= 0 && idx < pairCycleSupports.length ? pairCycleSupports[idx] : 0;
+    };
+    const getSameDrawPairCount = (a: number, b: number): number => {
+      const idx = getTriangularPairIndex(a, b);
+      return idx >= 0 && idx < sameDrawPairCountsArr.length ? sameDrawPairCountsArr[idx] : 0;
+    };
+
+    const lastCompletedStart = Math.max(0, (numCyclesForStats - 1) * cycleLength);
+    const lastCompletedEnd = Math.min(totalDraws, numCyclesForStats * cycleLength);
+    const lastCompletedNumbers = new Set<number>();
+    for (let t = lastCompletedStart; t < lastCompletedEnd; t++) {
+      const off = t * BALLS_PER_DRAW;
+      for (let c = 0; c < BALLS_PER_DRAW; c++) {
+        const v = flatChrono[off + c];
+        if (v >= 1 && v <= TOTAL_BALLS) lastCompletedNumbers.add(v);
+      }
+    }
+    const completedDrawsCount = lastCompletedEnd;
 
     // Exact stochastic cycle union probabilities under H0
     const expSingleCycleProb = computeExactCycleUnionProbability(1, cycleLength);
@@ -471,166 +519,6 @@ export const patternDiscoveryService = {
         (ballCycleCounts[n] + bayesPriorScale * expSingleCycleProb) /
         (numCyclesForStats + bayesPriorScale);
     }
-
-    // 3. Mine Simultaneous Intra-Draw Co-occurrences AND Intra-Cycle Pairs across ALL 90 balls
-    const sameDrawPairCounts = new Map<string, number>();
-    const sameDrawTripletCounts = new Map<string, number>();
-
-    completedCycles.forEach((cyc) => {
-      cyc.draws.forEach((draw) => {
-        const g = (draw.gagnants || [])
-          .filter((n) => n >= 1 && n <= TOTAL_BALLS)
-          .sort((a, b) => a - b);
-        const gLen = g.length;
-        for (let i = 0; i < gLen; i++) {
-          for (let j = i + 1; j < gLen; j++) {
-            const pKey = `${g[i]}_${g[j]}`;
-            sameDrawPairCounts.set(pKey, (sameDrawPairCounts.get(pKey) || 0) + 1);
-            for (let k = j + 1; k < gLen; k++) {
-              const tKey = `${g[i]}_${g[j]}_${g[k]}`;
-              sameDrawTripletCounts.set(tKey, (sameDrawTripletCounts.get(tKey) || 0) + 1);
-            }
-          }
-        }
-      });
-    });
-
-    const pairCycleMap = new Map<
-      string,
-      {
-        pair: [number, number];
-        cycleIndices: number[];
-        phaseCounts: { early: number; mid: number; late: number };
-      }
-    >();
-
-    completedCycles.forEach((cyc) => {
-      const cycleIdx = cyc.cycleIndex;
-      const nums = Array.from(cyc.allNumbers).sort((a, b) => a - b);
-      const len = nums.length;
-
-      for (let i = 0; i < len; i++) {
-        for (let j = i + 1; j < len; j++) {
-          const n1 = nums[i];
-          const n2 = nums[j];
-          const key = `${n1}_${n2}`;
-
-          let entry = pairCycleMap.get(key);
-          if (!entry) {
-            entry = {
-              pair: [n1, n2],
-              cycleIndices: [],
-              phaseCounts: { early: 0, mid: 0, late: 0 },
-            };
-            pairCycleMap.set(key, entry);
-          }
-          entry.cycleIndices.push(cycleIdx);
-
-          if (cyc.phaseNumbers.early.has(n1) && cyc.phaseNumbers.early.has(n2)) {
-            entry.phaseCounts.early += 1;
-          } else if (cyc.phaseNumbers.mid.has(n1) && cyc.phaseNumbers.mid.has(n2)) {
-            entry.phaseCounts.mid += 1;
-          } else if (cyc.phaseNumbers.late.has(n1) && cyc.phaseNumbers.late.has(n2)) {
-            entry.phaseCounts.late += 1;
-          } else {
-            if (cyc.phaseNumbers.early.has(n1) || cyc.phaseNumbers.early.has(n2))
-              entry.phaseCounts.early += 0.5;
-            if (cyc.phaseNumbers.mid.has(n1) || cyc.phaseNumbers.mid.has(n2))
-              entry.phaseCounts.mid += 0.5;
-            if (cyc.phaseNumbers.late.has(n1) || cyc.phaseNumbers.late.has(n2))
-              entry.phaseCounts.late += 0.5;
-          }
-        }
-      }
-    });
-
-    // 4. Apriori Bias-Free Triplet Mining across ALL 90 balls (Zero Math.min(len, 25) truncation!)
-    // A triplet {n1, n2, n3} is eligible if either it co-occurred in the same draw OR all 3 of its
-    // constituent pairs belong to the top synergistic Apriori pair set.
-    const minPairForTriplet = Math.max(
-      2,
-      Math.ceil(numCyclesForStats * expPairCycleProb * 1.15)
-    );
-    const candidatePairsForApriori: Array<{ key: string; score: number }> = [];
-    pairCycleMap.forEach((entry, key) => {
-      const sameDrawCnt = sameDrawPairCounts.get(key) || 0;
-      const sup = entry.cycleIndices.length;
-      if (sup >= minPairForTriplet || sameDrawCnt >= 2) {
-        const [a, b] = entry.pair;
-        const diceCohesion =
-          (2 * sup) / Math.max(1, (ballCycleCounts[a] || 1) + (ballCycleCounts[b] || 1));
-        const empLift = (sup / Math.max(1, numCyclesForStats)) / expPairCycleProb;
-        const pairSynergy = empLift * diceCohesion + sameDrawCnt * 3.0;
-        candidatePairsForApriori.push({ key, score: pairSynergy });
-      }
-    });
-    candidatePairsForApriori.sort((a, b) => b.score - a.score);
-    const frequentPairSet = new Set<string>(
-      candidatePairsForApriori.slice(0, 320).map((p) => p.key)
-    );
-
-    const tripletCycleMap = new Map<
-      string,
-      {
-        triplet: [number, number, number];
-        cycleIndices: number[];
-        phaseCounts: { early: number; mid: number; late: number };
-      }
-    >();
-
-    completedCycles.forEach((cyc) => {
-      const cycleIdx = cyc.cycleIndex;
-      const nums = Array.from(cyc.allNumbers).sort((a, b) => a - b);
-      const len = nums.length;
-      if (len < 3) return;
-
-      for (let i = 0; i < len - 2; i++) {
-        const n1 = nums[i];
-        for (let j = i + 1; j < len - 1; j++) {
-          const n2 = nums[j];
-          const p12Freq = frequentPairSet.has(`${n1}_${n2}`);
-
-          for (let k = j + 1; k < len; k++) {
-            const n3 = nums[k];
-            const tKey = `${n1}_${n2}_${n3}`;
-            const hasSameDraw = (sameDrawTripletCounts.get(tKey) || 0) >= 1;
-            if (
-              !hasSameDraw &&
-              (!p12Freq || !frequentPairSet.has(`${n1}_${n3}`) || !frequentPairSet.has(`${n2}_${n3}`))
-            ) {
-              continue;
-            }
-            let entry = tripletCycleMap.get(tKey);
-            if (!entry) {
-              entry = {
-                triplet: [n1, n2, n3],
-                cycleIndices: [],
-                phaseCounts: { early: 0, mid: 0, late: 0 },
-              };
-              tripletCycleMap.set(tKey, entry);
-            }
-            entry.cycleIndices.push(cycleIdx);
-
-            const eCount =
-              (cyc.phaseNumbers.early.has(n1) ? 1 : 0) +
-              (cyc.phaseNumbers.early.has(n2) ? 1 : 0) +
-              (cyc.phaseNumbers.early.has(n3) ? 1 : 0);
-            const mCount =
-              (cyc.phaseNumbers.mid.has(n1) ? 1 : 0) +
-              (cyc.phaseNumbers.mid.has(n2) ? 1 : 0) +
-              (cyc.phaseNumbers.mid.has(n3) ? 1 : 0);
-            const lCount =
-              (cyc.phaseNumbers.late.has(n1) ? 1 : 0) +
-              (cyc.phaseNumbers.late.has(n2) ? 1 : 0) +
-              (cyc.phaseNumbers.late.has(n3) ? 1 : 0);
-
-            entry.phaseCounts.early += eCount / 3;
-            entry.phaseCounts.mid += mCount / 3;
-            entry.phaseCounts.late += lCount / 3;
-          }
-        }
-      }
-    });
 
     // Characteristic Hawking memory decay constant tau_M derived continuously from M
     const hawkingTau = Math.max(2, numCyclesForStats / Math.log(numCyclesForStats + Math.E));
@@ -749,7 +637,7 @@ export const patternDiscoveryService = {
         100 * (1 / (1 + coefficientOfVariation)) * (1 - 0.5 * Math.min(1, intervalEntropy));
 
       // How many cycles ago was this motif last seen?
-      const isFullyInActive = seq.every((n) => activeCycle.allNumbers.has(n));
+      const isFullyInActive = seq.every((n) => activeNumberSet.has(n));
       const lastCompletedSeen =
         sortedCycles.length > 0 ? sortedCycles[sortedCycles.length - 1] : 0;
       const cyclesSinceLastCompleted = Math.max(0, numCyclesForStats - 1 - lastCompletedSeen);
@@ -804,8 +692,8 @@ export const patternDiscoveryService = {
       const phaseAlignment = logisticScore100((rawPhaseDot - 1 / 3) * 6.0);
 
       // Amorçage actif du cycle courant & probabilité exacte H0 combinatoire de complétion
-      const activePresent = seq.filter((n) => activeCycle.allNumbers.has(n));
-      const missing = seq.filter((n) => !activeCycle.allNumbers.has(n));
+      const activePresent = seq.filter((n) => activeNumberSet.has(n));
+      const missing = seq.filter((n) => !activeNumberSet.has(n));
 
       let activeAlertStatus: RecurringSequencePattern['activeAlertStatus'] = 'DORMANT';
       let completionProb = 0;
@@ -816,11 +704,8 @@ export const patternDiscoveryService = {
         if (activePresent.length === 1) {
           precursorCyclesCount = ballCycleCounts[activePresent[0]] || support;
         } else if (activePresent.length === 2) {
-          const pKey =
-            activePresent[0] < activePresent[1]
-              ? `${activePresent[0]}_${activePresent[1]}`
-              : `${activePresent[1]}_${activePresent[0]}`;
-          precursorCyclesCount = pairCycleMap.get(pKey)?.cycleIndices.length || support;
+          precursorCyclesCount =
+            getPairCycleSupport(activePresent[0], activePresent[1]) || support;
         }
         const expMissingProb = computeExactCycleUnionProbability(
           Math.max(1, missing.length),
@@ -856,11 +741,8 @@ export const patternDiscoveryService = {
         if (activePresent.length === 1) {
           precursorCount = ballCycleCounts[activePresent[0]] || support;
         } else if (activePresent.length === 2) {
-          const pKey =
-            activePresent[0] < activePresent[1]
-              ? `${activePresent[0]}_${activePresent[1]}`
-              : `${activePresent[1]}_${activePresent[0]}`;
-          precursorCount = pairCycleMap.get(pKey)?.cycleIndices.length || support;
+          precursorCount =
+            getPairCycleSupport(activePresent[0], activePresent[1]) || support;
         }
 
         // Rétraction bayésienne de James-Stein vers la probabilité H0
@@ -980,106 +862,96 @@ export const patternDiscoveryService = {
       };
     };
 
-    // Filter and rank Recurring Pairs using continuous composite scoring (no binary multiplier jump!)
-    const minPairCycles =
-      options.minSupportCycles ??
-      Math.max(2, Math.floor(numCyclesForStats * expPairCycleProb * 0.85));
-
+    // Évaluer les Paires & Triplets depuis les tampons CSR Rust/WASM
+    const pairCountHpc = Math.floor(hpcMining.pairTuples.length / 6);
     const allPairs: RecurringSequencePattern[] = [];
-    pairCycleMap.forEach((entry, key) => {
-      const sameDrawCnt = sameDrawPairCounts.get(key) || 0;
-      if (entry.cycleIndices.length >= minPairCycles || sameDrawCnt >= 2) {
-        const pat = evaluatePattern(
-          `pair_${key}`,
+    for (let i = 0; i < pairCountHpc; i++) {
+      const off = i * 6;
+      const a = hpcMining.pairTuples[off];
+      const b = hpcMining.pairTuples[off + 1];
+      const sameDrawCnt = hpcMining.pairTuples[off + 2];
+      const earlyX2 = hpcMining.pairTuples[off + 3];
+      const midX2 = hpcMining.pairTuples[off + 4];
+      const lateX2 = hpcMining.pairTuples[off + 5];
+      const cStart = hpcMining.pairCycleOffsets[i];
+      const cEnd = hpcMining.pairCycleOffsets[i + 1];
+      const cycleIndices = Array.from(hpcMining.pairCycleIndicesFlat.subarray(cStart, cEnd));
+
+      allPairs.push(
+        evaluatePattern(
+          `pair_${a}_${b}`,
           'PAIR',
-          entry.pair,
-          entry.cycleIndices,
+          [a, b],
+          cycleIndices,
           expPairCycleProb,
           expPairSameDrawCycleProb,
           sameDrawCnt,
-          entry.phaseCounts
-        );
-        allPairs.push(pat);
-      }
-    });
+          { early: earlyX2 / 2, mid: midX2 / 2, late: lateX2 / 2 }
+        )
+      );
+    }
 
     const topRecurringPairs = allPairs
       .sort((a, b) => (b.reasoning?.compositeScore ?? b.confidence) - (a.reasoning?.compositeScore ?? a.confidence))
       .slice(0, maxPerCat);
 
-    // Filter and rank Recurring Triplets across all 90 balls
+    const tripletCountHpc = Math.floor(hpcMining.tripletTuples.length / 7);
     const allTriplets: RecurringSequencePattern[] = [];
-    tripletCycleMap.forEach((entry, key) => {
-      const sameDrawCnt = sameDrawTripletCounts.get(key) || 0;
-      if (entry.cycleIndices.length >= 2 || sameDrawCnt >= 1) {
-        const pat = evaluatePattern(
-          `triplet_${key}`,
+    for (let i = 0; i < tripletCountHpc; i++) {
+      const off = i * 7;
+      const a = hpcMining.tripletTuples[off];
+      const b = hpcMining.tripletTuples[off + 1];
+      const c = hpcMining.tripletTuples[off + 2];
+      const sameDrawCnt = hpcMining.tripletTuples[off + 3];
+      const earlyX3 = hpcMining.tripletTuples[off + 4];
+      const midX3 = hpcMining.tripletTuples[off + 5];
+      const lateX3 = hpcMining.tripletTuples[off + 6];
+      const cStart = hpcMining.tripletCycleOffsets[i];
+      const cEnd = hpcMining.tripletCycleOffsets[i + 1];
+      const cycleIndices = Array.from(hpcMining.tripletCycleIndicesFlat.subarray(cStart, cEnd));
+
+      allTriplets.push(
+        evaluatePattern(
+          `triplet_${a}_${b}_${c}`,
           'TRIPLET',
-          entry.triplet,
-          entry.cycleIndices,
+          [a, b, c],
+          cycleIndices,
           expTripletCycleProb,
           expTripletSameDrawCycleProb,
           sameDrawCnt,
-          entry.phaseCounts
-        );
-        allTriplets.push(pat);
-      }
-    });
+          { early: earlyX3 / 3, mid: midX3 / 3, late: lateX3 / 3 }
+        )
+      );
+    }
 
     const topRecurringTriplets = allTriplets
       .sort((a, b) => (b.reasoning?.compositeScore ?? b.confidence) - (a.reasoning?.compositeScore ?? a.confidence))
       .slice(0, maxPerCat);
 
-    // 6. Mine Cross-Cycle Transition Chains (Cycle C -> Cycle C+1) with REAL occurrences, phases & entropy
-    const crossCycleMap = new Map<
-      string,
-      {
-        source: number;
-        target: number;
-        transitionCycles: number[];
-        targetPhaseCounts: { early: number; mid: number; late: number };
-      }
-    >();
-
-    for (let c = 0; c < completedCycles.length - 1; c++) {
-      const cycCurrent = completedCycles[c];
-      const cycNext = completedCycles[c + 1];
-
-      cycCurrent.allNumbers.forEach((nSrc) => {
-        cycNext.allNumbers.forEach((nTgt) => {
-          if (nSrc !== nTgt) {
-            const key = `${nSrc}->${nTgt}`;
-            let entry = crossCycleMap.get(key);
-            if (!entry) {
-              entry = {
-                source: nSrc,
-                target: nTgt,
-                transitionCycles: [],
-                targetPhaseCounts: { early: 0, mid: 0, late: 0 },
-              };
-              crossCycleMap.set(key, entry);
-            }
-            entry.transitionCycles.push(cycNext.cycleIndex);
-
-            if (cycNext.phaseNumbers.early.has(nTgt)) entry.targetPhaseCounts.early += 1;
-            if (cycNext.phaseNumbers.mid.has(nTgt)) entry.targetPhaseCounts.mid += 1;
-            if (cycNext.phaseNumbers.late.has(nTgt)) entry.targetPhaseCounts.late += 1;
-          }
-        });
-      });
-    }
-
-    const sourceBallCounts: Record<number, number> = {};
-    for (let c = 0; c < Math.max(1, completedCycles.length - 1); c++) {
-      completedCycles[c].allNumbers.forEach((n) => {
-        sourceBallCounts[n] = (sourceBallCounts[n] || 0) + 1;
-      });
-    }
-
-    const lastCompletedCycle = completedCycles[completedCycles.length - 1];
+    // 6. Construire les Chaînes de Transitions Markov inter-cycles extraites par Rust/WASM
     const topCrossCycleTransitions: RecurringSequencePattern[] = [];
+    const transCountHpc = Math.floor(hpcMining.transitionTuples.length / 5);
 
-    crossCycleMap.forEach((entry, key) => {
+    for (let i = 0; i < transCountHpc; i++) {
+      const off = i * 5;
+      const source = hpcMining.transitionTuples[off];
+      const target = hpcMining.transitionTuples[off + 1];
+      const earlyCnt = hpcMining.transitionTuples[off + 2];
+      const midCnt = hpcMining.transitionTuples[off + 3];
+      const lateCnt = hpcMining.transitionTuples[off + 4];
+      const cStart = hpcMining.transitionCycleOffsets[i];
+      const cEnd = hpcMining.transitionCycleOffsets[i + 1];
+      const transitionCycles = Array.from(
+        hpcMining.transitionCycleIndicesFlat.subarray(cStart, cEnd)
+      );
+      const entry = {
+        source,
+        target,
+        transitionCycles,
+        targetPhaseCounts: { early: earlyCnt, mid: midCnt, late: lateCnt },
+      };
+      const key = `${source}->${target}`;
+
       const transitions = entry.transitionCycles.length;
       const srcTotal = Math.max(1, sourceBallCounts[entry.source] || 1);
       const targetMarginalProb = smoothedBallCycleProb[entry.target] || expSingleCycleProb;
@@ -1101,12 +973,12 @@ export const patternDiscoveryService = {
         // Real interval & entropy calculation for transition occurrences
         const sortedTransCycles = [...entry.transitionCycles].sort((a, b) => a - b);
         const intervals: number[] = [];
-        for (let i = 1; i < sortedTransCycles.length; i++) {
-          intervals.push(sortedTransCycles[i] - sortedTransCycles[i - 1]);
+        for (let k = 1; k < sortedTransCycles.length; k++) {
+          intervals.push(sortedTransCycles[k] - sortedTransCycles[k - 1]);
         }
         const meanInterval =
           intervals.length > 0
-            ? intervals.reduce((a, b) => a + b, 0) / intervals.length
+            ? intervals.reduce((acc, v) => acc + v, 0) / intervals.length
             : numCyclesForStats / Math.max(1, transitions);
 
         let transEntropy = 0;
@@ -1143,11 +1015,9 @@ export const patternDiscoveryService = {
           (latePct / 100) * activePhaseWeights.late;
         const phaseAlignment = logisticScore100((rawPhaseDot - 1 / 3) * 6.0);
 
-        // Is source active in the preceding completed cycle (priming current active cycle)
-        // OR already in current active cycle (priming next cycle)?
-        const isSourceInLastCompleted = lastCompletedCycle.allNumbers.has(entry.source);
-        const isSourceInActiveCycle = activeCycle.allNumbers.has(entry.source);
-        const isTargetInActiveCycle = activeCycle.allNumbers.has(entry.target);
+        const isSourceInLastCompleted = lastCompletedNumbers.has(entry.source);
+        const isSourceInActiveCycle = activeNumberSet.has(entry.source);
+        const isTargetInActiveCycle = activeNumberSet.has(entry.target);
 
         const hasTransProof = zScore >= 2.33 && pmi > 0.2;
         const isPrimedForCurrentCycle =
@@ -1279,7 +1149,7 @@ export const patternDiscoveryService = {
           },
         });
       }
-    });
+    }
 
     // Correction de Benjamini-Hochberg (FDR) sur l'univers COMPLET des hypothèses testées
     // (toutes les C(90,2) paires + triplets candidats + transitions N*(N-1)),
@@ -1311,9 +1181,19 @@ export const patternDiscoveryService = {
     const testedCount = Math.max(1, Object.keys(pValueFamily).length);
     const familyScale = totalFamilySize / testedCount;
     const qValues: Record<string, number> = {};
+    const unclampedQValues: Record<string, number> = {};
     Object.entries(rawBhQ).forEach(([id, qVal]) => {
-      qValues[id] = Math.min(1.0, qVal * familyScale);
+      const scaledQ = qVal * familyScale;
+      unclampedQValues[id] = scaledQ;
+      qValues[id] = Math.min(1.0, scaledQ);
     });
+
+    // Rétraction continue Empirical-Bayes issue de la famille BH complète (0 nombre magique)
+    const getFdrCredibility = (id: string): number => {
+      const qUnc = unclampedQValues[id];
+      if (qUnc === undefined || !Number.isFinite(qUnc)) return 0;
+      return 1 / (1 + Math.max(0, qUnc));
+    };
 
     allPairs.forEach((p) => {
       p.hasEmpiricalProof = (qValues[p.id] ?? 1.0) <= 0.05 && p.lift > 1.05 && p.zScore > 0;
@@ -1368,15 +1248,13 @@ export const patternDiscoveryService = {
         (a.completionProbability || 0) * (a.reasoning?.compositeScore || 50)
     );
 
-    // 10. Multi-Motif Candidate Ball Convergence & Optimal 5-Ball Selection Engine
+    // 10. Agrégation Multi-Motifs Homogène par la Méthode de Stouffer (5 canaux Z-scores sous H0)
     const ballEvidence = Array.from({ length: TOTAL_BALLS + 1 }, (_, n) => ({
       number: n,
-      primedScore: 0,
-      transitionScore: 0,
-      periodicScore: 0,
-      synergyScore: 0,
-      phaseWeightedSum: 0,
-      phaseWeightTotal: 0,
+      primedZChannels: [] as Array<{ z: number; weight: number }>,
+      transitionZChannels: [] as Array<{ z: number; weight: number }>,
+      periodicZChannels: [] as Array<{ z: number; weight: number }>,
+      phaseZChannels: [] as Array<{ z: number; weight: number }>,
       primedMotifsCount: 0,
       transitionDriversCount: 0,
       periodicMotifsCount: 0,
@@ -1386,8 +1264,6 @@ export const patternDiscoveryService = {
       coveredPatternIds: new Set<string>(),
     }));
 
-    // Accumulate evidence from Top Validated Pairs, Triplets & Periodic Motifs
-    // Using top-ranked motifs + PMI & simultaneous intra-draw specificity prevents noise dilution
     const highPrecisionMotifs = Array.from(
       new Map(
         [
@@ -1399,132 +1275,254 @@ export const patternDiscoveryService = {
       ).values()
     );
 
+    // Constante exacte de variance multinomiale de phase sous H0 uniforme (1/3, 1/3, 1/3)
+    const phaseWeightSqSum =
+      activePhaseWeights.early * activePhaseWeights.early +
+      activePhaseWeights.mid * activePhaseWeights.mid +
+      activePhaseWeights.late * activePhaseWeights.late;
+    const phaseUnitVarH0 = Math.max(1e-6, phaseWeightSqSum / 3 - 1 / 9);
+
+    const computeMotifPhaseZ = (pat: RecurringSequencePattern): number => {
+      const nObs = Math.max(1, pat.cycleSupport);
+      const pDot =
+        (pat.phaseDistribution.early / 100) * activePhaseWeights.early +
+        (pat.phaseDistribution.mid / 100) * activePhaseWeights.mid +
+        (pat.phaseDistribution.late / 100) * activePhaseWeights.late;
+      const se = Math.sqrt(phaseUnitVarH0 / nObs);
+      const rawZ = se > 0 ? (pDot - 1 / 3) / se : 0;
+      const cred = nObs / (nObs + bayesPriorScale);
+      return cred * rawZ;
+    };
+
+    // Moyenne pondérée intra-canal pour combiner des motifs corrélés sur la même boule sans inflation √m
+    const combineCorrelatedChannelZScores = (
+      items: Array<{ z: number; weight: number }>
+    ): number => {
+      let weightedSum = 0;
+      let weightTotal = 0;
+      for (const item of items) {
+        if (!Number.isFinite(item.z) || !Number.isFinite(item.weight) || item.weight <= 0) {
+          continue;
+        }
+        weightedSum += item.weight * item.z;
+        weightTotal += item.weight;
+      }
+      return weightTotal > 0 ? weightedSum / weightTotal : 0;
+    };
+
     highPrecisionMotifs.forEach((pat) => {
       if (pat.type === 'TRANSITION_CHAIN') return;
-      const compScore = pat.reasoning?.compositeScore ?? pat.confidence;
-      const renewal = pat.reasoning?.renewalHazard ?? 0;
-      const phaseAlign = pat.reasoning?.phaseAlignment ?? 50;
-      const pmiVal = Math.max(0.1, pat.reasoning?.pmi ?? 0.2);
       const sameDrawCnt = pat.reasoning?.sameDrawOccurrences ?? 0;
-
-      // Specificity multiplier: Order-2 Triplet completion (2 precursors active) + Simultaneous draw hits
-      const orderSpecificity = pat.type === 'TRIPLET' ? 2.25 : 1.0;
-      const simultaneityBoost = 1 + 0.65 * Math.log1p(sameDrawCnt);
-      const infoGainFactor = (1 + 0.55 * pmiVal) * orderSpecificity * simultaneityBoost;
+      const orderWeight = Math.sqrt(Math.max(1, pat.sequence.length - 1));
+      const fdrCred = getFdrCredibility(pat.id);
+      const zMotifAdj = fdrCred * pat.zScore;
+      const motifPhaseZ = computeMotifPhaseZ(pat);
 
       if (pat.activeAlertStatus === 'PRIMED' && pat.completionCandidates) {
-        const w =
-          ((pat.completionProbability ?? 50) / 100) *
-          (compScore / 100) *
-          infoGainFactor;
+        // Canal A : Z-score du motif pondéré par FDR + excès conditionnel exact sur cycle complet vs H0
+        const presentNums = pat.sequence.filter((x) => activeNumberSet.has(x));
+        let precursorCount = pat.cycleSupport;
+        if (presentNums.length === 1) {
+          precursorCount = ballCycleCounts[presentNums[0]] || pat.cycleSupport;
+        } else if (presentNums.length === 2) {
+          precursorCount =
+            getPairCycleSupport(presentNums[0], presentNums[1]) || pat.cycleSupport;
+        }
+
+        // pat.cycleSupport est compté sur le cycle complet de longueur cycleLength :
+        // sa probabilité nulle conditionnelle exacte sachant le précurseur est E[motif] / E[précurseur].
+        const expPrecursorRate = presentNums.length >= 2 ? expPairCycleProb : expSingleCycleProb;
+        const p0FullComp = Math.min(
+          0.99,
+          Math.max(1e-6, pat.expectedSupportRate / Math.max(1e-6, expPrecursorRate))
+        );
+        let zComp = 0;
+        if (precursorCount > 0) {
+          const rawZComp = computeBinomialUpperTailZScore(
+            pat.cycleSupport,
+            precursorCount,
+            p0FullComp
+          );
+          zComp =
+            fdrCred * (precursorCount / (precursorCount + bayesPriorScale)) * rawZComp;
+        }
+        const motifPrimedZ = combineCorrelatedChannelZScores([
+          { z: zMotifAdj, weight: 1 },
+          { z: zComp, weight: precursorCount > 0 ? 1 : 0 },
+        ]);
+
         pat.completionCandidates.forEach((cand) => {
           const ev = ballEvidence[cand];
-          ev.primedScore += w * 45;
+          ev.primedZChannels.push({ z: motifPrimedZ, weight: orderWeight });
+          ev.phaseZChannels.push({ z: motifPhaseZ, weight: 1 });
           ev.primedMotifsCount++;
           ev.sameDrawSynergyCount += sameDrawCnt;
-          ev.phaseWeightedSum += phaseAlign * w;
-          ev.phaseWeightTotal += w;
           ev.coveredPatternIds.add(pat.id);
           ev.supportingPatterns.push({
             id: pat.id,
-            label: `${pat.type === 'PAIR' ? 'Paire' : 'Triplet'} amorcé [${pat.sequence.join('-')}] (${pat.completionProbability}%)`,
-            weight: w * 100,
+            label: `${pat.type === 'PAIR' ? 'Paire' : 'Triplet'} amorcé [${pat.sequence.join('-')}] (Z=${motifPrimedZ >= 0 ? '+' : ''}${motifPrimedZ.toFixed(2)}σ, ${pat.completionProbability}%)`,
+            weight: motifPrimedZ,
           });
           pat.sequence.forEach((other) => {
             if (other !== cand) {
-              ev.partnerWeights.set(other, (ev.partnerWeights.get(other) || 0) + w);
+              ev.partnerWeights.set(
+                other,
+                (ev.partnerWeights.get(other) || 0) + Math.max(0, motifPrimedZ)
+              );
             }
           });
         });
       }
 
-      // Accumulate evidence from Periodic Renewal Resonance (motifs due in current cycle)
-      if (renewal >= 58 && pat.activeAlertStatus !== 'TRIGGERED') {
-        const wPer = (renewal / 100) * (compScore / 100) * infoGainFactor;
+      // Canal C : Résonance périodique sous-dispersée en fenêtre de retour (ajustée FDR)
+      const isPeriodicCandidate =
+        (pat.isPeriodicitySignificant ||
+          (pat.dispersionIndex !== undefined && pat.dispersionIndex < 0.75)) &&
+        pat.activeAlertStatus !== 'TRIGGERED';
+      if (isPeriodicCandidate) {
+        const intervalsCount = Math.max(0, pat.cycleOccurrences.length - 1);
+        const dispIdx = pat.dispersionIndex ?? 1.0;
+        const lagResonance = Math.min(1, Math.max(0, (pat.reasoning?.renewalHazard ?? 0) / 100));
+        const zUnderDisp =
+          intervalsCount >= 2
+            ? ((intervalsCount - 1) * (1 - dispIdx)) /
+              Math.sqrt(Math.max(1e-6, 2 * (intervalsCount - 1)))
+            : 0;
+        const motifPeriodicZ = combineCorrelatedChannelZScores([
+          { z: zMotifAdj, weight: 1 },
+          { z: zUnderDisp * lagResonance * fdrCred, weight: intervalsCount >= 2 ? 1 : 0 },
+        ]);
+
         pat.sequence.forEach((n) => {
-          if (activeCycle.allNumbers.has(n)) return; // Focus on balls not yet drawn in active cycle
+          if (activeNumberSet.has(n)) return;
           const ev = ballEvidence[n];
-          ev.periodicScore += wPer * 24;
+          ev.periodicZChannels.push({ z: motifPeriodicZ, weight: orderWeight });
+          ev.phaseZChannels.push({ z: motifPhaseZ, weight: 1 });
           ev.periodicMotifsCount++;
-          ev.phaseWeightedSum += phaseAlign * wPer;
-          ev.phaseWeightTotal += wPer;
           ev.coveredPatternIds.add(pat.id);
           ev.supportingPatterns.push({
             id: pat.id,
-            label: `Résonance cyclique [${pat.sequence.join('-')}] (~${pat.meanCycleInterval} cyc)`,
-            weight: wPer * 80,
+            label: `Résonance cyclique [${pat.sequence.join('-')}] (~${pat.meanCycleInterval} cyc, Z=${motifPeriodicZ >= 0 ? '+' : ''}${motifPeriodicZ.toFixed(2)}σ)`,
+            weight: motifPeriodicZ,
           });
           pat.sequence.forEach((other) => {
             if (other !== n) {
-              ev.partnerWeights.set(other, (ev.partnerWeights.get(other) || 0) + wPer * 0.8);
+              ev.partnerWeights.set(
+                other,
+                (ev.partnerWeights.get(other) || 0) + Math.max(0, motifPeriodicZ)
+              );
             }
           });
         });
       }
 
-      // General structural synergy for high-PMI motifs
-      if (pmiVal > 0.25) {
-        const wSyn = pmiVal * (compScore / 100) * simultaneityBoost;
+      // Motifs structurels généraux (cohésion multi-cycles & phase) pour boules non encore tirées
+      if (pat.zScore > 0 && pat.activeAlertStatus !== 'TRIGGERED') {
         pat.sequence.forEach((n) => {
-          if (activeCycle.allNumbers.has(n)) return;
+          if (activeNumberSet.has(n)) return;
           const ev = ballEvidence[n];
-          ev.synergyScore += wSyn * 8;
+          ev.phaseZChannels.push({ z: motifPhaseZ, weight: 1 });
+          ev.coveredPatternIds.add(pat.id);
           pat.sequence.forEach((other) => {
             if (other !== n) {
-              ev.partnerWeights.set(other, (ev.partnerWeights.get(other) || 0) + wSyn * 0.5);
+              ev.partnerWeights.set(
+                other,
+                (ev.partnerWeights.get(other) || 0) + Math.max(0, zMotifAdj) * 0.5
+              );
             }
           });
         });
       }
     });
 
-    // Accumulate evidence from Active Cross-Cycle Transitions
+    // Canal B : Transitions Markoviennes inter-cycles actives (ajustées FDR)
     prunedTransitions.forEach((tr) => {
       if (tr.activeAlertStatus === 'PRIMED' && tr.completionCandidates?.[0]) {
         const target = tr.completionCandidates[0];
         const source = tr.sequence[0];
         const ev = ballEvidence[target];
-        const wTr = ((tr.completionProbability ?? 50) / 100) * (tr.confidence / 100);
-        ev.transitionScore += wTr * 36;
+        const srcTotal = Math.max(1, sourceBallCounts[source] || 1);
+        const credTr = srcTotal / (srcTotal + bayesPriorScale);
+        const fdrCredTr = getFdrCredibility(tr.id);
+        const zTr = fdrCredTr * credTr * tr.zScore;
+        const trPhaseZ = computeMotifPhaseZ(tr);
+
+        ev.transitionZChannels.push({ z: zTr, weight: 1 });
+        ev.phaseZChannels.push({ z: trPhaseZ, weight: 1 });
         ev.transitionDriversCount++;
-        ev.phaseWeightedSum += (tr.reasoning?.phaseAlignment ?? 50) * wTr;
-        ev.phaseWeightTotal += wTr;
         ev.coveredPatternIds.add(tr.id);
         ev.supportingPatterns.push({
           id: tr.id,
-          label: `Transition ${source} ➔ ${target} (${tr.transitionConfidence}%)`,
-          weight: wTr * 95,
+          label: `Transition ${source} ➔ ${target} (Z=${zTr >= 0 ? '+' : ''}${zTr.toFixed(2)}σ, ${tr.transitionConfidence}%)`,
+          weight: zTr,
         });
-        ev.partnerWeights.set(source, (ev.partnerWeights.get(source) || 0) + wTr);
+        ev.partnerWeights.set(source, (ev.partnerWeights.get(source) || 0) + Math.max(0, zTr));
       }
     });
 
-    // Build Candidate Rankings across balls 1..90
-    const rawTotals: number[] = [];
-    for (let n = 1; n <= TOTAL_BALLS; n++) {
-      const ev = ballEvidence[n];
-      const raw = ev.primedScore + ev.transitionScore + ev.periodicScore + ev.synergyScore;
-      rawTotals.push(raw);
-    }
-    const maxRawTotal = Math.max(1e-5, ...rawTotals);
+    // Canal E : Synergie simultanée intra-tirage avec les numéros déjà actifs (modèle nul hypergéométrique exact 5/90)
+    const pPairSameDrawSingle =
+      (BALLS_PER_DRAW * (BALLS_PER_DRAW - 1)) / (TOTAL_BALLS * (TOTAL_BALLS - 1)); // 20/8010 = 2/801
 
     const candidateRankings: PatternCandidateSelection[] = [];
     for (let n = 1; n <= TOTAL_BALLS; n++) {
       const ev = ballEvidence[n];
-      const raw = ev.primedScore + ev.transitionScore + ev.periodicScore + ev.synergyScore;
-      if (raw <= 0) continue;
+      const hasMotifEvidence =
+        ev.primedZChannels.length > 0 ||
+        ev.transitionZChannels.length > 0 ||
+        ev.periodicZChannels.length > 0 ||
+        ev.coveredPatternIds.size > 0;
+      if (!hasMotifEvidence) continue;
 
-      const normalizedRatio = raw / maxRawTotal;
-      const convergenceScore = parseFloat(
-        Math.min(99.4, Math.max(12.0, logisticScore100((normalizedRatio - 0.32) * 4.5))).toFixed(1)
-      );
+      const activePartnersExcludingSelf = activeCycleNumbers.filter((a) => a !== n);
+      let activeSameDrawHits = 0;
+      for (const a of activePartnersExcludingSelf) {
+        activeSameDrawHits += getSameDrawPairCount(n, a);
+      }
 
-      const phaseAffinityScore = parseFloat(
-        (ev.phaseWeightTotal > 0 ? ev.phaseWeightedSum / ev.phaseWeightTotal : 50).toFixed(1)
-      );
+      const lambdaSynergy =
+        completedDrawsCount * activePartnersExcludingSelf.length * pPairSameDrawSingle;
+      let zSynergy = 0;
+      const hasSynergyChannel = lambdaSynergy > 0;
+      if (hasSynergyChannel) {
+        const rawZSyn = computePoissonUpperTailZScore(activeSameDrawHits, lambdaSynergy);
+        const synCred =
+          completedDrawsCount / (completedDrawsCount + cycleLength * bayesPriorScale);
+        zSynergy = synCred * rawZSyn;
+      }
+
+      const zPrimed =
+        ev.primedZChannels.length > 0
+          ? combineCorrelatedChannelZScores(ev.primedZChannels)
+          : 0;
+      const zTransition =
+        ev.transitionZChannels.length > 0
+          ? combineCorrelatedChannelZScores(ev.transitionZChannels)
+          : 0;
+      const zPeriodic =
+        ev.periodicZChannels.length > 0
+          ? combineCorrelatedChannelZScores(ev.periodicZChannels)
+          : 0;
+      const zPhase =
+        ev.phaseZChannels.length > 0
+          ? combineCorrelatedChannelZScores(ev.phaseZChannels)
+          : 0;
+
+      const stouffer = combinePatternStoufferZScores([
+        { z: zPrimed, weight: ev.primedZChannels.length > 0 ? 1 : 0 },
+        { z: zTransition, weight: ev.transitionZChannels.length > 0 ? 1 : 0 },
+        { z: zPeriodic, weight: ev.periodicZChannels.length > 0 ? 1 : 0 },
+        { z: zPhase, weight: ev.phaseZChannels.length > 0 ? 1 : 0 },
+        { z: zSynergy, weight: hasSynergyChannel ? 1 : 0 },
+      ]);
+
+      const stoufferZScore = Number(stouffer.zScore.toFixed(4));
+      const stoufferPValue = Number(stouffer.pValue.toFixed(6));
+      const convergenceScore = Number((normalCdf(stouffer.zScore) * 100).toFixed(1));
+      const phaseAffinityScore = Number((normalCdf(zPhase) * 100).toFixed(1));
 
       const topPartners = Array.from(ev.partnerWeights.entries())
-        .sort((a, b) => b[1] - a[1])
+        .sort((a, b) => b[1] - a[1] || a[0] - b[0])
         .slice(0, 4)
         .map(([partner]) => partner);
 
@@ -1538,31 +1536,46 @@ export const patternDiscoveryService = {
         .slice(0, 3)
         .map((item) => item.label);
 
+      // Rôle analytique dominant déterminé par les Z-scores des canaux (zéro seuil arbitraire)
       let selectionRole: CandidateSelectionRole = 'RESONANCE_CYCLIQUE';
       if (ev.primedMotifsCount >= 1 && ev.transitionDriversCount >= 1) {
         selectionRole = 'PIVOT_CONVERGENT';
-      } else if (ev.primedScore >= ev.transitionScore && ev.primedMotifsCount >= 1) {
+      } else if (
+        ev.primedMotifsCount >= 1 &&
+        zPrimed >= Math.max(zTransition, zPeriodic)
+      ) {
         selectionRole = 'COMPLETION_PRIMED';
-      } else if (ev.transitionDriversCount >= 1) {
+      } else if (ev.transitionDriversCount >= 1 && zTransition >= zPeriodic) {
         selectionRole = 'TRANSITION_CIBLE';
       }
 
+      const zSign = stoufferZScore >= 0 ? '+' : '';
       const reasoningSummary =
         selectionRole === 'PIVOT_CONVERGENT'
-          ? `Convergence multi-canaux : ${ev.primedMotifsCount} motif(s) amorcé(s) + ${ev.transitionDriversCount} chaîne(s) de transition Markov.`
+          ? `Convergence Stouffer Z=${zSign}${stoufferZScore.toFixed(2)}σ : ${ev.primedMotifsCount} motif(s) amorcé(s) + ${ev.transitionDriversCount} transition(s) Markov.`
           : selectionRole === 'COMPLETION_PRIMED'
-          ? `Candidat direct de complétion pour ${ev.primedMotifsCount} motif(s) amorcé(s) dans le cycle actif.`
+          ? `Complétion amorcée (Z=${zSign}${stoufferZScore.toFixed(2)}σ, Z_primed=${zPrimed.toFixed(2)}σ) sur ${ev.primedMotifsCount} motif(s) actif(s).`
           : selectionRole === 'TRANSITION_CIBLE'
-          ? `Cible directe de ${ev.transitionDriversCount} transition(s) inter-cycles active(s).`
-          : `Porté par ${ev.periodicMotifsCount} motif(s) périodique(s) en fenêtre de retour cyclique.`;
+          ? `Cible Markov (Z=${zSign}${stoufferZScore.toFixed(2)}σ, Z_trans=${zTransition.toFixed(2)}σ) sur ${ev.transitionDriversCount} chaîne(s).`
+          : `Résonance cyclique (Z=${zSign}${stoufferZScore.toFixed(2)}σ, Z_per=${zPeriodic.toFixed(2)}σ, Z_syn=${zSynergy.toFixed(2)}σ).`;
 
       candidateRankings.push({
         number: n,
         convergenceScore,
+        stoufferZScore,
+        stoufferPValue,
+        channelZScores: {
+          zPrimed: Number(zPrimed.toFixed(4)),
+          zTransition: Number(zTransition.toFixed(4)),
+          zPeriodic: Number(zPeriodic.toFixed(4)),
+          zPhase: Number(zPhase.toFixed(4)),
+          zSynergy: Number(zSynergy.toFixed(4)),
+          activeChannels: stouffer.activeChannels,
+        },
         primedMotifsCount: ev.primedMotifsCount,
         transitionDriversCount: ev.transitionDriversCount,
         periodicMotifsCount: ev.periodicMotifsCount,
-        sameDrawSynergyCount: ev.sameDrawSynergyCount,
+        sameDrawSynergyCount: ev.sameDrawSynergyCount + activeSameDrawHits,
         phaseAffinityScore,
         synergyPartners: topPartners,
         supportingPatterns: uniqueSupporting,
@@ -1571,12 +1584,66 @@ export const patternDiscoveryService = {
       });
     }
 
-    candidateRankings.sort((a, b) => b.convergenceScore - a.convergenceScore);
+    candidateRankings.sort(
+      (a, b) =>
+        (b.stoufferZScore ?? 0) - (a.stoufferZScore ?? 0) ||
+        b.convergenceScore - a.convergenceScore ||
+        a.number - b.number
+    );
 
-    // 11. Submodular Coverage + Pairwise PMI Synergy Optimizer for Optimal 5-Ball Selection + 2 Reserves
+    // 11. Synthèse Sous-Modulaire en Espace Z (5 Gagnants + 2 Réserves)
+    // Toutes les grandeurs (base Stouffer, couverture marginale, synergie de paires, diversité dizaines)
+    // sont exprimées en unités homogènes d'écarts-types σ.
     const selectedSeven: number[] = [];
     const coveredPatternsGlobal = new Set<string>();
     const candidatePool = candidateRankings.slice(0, 30);
+    const diversityScaleSigma = 1 / Math.sqrt(BALLS_PER_DRAW);
+
+    // Filet de sécurité déterministe si moins de 7 boules ont un motif actif
+    if (candidatePool.length < 7) {
+      const existingNums = new Set(candidatePool.map((c) => c.number));
+      const fallbackBalls = Array.from({ length: TOTAL_BALLS }, (_, i) => i + 1)
+        .filter((n) => !existingNums.has(n))
+        .map((n) => {
+          const zFreq = computeBinomialUpperTailZScore(
+            ballCycleCounts[n] || 0,
+            numCyclesForStats,
+            expSingleCycleProb
+          );
+          const credFreq =
+            numCyclesForStats / (numCyclesForStats + bayesPriorScale);
+          const zVal = Number((credFreq * zFreq).toFixed(4));
+          return {
+            number: n,
+            convergenceScore: Number((normalCdf(zVal) * 100).toFixed(1)),
+            stoufferZScore: zVal,
+            stoufferPValue: Number(patternNormalUpperPValue(zVal).toFixed(6)),
+            channelZScores: {
+              zPrimed: 0,
+              zTransition: 0,
+              zPeriodic: 0,
+              zPhase: 0,
+              zSynergy: zVal,
+              activeChannels: 1,
+            },
+            primedMotifsCount: 0,
+            transitionDriversCount: 0,
+            periodicMotifsCount: 0,
+            sameDrawSynergyCount: 0,
+            phaseAffinityScore: 50,
+            synergyPartners: [],
+            supportingPatterns: [],
+            selectionRole: 'RESONANCE_CYCLIQUE' as CandidateSelectionRole,
+            reasoningSummary: `Fréquence cyclique de repli (Z=${zVal >= 0 ? '+' : ''}${zVal.toFixed(2)}σ).`,
+          };
+        })
+        .sort((a, b) => (b.stoufferZScore ?? 0) - (a.stoufferZScore ?? 0) || a.number - b.number);
+
+      for (const fb of fallbackBalls) {
+        if (candidatePool.length >= 7) break;
+        candidatePool.push(fb);
+      }
+    }
 
     while (selectedSeven.length < 7 && selectedSeven.length < candidatePool.length) {
       let bestCandidate: PatternCandidateSelection | null = null;
@@ -1586,39 +1653,51 @@ export const patternDiscoveryService = {
         if (selectedSeven.includes(cand.number)) continue;
         const ev = ballEvidence[cand.number];
 
-        // 1. Utilité de convergence de base
-        const baseUtility = cand.convergenceScore;
+        // 1. Score homogène de Stouffer (en σ)
+        const baseZ = cand.stoufferZScore ?? 0;
 
-        // 2. Gain de couverture marginale sous-modulaire (théorie de l'information)
+        // 2. Gain marginal de couverture de motifs (adimensionnel mis à l'échelle 1/√5 σ)
         let newPatternsCovered = 0;
         ev.coveredPatternIds.forEach((pid) => {
           if (!coveredPatternsGlobal.has(pid)) newPatternsCovered++;
         });
-        const coverageGainRatio =
-          newPatternsCovered / Math.max(1, coveredPatternsGlobal.size + 1);
-        const coverageUtility = Math.log1p(coverageGainRatio) * (baseUtility * 0.35);
+        const coverageGainZ =
+          Math.log1p(newPatternsCovered / Math.max(1, coveredPatternsGlobal.size + 1)) *
+          diversityScaleSigma;
 
-        // 3. Synergie intra-ticket par information mutuelle (PMI) et co-occurrences intra-tirage réelles
-        let pairwiseSynergy = 0;
+        // 3. Synergie intra-ticket en unités σ (combinaison de Stouffer des Z-scores de paires positives)
+        const pairZChannels: Array<{ z: number; weight: number }> = [];
         selectedSeven.forEach((alreadyPicked) => {
-          const wPartner = ev.partnerWeights.get(alreadyPicked) || 0;
-          const pKey =
-            cand.number < alreadyPicked
-              ? `${cand.number}_${alreadyPicked}`
-              : `${alreadyPicked}_${cand.number}`;
-          const sameDrawHits = sameDrawPairCounts.get(pKey) || 0;
-          pairwiseSynergy += wPartner * 2.2 + sameDrawHits * 1.5;
+          const pairCycles = getPairCycleSupport(cand.number, alreadyPicked);
+          const sameDrawHits = getSameDrawPairCount(cand.number, alreadyPicked);
+          if (pairCycles > 0 || sameDrawHits > 0) {
+            const zPair = computeBinomialUpperTailZScore(
+              pairCycles,
+              numCyclesForStats,
+              expPairCycleProb
+            );
+            const zPairCred =
+              (numCyclesForStats / (numCyclesForStats + bayesPriorScale)) *
+              Math.max(0, zPair);
+            if (zPairCred > 0) {
+              pairZChannels.push({ z: zPairCred, weight: 1 });
+            }
+          }
         });
+        const pairwiseSynergyZ =
+          pairZChannels.length > 0
+            ? combineCorrelatedChannelZScores(pairZChannels) * diversityScaleSigma
+            : 0;
 
-        // 4. Régularisation continue de diversité des dizaines (pénalité douce d'encombrement)
-        const candDecade = Math.floor((cand.number - 1) / 10);
+        // 4. Pénalité d'encombrement par dizaine en unités σ (soustractive, préserve la monotonie des Z signés)
+        const candDecade = Math.min(8, Math.floor((cand.number - 1) / 10));
         const sameDecadeCount = selectedSeven.filter(
-          (x) => Math.floor((x - 1) / 10) === candDecade
+          (x) => Math.min(8, Math.floor((x - 1) / 10)) === candDecade
         ).length;
-        const decadeRegularizer = Math.exp(-Math.pow(sameDecadeCount, 1.5) / 3.0);
+        const decadePenaltyZ = sameDecadeCount * diversityScaleSigma;
 
         const marginalUtility =
-          (baseUtility + coverageUtility + pairwiseSynergy) * (0.7 + 0.3 * decadeRegularizer);
+          baseZ + coverageGainZ + pairwiseSynergyZ - decadePenaltyZ;
 
         if (marginalUtility > bestMarginalUtility) {
           bestMarginalUtility = marginalUtility;
@@ -1636,16 +1715,20 @@ export const patternDiscoveryService = {
     const optimalFive = selectedSeven.slice(0, 5).sort((a, b) => a - b);
     const reserveNumbers = selectedSeven.slice(5, 7);
 
-    // Compute quantitative metrics of the synthesized 5-ball selection
+    // Métriques quantitatives de la sélection synthétisée
     const optimalCandidates = optimalFive
-      .map((n) => candidateRankings.find((c) => c.number === n))
+      .map((n) => candidatePool.find((c) => c.number === n))
       .filter((c): c is PatternCandidateSelection => Boolean(c));
+
+    const ticketStouffer = combinePatternStoufferZScores(
+      optimalCandidates.map((c) => ({ z: c.stoufferZScore ?? 0, weight: 1 }))
+    );
 
     const meanConv =
       optimalCandidates.length > 0
         ? optimalCandidates.reduce((acc, c) => acc + c.convergenceScore, 0) /
           optimalCandidates.length
-        : 0;
+        : 50;
     const phaseCoherenceScore =
       optimalCandidates.length > 0
         ? parseFloat(
@@ -1659,10 +1742,9 @@ export const patternDiscoveryService = {
     let internalPairSynergyHits = 0;
     for (let i = 0; i < optimalFive.length; i++) {
       for (let j = i + 1; j < optimalFive.length; j++) {
-        const key = `${optimalFive[i]}_${optimalFive[j]}`;
-        const pEntry = pairCycleMap.get(key);
-        if (pEntry) {
-          internalPairSynergyHits += pEntry.cycleIndices.length / Math.max(1, numCyclesForStats);
+        const sup = getPairCycleSupport(optimalFive[i], optimalFive[j]);
+        if (sup > 0) {
+          internalPairSynergyHits += sup / Math.max(1, numCyclesForStats);
         }
       }
     }
@@ -1674,10 +1756,8 @@ export const patternDiscoveryService = {
     );
 
     // Confiance honnête et calibrée de la sélection 5 boules :
-    // Sous l'hypothèse nulle H0 (bruit i.i.d.), la probabilité qu'un ticket de 5 boules contienne
+    // Sous H0 (bruit i.i.d.), la probabilité qu'un ticket de 5 boules contienne
     // au moins 1 numéro gagnant dans une loterie 5/90 est exactement 1 - C(85,5)/C(90,5) = 25.4%.
-    // L'indice de cohérence interne n'est mis à l'échelle au-delà de cette ligne de base
-    // que proportionnellement à la présence d'évidences statistiques réelles (max z >= 1.645).
     const selectedMotifs = highPrecisionMotifs.filter((m) =>
       optimalFive.some((n) => m.sequence.includes(n))
     );
@@ -1700,10 +1780,11 @@ export const patternDiscoveryService = {
       ).toFixed(1)
     );
 
+    const zTicketSign = ticketStouffer.zScore >= 0 ? '+' : '';
     const selectionRationale: string[] = [
-      `Couverture sous-modulaire de ${coveredPatternsGlobal.size} motifs actifs et périodiques distincts sur ${numCyclesForStats} cycles analysés.`,
-      `Alignement de phase (${activePhaseWeights.label} : ${activeCycle.draws.length}/${cycleLength} tirages) avec cohérence de ${phaseCoherenceScore}%.`,
-      `Cohésion interne inter-boules (PMI & co-occurrences simultanées) évaluée à ${pairwiseSynergyScore}%.`,
+      `Agrégation homogène de Stouffer sur 5 Z-scores N(0, 1) sous H0 (amorçage, Markov inter-cycles, résonance périodique, phase χ², synergie simultanée) : Z_ticket = ${zTicketSign}${ticketStouffer.zScore.toFixed(2)}σ.`,
+      `Couverture sous-modulaire en espace Z de ${coveredPatternsGlobal.size} motif(s) distinct(s) sur ${numCyclesForStats} cycles analysés.`,
+      `Alignement de phase (${activePhaseWeights.label} : ${activeCycleDrawsCount}/${cycleLength} tirages) à ${phaseCoherenceScore}% et cohésion inter-boules à ${pairwiseSynergyScore}%.`,
     ];
 
     return {
@@ -1712,7 +1793,7 @@ export const patternDiscoveryService = {
       totalDraws,
       totalCycles,
       activeCycleIndex: totalCycles - 1,
-      activeCycleDrawsCount: activeCycle.draws.length,
+      activeCycleDrawsCount,
       activeCycleNumbers,
       topRecurringPairs,
       topRecurringTriplets,
@@ -1729,6 +1810,9 @@ export const patternDiscoveryService = {
         pairwiseSynergyScore,
         phaseCoherenceScore,
         currentPhaseLabel: activePhaseWeights.label,
+        ticketStoufferZScore: Number(ticketStouffer.zScore.toFixed(4)),
+        ticketPValue: Number(ticketStouffer.pValue.toFixed(6)),
+        scoringMethod: 'STOUFFER_Z',
         selectionRationale,
       },
       overallCycleEntropy,

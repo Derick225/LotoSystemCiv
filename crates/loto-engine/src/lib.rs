@@ -28,6 +28,8 @@ pub mod calibration;
 pub mod scoring;
 pub mod validation;
 pub mod interdraw_matrix;
+pub mod gap_range;
+pub mod pattern_discovery;
 
 // Noyau mathématique pur (crate `loto-core`, sans wasm-bindgen).
 pub use loto_core::{combinatorics, hyperparams, stacking};
@@ -101,9 +103,12 @@ pub fn abi_hash() -> String {
         "ClosedLoopAutopsyResultHpc",
         "CooccurrenceTensorResult",
         "CrossHawkesWasmResult",
+        "GapRangeAnalysisWasmResult",
+        "GapRangeWalkForwardWasmResult",
         "HybridRegimeOptimizationHpc",
         "InMemoryDrawStore",
         "NativePredictionResult",
+        "PatternMiningWasmResult",
         "PriorAnalysisReport",
         "SpatialFieldMetricsHpc",
         "SpectralAnalysisResult",
@@ -124,6 +129,8 @@ pub fn abi_hash() -> String {
         "compute_domino_advection_wasm",
         "compute_fft_power_spectrum",
         "compute_frequency_counts_wasm",
+        "compute_gap_range_analysis_wasm",
+        "compute_gap_range_walk_forward_wasm",
         "compute_graph_heat_kernel_wasm",
         "compute_hawkes_intensity_hpc",
         "compute_hybrid_regime_weights_wasm",
@@ -136,6 +143,7 @@ pub fn abi_hash() -> String {
         "dot_product_f64",
         "engine_version",
         "init_engine",
+        "mine_cycle_patterns_wasm",
         "project_markov_next_state",
         "run_aco_optimization_wasm",
         "run_monte_carlo_whatif_hpc",

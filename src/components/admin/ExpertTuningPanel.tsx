@@ -31,7 +31,6 @@ import {
   TrendingDown,
   Scan,
   Server,
-  Cloud,
   Flame,
 } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
@@ -53,8 +52,6 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
   const refreshData = useNexusStore((state) => state.refreshData);
   const history = useNexusStore((state) => state.history);
   const activeDrawName = useNexusStore((state) => state.drawName);
-  const useCloudEngine = useNexusStore((state) => state.useCloudEngine);
-  const setUseCloudEngine = useNexusStore((state) => state.setUseCloudEngine);
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
   const setTemporalDepth = useNexusStore((state) => state.setTemporalDepth);
 
@@ -729,34 +726,19 @@ export const ExpertTuningPanel: React.FC<ExpertTuningPanelProps> = ({
                   </p>
                 </div>
 
-                <div className="flex items-center justify-between mt-4">
+                <div className="flex items-center justify-between mt-4 p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
                   <div>
-                    <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                      <Cloud
-                        size={14}
-                        className={
-                          useCloudEngine ? "text-indigo-400" : "text-slate-500"
-                        }
-                      />
-                      Délégation Cloud
+                    <span className="text-xs font-bold text-slate-200 flex items-center gap-2">
+                      <Server size={14} className="text-emerald-400" />
+                      Exécution Locale HPC
                     </span>
-                    <p className="text-[9px] text-slate-500 mt-1 font-bold uppercase tracking-widest max-w-[150px]">
-                      {useCloudEngine
-                        ? "Nœuds distants (Haute précision)."
-                        : "Calcul local Edge (Mode dégradé)."}
+                    <p className="text-[9px] text-slate-400 mt-1 font-bold uppercase tracking-widest max-w-[190px]">
+                      Noyau Rust / WASM natif (100% local, zéro délégation Cloud).
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      audioEngine.play("click");
-                      setUseCloudEngine(!useCloudEngine);
-                    }}
-                    className={`w-12 h-6 rounded-full transition-colors relative flex-shrink-0 ${useCloudEngine ? "bg-indigo-600" : "bg-slate-700"}`}
-                  >
-                    <div
-                      className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${useCloudEngine ? "right-1" : "left-1"}`}
-                    />
-                  </button>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-black uppercase tracking-wider">
+                    Actif
+                  </span>
                 </div>
               </div>
             </div>

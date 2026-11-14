@@ -97,8 +97,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const temporalDepth = useNexusStore((state) => state.temporalDepth);
   const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
   const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
-  const useCloudEngine = useNexusStore((state) => state.useCloudEngine);
-  const setUseCloudEngine = useNexusStore((state) => state.setUseCloudEngine);
   const forcedOutsiderCount = useNexusStore((state) => state.forcedOutsiderCount);
   const setForcedOutsiderCount = useNexusStore((state) => state.setForcedOutsiderCount);
 
@@ -576,15 +574,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     try {
       let aiWeights: Record<string, number> | undefined = undefined;
       let aiRationale = "";
-      // Confiance revendiquée par le modèle cloud, quand il en fournit une. En secours local,
-      // elle reste indéfinie : la confiance affichée vient alors du moteur d'inférence.
-      let aiConfidence: number | undefined = undefined;
       let aiStrategicAdvice = "";
-      let isLocalFallback = false;
 
-      // Socle complet des 24 canaux sur lequel toute allocation partielle se fusionne : le
-      // cloud ne se prononce que sur les canaux actifs qu'il connaît, les autres doivent
-      // conserver leur calibration entraînée pour ce tirage plutôt que retomber à un défaut.
+      // Socle complet des canaux sur lequel l'optimisation Rust/WASM HPC s'applique,
+      // en conservant la calibration entraînée pour ce tirage plutôt qu'un défaut statique.
       const resolveBaseWeights = async (): Promise<AlgoWeights> =>
         globalWeights && Object.keys(globalWeights).length > 0
           ? globalWeights
@@ -640,9 +633,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       );
       aiWeights = hpcWeights;
       aiRationale = localFb.rationale;
-      aiConfidence = Math.round(hpcRes.confidence);
       aiStrategicAdvice = localFb.strategicAdvice;
-      isLocalFallback = true;
 
       const { generateMasterPrediction } =
         await import("../../services/prediction/predictionFacade");
@@ -667,18 +658,12 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       setPrediction({
         suggestedNumbers: predictionData.suggestedNumbers,
         candidates: predictionData.candidates,
-        // La confiance affichée est soit celle revendiquée par le cloud, soit celle du moteur
-        // d'inférence. Le secours local n'en produit pas : il ne fabrique donc aucune valeur.
-        confidence:
-          isLocalFallback || aiConfidence === undefined
-            ? predictionData.confidence
-            : aiConfidence,
+        confidence: predictionData.confidence,
         analysis:
           predictionData.analysis ||
-          "Inférence hybride complétée à partir de la matrice d'alignement.",
-        mathModelSummary: isLocalFallback
-          ? "Inférence Locale Neuro-Vectorielle HPC (Rust / WASM)"
-          : "Inférence Cloud IA • Oracle Gemini + Supabase Edge Engine",
+          "Inférence hybride locale complétée à partir de la matrice d'alignement.",
+        mathModelSummary:
+          "Inférence Locale Neuro-Vectorielle HPC (Rust / WASM)",
         xapExp: predictionData.xapExp,
         realityAlignment: predictionData.realityAlignment,
         adversarialApplied: predictionData.adversarialApplied,
@@ -693,11 +678,11 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         aiWeights,
         aiRationale,
         aiStrategicAdvice,
-        isLocalFallback,
-        engineType: isLocalFallback ? "local" : "cloud",
+        isLocalFallback: true,
+        engineType: "local",
       });
       audioEngine.play("success");
-      showToast("Convergence Hybride IA complétée.", "success");
+      showToast("Inférence Neuro-Vectorielle HPC complétée.", "success");
     } catch (e: any) {
       console.error("Failed to compute IA prediction hybridly:", e);
       setError(e.message || "Erreur de quantification mathématique hybride.");
@@ -1053,27 +1038,25 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 </div>
               </label>
 
-              {/* Identifier: Cloud IA & Neural Edge Engine */}
+              {/* Identifier: Local Neuro-Vectoriel HPC (Rust / WASM) */}
               <div
                 className="flex items-start gap-3 select-none"
                 style={{ minHeight: "44px" }}
               >
                 <div className="w-9 h-9 rounded-xl bg-fuchsia-500/10 border border-fuchsia-500/30 text-fuchsia-400 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
-                  <Zap size={18} className="animate-pulse text-fuchsia-400" />
+                  <Cpu size={18} className="text-fuchsia-400" />
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-black uppercase tracking-wider text-fuchsia-400 block">
-                      {useCloudEngine ? "Moteur Cloud IA" : "Moteur Neuro-Vectoriel HPC"}
+                      Moteur Neuro-Vectoriel HPC
                     </span>
-                    <span className="px-1.5 py-0.5 rounded-md bg-fuchsia-500/20 text-fuchsia-300 text-[8px] font-black uppercase border border-fuchsia-500/30">
-                      {useCloudEngine ? "Gemini Cloud" : "Inférence Native"}
+                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 text-[8px] font-black uppercase border border-emerald-500/30">
+                      Rust / WASM Local
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-400 block leading-normal">
-                    {useCloudEngine
-                      ? "Délègue l'inférence neuronale et le raisonnement sémantique aux serveurs Cloud haute performance."
-                      : "Exécution déterministe haute fidélité en local via le moteur vectoriel et les 25 canaux stochastiques."}
+                    Exécution déterministe 100% locale via le noyau Rust/WASM HPC et les 25 canaux stochastiques (zéro appel Cloud externe).
                   </span>
                 </div>
               </div>
@@ -1114,15 +1097,15 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
               disabled={loading}
               className="w-full lg:w-auto px-8 py-4 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all duration-300 hover:scale-[1.02] shadow-xl shadow-fuchsia-500/10 border border-fuchsia-400/25 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
-              {loading ? (
+                  {loading ? (
                 <>
                   <RefreshCw size={16} className="animate-spin" />
-                  <span>Optimisation des Poids IA...</span>
+                  <span>Optimisation des Poids HPC...</span>
                 </>
               ) : (
                 <>
                   <Sparkles size={16} />
-                  <span>Lancer la Prédiction Hybride IA</span>
+                  <span>Lancer l'Inférence Neuro-Vectorielle</span>
                 </>
               )}
             </button>
@@ -1327,9 +1310,9 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             adversarialSurvivalScore:
                               prediction.adversarialSurvivalScore,
                             adversarialRisks: prediction.adversarialRisks,
-                            engineType: prediction.isLocalFallback ? "local" : "cloud",
+                            engineType: "local",
                             mathModelSummary: prediction.mathModelSummary,
-                            isLocalFallback: prediction.isLocalFallback,
+                            isLocalFallback: true,
                             aiWeights: prediction.aiWeights,
                             aiRationale: prediction.aiRationale,
                             aiStrategicAdvice: prediction.aiStrategicAdvice,
@@ -1655,29 +1638,18 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             Pondération Hybride de l'Oracle
                           </h3>
                           <p className="text-[11px] text-slate-500">
-                            Configuration des {ACTIVE_ALGO_COUNT} canaux algorithmiques actifs calibrée par{" "}
-                            {prediction.isLocalFallback
-                              ? "le moteur cybernétique local"
-                              : "l'IA Gemini"}
+                            Configuration des {ACTIVE_ALGO_COUNT} canaux algorithmiques actifs calibrée par le moteur hybride Rust/WASM local
                           </p>
                         </div>
-                        <span
-                          className={`px-3 py-1 text-[9px] font-black uppercase tracking-wider rounded-full border ${
-                            prediction.isLocalFallback
-                              ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                              : "bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20"
-                          }`}
-                        >
-                          {prediction.isLocalFallback
-                            ? "Moteur Déterministe"
-                            : "Gemini Optimisé"}
+                        <span className="px-3 py-1 text-[9px] font-black uppercase tracking-wider rounded-full border bg-blue-500/10 text-blue-400 border-blue-500/20">
+                          Moteur HPC Local
                         </span>
                       </div>
 
-                      {/* AI Rationale Text */}
+                      {/* Local Engine Rationale Text */}
                       <div className="p-5 bg-slate-950/40 rounded-2xl border border-slate-800/60 space-y-2">
                         <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-300">
-                          Raisonnement stratégique de l'IA :
+                          Raisonnement stratégique du moteur local :
                         </h4>
                         <p className="text-[11px] text-slate-400 leading-relaxed font-normal whitespace-pre-line">
                           {prediction.aiRationale}
@@ -2487,7 +2459,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                 <div className="flex items-center gap-2">
                   <Scale size={16} className="text-fuchsia-400" />
                   <h4 className="text-xs font-black uppercase tracking-widest text-slate-200">
-                    Analyse Comparative des Moteurs : Local Déterministe vs Cloud IA
+                    Analyse Comparative des Moteurs : Local Déterministe vs Archives Pré-Unification
                   </h4>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2590,7 +2562,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                       </span>
                       <div>
                         <div className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                          Moteur Cloud IA (Prédiction IA)
+                          Archives Pré-Unification (Ex-Cloud)
                           {forensicEngineFilter === "cloud" && (
                             <span className="text-[8px] bg-fuchsia-500 text-white px-1.5 py-0.2 rounded font-black">
                               ACTIF
@@ -2598,7 +2570,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           )}
                         </div>
                         <span className="text-[9px] text-slate-400">
-                          Oracle Gemini Pro • Supabase Edge • XAP Neural
+                          Historique migré • Désormais 100% Local Rust/WASM
                         </span>
                       </div>
                     </div>
@@ -2787,7 +2759,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                     }`}
                   >
                     <Zap size={12} />
-                    Cloud IA Gemini ({engineComparisonStats.cloud.total})
+                    Archives Pré-Unification ({engineComparisonStats.cloud.total})
                   </button>
                 </div>
 
@@ -3014,7 +2986,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           {isCloud ? (
                             <span className="px-2.5 py-0.5 rounded-md bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/30 text-[9px] font-black uppercase flex items-center gap-1 shadow-sm">
                               <Zap size={10} />
-                              Cloud IA Gemini
+                              Archive Hybride
                             </span>
                           ) : (
                             <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[9px] font-black uppercase flex items-center gap-1 shadow-sm">
@@ -3191,11 +3163,11 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                             <div className="flex items-center gap-1.5 mb-1">
                               {isCloud ? (
                                 <span className="px-2 py-0.5 rounded bg-fuchsia-500/20 text-fuchsia-300 text-[8.5px] font-black uppercase flex items-center gap-1">
-                                  <Zap size={9} /> Cloud IA
+                                  <Zap size={9} /> Archive Hybride
                                 </span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[8.5px] font-black uppercase flex items-center gap-1">
-                                  <Cpu size={9} /> Local Base
+                                  <Cpu size={9} /> Local HPC
                                 </span>
                               )}
                             </div>
@@ -3203,8 +3175,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                               {item.prediction.mathModelSummary ||
                                 item.prediction.analysis ||
                                 (isCloud
-                                  ? "Inférence Cloud IA • Oracle Gemini Pro + Supabase Edge Engine"
-                                  : "Inférence Déterministe Local • Web Workers & ACO")}
+                                  ? "Inférence Hybride HPC (Archive pré-unification)"
+                                  : "Inférence Déterministe Locale • Rust/WASM & ACO")}
                             </span>
                           </div>
 

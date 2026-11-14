@@ -363,85 +363,16 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
     };
   }, [report, simPrevBin, simCurrBin]);
 
-  // 3. Historical Backtest Precision Metrics avec Ligne de Base Chance H0
+  // 3. Évaluation Walk-Forward Strictement Hors-Échantillon (0 Fuite Future)
   const backtestMetrics = useMemo(() => {
-    if (!report || report.recentFootprints.length < 6) return null;
-    const footprints = [...report.recentFootprints].reverse();
-    const evalCount = Math.min(backtestWindow, footprints.length - 2);
-    if (evalCount <= 0) return null;
-
-    let top1SuccessDraws = 0;
-    let top3CoveredBalls = 0;
-    let totalEvaluatedBalls = 0;
-    let sumH0Top1Chance = 0;
-    let sumH0Top3Chance = 0;
-
-    const drawEvaluations: Array<{
-      date: string;
-      predictedTopBins: GapBinId[];
-      actualCounts: Record<GapBinId, number>;
-      coveredBalls: number;
-      top1Hit: boolean;
-    }> = [];
-
-    for (
-      let i = footprints.length - evalCount;
-      i < footprints.length;
-      i++
-    ) {
-      const prevDom = footprints[i - 1].dominantBin;
-      const row = report.transitionMatrixOrder1[prevDom];
-      const rankedBins = [...GAP_RANGE_BINS]
-        .sort((a, b) => (row?.[b.id] ?? 0) - (row?.[a.id] ?? 0))
-        .slice(0, 3)
-        .map((b) => b.id);
-
-      const targetFp = footprints[i];
-      const top1Hit = targetFp.binCounts[rankedBins[0]] > 0;
-      if (top1Hit) top1SuccessDraws++;
-
-      const pTop1 =
-        GAP_RANGE_BINS.find((b) => b.id === rankedBins[0])?.theoreticalProb ??
-        0.25;
-      const pTop3 = rankedBins.reduce(
-        (acc, id) =>
-          acc +
-          (GAP_RANGE_BINS.find((b) => b.id === id)?.theoreticalProb ?? 0),
-        0
-      );
-      // Chance H0 d'avoir >= 1 boule dans la tranche #1 en 5 tirages indépendants
-      sumH0Top1Chance += 1 - Math.pow(1 - pTop1, 5);
-      sumH0Top3Chance += pTop3;
-
-      const covered =
-        targetFp.binCounts[rankedBins[0]] +
-        targetFp.binCounts[rankedBins[1]] +
-        targetFp.binCounts[rankedBins[2]];
-      top3CoveredBalls += covered;
-      totalEvaluatedBalls += 5;
-
-      drawEvaluations.push({
-        date: targetFp.date,
-        predictedTopBins: rankedBins,
-        actualCounts: targetFp.binCounts,
-        coveredBalls: covered,
-        top1Hit,
-      });
-    }
-
-    return {
-      evalCount,
-      top1SuccessRate: (top1SuccessDraws / evalCount) * 100,
-      top1H0ChanceRate: (sumH0Top1Chance / evalCount) * 100,
-      top3BallCoverageRate:
-        totalEvaluatedBalls > 0
-          ? (top3CoveredBalls / totalEvaluatedBalls) * 100
-          : 0,
-      top3H0ChanceRate: (sumH0Top3Chance / evalCount) * 100,
-      avgBallsCoveredPerDraw: top3CoveredBalls / evalCount,
-      recentEvaluations: drawEvaluations.reverse().slice(0, 8),
-    };
-  }, [report, backtestWindow]);
+    if (!globalHistory || globalHistory.length < 14) return null;
+    const wf = gapRangeSequenceService.evaluateGapRangeWalkForward(
+      drawName,
+      globalHistory,
+      backtestWindow
+    );
+    return wf.evalCount > 0 ? wf : null;
+  }, [drawName, globalHistory, backtestWindow]);
 
   if (!report || report.totalAnalyzedDraws < 5) {
     return null;
@@ -1805,16 +1736,21 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
             </div>
           </div>
 
-          {/* 3. Backtest Accuracy & Multi-Draw Regime Comparator */}
+          {/* 3. Walk-Forward OOS Accuracy & Multi-Draw Regime Comparator */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {backtestMetrics && (
               <div className="lg:col-span-7 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <Award size={16} className="text-emerald-500" />
-                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                      Validation Backtest des Prédictions de Tranches
-                    </h4>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Award size={16} className="text-emerald-500" />
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        Validation Walk-Forward Hors-Échantillon (0 Fuite)
+                      </h4>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Entraînement roulant causal [0..t-1] ➔ évaluation sur tirage t inédit ({backtestMetrics.evalCount} pas OOS)
+                    </p>
                   </div>
                   <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
                     {[10, 20, 30].map((w) => (
@@ -1833,38 +1769,56 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
                     <span className="text-[10px] text-slate-400 block">
-                      Précision Tranche #1
+                      Tranche #1 (OOS)
                     </span>
                     <span className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">
                       {backtestMetrics.top1SuccessRate.toFixed(0)}%
                     </span>
                     <span className="text-[9px] text-slate-400 block">
-                      Au moins 1 boule (Réf H0 : {backtestMetrics.top1H0ChanceRate.toFixed(0)}%)
+                      ≥1 boule (Réf H0 : {backtestMetrics.top1H0ChanceRate.toFixed(0)}%)
                     </span>
                   </div>
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
                     <span className="text-[10px] text-slate-400 block">
-                      Couverture Top 3 Tranches
+                      Top 3 Tranches (OOS)
                     </span>
                     <span className="text-lg font-black font-mono text-indigo-600 dark:text-indigo-400">
                       {backtestMetrics.top3BallCoverageRate.toFixed(1)}%
                     </span>
                     <span className="text-[9px] text-slate-400 block">
-                      Boules capturées (Réf H0 : {backtestMetrics.top3H0ChanceRate.toFixed(1)}%)
+                      {backtestMetrics.avgBallsCoveredPerDraw.toFixed(2)}/5 (H0 : {backtestMetrics.top3H0ChanceRate.toFixed(1)}%)
                     </span>
                   </div>
                   <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
                     <span className="text-[10px] text-slate-400 block">
-                      Moyenne Capturée / Tirage
+                      Sélection 5 Boules
                     </span>
-                    <span className="text-lg font-black font-mono text-slate-900 dark:text-white">
-                      {backtestMetrics.avgBallsCoveredPerDraw.toFixed(2)} / 5
+                    <span className="text-lg font-black font-mono text-cyan-600 dark:text-cyan-400">
+                      {backtestMetrics.selectionAtLeastOneHitRate.toFixed(0)}%
                     </span>
                     <span className="text-[9px] text-slate-400 block">
-                      Sur {backtestMetrics.evalCount} tirages testés
+                      {backtestMetrics.avgSelectionHitsPerDraw.toFixed(2)}/5 moy (H0 : {backtestMetrics.expectedH0AtLeastOneHitRate.toFixed(1)}%)
+                    </span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                    <span className="text-[10px] text-slate-400 block">
+                      Brier Skill Score
+                    </span>
+                    <span
+                      className={`text-lg font-black font-mono ${
+                        backtestMetrics.brierSkillScore > 0
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-amber-600 dark:text-amber-400'
+                      }`}
+                    >
+                      {backtestMetrics.brierSkillScore >= 0 ? '+' : ''}
+                      {(backtestMetrics.brierSkillScore * 100).toFixed(1)}%
+                    </span>
+                    <span className="text-[9px] text-slate-400 block">
+                      MSE {backtestMetrics.meanBrierScore.toFixed(4)} vs H0 {backtestMetrics.h0BrierScore.toFixed(4)}
                     </span>
                   </div>
                 </div>
@@ -1873,14 +1827,14 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                   {backtestMetrics.recentEvaluations.map((ev, i) => (
                     <div
                       key={`${ev.date}-${i}`}
-                      className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-xs"
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between gap-2 text-xs"
                     >
-                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                      <span className="font-bold text-slate-700 dark:text-slate-300 shrink-0">
                         {ev.date}
                       </span>
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] text-slate-400">
-                          Top 3 prévus :
+                          Top 3 OOS :
                         </span>
                         {ev.predictedTopBins.map((bid) => {
                           const b = GAP_RANGE_BINS.find((x) => x.id === bid);
@@ -1899,15 +1853,26 @@ export const GapRangeSequenceWidget: React.FC<GapRangeSequenceWidgetProps> = ({
                           );
                         })}
                       </div>
-                      <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
-                          ev.coveredBalls >= 3
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                        }`}
-                      >
-                        {ev.coveredBalls}/5 capturées
-                      </span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                            ev.optimalFiveHitCount >= 1
+                              ? 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {ev.optimalFiveHitCount}/5 boules
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded ${
+                            ev.coveredBalls >= 3
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                          }`}
+                        >
+                          {ev.coveredBalls}/5 tranches
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>

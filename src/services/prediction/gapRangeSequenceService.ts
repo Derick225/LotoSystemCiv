@@ -1,6 +1,7 @@
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { LOTTERY_CONSTANTS } from '../lotteryService';
+import { computeGapRangeWalkForwardHpc } from '../wasm/lotoEngineBridge';
 
 export type GapBinId =
   | 'G0'
@@ -187,6 +188,38 @@ export interface GapRangeSequenceReport {
   narrativeSummary: string;
   reasoning: GapRangeReasoningMetrics;
   selectionSynthesis: GapRangeSelectionSynthesis;
+}
+
+export interface GapRangeWalkForwardEvaluation {
+  drawIndex: number; // 0 = plus récent de l'historique évalué
+  date: string;
+  predictedTopBins: GapBinId[];
+  actualCounts: Record<GapBinId, number>;
+  coveredBalls: number;
+  top1Hit: boolean;
+  optimalFiveHitCount: number; // Boules justes sur les 5 prédites hors-échantillon
+  brierScore: number; // Score de Brier multi-tranches hors-échantillon
+}
+
+export interface GapRangeWalkForwardReport {
+  drawName: string;
+  isOutOfSample: boolean;
+  evalCount: number;
+  minTrainDraws: number;
+  top1SuccessRate: number;
+  top1H0ChanceRate: number;
+  top3BallCoverageRate: number;
+  top3H0ChanceRate: number;
+  avgBallsCoveredPerDraw: number;
+  avgSelectionHitsPerDraw: number;
+  expectedH0SelectionHitsPerDraw: number; // 5 * 5 / 90 ≈ 0.2778
+  selectionAtLeastOneHitRate: number;
+  expectedH0AtLeastOneHitRate: number; // 1 - C(85,5)/C(90,5) = 25.4%
+  meanBrierScore: number;
+  h0BrierScore: number;
+  brierSkillScore: number; // 1 - MSE_model / MSE_H0
+  evaluations: GapRangeWalkForwardEvaluation[];
+  recentEvaluations: GapRangeWalkForwardEvaluation[];
 }
 
 /**
@@ -1809,5 +1842,133 @@ export const gapRangeSequenceService = {
     }
 
     return scores;
+  },
+
+  /**
+   * Évaluation Walk-Forward strictement hors-échantillon (0 fuite future).
+   * Pour chaque pas t, entraîne le pipeline complet uniquement sur [0 .. t-1]
+   * et évalue la prédiction contre le tirage réel t jamais vu (Routage Rust/WASM HPC).
+   */
+  evaluateGapRangeWalkForward(
+    drawName: string,
+    rawHistory: DrawResult[],
+    windowSize: number = 30
+  ): GapRangeWalkForwardReport {
+    const binIds: GapBinId[] = GAP_RANGE_BINS.map((b) => b.id);
+    const purified =
+      drawName && drawName !== 'ALL'
+        ? purifyHistoryForDraw(drawName, rawHistory)
+        : rawHistory;
+
+    const validChrono = [...purified]
+      .reverse()
+      .filter((d) => (d.gagnants || []).some((n) => n >= 1 && n <= 90));
+
+    const totalDraws = validChrono.length;
+    const minTrainDraws = Math.max(12, Math.min(25, Math.floor(totalDraws / 3)));
+
+    const emptyReport: GapRangeWalkForwardReport = {
+      drawName,
+      isOutOfSample: true,
+      evalCount: 0,
+      minTrainDraws,
+      top1SuccessRate: 0,
+      top1H0ChanceRate: 0,
+      top3BallCoverageRate: 0,
+      top3H0ChanceRate: 0,
+      avgBallsCoveredPerDraw: 0,
+      avgSelectionHitsPerDraw: 0,
+      expectedH0SelectionHitsPerDraw:
+        (LOTTERY_CONSTANTS.NUMBERS_PER_DRAW * LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) /
+        LOTTERY_CONSTANTS.TOTAL_NUMBERS,
+      selectionAtLeastOneHitRate: 0,
+      expectedH0AtLeastOneHitRate: 25.4,
+      meanBrierScore: 0,
+      h0BrierScore: 0,
+      brierSkillScore: 0,
+      evaluations: [],
+      recentEvaluations: [],
+    };
+
+    if (totalDraws <= minTrainDraws) {
+      return emptyReport;
+    }
+
+    const cols = LOTTERY_CONSTANTS.NUMBERS_PER_DRAW; // 5
+    const flatChrono = new Int32Array(totalDraws * cols);
+    for (let t = 0; t < totalDraws; t++) {
+      const g = (validChrono[t].gagnants || []).filter((n) => n >= 1 && n <= 90);
+      for (let c = 0; c < Math.min(cols, g.length); c++) {
+        flatChrono[t * cols + c] = g[c];
+      }
+    }
+
+    const hpc = computeGapRangeWalkForwardHpc(flatChrono, totalDraws, cols, windowSize);
+    if (hpc.evalCount <= 0) {
+      return emptyReport;
+    }
+
+    const evaluationsChrono: GapRangeWalkForwardEvaluation[] = [];
+    const numBins = binIds.length;
+    for (let s = 0; s < hpc.evalCount; s++) {
+      const drawIdxFromNewest = hpc.stepDrawIndices[s];
+      const chronoPos = totalDraws - 1 - drawIdxFromNewest;
+      const draw = validChrono[chronoPos];
+
+      const predictedTopBins: GapBinId[] = [
+        binIds[hpc.stepPredictedTop3[s * 3]] || 'G1_3',
+        binIds[hpc.stepPredictedTop3[s * 3 + 1]] || 'G4_7',
+        binIds[hpc.stepPredictedTop3[s * 3 + 2]] || 'G8_14',
+      ];
+
+      const actualCounts = createEmptyBinCounts();
+      for (let b = 0; b < numBins; b++) {
+        actualCounts[binIds[b]] = hpc.stepActualCounts[s * numBins + b] || 0;
+      }
+
+      const coveredBalls =
+        actualCounts[predictedTopBins[0]] +
+        actualCounts[predictedTopBins[1]] +
+        actualCounts[predictedTopBins[2]];
+
+      evaluationsChrono.push({
+        drawIndex: drawIdxFromNewest,
+        date: draw?.date || `T-${drawIdxFromNewest}`,
+        predictedTopBins,
+        actualCounts,
+        coveredBalls,
+        top1Hit: actualCounts[predictedTopBins[0]] > 0,
+        optimalFiveHitCount: hpc.stepOptimalFiveHits[s] || 0,
+        brierScore: hpc.stepBrierScores[s] || 0,
+      });
+    }
+
+    const evaluations = [...evaluationsChrono].reverse();
+
+    return {
+      drawName,
+      isOutOfSample: true,
+      evalCount: hpc.evalCount,
+      minTrainDraws: hpc.minTrainDraws,
+      top1SuccessRate: hpc.top1SuccessRate,
+      top1H0ChanceRate: hpc.top1H0ChanceRate,
+      top3BallCoverageRate: hpc.top3BallCoverageRate,
+      top3H0ChanceRate: hpc.top3H0ChanceRate,
+      avgBallsCoveredPerDraw: hpc.avgBallsCoveredPerDraw,
+      avgSelectionHitsPerDraw: hpc.avgSelectionHitsPerDraw,
+      expectedH0SelectionHitsPerDraw: Number(
+        (
+          (LOTTERY_CONSTANTS.NUMBERS_PER_DRAW * LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) /
+          LOTTERY_CONSTANTS.TOTAL_NUMBERS
+        ).toFixed(4)
+      ),
+      selectionAtLeastOneHitRate: hpc.selectionAtLeastOneHitRate,
+      expectedH0AtLeastOneHitRate: 25.4,
+      meanBrierScore: hpc.meanBrierScore,
+      h0BrierScore: hpc.h0BrierScore,
+      brierSkillScore: hpc.brierSkillScore,
+      evaluations,
+      recentEvaluations: evaluations.slice(0, 12),
+    };
   },
 };

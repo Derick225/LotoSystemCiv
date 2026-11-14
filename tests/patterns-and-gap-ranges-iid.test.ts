@@ -153,9 +153,18 @@ describe('Audit i.i.d. : Tranches d’Écarts & Motifs Répétitifs', () => {
 
       // La confiance de sélection ne doit pas afficher le ~71% trompeur sur du bruit pur
       expect(summary.recommendedSelection).toBeDefined();
+      expect(summary.recommendedSelection!.scoringMethod).toBe('STOUFFER_Z');
       expect(summary.recommendedSelection!.selectionConfidence).toBeLessThanOrEqual(40.0);
       expect(summary.recommendedSelection!.selectionConfidence).toBeGreaterThanOrEqual(20.0);
       expect(summary.recommendedSelection!.optimalFive).toHaveLength(5);
+      if (summary.candidateRankings && summary.candidateRankings.length > 0) {
+        const meanPatternCandZ =
+          summary.candidateRankings.reduce(
+            (acc, c) => acc + (c.stoufferZScore ?? 0),
+            0
+          ) / summary.candidateRankings.length;
+        expect(Math.abs(meanPatternCandZ)).toBeLessThan(1.8);
+      }
     });
 
     it('intègre un test du Chi-deux pour la phase et un test de dispersion pour la périodicité', () => {

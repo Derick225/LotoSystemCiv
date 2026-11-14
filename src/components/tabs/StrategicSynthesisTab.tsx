@@ -66,9 +66,8 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     synthesis: string;
     focalPoints: string[];
     overallCalibration: string;
-    // Origine du texte : le badge de l'interface doit distinguer une synthèse produite par le
-    // modèle cloud d'une composition locale déterministe.
-    source: "cloud" | "local";
+    // Origine du texte : synthèse consolidée des autopsies locales vs composition directe.
+    source: "local_forensic" | "local";
   } | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -141,10 +140,10 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
     audioEngine.play("scan");
     setLoading(true);
     try {
-      // Send reports to Gemini Synthesis Oracle
+      // Consolidation locale déterministe à partir des rapports médico-légaux persistés
       const result = await generateGlobalForensicSynthesis(reports);
       if (result) {
-        setSynthesis({ ...result, source: "cloud" });
+        setSynthesis({ ...result, source: "local_forensic" });
         audioEngine.play("success");
         showToast("Synthèse Stratégique générée.", "success");
       } else {
@@ -801,7 +800,7 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
           </div>
         </div>
 
-        {/* Right Side: Gemini Boardroom Decision Narrative Output */}
+        {/* Right Side: Local Deterministic Decision Narrative Output */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           {/* DNA Balance Quick-Check */}
           <div className="bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4">
@@ -927,13 +926,13 @@ export const StrategicSynthesisTab: React.FC<{ drawName: string }> = ({
                       </div>
                       <span
                         className={`text-[9px] border px-2 py-0.5 rounded-lg font-bold uppercase tracking-wider ${
-                          synthesis.source === "cloud"
+                          synthesis.source === "local_forensic"
                             ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                             : "bg-sky-500/10 text-sky-400 border-sky-500/20"
                         }`}
                       >
-                        {synthesis.source === "cloud"
-                          ? "Modèle Cloud"
+                        {synthesis.source === "local_forensic"
+                          ? "Synthèse Autopsies (Locale)"
                           : "Composition Locale"}
                       </span>
                     </div>

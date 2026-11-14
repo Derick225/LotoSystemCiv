@@ -413,12 +413,9 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   const deterministicId = getDeterministicUUID(`pred_${Math.abs(hashVal)}_${Date.now()}`);
 
   const resolvedEngineType: "local" | "cloud" =
-    prediction.engineType ||
-    (prediction.isLocalFallback
-      ? "local"
-      : prediction.aiRationale || prediction.aiStrategicAdvice || (prediction.mathModelSummary && (prediction.mathModelSummary.includes("Cloud") || prediction.mathModelSummary.includes("Gemini")))
+    prediction.engineType === "cloud" && !prediction.isLocalFallback
       ? "cloud"
-      : "local");
+      : "local";
 
   const normalizedPrediction: Prediction = {
     ...prediction,

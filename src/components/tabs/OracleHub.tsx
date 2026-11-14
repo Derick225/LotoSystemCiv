@@ -433,7 +433,7 @@ export const OracleHub: React.FC<OracleHubProps> = ({ drawName }) => {
                     }`}
                   >
                     <BrainCircuit size={13} />
-                    Prédiction Cloud IA
+                    Inférence Neuro-Vectorielle HPC
                   </button>
                 </div>
               </div>

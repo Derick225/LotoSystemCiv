@@ -454,20 +454,26 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                 </span>
               </div>
               <h2 className="text-lg sm:text-xl font-black text-white uppercase tracking-tight">
-                Sélection Optimale par Convergence de Motifs
+                Sélection Optimale par Convergence de Motifs (Méthode de Stouffer)
               </h2>
               <p className="text-xs text-slate-400">
-                Synthèse déterministe croisant les précurseurs amorcés, les chaînes de Markov inter-cycles, la tension de retour périodique et la cohésion PMI.
+                Synthèse déterministe agrégeant 5 Z-scores homogènes N(0, 1) sous H0 (amorçage, Markov inter-cycles, résonance périodique, phase χ², synergie simultanée).
               </p>
             </div>
 
             {/* Selection Quality KPIs */}
             <div className="grid grid-cols-3 gap-2.5 shrink-0">
               <div className="bg-slate-950/80 px-3.5 py-2.5 rounded-2xl border border-slate-800 text-center">
-                <span className="text-[9px] font-bold uppercase text-slate-400 block">Indice Convergence</span>
+                <span className="text-[9px] font-bold uppercase text-slate-400 block">Confiance / Z_ticket</span>
                 <span className="text-base font-black font-mono text-emerald-400">
                   {recSelection.selectionConfidence}%
                 </span>
+                {recSelection.ticketStoufferZScore !== undefined && (
+                  <span className="text-[9px] font-mono text-indigo-300 block">
+                    {recSelection.ticketStoufferZScore >= 0 ? '+' : ''}
+                    {recSelection.ticketStoufferZScore.toFixed(2)}σ
+                  </span>
+                )}
               </div>
               <div className="bg-slate-950/80 px-3.5 py-2.5 rounded-2xl border border-slate-800 text-center">
                 <span className="text-[9px] font-bold uppercase text-slate-400 block">Motifs Couverts</span>
@@ -627,7 +633,13 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                           <div>
                             {getRoleBadge(cand.selectionRole)}
                             <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                              Score : <strong className="text-emerald-400">{cand.convergenceScore}%</strong> • Phase :{' '}
+                              Stouffer :{' '}
+                              <strong className="text-emerald-400">
+                                {cand.stoufferZScore !== undefined
+                                  ? `${cand.stoufferZScore >= 0 ? '+' : ''}${cand.stoufferZScore.toFixed(2)}σ`
+                                  : `${cand.convergenceScore}%`}
+                              </strong>{' '}
+                              ({cand.convergenceScore}%) • Phase :{' '}
                               <strong className="text-cyan-400">{cand.phaseAffinityScore}%</strong>
                             </div>
                           </div>

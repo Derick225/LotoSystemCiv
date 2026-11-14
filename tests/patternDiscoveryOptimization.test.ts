@@ -3,6 +3,8 @@ import {
   patternDiscoveryService,
   computeExactCycleUnionProbability,
   computeExactSameDrawCycleProbability,
+  patternNormalCdf,
+  combinePatternStoufferZScores,
 } from '../src/services/prediction/patternDiscoveryService';
 import { DrawResult } from '../src/types';
 
@@ -79,12 +81,29 @@ describe('Optimisation Sous-Onglet Motifs Répétitifs (Détection, Raisonnement
     expect(highTriplet?.reasoning?.sameDrawOccurrences).toBeGreaterThanOrEqual(6);
     expect(highTriplet?.reasoning?.pmi).toBeGreaterThan(0);
 
-    // Verify candidate #89 is surfaced in the synthesized selection rankings
+    // Verify candidate #89 is surfaced in the synthesized selection rankings with Stouffer Z
     const cand89 = summary.candidateRankings?.find((c) => c.number === 89);
     expect(cand89).toBeDefined();
     expect(cand89?.primedMotifsCount).toBeGreaterThanOrEqual(1);
+    expect(cand89?.stoufferZScore).toBeGreaterThan(1.96);
+    expect(cand89?.channelZScores?.activeChannels).toBeGreaterThanOrEqual(2);
+    expect(cand89?.convergenceScore).toBeCloseTo(
+      patternNormalCdf(cand89!.stoufferZScore!) * 100,
+      1
+    );
+    expect(summary.recommendedSelection?.scoringMethod).toBe('STOUFFER_Z');
+    expect(summary.recommendedSelection?.ticketStoufferZScore).toBeDefined();
+    expect(summary.recommendedSelection?.ticketPValue).toBeDefined();
     expect(summary.recommendedSelection?.optimalFive.length).toBe(5);
     expect(summary.recommendedSelection?.optimalFive).toContain(89);
+
+    const stoufferUnit = combinePatternStoufferZScores([
+      { z: 1.5, weight: 1 },
+      { z: 2.5, weight: 1 },
+      { z: 99, weight: 0 },
+    ]);
+    expect(stoufferUnit.activeChannels).toBe(2);
+    expect(stoufferUnit.zScore).toBeCloseTo(4 / Math.SQRT2, 6);
   });
 
   it('3. renseigne les occurrences réelles, la phase cible et le raisonnement des chaînes de transition inter-cycles', () => {
