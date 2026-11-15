@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   synthesizeDnaGeneSequenceAndWeights,
   runUnifiedDnaGeneSequencer,
+  evaluateDnaGeneSequencerWalkForward,
   computeNormalizedKendallTauDistance,
   computeNormalizedSpearmanFootrule,
   getChromosomalArm,
@@ -12,7 +13,12 @@ import {
   computeSequenceKendallTauShift,
 } from '../src/services/prediction/modelDnaKnowledgeBase';
 import { synthesizePostMortemLearningSession } from '../src/services/forensicTrainingBridge';
-import { getDefaultWeights, type AlgoProofMetric } from '../src/services/prediction/weightsManager';
+import {
+  getDefaultWeights,
+  evaluateAlgoEmpiricalProof,
+  type AlgoProofMetric,
+} from '../src/services/prediction/weightsManager';
+import { drawHasMachineNumbers } from '../src/constants';
 import { AlgoKey } from '../src/shared/prediction.types';
 import type { DrawResult, ForensicReport } from '../src/types';
 
@@ -376,4 +382,92 @@ describe('dnaGeneSequenceService (EpiGenome-SQ)', () => {
     expect(lineage.meanKendallTauShift).not.toBeNull();
     expect(lineage.sequenceStabilityIndex).not.toBeNull();
   });
+
+  it('evaluateDnaGeneSequencerWalkForward respecte la coupure causale stricte, le déterminisme et H0', async () => {
+    const drawName = 'MONDAY SPECIAL';
+    const history = makeDeterministicHistory(drawName, 22);
+    const weights = getDefaultWeights();
+
+    // Historique insuffisant -> INSUFFICIENT_DATA honnête
+    const shortRes = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history: history.slice(0, 8),
+      currentWeights: weights,
+    });
+    expect(shortRes.status).toBe('INSUFFICIENT_DATA');
+    expect(shortRes.verdict).toBe('INSUFFICIENT_DATA');
+    expect(shortRes.evaluatedDrawsCount).toBe(0);
+
+    // Exécution complète sur 4 pas hors-échantillon
+    const reports = [
+      makePostMortemReport(drawName, history[3].date), // date du 4e plus récent tirage -> ne doit affecter que les pas postérieurs à ce tirage
+    ];
+    const wf1 = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history,
+      currentWeights: weights,
+      forensicReports: reports,
+      maxSteps: 4,
+    });
+    const wf2 = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history,
+      currentWeights: weights,
+      forensicReports: reports,
+      maxSteps: 4,
+    });
+
+    expect(wf1.status).toBe('COMPLETED');
+    expect(wf1.evaluatedDrawsCount).toBe(4);
+    expect(wf1.h0MeanHitsTop5).toBeCloseTo(5 / 18, 4);
+    expect(wf1.h0AtLeastOneHitRate).toBeCloseTo(
+      1 - (85 * 84 * 83 * 82 * 81) / (90 * 89 * 88 * 87 * 86),
+      4
+    );
+    expect(wf1.h0BrierScore).toBeCloseTo((5 / 90) * (85 / 90), 5);
+    expect(wf1.steps).toEqual(wf2.steps);
+    expect(wf1.meanBrierEpigenome).toBe(wf2.meanBrierEpigenome);
+
+    // Anti-fuite : perturber les gagnants du tirage le plus récent (index 0) ne doit JAMAIS
+    // modifier les prédictions Top-5 ni le Brier des pas antérieurs (steps 0..2).
+    const alteredHistory = history.map((d, idx) =>
+      idx === 0 ? { ...d, gagnants: [1, 2, 3, 4, 5] } : d
+    );
+    const wfAltered = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history: alteredHistory,
+      currentWeights: weights,
+      forensicReports: reports,
+      maxSteps: 4,
+    });
+
+    for (let s = 0; s < 3; s++) {
+      expect(wfAltered.steps[s].top5Epigenome).toEqual(wf1.steps[s].top5Epigenome);
+      expect(wfAltered.steps[s].top5Baseline).toEqual(wf1.steps[s].top5Baseline);
+      expect(wfAltered.steps[s].sequenceSignature).toBe(wf1.steps[s].sequenceSignature);
+    }
+  });
+
+  it('evaluateAlgoEmpiricalProof et drawHasMachineNumbers maintiennent une isolation inter-réseaux stricte (AGENTS.md #2)', () => {
+    const shortNational = makeDeterministicHistory('NATIONAL', 3); // Réseau Hebdomadaire, < 5 tirages
+    const longEspoir = makeDeterministicHistory('ESPOIR', 25).map((d, idx) => ({
+      ...d,
+      id: `espoir_${idx}`,
+      machine: [10, 20, 30, 40, 50],
+    })); // Réseau Quotidien (autre réseau étanche)
+
+    const mixedHistory = [...shortNational, ...longEspoir];
+    const proof = evaluateAlgoEmpiricalProof('NATIONAL', mixedHistory);
+
+    // Malgré 25 tirages ESPOIR présents, NATIONAL n'a que 3 tirages -> aucune preuve fabriquée par fuite
+    for (const key of Object.values(AlgoKey)) {
+      expect(proof[key].hasProof).toBe(false);
+      expect(proof[key].proofScore).toBe(0);
+      expect(proof[key].confidence).toBe(0);
+    }
+
+    // Fortune Thursday (sans machine) ne doit jamais hériter des numéros machine d'ESPOIR
+    expect(drawHasMachineNumbers('FORTUNE THURSDAY', longEspoir)).toBe(false);
+  });
 });
+

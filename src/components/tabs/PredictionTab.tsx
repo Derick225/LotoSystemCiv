@@ -18,7 +18,7 @@ import { NeuralWeightsAuditDashboard } from "../prediction/NeuralWeightsAuditDas
 import { OracleScenarioMatrixDeck } from "../prediction/OracleScenarioMatrixDeck";
 import { exportService } from "../../services/exportService";
 import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsManager";
-import { getPrimaryInterDrawFamily } from "../../constants";
+import { getPrimaryInterDrawFamily, drawHasMachineNumbers } from "../../constants";
 import { ACTIVE_ALGO_COUNT, RETIRED_ALGO_COUNT, TOTAL_ALGO_COUNT } from "../../shared/prediction.types";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { Prediction } from "../../types";
@@ -202,9 +202,8 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
 
     setIsExportingForensicPDF(true);
     try {
-      const isolatedHistory = activeHistory.length > 0 ? activeHistory : purifyHistoryForDraw(drawName, history);
-      const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
-      const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+      const sample = activeHistory.length > 0 ? activeHistory : purifyHistoryForDraw(drawName, history);
+      const hasMachineData = drawHasMachineNumbers(drawName, sample);
 
       const proofs = evaluateAlgoEmpiricalProof(drawName, sample);
 

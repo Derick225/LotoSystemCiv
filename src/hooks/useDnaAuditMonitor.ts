@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useNexusStore } from "../store/useNexusStore";
 import {
   runSystematicDnaAudit,
-  synchronizeAlgorithmsToDnaReference,
   DnaAuditReport,
 } from "../services/prediction/dnaAuditService";
+import { runUnifiedDnaGeneSequencer } from "../services/prediction/dnaGeneSequenceService";
 import { audioEngine } from "../utils/audioEngine";
 import { logger } from "../utils/logger";
 import { useToast } from "../components/ui/Toast";
@@ -80,22 +80,28 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
         logger.debug({ scanErr }, "Audio playback non-bloquant");
       }
 
-      const syncResult = await synchronizeAlgorithmsToDnaReference(
+      const synthesis = await runUnifiedDnaGeneSequencer(
         drawName,
         history,
-        globalWeights
+        globalWeights,
+        { applyWeights: true }
       );
 
-      setGlobalWeights(syncResult.synchronizedWeights);
-      setAuditReport(syncResult.report);
+      setGlobalWeights(synthesis.optimizedWeights);
+      const updatedReport = await runSystematicDnaAudit(
+        drawName,
+        history,
+        synthesis.optimizedWeights
+      );
+      setAuditReport(updatedReport);
       setIsDismissed(true);
 
       addAgentLog({
-        id: `dna_reharmonize_notif_${Date.now()}`,
+        id: `epigenome_reharmonize_notif_${Date.now()}`,
         timestamp: new Date(),
-        action: `Ré-harmonisation prioritaire de l'ADN de référence exécutée pour ${drawName}.`,
+        action: `Régulation EpiGenome-SQ exécutée pour ${drawName} (${synthesis.sequenceMetrics.sequenceSignature}).`,
         type: "AUTOTUNE",
-        impact: `Alignement ADN rétabli à 100% (${syncResult.realignedCount} plugins calibrés).`,
+        impact: `Cohérence épistasique ${synthesis.sequenceMetrics.epistaticCoherenceScore}% · Alignement ${updatedReport.coherenceScore}%.`,
       });
 
       try {
@@ -105,7 +111,7 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
       }
 
       showToast(
-        `Ré-harmonisation réussie ! L'ADN canonique de ${drawName} est désormais aligné.`,
+        `Régulation EpiGenome-SQ appliquée pour ${drawName} (${synthesis.sequenceMetrics.sequenceSignature}).`,
         "success"
       );
     } catch (err: unknown) {
@@ -121,12 +127,12 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
   }, [drawName, history, globalWeights, setGlobalWeights, addAgentLog, showToast]);
 
   const inspectDnaAuditor = useCallback(() => {
-    navigateToModule("Genomique", "DNA_AUDITOR");
+    navigateToModule("Genomique", "GENE_SEQUENCER");
     setIsDismissed(true);
   }, [navigateToModule]);
 
   const inspectDriftHeatmap = useCallback(() => {
-    navigateToModule("Genomique", "DRIFT_HEATMAP");
+    navigateToModule("Genomique", "GENE_SEQUENCER");
     setIsDismissed(true);
   }, [navigateToModule]);
 

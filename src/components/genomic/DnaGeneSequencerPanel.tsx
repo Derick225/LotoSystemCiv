@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   Link2,
+  Activity,
 } from "lucide-react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useForensicData } from "../../hooks/useForensicData";
@@ -15,11 +16,13 @@ import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import {
   runUnifiedDnaGeneSequencer,
+  evaluateDnaGeneSequencerWalkForward,
   CHROMOSOMAL_ARM_LABELS,
   type ChromosomalArm,
   type GeneExpressionState,
   type DnaGeneSynthesisResult,
   type DnaGeneNode,
+  type DnaGeneWalkForwardResult,
 } from "../../services/prediction/dnaGeneSequenceService";
 import { AlgoKey } from "../../shared/prediction.types";
 
@@ -99,6 +102,29 @@ export const DnaGeneSequencerPanel: React.FC<{
   const [selectedGeneKey, setSelectedGeneKey] = useState<AlgoKey | null>(null);
   const [sortCol, setSortCol] = useState<SortColumn>("rank");
   const [sortAsc, setSortAsc] = useState<boolean>(true);
+  const [walkForward, setWalkForward] = useState<DnaGeneWalkForwardResult | null>(null);
+  const [wfLoading, setWfLoading] = useState<boolean>(false);
+
+  const handleRunWalkForward = async () => {
+    try {
+      setWfLoading(true);
+      audioEngine.play("scan");
+      const wf = await evaluateDnaGeneSequencerWalkForward({
+        drawName,
+        history,
+        currentWeights: globalWeights,
+        forensicReports: reports,
+      });
+      setWalkForward(wf);
+      audioEngine.play("success");
+      showToast(wf.summaryText, wf.status === "COMPLETED" ? "success" : "info");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur de validation walk-forward";
+      showToast(`Erreur walk-forward : ${msg}`, "error");
+    } finally {
+      setWfLoading(false);
+    }
+  };
 
   const runDryAnalysis = useCallback(async () => {
     try {
@@ -118,6 +144,7 @@ export const DnaGeneSequencerPanel: React.FC<{
   }, [drawName, history, globalWeights, reports]);
 
   useEffect(() => {
+    setWalkForward(null);
     runDryAnalysis();
   }, [runDryAnalysis]);
 
@@ -744,6 +771,158 @@ export const DnaGeneSequencerPanel: React.FC<{
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* Validation Walk-Forward Hors-Échantillon (Anti-Fuite) */}
+      <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h4 className="text-base font-semibold text-white flex items-center gap-2">
+              <Activity size={16} className="text-cyan-400" />
+              Validation Walk-Forward Hors-Échantillon (EpiGenome-SQ vs Baseline vs H0)
+            </h4>
+            <p className="text-xs text-slate-400">
+              Entraîne strictement sur l&apos;historique antérieur [t+1..N-1] et mesure le gain réel hors-échantillon face aux poids initiaux et au hasard pur (25,4 % ≥ 1 hit).
+            </p>
+          </div>
+          <button
+            onClick={handleRunWalkForward}
+            disabled={wfLoading || loading}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={wfLoading ? "animate-spin text-cyan-400" : "text-cyan-400"} />
+            {wfLoading ? "Évaluation OOS..." : "Lancer Walk-Forward"}
+          </button>
+        </div>
+
+        {walkForward && (
+          <div className="space-y-4">
+            <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+              <span className="text-slate-200">{walkForward.summaryText}</span>
+              <span
+                className={
+                  walkForward.verdict === "OUTPERFORMS_BASELINE"
+                    ? "text-emerald-400 font-semibold"
+                    : walkForward.verdict === "UNDERPERFORMS_BASELINE"
+                      ? "text-amber-400 font-semibold"
+                      : "text-slate-400"
+                }
+              >
+                {walkForward.verdict === "OUTPERFORMS_BASELINE"
+                  ? "Gain vérifié vs Baseline"
+                  : walkForward.verdict === "UNDERPERFORMS_BASELINE"
+                    ? "Sous la Baseline sur cet échantillon"
+                    : walkForward.verdict === "PARITY_WITH_BASELINE"
+                      ? "Parité statistique"
+                      : "Historique insuffisant"}
+              </span>
+            </div>
+
+            {walkForward.status === "COMPLETED" && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Taux ≥ 1 Hit Top-5 (OOS)</div>
+                    <div className="text-xl font-mono font-bold text-white tabular-nums">
+                      {(walkForward.atLeastOneHitRateEpigenome * 100).toFixed(1)}%
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      Base {(walkForward.atLeastOneHitRateBaseline * 100).toFixed(1)}% · H0 {(walkForward.h0AtLeastOneHitRate * 100).toFixed(1)}%
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Hits Moyens Top-5 / Tirage</div>
+                    <div className="text-xl font-mono font-bold text-white tabular-nums">
+                      {walkForward.meanHitsTop5Epigenome.toFixed(2)}
+                      <span
+                        className={`text-xs ml-1.5 ${
+                          walkForward.deltaMeanHitsTop5 >= 0 ? "text-emerald-400" : "text-amber-400"
+                        }`}
+                      >
+                        ({walkForward.deltaMeanHitsTop5 >= 0 ? "+" : ""}
+                        {walkForward.deltaMeanHitsTop5.toFixed(2)})
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      Base {walkForward.meanHitsTop5Baseline.toFixed(2)} · H0 {walkForward.h0MeanHitsTop5.toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Brier Skill Score vs Base</div>
+                    <div
+                      className={`text-xl font-mono font-bold tabular-nums ${
+                        walkForward.brierSkillScoreVsBaseline >= 0 ? "text-emerald-400" : "text-amber-400"
+                      }`}
+                    >
+                      {walkForward.brierSkillScoreVsBaseline >= 0 ? "+" : ""}
+                      {(walkForward.brierSkillScoreVsBaseline * 100).toFixed(2)}%
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      BSS vs H0 : {(walkForward.brierSkillScoreVsH0 * 100).toFixed(2)}%
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Z-Score Binomial vs H0</div>
+                    <div className="text-xl font-mono font-bold text-white tabular-nums">
+                      {walkForward.epigenomeZScoreVsH0 >= 0 ? "+" : ""}
+                      {walkForward.epigenomeZScoreVsH0.toFixed(2)}σ
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      {walkForward.evaluatedDrawsCount} tirages · Top-10 moy {walkForward.meanHitsTop10Epigenome.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950/90 border-b border-slate-800 text-[11px] font-mono text-slate-400 uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Pas</th>
+                        <th className="py-2.5 px-3">Date Cible</th>
+                        <th className="py-2.5 px-3 text-right">Train</th>
+                        <th className="py-2.5 px-3">Séquence Active</th>
+                        <th className="py-2.5 px-3 text-right">Top-5 Epi vs Base</th>
+                        <th className="py-2.5 px-3 text-right">Brier Epi / Base</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/70 text-xs font-mono tabular-nums">
+                      {walkForward.steps.map((st) => (
+                        <tr key={`${st.stepIndex}_${st.drawDate}`} className="hover:bg-slate-950/50">
+                          <td className="py-2 px-3 text-slate-400">#{st.stepIndex}</td>
+                          <td className="py-2 px-3 text-slate-200">{st.drawDate}</td>
+                          <td className="py-2 px-3 text-right text-slate-400">{st.trainDrawsCount}</td>
+                          <td className="py-2 px-3 text-cyan-400 truncate max-w-[180px]" title={st.sequenceSignature}>
+                            {st.sequenceSignature}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <span
+                              className={
+                                st.hitsTop5Epigenome > st.hitsTop5Baseline
+                                  ? "text-emerald-400 font-semibold"
+                                  : st.hitsTop5Epigenome < st.hitsTop5Baseline
+                                    ? "text-amber-400"
+                                    : "text-slate-200"
+                              }
+                            >
+                              {st.hitsTop5Epigenome}
+                            </span>
+                            <span className="text-slate-500"> / {st.hitsTop5Baseline}</span>
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-300">
+                            {st.brierEpigenome.toFixed(4)} / {st.brierBaseline.toFixed(4)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       {/* Piste d'audit causal */}

@@ -12,6 +12,10 @@ import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { parseDateSafely } from '../../utils/dateUtils';
 import { drawHasMachineNumbers } from '../../constants';
 import { calculateStatisticalBounds, detectGameRegime } from '../mathService';
+import { extractFeatures, extractDrawNumbers } from './featureExtractor';
+import { computeAdvancedMetrics } from './advancedMetricsCalculator';
+import { algorithmRegistry, type AlgorithmContext } from './algorithmRegistry';
+import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 import {
   normalizeWeights,
   getDefaultWeights,
@@ -1237,3 +1241,361 @@ export async function runUnifiedDnaGeneSequencer(
 
   return synthesis;
 }
+
+export interface DnaGeneWalkForwardStep {
+  stepIndex: number;
+  drawDate: string;
+  trainDrawsCount: number;
+  actualWinners: number[];
+  top5Epigenome: number[];
+  top5Baseline: number[];
+  hitsTop5Epigenome: number;
+  hitsTop5Baseline: number;
+  hitsTop10Epigenome: number;
+  hitsTop10Baseline: number;
+  brierEpigenome: number;
+  brierBaseline: number;
+  kendallTauShift: number;
+  epistaticCoherenceScore: number;
+  sequenceSignature: string;
+}
+
+export type DnaGeneWalkForwardVerdict =
+  | 'OUTPERFORMS_BASELINE'
+  | 'PARITY_WITH_BASELINE'
+  | 'UNDERPERFORMS_BASELINE'
+  | 'INSUFFICIENT_DATA';
+
+export interface DnaGeneWalkForwardResult {
+  drawName: string;
+  evaluatedAt: string;
+  status: 'COMPLETED' | 'INSUFFICIENT_DATA';
+  verdict: DnaGeneWalkForwardVerdict;
+  evaluatedDrawsCount: number;
+  minTrainDraws: number;
+  h0MeanHitsTop5: number; // 5/18 ≈ 0.2778
+  h0AtLeastOneHitRate: number; // 1 - C(85,5)/C(90,5) ≈ 0.2537
+  h0BrierScore: number; // (5/90)*(85/90) ≈ 0.052469
+  meanHitsTop5Epigenome: number;
+  meanHitsTop5Baseline: number;
+  deltaMeanHitsTop5: number;
+  atLeastOneHitRateEpigenome: number;
+  atLeastOneHitRateBaseline: number;
+  meanHitsTop10Epigenome: number;
+  meanHitsTop10Baseline: number;
+  meanBrierEpigenome: number;
+  meanBrierBaseline: number;
+  brierSkillScoreVsH0: number;
+  brierSkillScoreVsBaseline: number;
+  epigenomeZScoreVsH0: number;
+  steps: DnaGeneWalkForwardStep[];
+  summaryText: string;
+}
+
+/**
+ * VALIDATION WALK-FORWARD HORS-ÉCHANTILLON D'EPIGENOME-SQ (100% CAUSALE, ZÉRO FUITE)
+ *
+ * Évalue séquentiellement sur une fenêtre glissante stricte `[i+1 .. N-1] -> [i]` si les poids
+ * synthétisés par EpiGenome-SQ améliorent réellement le taux de succès Top-5 et le Brier Score
+ * par rapport aux poids initiaux de référence et à l'hypothèse nulle H0 (tirage uniforme 5/90).
+ */
+export async function evaluateDnaGeneSequencerWalkForward(input: {
+  drawName: string;
+  history: DrawResult[];
+  currentWeights: AlgoWeights;
+  forensicReports?: ForensicReport[];
+  maxSteps?: number;
+}): Promise<DnaGeneWalkForwardResult> {
+  const { drawName, history: rawHistory, currentWeights, forensicReports = [] } = input;
+  const pureHistory = purifyHistoryForDraw(drawName, rawHistory || []);
+  const hasMachine = drawHasMachineNumbers(drawName, pureHistory);
+
+  const p0 = 5.0 / 90.0;
+  const h0MeanHitsTop5 = 5.0 * p0;
+  const h0AtLeastOneHitRate = 1.0 - (85 * 84 * 83 * 82 * 81) / (90 * 89 * 88 * 87 * 86);
+  const h0BrierScore = p0 * (1.0 - p0);
+
+  // Profondeur minimale d'entraînement dérivée du rang d'ensemble (~10 tirages)
+  const minTrainDraws = Math.max(8, Math.min(12, Math.floor(pureHistory.length * 0.45)));
+  const maxAvailableSteps = Math.max(0, pureHistory.length - minTrainDraws);
+  const targetSteps =
+    typeof input.maxSteps === 'number' && input.maxSteps > 0
+      ? Math.min(maxAvailableSteps, Math.floor(input.maxSteps))
+      : Math.min(maxAvailableSteps, Math.min(10, Math.max(3, Math.floor(Math.sqrt(pureHistory.length)))));
+
+  const baseRaw: AlgoWeights = {
+    ...getDefaultWeights(),
+    ...(currentWeights || {}),
+  };
+  if (!hasMachine) {
+    baseRaw[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const baselineWeights = normalizeWeights(baseRaw);
+
+  if (pureHistory.length < 11 || targetSteps < 2) {
+    return {
+      drawName,
+      evaluatedAt: new Date().toISOString(),
+      status: 'INSUFFICIENT_DATA',
+      verdict: 'INSUFFICIENT_DATA',
+      evaluatedDrawsCount: 0,
+      minTrainDraws,
+      h0MeanHitsTop5: parseFloat(h0MeanHitsTop5.toFixed(4)),
+      h0AtLeastOneHitRate: parseFloat(h0AtLeastOneHitRate.toFixed(4)),
+      h0BrierScore: parseFloat(h0BrierScore.toFixed(6)),
+      meanHitsTop5Epigenome: 0,
+      meanHitsTop5Baseline: 0,
+      deltaMeanHitsTop5: 0,
+      atLeastOneHitRateEpigenome: 0,
+      atLeastOneHitRateBaseline: 0,
+      meanHitsTop10Epigenome: 0,
+      meanHitsTop10Baseline: 0,
+      meanBrierEpigenome: h0BrierScore,
+      meanBrierBaseline: h0BrierScore,
+      brierSkillScoreVsH0: 0,
+      brierSkillScoreVsBaseline: 0,
+      epigenomeZScoreVsH0: 0,
+      steps: [],
+      summaryText: `Historique isolé insuffisant pour ${drawName} (${pureHistory.length} tirages ; minimum 11 requis pour une évaluation walk-forward causale).`,
+    };
+  }
+
+  const validKeys = Object.values(AlgoKey);
+  const K = validKeys.length;
+  let runningWeights: AlgoWeights = { ...baselineWeights };
+  const steps: DnaGeneWalkForwardStep[] = [];
+
+  // Parcours chronologique strict : du tirage hors-échantillon le plus ancien (targetSteps - 1) au plus récent (0)
+  for (let i = targetSteps - 1; i >= 0; i--) {
+    const targetDraw = pureHistory[i];
+    const trainHistory = pureHistory.slice(i + 1);
+    const { winners: actualWinners } = extractDrawNumbers(targetDraw);
+    if (actualWinners.length === 0 || trainHistory.length < minTrainDraws) {
+      continue;
+    }
+
+    const actualSet = new Set(actualWinners);
+    const targetTimeMs = parseDateSafely(targetDraw.date).getTime();
+
+    // Coupure causale stricte sur les rapports post-mortem (< targetTimeMs pour prévenir toute fuite du tirage évalué)
+    const causalReports = forensicReports.filter((r) => {
+      if (!r || r.drawName?.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
+        return false;
+      }
+      if (Number.isFinite(targetTimeMs) && targetTimeMs > 0) {
+        const repTs = parseDateSafely(r.date).getTime();
+        return Number.isFinite(repTs) && repTs > 0 && repTs < targetTimeMs;
+      }
+      return false;
+    });
+
+    const stepSynthesis = synthesizeDnaGeneSequenceAndWeights({
+      drawName,
+      history: trainHistory,
+      currentWeights: runningWeights,
+      forensicReports: causalReports,
+    });
+    const epiWeights = stepSynthesis.optimizedWeights;
+
+    // Évaluation unique des 25 canaux sur trainHistory (zéro fuite du tirage i)
+    const [features, advancedMetrics] = await Promise.all([
+      extractFeatures(drawName, trainHistory),
+      computeAdvancedMetrics(trainHistory, drawName, {}, false, undefined),
+    ]);
+    const bounds = calculateStatisticalBounds(trainHistory);
+    const context: AlgorithmContext = {
+      features,
+      advancedMetrics,
+      history: trainHistory,
+      weights: { ...epiWeights },
+      algoWeights: { ...epiWeights },
+      statisticalBounds: bounds,
+      deterministicSeed: deriveSeedFromHistory(trainHistory),
+      drawName,
+      pluginCache: {},
+    };
+
+    algorithmRegistry.forEach((plugin) => {
+      try {
+        if (typeof plugin.precompute === 'function') {
+          plugin.precompute(context);
+        }
+      } catch {
+        // Repli silencieux sur plugin
+      }
+    });
+
+    const epiScores = new Float64Array(91);
+    const baseScores = new Float64Array(91);
+    const trainHasMachine = drawHasMachineNumbers(drawName, trainHistory);
+
+    for (let num = 1; num <= 90; num++) {
+      let sEpi = 0;
+      let sBase = 0;
+      for (let idx = 0; idx < algorithmRegistry.length; idx++) {
+        const plugin = algorithmRegistry[idx];
+        if (!validKeys.includes(plugin.key)) continue;
+        if (!trainHasMachine && plugin.key === AlgoKey.MACHINE_TRANSFER) continue;
+        try {
+          const ev = plugin.evaluate(num, context);
+          const rawS =
+            typeof ev.score === 'number' && Number.isFinite(ev.score)
+              ? Math.max(0, Math.min(100, ev.score)) / 100.0
+              : 0;
+          sEpi += rawS * (Number(epiWeights[plugin.key]) || 0);
+          sBase += rawS * (Number(baselineWeights[plugin.key]) || 0);
+        } catch {
+          // Canal neutre en cas d'exception isolée
+        }
+      }
+      epiScores[num] = sEpi;
+      baseScores[num] = sBase;
+    }
+
+    const scoreAndEval = (scoresArr: Float64Array) => {
+      let sum = 0;
+      for (let n = 1; n <= 90; n++) sum += scoresArr[n];
+      let brier = 0;
+      const ranked: { num: number; score: number }[] = [];
+      for (let n = 1; n <= 90; n++) {
+        const prob = sum > 0 ? scoresArr[n] / sum : 1.0 / 90.0;
+        const pInc = Math.max(0, Math.min(1, 5.0 * prob));
+        const y = actualSet.has(n) ? 1.0 : 0.0;
+        brier += (pInc - y) * (pInc - y);
+        ranked.push({ num: n, score: scoresArr[n] });
+      }
+      ranked.sort((a, b) => b.score - a.score || a.num - b.num);
+      const top5 = ranked.slice(0, 5).map((r) => r.num);
+      const top10 = ranked.slice(0, 10).map((r) => r.num);
+      return {
+        top5,
+        hitsTop5: top5.filter((n) => actualSet.has(n)).length,
+        hitsTop10: top10.filter((n) => actualSet.has(n)).length,
+        brier: brier / 90.0,
+      };
+    };
+
+    const epiRes = scoreAndEval(epiScores);
+    const baseRes = scoreAndEval(baseScores);
+
+    steps.push({
+      stepIndex: steps.length + 1,
+      drawDate: targetDraw.date,
+      trainDrawsCount: trainHistory.length,
+      actualWinners,
+      top5Epigenome: epiRes.top5,
+      top5Baseline: baseRes.top5,
+      hitsTop5Epigenome: epiRes.hitsTop5,
+      hitsTop5Baseline: baseRes.hitsTop5,
+      hitsTop10Epigenome: epiRes.hitsTop10,
+      hitsTop10Baseline: baseRes.hitsTop10,
+      brierEpigenome: parseFloat(epiRes.brier.toFixed(6)),
+      brierBaseline: parseFloat(baseRes.brier.toFixed(6)),
+      kendallTauShift: stepSynthesis.sequenceMetrics.kendallTauShiftVsActive,
+      epistaticCoherenceScore: stepSynthesis.sequenceMetrics.epistaticCoherenceScore,
+      sequenceSignature: stepSynthesis.sequenceMetrics.sequenceSignature,
+    });
+
+    runningWeights = epiWeights;
+  }
+
+  const N = steps.length;
+  if (N === 0) {
+    return {
+      drawName,
+      evaluatedAt: new Date().toISOString(),
+      status: 'INSUFFICIENT_DATA',
+      verdict: 'INSUFFICIENT_DATA',
+      evaluatedDrawsCount: 0,
+      minTrainDraws,
+      h0MeanHitsTop5: parseFloat(h0MeanHitsTop5.toFixed(4)),
+      h0AtLeastOneHitRate: parseFloat(h0AtLeastOneHitRate.toFixed(4)),
+      h0BrierScore: parseFloat(h0BrierScore.toFixed(6)),
+      meanHitsTop5Epigenome: 0,
+      meanHitsTop5Baseline: 0,
+      deltaMeanHitsTop5: 0,
+      atLeastOneHitRateEpigenome: 0,
+      atLeastOneHitRateBaseline: 0,
+      meanHitsTop10Epigenome: 0,
+      meanHitsTop10Baseline: 0,
+      meanBrierEpigenome: h0BrierScore,
+      meanBrierBaseline: h0BrierScore,
+      brierSkillScoreVsH0: 0,
+      brierSkillScoreVsBaseline: 0,
+      epigenomeZScoreVsH0: 0,
+      steps: [],
+      summaryText: `Aucun pas hors-échantillon exploitable pour ${drawName}.`,
+    };
+  }
+
+  const sumHits5Epi = steps.reduce((a, s) => a + s.hitsTop5Epigenome, 0);
+  const sumHits5Base = steps.reduce((a, s) => a + s.hitsTop5Baseline, 0);
+  const sumHits10Epi = steps.reduce((a, s) => a + s.hitsTop10Epigenome, 0);
+  const sumHits10Base = steps.reduce((a, s) => a + s.hitsTop10Baseline, 0);
+  const sumBrierEpi = steps.reduce((a, s) => a + s.brierEpigenome, 0);
+  const sumBrierBase = steps.reduce((a, s) => a + s.brierBaseline, 0);
+  const atLeastOneEpi = steps.filter((s) => s.hitsTop5Epigenome >= 1).length;
+  const atLeastOneBase = steps.filter((s) => s.hitsTop5Baseline >= 1).length;
+
+  const meanHitsTop5Epigenome = sumHits5Epi / N;
+  const meanHitsTop5Baseline = sumHits5Base / N;
+  const deltaMeanHitsTop5 = meanHitsTop5Epigenome - meanHitsTop5Baseline;
+  const atLeastOneHitRateEpigenome = atLeastOneEpi / N;
+  const atLeastOneHitRateBaseline = atLeastOneBase / N;
+  const meanHitsTop10Epigenome = sumHits10Epi / N;
+  const meanHitsTop10Baseline = sumHits10Base / N;
+  const meanBrierEpigenome = sumBrierEpi / N;
+  const meanBrierBaseline = sumBrierBase / N;
+
+  const brierSkillScoreVsH0 = h0BrierScore > 0 ? 1.0 - meanBrierEpigenome / h0BrierScore : 0;
+  const brierSkillScoreVsBaseline =
+    meanBrierBaseline > 0 ? 1.0 - meanBrierEpigenome / meanBrierBaseline : 0;
+
+  // Test binomial exact sur N * 5 sélections Top-5 face à H0 (p0 = 5/90)
+  const totalSlots = N * 5;
+  const empiricalSlotRate = sumHits5Epi / totalSlots;
+  const slotStdErr = Math.sqrt((p0 * (1.0 - p0)) / totalSlots);
+  const epigenomeZScoreVsH0 = slotStdErr > 0 ? (empiricalSlotRate - p0) / slotStdErr : 0;
+
+  let verdict: DnaGeneWalkForwardVerdict = 'PARITY_WITH_BASELINE';
+  if (
+    deltaMeanHitsTop5 > 1e-6 ||
+    (Math.abs(deltaMeanHitsTop5) <= 1e-6 && brierSkillScoreVsBaseline > 1e-4)
+  ) {
+    verdict = 'OUTPERFORMS_BASELINE';
+  } else if (
+    deltaMeanHitsTop5 < -1e-6 ||
+    (Math.abs(deltaMeanHitsTop5) <= 1e-6 && brierSkillScoreVsBaseline < -1e-4)
+  ) {
+    verdict = 'UNDERPERFORMS_BASELINE';
+  }
+
+  const summaryText = `Walk-Forward OOS (${N} tirages, K=${K}) : EpiGenome-SQ ${meanHitsTop5Epigenome.toFixed(2)} hits Top-5/tirage (${(atLeastOneHitRateEpigenome * 100).toFixed(1)}% ≥1 hit) vs Baseline ${meanHitsTop5Baseline.toFixed(2)} (H0=${h0MeanHitsTop5.toFixed(2)}, ${(h0AtLeastOneHitRate * 100).toFixed(1)}%) · BSS vs Baseline ${(brierSkillScoreVsBaseline * 100).toFixed(2)}%.`;
+
+  return {
+    drawName,
+    evaluatedAt: new Date().toISOString(),
+    status: 'COMPLETED',
+    verdict,
+    evaluatedDrawsCount: N,
+    minTrainDraws,
+    h0MeanHitsTop5: parseFloat(h0MeanHitsTop5.toFixed(4)),
+    h0AtLeastOneHitRate: parseFloat(h0AtLeastOneHitRate.toFixed(4)),
+    h0BrierScore: parseFloat(h0BrierScore.toFixed(6)),
+    meanHitsTop5Epigenome: parseFloat(meanHitsTop5Epigenome.toFixed(4)),
+    meanHitsTop5Baseline: parseFloat(meanHitsTop5Baseline.toFixed(4)),
+    deltaMeanHitsTop5: parseFloat(deltaMeanHitsTop5.toFixed(4)),
+    atLeastOneHitRateEpigenome: parseFloat(atLeastOneHitRateEpigenome.toFixed(4)),
+    atLeastOneHitRateBaseline: parseFloat(atLeastOneHitRateBaseline.toFixed(4)),
+    meanHitsTop10Epigenome: parseFloat(meanHitsTop10Epigenome.toFixed(4)),
+    meanHitsTop10Baseline: parseFloat(meanHitsTop10Baseline.toFixed(4)),
+    meanBrierEpigenome: parseFloat(meanBrierEpigenome.toFixed(6)),
+    meanBrierBaseline: parseFloat(meanBrierBaseline.toFixed(6)),
+    brierSkillScoreVsH0: parseFloat(brierSkillScoreVsH0.toFixed(4)),
+    brierSkillScoreVsBaseline: parseFloat(brierSkillScoreVsBaseline.toFixed(4)),
+    epigenomeZScoreVsH0: parseFloat(epigenomeZScoreVsH0.toFixed(3)),
+    steps,
+    summaryText,
+  };
+}
+

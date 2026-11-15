@@ -3,10 +3,9 @@ import { useNexusStore } from "../../store/useNexusStore";
 import { useForensicData } from "../../hooks/useForensicData";
 import {
   runSystematicDnaAudit,
-  synchronizeAlgorithmsToDnaReference,
   DnaAuditReport,
-  AlgorithmDnaAuditItem,
 } from "../../services/prediction/dnaAuditService";
+import { runUnifiedDnaGeneSequencer } from "../../services/prediction/dnaGeneSequenceService";
 import { ForensicReport, ForensicEvidence, ScoreDivergence, CounterfactualResult } from "../../types";
 import { formatDateSafely } from "../../utils/dateUtils";
 import { audioEngine } from "../../utils/audioEngine";
@@ -92,7 +91,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
     loadDnaAudit();
   }, [loadDnaAudit]);
 
-  // Synchronisation 1-Click depuis la vue Forensic Logs
+  // Régulation 1-Click via EpiGenome-SQ depuis la vue Forensic Logs
   const handleQuickSync = async () => {
     try {
       setIsSyncingWeights(true);
@@ -102,21 +101,30 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
         logger.debug({ err }, "Audio error non-bloquant");
       }
 
-      const syncResult = await synchronizeAlgorithmsToDnaReference(
+      const synthesis = await runUnifiedDnaGeneSequencer(
         drawName,
         history,
-        globalWeights
+        globalWeights,
+        {
+          forensicReports: reports,
+          applyWeights: true,
+        }
       );
 
-      setGlobalWeights(syncResult.synchronizedWeights);
-      setDnaAudit(syncResult.report);
+      setGlobalWeights(synthesis.optimizedWeights);
+      const updatedAudit = await runSystematicDnaAudit(
+        drawName,
+        history,
+        synthesis.optimizedWeights
+      );
+      setDnaAudit(updatedAudit);
 
       addAgentLog({
-        id: `dna_sync_forensic_${Date.now()}`,
+        id: `epigenome_forensic_sync_${Date.now()}`,
         timestamp: new Date(),
-        action: `Resynchronisation des poids initiée depuis les Forensic Logs (${drawName}).`,
+        action: `Régulation EpiGenome-SQ initiée depuis les Forensic Logs (${drawName}) · ${synthesis.sequenceMetrics.sequenceSignature}.`,
         type: "AUTOTUNE",
-        impact: `Alignement ADN rétabli à ${syncResult.report.coherenceScore}%.`,
+        impact: `Cohérence épistasique ${synthesis.sequenceMetrics.epistaticCoherenceScore}% · Alignement ${updatedAudit.coherenceScore}%.`,
       });
 
       try {
@@ -126,13 +134,13 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
       }
 
       showToast(
-        `Tous les poids algorithmiques ont été resynchronisés sur l'ADN canonique.`,
+        `Poids régulés via EpiGenome-SQ (${synthesis.sequenceMetrics.sequenceSignature}).`,
         "success"
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Erreur";
       showToast(
-        `Erreur lors de la synchronisation : ${msg}`,
+        `Erreur lors de la régulation EpiGenome-SQ : ${msg}`,
         "error"
       );
     } finally {
@@ -372,7 +380,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
                   size={16}
                   className={isSyncingWeights ? "animate-spin" : ""}
                 />
-                {isSyncingWeights ? "Resynchronisation..." : "Corriger les Poids"}
+                {isSyncingWeights ? "Régulation..." : "Réguler via EpiGenome-SQ"}
               </button>
             )}
           </div>
@@ -454,7 +462,7 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
             disabled={isSyncingWeights}
             className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-black uppercase tracking-wider shrink-0 transition-all shadow-md shadow-amber-600/30"
           >
-            Resynchroniser ({driftedAlgorithms.length})
+            Réguler via EpiGenome-SQ ({driftedAlgorithms.length})
           </button>
         </div>
       )}

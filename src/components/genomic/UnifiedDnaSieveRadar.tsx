@@ -90,6 +90,7 @@ interface MacroFamilyScore {
 export const UnifiedDnaSieveRadar: React.FC<{
   drawName: string;
   initialViewMode?: ActiveViewMode;
+  sieveOnly?: boolean;
   className?: string;
   scenarios?: PlatinumScenario[];
   selectedScenarioId?: string | null;
@@ -97,6 +98,7 @@ export const UnifiedDnaSieveRadar: React.FC<{
 }> = ({
   drawName,
   initialViewMode = "PANORAMA",
+  sieveOnly = false,
   className = "",
   scenarios = [],
   selectedScenarioId = null,
@@ -107,7 +109,9 @@ export const UnifiedDnaSieveRadar: React.FC<{
   const globalWeights = useNexusStore((state) => state.globalWeights);
   const setGlobalWeights = useNexusStore((state) => state.setGlobalWeights);
 
-  const [viewMode, setViewMode] = useState<ActiveViewMode>(initialViewMode);
+  const [viewMode, setViewMode] = useState<ActiveViewMode>(
+    sieveOnly ? "SIEVE" : initialViewMode,
+  );
   const [radarGranularity, setRadarGranularity] = useState<"MACRO" | "MICRO">(
     "MACRO",
   );
@@ -202,12 +206,12 @@ export const UnifiedDnaSieveRadar: React.FC<{
     }
   }, [drawName, cleanHistory, globalWeights, showToast]);
 
-  // Lancement automatique au montage si l'historique est prêt
+  // Lancement automatique au montage si l'historique est prêt (hors mode Crible seul)
   useEffect(() => {
-    if (cleanHistory.length >= 5 && !auditReport && !isLoading) {
+    if (!sieveOnly && cleanHistory.length >= 5 && !auditReport && !isLoading) {
       handleRunAudit();
     }
-  }, [drawName, cleanHistory.length]);
+  }, [drawName, cleanHistory.length, sieveOnly]);
 
   // 3. Synthèse des Macro-Familles pour le Radar Algorithmique
   const macroFamilies: MacroFamilyScore[] = useMemo(() => {
@@ -537,47 +541,56 @@ export const UnifiedDnaSieveRadar: React.FC<{
         <div className="space-y-1.5 relative z-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-emerald-500/10 via-indigo-500/10 to-amber-500/10 border border-emerald-500/30 text-emerald-400 font-black text-[10px] rounded-lg uppercase tracking-wider">
             <Dna size={13} className="text-emerald-400 animate-pulse" />
-            <span>Trilogie Algorithmique : ADN • Tamis • Radar</span>
+            <span>
+              {sieveOnly
+                ? "Crible ADN Numéros (1–90)"
+                : "Trilogie Algorithmique : ADN • Tamis • Radar"}
+            </span>
           </div>
           <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight flex items-center gap-3">
-            Génome, Filtration & Radar Unifiés
+            {sieveOnly
+              ? "Crible ADN & Amplification des Boules"
+              : "Génome, Filtration & Radar Unifiés"}
           </h2>
           <p className="text-xs text-slate-400 font-medium max-w-2xl">
-            Convergence continue entre l'ADN actif, le tamisage différentiable
-            des 90 numéros et le radar d'alignement stochastique pour{" "}
+            {sieveOnly
+              ? "Tamisage différentiable continu des 90 numéros à partir des poids synthétisés pour "
+              : "Convergence continue entre l'ADN actif, le tamisage différentiable des 90 numéros et le radar d'alignement stochastique pour "}
             <span className="text-emerald-400 font-bold">{drawName}</span>.
           </p>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap relative z-10">
           {/* Sélecteur d'onglets de vue unifiée */}
-          <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
-            {[
-              { id: "PANORAMA", label: "Panoramique", icon: Sparkles },
-              { id: "RADAR", label: "Radar 3D", icon: Radio },
-              { id: "SIEVE", label: "Tamis 1-90", icon: Filter },
-              { id: "GENOME_TABLE", label: "22 Gènes", icon: Layers },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => {
-                    audioEngine.play("click");
-                    setViewMode(tab.id as ActiveViewMode);
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
-                    viewMode === tab.id
-                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
-                      : "text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  <Icon size={12} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          {!sieveOnly && (
+            <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+              {[
+                { id: "PANORAMA", label: "Panoramique", icon: Sparkles },
+                { id: "RADAR", label: "Radar 3D", icon: Radio },
+                { id: "SIEVE", label: "Tamis 1-90", icon: Filter },
+                { id: "GENOME_TABLE", label: "22 Gènes", icon: Layers },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      audioEngine.play("click");
+                      setViewMode(tab.id as ActiveViewMode);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all cursor-pointer ${
+                      viewMode === tab.id
+                        ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    <Icon size={12} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <button
             onClick={handleExportUnifiedJSON}
@@ -589,14 +602,16 @@ export const UnifiedDnaSieveRadar: React.FC<{
             <span className="hidden sm:inline">Export</span>
           </button>
 
-          <button
-            onClick={handleRunAudit}
-            disabled={isLoading}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-600/20 active:scale-95 disabled:opacity-50 cursor-pointer"
-          >
-            <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
-            <span>{isLoading ? "Sync..." : "Re-Scan Unifié"}</span>
-          </button>
+          {!sieveOnly && (
+            <button
+              onClick={handleRunAudit}
+              disabled={isLoading}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-wider rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-600/20 active:scale-95 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+              <span>{isLoading ? "Sync..." : "Re-Scan Unifié"}</span>
+            </button>
+          )}
         </div>
       </div>
 

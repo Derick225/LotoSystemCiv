@@ -47,6 +47,7 @@ import { evaluateAlgoEmpiricalProof } from "../../services/prediction/weightsMan
 import { audioEngine } from "../../utils/audioEngine";
 import { ACTIVE_ALGO_COUNT, AlgoKey } from "../../shared/prediction.types";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
+import { drawHasMachineNumbers } from "../../constants";
 
 
 interface XAPTransparencyPanelProps {
@@ -145,9 +146,8 @@ export const XAPTransparencyPanel: React.FC<XAPTransparencyPanelProps> = ({
     audioEngine.play("click");
     setIsExportingForensicPDF(true);
     try {
-      const isolatedHistory = purifyHistoryForDraw(drawName, history);
-      const sample = isolatedHistory.length > 0 ? isolatedHistory : history;
-      const hasMachineData = sample.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+      const sample = purifyHistoryForDraw(drawName, history);
+      const hasMachineData = drawHasMachineNumbers(drawName, sample);
 
       const proofs = evaluateAlgoEmpiricalProof(drawName, sample);
 

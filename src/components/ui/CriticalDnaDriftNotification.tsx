@@ -11,8 +11,6 @@ import {
   ShieldAlert,
   Fingerprint,
   Layers,
-  Sparkles,
-  Sliders,
   ExternalLink,
 } from "lucide-react";
 
@@ -27,7 +25,6 @@ export const CriticalDnaDriftNotification: React.FC = () => {
     driftSeverityScore,
     harmonizeDna,
     inspectDnaAuditor,
-    inspectDriftHeatmap,
     dismissNotification,
   } = useDnaAuditMonitor();
 
@@ -146,28 +143,18 @@ export const CriticalDnaDriftNotification: React.FC = () => {
                     className={isHarmonizing ? "animate-spin" : ""}
                   />
                   {isHarmonizing
-                    ? "Ré-harmonisation..."
-                    : "Ré-harmoniser l'ADN Immédiatement"}
+                    ? "Régulation..."
+                    : "Réguler via EpiGenome-SQ"}
                 </button>
 
                 <button
                   id="inspect-dna-auditor-btn"
                   onClick={inspectDnaAuditor}
-                  className="px-3.5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all border border-white/10"
-                  title="Inspecter dans l'Audit ADN"
+                  className="px-3.5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all border border-white/10 cursor-pointer"
+                  title="Ouvrir le Séquenceur Épistasique EpiGenome-SQ"
                 >
                   <ExternalLink size={14} />
-                  Audit ADN
-                </button>
-
-                <button
-                  id="inspect-drift-heatmap-btn"
-                  onClick={inspectDriftHeatmap}
-                  className="px-3.5 py-3 bg-rose-950/80 hover:bg-rose-900 text-rose-200 rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all border border-rose-500/40 shadow-sm"
-                  title="Voir la Heatmap des Corrélations Écarts & Sous-Algorithmes"
-                >
-                  <Sparkles size={14} className="text-amber-400" />
-                  Heatmap
+                  Ouvrir EpiGenome-SQ
                 </button>
               </div>
             </div>

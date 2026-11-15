@@ -4,7 +4,7 @@ import { packHistory } from '../workers/zeroCopy';
 import { supabase, isSupabaseConfigured } from '../supabaseClient';
 import { get, set } from 'idb-keyval';
 import { logger } from '../../utils/logger';
-import { drawHasMachineNumbers, getMirrorNumber, getComplement90 } from '../../constants';
+import { drawHasMachineNumbers, getMirrorNumber, getComplement90, getDrawNetworkId, normalizeDrawName } from '../../constants';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { algorithmRegistry, type AlgorithmContext } from './algorithmRegistry';
 import { calculateStatisticalBounds } from '../mathService';
@@ -221,7 +221,9 @@ export const evaluateAlgoEmpiricalProof = (
   const result: Record<AlgoKey, AlgoProofMetric> = {} as any;
   const baselineRate = 5.0 / 90.0; // Espérance stochastique neutre
 
-  if (!history || history.length < 5) {
+  const sample = purifyHistoryForDraw(drawName, history || []);
+
+  if (sample.length < 5) {
     validKeys.forEach(k => {
       result[k] = {
         hasProof: false,
@@ -234,12 +236,11 @@ export const evaluateAlgoEmpiricalProof = (
     return result;
   }
 
-  const cacheKey = `${(drawName || 'default').trim().toLowerCase()}_${history.length}_${history[0]?.date || 'nodate'}_${history[0]?.gagnants?.join('-') || 'none'}`;
+  const networkId = getDrawNetworkId(drawName) || 'isolated';
+  const normDraw = normalizeDrawName(drawName) || 'default';
+  const cacheKey = `${networkId}_${normDraw}_${sample.length}_${sample[0]?.date || 'nodate'}_${sample[0]?.gagnants?.join('-') || 'none'}_${sample[sample.length - 1]?.date || 'nodate'}_${sample[sample.length - 1]?.gagnants?.join('-') || 'none'}`;
   const cached = algoEmpiricalProofCache.get(cacheKey);
   if (cached) return cached;
-
-  const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
-  const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
   const T = sample.length;
   // Profondeur d'évaluation empirique alignée sur l'espérance mathématique (90/5 = 18)
   const expectedMeanGap = 90.0 / 5.0; 
@@ -810,14 +811,13 @@ export const computeChronologicalAlgoReinforcement = (
   baseWeights: AlgoWeights
 ): AlgoWeights => {
   const validKeys = Object.values(AlgoKey);
-  if (!history || history.length < 5) {
+  const sample = purifyHistoryForDraw(drawName, history || []);
+  if (sample.length < 5) {
     return normalizeWeights(baseWeights);
   }
 
   // 1. Évaluation rigoureuse des preuves empiriques propres au tirage actif
-  const proofResults = evaluateAlgoEmpiricalProof(drawName, history);
-  const isolatedHistory = history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase());
-  const sample = isolatedHistory.length >= 5 ? isolatedHistory : history;
+  const proofResults = evaluateAlgoEmpiricalProof(drawName, sample);
   const T = sample.length;
   const sampleConfidence = Math.tanh(T / 30.0);
 
@@ -855,7 +855,10 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
   try {
     const { getLocalForensicReports } = await import('../postPredictionAnalysisService');
     let forensicReports = await getLocalForensicReports() || [];
-    if (drawName) forensicReports = forensicReports.filter(r => r.drawName === drawName);
+    if (drawName) {
+      const targetNorm = normalizeDrawName(drawName);
+      forensicReports = forensicReports.filter(r => normalizeDrawName(r.drawName) === targetNorm);
+    }
     
     // CORRECTION : Fenêtre dynamique absolue basée sur l'entropie de l'historique
     const entropyWindow = forensicReports.length > 0 ? 

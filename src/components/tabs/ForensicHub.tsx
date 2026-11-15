@@ -9,9 +9,6 @@ import { ForensicTimeMachine } from "../ForensicTimeMachine";
 import { ClosedLoopAutopsyPanel } from "../ClosedLoopAutopsyPanel";
 import { StorageOptimizationModal } from "../StorageOptimizationModal";
 import { StochasticEntropyPanel } from "../forensic/StochasticEntropyPanel";
-import { DnaReferenceAuditor } from "../genomic/DnaReferenceAuditor";
-import { SubAlgorithmDriftHeatmap } from "../genomic/SubAlgorithmDriftHeatmap";
-import { ExpertBiasAdjuster } from "../genomic/ExpertBiasAdjuster";
 import { NeuralSelfOptimizationPanel } from "../genomic/NeuralSelfOptimizationPanel";
 import { UnifiedDnaSieveRadar } from "../genomic/UnifiedDnaSieveRadar";
 import { ForensicAuditLogsView } from "../genomic/ForensicAuditLogsView";
@@ -24,13 +21,10 @@ import {
   Radar,
   Clock,
   Zap,
-  ShieldCheck,
   FileText,
   AlertTriangle,
   Dna,
-  Flame,
   BrainCircuit,
-  Sliders,
 } from "lucide-react";
 import {
   buildUnifiedForensicScenario,
@@ -197,21 +191,17 @@ export const ForensicHub: React.FC<{
   });
 
   const [auditSubView, setAuditSubView] = useState<"table" | "logs">("table");
-  const [closedLoopSubView, setClosedLoopSubView] = useState<"autopsy" | "neural_opt" | "expert_bias">(
+  const [closedLoopSubView, setClosedLoopSubView] = useState<"autopsy" | "neural_opt">(
     "autopsy"
   );
   const [dnaSubView, setDnaSubView] = useState<
-    "reference" | "gene_sequencer" | "drift_heatmap" | "sieve_radar" | "history_dna"
+    "gene_sequencer" | "sieve_radar" | "history_dna"
   >(() => {
-    if (initialSubView === "gene_sequencer" || initialTab === "GENE_SEQUENCER") {
-      return "gene_sequencer";
-    }
     if (initialSubView === "history_dna" || initialTab === "dna_history" || initialTab === "history_dna") {
       return "history_dna";
     }
-    if (initialTab === "DRIFT_HEATMAP") return "drift_heatmap";
     if (initialTab === "SIEVE_RADAR") return "sieve_radar";
-    return "reference";
+    return "gene_sequencer";
   });
   const [matrixSubView, setMatrixSubView] = useState<"confusion" | "entropy" | "radar" | "timeline">(
     "confusion"
@@ -221,10 +211,17 @@ export const ForensicHub: React.FC<{
   React.useEffect(() => {
     if (!activeSubTab) return;
     const sub = activeSubTab.toUpperCase();
-    if (sub === "DNA_AUDITOR" || sub === "DNA") {
-      setActiveTab("dna_drift");
-      setDnaSubView("reference");
-    } else if (sub === "GENE_SEQUENCER" || sub === "SEQUENCER" || sub === "EPIGENOME") {
+    if (
+      sub === "GENE_SEQUENCER" ||
+      sub === "SEQUENCER" ||
+      sub === "EPIGENOME" ||
+      sub === "DNA_AUDITOR" ||
+      sub === "DNA" ||
+      sub === "DRIFT_HEATMAP" ||
+      sub === "HEATMAP" ||
+      sub === "DRIFT" ||
+      sub === "DNA_DRIFT"
+    ) {
       setActiveTab("dna_drift");
       setDnaSubView("gene_sequencer");
     } else if (
@@ -237,9 +234,6 @@ export const ForensicHub: React.FC<{
       sub === "GENEALOGIE"
     ) {
       navigateToModule("admin", "fusion");
-    } else if (sub === "DRIFT_HEATMAP" || sub === "HEATMAP" || sub === "DRIFT" || sub === "DNA_DRIFT") {
-      setActiveTab("dna_drift");
-      setDnaSubView("drift_heatmap");
     } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
       setActiveTab("dna_drift");
       setDnaSubView("sieve_radar");
@@ -255,10 +249,7 @@ export const ForensicHub: React.FC<{
     } else if (sub === "NEURAL_OPT" || sub === "NEURAL") {
       setActiveTab("closedloop");
       setClosedLoopSubView("neural_opt");
-    } else if (sub === "EXPERT_BIAS" || sub === "BIAS") {
-      setActiveTab("closedloop");
-      setClosedLoopSubView("expert_bias");
-    } else if (sub === "AUTOPSY" || sub === "CLOSEDLOOP") {
+    } else if (sub === "AUTOPSY" || sub === "CLOSEDLOOP" || sub === "EXPERT_BIAS" || sub === "BIAS") {
       setActiveTab("closedloop");
       setClosedLoopSubView("autopsy");
     } else if (sub === "FORENSIC_LOGS" || sub === "LOGS") {
@@ -872,7 +863,7 @@ export const ForensicHub: React.FC<{
                 audioEngine.play("click");
                 setClosedLoopSubView("neural_opt");
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 closedLoopSubView === "neural_opt"
                   ? "bg-cyan-600 text-white shadow-sm"
                   : "text-slate-400 hover:text-white"
@@ -881,25 +872,10 @@ export const ForensicHub: React.FC<{
               <BrainCircuit size={13} />
               Auto-Optimisation Neurale
             </button>
-            <button
-              onClick={() => {
-                audioEngine.play("click");
-                setClosedLoopSubView("expert_bias");
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                closedLoopSubView === "expert_bias"
-                  ? "bg-amber-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Sliders size={13} />
-              Biais Expert Manuel
-            </button>
           </div>
 
           {closedLoopSubView === "autopsy" && <ClosedLoopAutopsyPanel drawName={drawName} />}
           {closedLoopSubView === "neural_opt" && <NeuralSelfOptimizationPanel drawName={drawName} />}
-          {closedLoopSubView === "expert_bias" && <ExpertBiasAdjuster drawName={drawName} />}
         </div>
       )}
 
@@ -910,65 +886,37 @@ export const ForensicHub: React.FC<{
             <button
               onClick={() => {
                 audioEngine.play("click");
-                setDnaSubView("reference");
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                dnaSubView === "reference"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <ShieldCheck size={13} />
-              Audit ADN &amp; Synchronisation
-            </button>
-            <button
-              onClick={() => {
-                audioEngine.play("click");
                 setDnaSubView("gene_sequencer");
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 dnaSubView === "gene_sequencer"
                   ? "bg-cyan-600 text-white shadow-sm"
                   : "text-slate-400 hover:text-white"
               }`}
             >
               <Dna size={13} />
-              Séquenceur Gènes ADN
-            </button>
-            <button
-              onClick={() => {
-                audioEngine.play("click");
-                setDnaSubView("drift_heatmap");
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
-                dnaSubView === "drift_heatmap"
-                  ? "bg-rose-600 text-white shadow-sm"
-                  : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Flame size={13} />
-              Heatmap Dérive Sous-Algos
+              Séquenceur EpiGenome-SQ
             </button>
             <button
               onClick={() => {
                 audioEngine.play("click");
                 setDnaSubView("sieve_radar");
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 dnaSubView === "sieve_radar"
                   ? "bg-teal-600 text-white shadow-sm"
                   : "text-slate-400 hover:text-white"
               }`}
             >
               <Radar size={13} />
-              Radar Crible ADN
+              Crible ADN Boules (1–90)
             </button>
             <button
               onClick={() => {
                 audioEngine.play("click");
                 setDnaSubView("history_dna");
               }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 dnaSubView === "history_dna"
                   ? "bg-amber-600 text-white shadow-sm"
                   : "text-slate-400 hover:text-white"
@@ -979,10 +927,10 @@ export const ForensicHub: React.FC<{
             </button>
           </div>
 
-          {dnaSubView === "reference" && <DnaReferenceAuditor drawName={drawName} />}
           {dnaSubView === "gene_sequencer" && <DnaGeneSequencerPanel drawName={drawName} />}
-          {dnaSubView === "drift_heatmap" && <SubAlgorithmDriftHeatmap drawName={drawName} />}
-          {dnaSubView === "sieve_radar" && <UnifiedDnaSieveRadar drawName={drawName} />}
+          {dnaSubView === "sieve_radar" && (
+            <UnifiedDnaSieveRadar drawName={drawName} sieveOnly />
+          )}
           {dnaSubView === "history_dna" && (
             <DrawDnaHistoryViewer drawName={drawName} history={history} />
           )}

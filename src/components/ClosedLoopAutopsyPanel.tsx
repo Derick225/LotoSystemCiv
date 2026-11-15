@@ -9,6 +9,10 @@ import {
   BatchClosedLoopAutopsyResult,
 } from "../services/prediction/closedLoopAutopsyService";
 import { applyOptimizedWeights } from "../services/prediction/optimizationController";
+import {
+  runUnifiedDnaGeneSequencer,
+  type DnaGeneSynthesisResult,
+} from "../services/prediction/dnaGeneSequenceService";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 import { normalizeDrawName } from "../constants";
 import { useToast } from "./ui/Toast";
@@ -62,6 +66,8 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
   const [batchResult, setBatchResult] = useState<BatchClosedLoopAutopsyResult | null>(null);
   const [isBatchRunning, setIsBatchRunning] = useState<boolean>(false);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [isApplyingEpigenome, setIsApplyingEpigenome] = useState<boolean>(false);
+  const [epigenomeResult, setEpigenomeResult] = useState<DnaGeneSynthesisResult | null>(null);
 
   // Filtrage strict par tirage (Tirage Isolation)
   const drawHistory = useMemo(() => {
@@ -73,6 +79,7 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       setLoading(true);
       setApplied(false);
       setLastAdjustmentResult(null);
+      setEpigenomeResult(null);
       const res = await executeClosedLoopAutopsy(
         drawName,
         index,
@@ -173,6 +180,39 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
       showToast(e?.message || "Erreur lors de l'application de la correction", "error");
     } finally {
       setIsApplying(false);
+    }
+  };
+
+  const handleApplyEpigenomeSq = async () => {
+    if (!report && !batchResult) return;
+    try {
+      setIsApplyingEpigenome(true);
+      audioEngine.play("scan");
+      const synthesis = await runUnifiedDnaGeneSequencer(
+        drawName,
+        history,
+        globalWeights,
+        {
+          autopsyReports: report ? [report] : [],
+          batchAutopsy: batchResult,
+          applyWeights: true,
+        }
+      );
+      setEpigenomeResult(synthesis);
+      setGlobalWeights(synthesis.optimizedWeights, drawName);
+      setApplied(true);
+      audioEngine.play("success");
+      showToast(
+        `EpiGenome-SQ appliqué sur ${drawName} (${synthesis.sequenceMetrics.sequenceSignature} · cohérence ${synthesis.sequenceMetrics.epistaticCoherenceScore}%)`,
+        "success"
+      );
+    } catch (e: any) {
+      showToast(
+        e?.message || "Erreur lors de la synthèse EpiGenome-SQ",
+        "error"
+      );
+    } finally {
+      setIsApplyingEpigenome(false);
     }
   };
 
@@ -401,14 +441,26 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
             </p>
           </div>
 
-          <button
-            onClick={handleApplyBatchWeights}
-            disabled={isApplying}
-            className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
-          >
-            <Sparkles size={14} />
-            <span>Appliquer Consensus ({batchResult.batchSize} tirages)</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={handleApplyBatchWeights}
+              disabled={isApplying || isApplyingEpigenome}
+              className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-purple-600/30 flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+            >
+              <Sparkles size={14} />
+              <span>Appliquer Consensus ({batchResult.batchSize} tirages)</span>
+            </button>
+
+            <button
+              onClick={handleApplyEpigenomeSq}
+              disabled={isApplying || isApplyingEpigenome}
+              className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-cyan-600/30 flex items-center gap-2 cursor-pointer active:scale-95 disabled:opacity-50"
+              title="Fusionner ce consensus multi-tirages dans le séquenceur épistasique EpiGenome-SQ"
+            >
+              <Dna size={14} className={isApplyingEpigenome ? "animate-spin" : ""} />
+              <span>{isApplyingEpigenome ? "Séquençage..." : "Synthétiser via EpiGenome-SQ"}</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -431,32 +483,55 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
                 </h4>
               </div>
 
-              <button
-                onClick={handleApplyCorrection}
-                disabled={isApplying || applied}
-                className={`px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all active:scale-95 cursor-pointer ${
-                  applied
-                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                    : "bg-indigo-600 hover:bg-indigo-500 text-white"
-                }`}
-              >
-                {applied ? (
-                  <>
-                    <CheckCircle2 size={15} />
-                    <span>Correction Appliquée à l'ADN</span>
-                  </>
-                ) : (
-                  <>
-                    <Cpu size={15} />
-                    <span>Recalibrer l'ADN par Boucle Fermée</span>
-                  </>
-                )}
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={handleApplyCorrection}
+                  disabled={isApplying || isApplyingEpigenome || applied}
+                  className={`px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg transition-all active:scale-95 cursor-pointer disabled:opacity-50 ${
+                    applied
+                      ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                  }`}
+                >
+                  {applied ? (
+                    <>
+                      <CheckCircle2 size={15} />
+                      <span>Correction Appliquée à l'ADN</span>
+                    </>
+                  ) : (
+                    <>
+                      <Cpu size={15} />
+                      <span>Recalibrer l'ADN par Boucle Fermée</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={handleApplyEpigenomeSq}
+                  disabled={isApplying || isApplyingEpigenome}
+                  className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-2xl text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-cyan-600/20 transition-all active:scale-95 cursor-pointer disabled:opacity-50"
+                  title="Injecter l'autopsie dans le séquenceur épistasique EpiGenome-SQ avec garde Benjamini-Hochberg"
+                >
+                  <Dna size={15} className={isApplyingEpigenome ? "animate-spin" : ""} />
+                  <span>{isApplyingEpigenome ? "Séquençage..." : "Réguler via EpiGenome-SQ"}</span>
+                </button>
+              </div>
             </div>
 
             <p className="text-xs text-indigo-100 leading-relaxed font-medium">
               {report.summaryRemark}
             </p>
+
+            {epigenomeResult && (
+              <div className="pt-3 border-t border-cyan-500/30 flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-cyan-200">
+                <span>
+                  EpiGenome-SQ appliqué : <strong className="text-white">{epigenomeResult.sequenceMetrics.sequenceSignature}</strong>
+                </span>
+                <span>
+                  Cohérence épistasique {epigenomeResult.sequenceMetrics.epistaticCoherenceScore.toFixed(1)}% · Kendall-Tau {(epigenomeResult.sequenceMetrics.kendallTauShiftVsActive * 100).toFixed(1)}% · {epigenomeResult.codons.length} codon(s)
+                </span>
+              </div>
+            )}
           </div>
 
           {/* NOUVELLE VERSION ADN ENREGISTRÉE */}

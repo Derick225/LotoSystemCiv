@@ -87,11 +87,15 @@ export const drawHasMachineNumbers = (
   if (!drawName && (!history || history.length === 0)) return true;
   if (drawName && isDrawWithoutMachine(drawName)) return false;
   if (history && history.length > 0) {
-    const isolated = drawName
-      ? history.filter(d => !d.drawName || d.drawName.trim().toLowerCase() === drawName.trim().toLowerCase())
+    const normTarget = drawName ? normalizeDrawName(drawName) : '';
+    const isolated = normTarget
+      ? history.filter(d => !d.drawName || normalizeDrawName(d.drawName) === normTarget)
       : history;
-    const sample = isolated.length > 0 ? isolated : history;
-    return sample.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+    if (isolated.length > 0) {
+      return isolated.some(d => Array.isArray(d.machine) && d.machine.length > 0);
+    }
+    // Zéro fuite inter-tirages : si aucun enregistrement du tirage cible n'est présent, ne pas lire d'autres tirages
+    return drawName ? !isDrawWithoutMachine(drawName) : false;
   }
   return !isDrawWithoutMachine(drawName);
 };
