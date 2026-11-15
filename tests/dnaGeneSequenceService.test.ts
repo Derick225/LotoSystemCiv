@@ -8,6 +8,11 @@ import {
   getChromosomalArm,
 } from '../src/services/prediction/dnaGeneSequenceService';
 import {
+  computeEpigenomeMatrixHpc,
+  computeSequenceOrderMetricsHpc,
+  scoreEpigenomeWalkForwardStepHpc,
+} from '../src/services/wasm/lotoEngineBridge';
+import {
   recordModelDnaVersion,
   getModelEvolutionLineage,
   computeSequenceKendallTauShift,
@@ -469,5 +474,118 @@ describe('dnaGeneSequenceService (EpiGenome-SQ)', () => {
     // Fortune Thursday (sans machine) ne doit jamais hériter des numéros machine d'ESPOIR
     expect(drawHasMachineNumbers('FORTUNE THURSDAY', longEspoir)).toBe(false);
   });
+
+  it('valide les noyaux HPC EpiGenome-SQ (matrice épistasique, distance Kendall-Tau/Spearman et pas Walk-Forward)', () => {
+    const seqRes = computeSequenceOrderMetricsHpc([1, 2, 3, 4], [4, 3, 2, 1]);
+    expect(seqRes.kendallTau).toBeCloseTo(1, 6);
+    expect(seqRes.spearmanFootrule).toBeCloseTo(1, 6);
+
+    const k = 4;
+    const rawEp = new Float64Array(k * k);
+    const sampEp = new Float64Array(k * k);
+    rawEp[0 * k + 1] = 2.0;
+    rawEp[1 * k + 0] = 2.0;
+    sampEp[0 * k + 1] = 4.0;
+    sampEp[1 * k + 0] = 4.0;
+
+    const lineage = new Float64Array([
+      0.4, 0.3, 0.2, 0.1,
+      0.42, 0.31, 0.18, 0.09,
+      0.44, 0.33, 0.15, 0.08,
+    ]);
+
+    const matRes = computeEpigenomeMatrixHpc({
+      rawEpistasisFlat: rawEp,
+      epistasisSamplesFlat: sampEp,
+      lineageWeightsFlat: lineage,
+      numLineage: 3,
+      initialWeights: new Float64Array([0.35, 0.25, 0.25, 0.15]),
+      armIds: new Uint8Array([0, 1, 2, 3]),
+      proofFlags: new Uint8Array([1, 1, 0, 0]),
+      proofScores: new Float64Array([2.5, 1.8, 0, 0]),
+      baseAnalysisSignals: new Float64Array([0.5, -0.2, 0.1, 0.0]),
+      forcedZeroFlags: new Uint8Array([0, 0, 0, 1]),
+      numGenes: k,
+      hurst: 0.56,
+      entropyNorm: 0.92,
+      totalEvidenceUnits: 5,
+    });
+
+    expect(matRes.numGenes).toBe(k);
+    // Symétrie stricte de la matrice épistasique et rétrécissement borné [-1, 1]
+    expect(matRes.epistaticMatrixFlat[0 * k + 1]).toBeCloseTo(matRes.epistaticMatrixFlat[1 * k + 0], 10);
+    expect(matRes.epistaticMatrixFlat[0 * k + 1]).toBeGreaterThan(0);
+    expect(matRes.epistaticMatrixFlat[0 * k + 1]).toBeLessThanOrEqual(1);
+    // Gène forcedZero[3] strictement neutralisé
+    expect(matRes.postMortemSignal[3]).toBe(0);
+    expect(matRes.rawTargetWeights[3]).toBe(0);
+    expect(matRes.rawTargetWeights[0]).toBeGreaterThan(0);
+
+    // Pas Walk-Forward HPC : 2 gènes x 90 numéros
+    const pluginScores = new Float64Array(2 * 90).fill(0.4);
+    for (const num of [5, 12, 23, 44, 78]) {
+      pluginScores[num - 1] = 0.95;
+      pluginScores[90 + (num - 1)] = 0.92;
+    }
+    const wfStep = scoreEpigenomeWalkForwardStepHpc({
+      pluginScoresFlat: pluginScores,
+      epiWeights: new Float64Array([0.6, 0.4]),
+      baseWeights: new Float64Array([0.5, 0.5]),
+      numGenes: 2,
+      actualWinners: new Uint8Array([5, 12, 23, 60, 88]),
+    });
+
+    expect(wfStep.top5Epi.length).toBe(5);
+    expect(wfStep.hitsTop5Epi).toBe(3);
+    expect(wfStep.brierEpi).toBeGreaterThanOrEqual(0);
+    expect(wfStep.brierEpi).toBeLessThanOrEqual(1);
+    expect(wfStep.epiIncProbs.length).toBe(90);
+    expect(wfStep.expectedHitsTop5Epi).toBeGreaterThan(0);
+  });
+
+  it('produit une calibration conforme et des profils par régime valides et déterministes dans evaluateDnaGeneSequencerWalkForward', async () => {
+    const drawName = 'NATIONAL';
+    const history = makeDeterministicHistory(drawName, 22);
+    const weights = getDefaultWeights();
+
+    const shortRes = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history: history.slice(0, 7),
+      currentWeights: weights,
+    });
+    expect(shortRes.status).toBe('INSUFFICIENT_DATA');
+    expect(shortRes.conformalSummary.regimeProfiles).toHaveLength(0);
+    expect(shortRes.conformalSummary.globalInterval.sampleSize).toBe(0);
+
+    const wfRes = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history,
+      currentWeights: weights,
+      maxSteps: 4,
+    });
+
+    expect(wfRes.status).toBe('COMPLETED');
+    const cs = wfRes.conformalSummary;
+    expect(cs.globalInterval.sampleSize).toBe(wfRes.evaluatedDrawsCount);
+    expect(cs.globalInterval.lower).toBeGreaterThanOrEqual(0);
+    expect(cs.globalInterval.upper).toBeLessThanOrEqual(5);
+    expect(cs.globalInterval.lower).toBeLessThanOrEqual(cs.globalInterval.center + 1e-6);
+    expect(cs.globalInterval.center).toBeLessThanOrEqual(cs.globalInterval.upper + 1e-6);
+    expect(cs.adaptiveCoverage).toBeGreaterThan(0);
+    expect(cs.adaptiveCoverage).toBeLessThan(1);
+    expect(Number.isFinite(cs.eceBeforeCalibration)).toBe(true);
+    expect(Number.isFinite(cs.eceAfterLooCalibration)).toBe(true);
+
+    expect(cs.regimeProfiles.length).toBeGreaterThan(0);
+    const totalRegimeSteps = cs.regimeProfiles.reduce((acc, p) => acc + p.stepsCount, 0);
+    expect(totalRegimeSteps).toBe(wfRes.evaluatedDrawsCount);
+    for (const prof of cs.regimeProfiles) {
+      expect(prof.conformalInterval.lower).toBeGreaterThanOrEqual(0);
+      expect(prof.conformalInterval.upper).toBeLessThanOrEqual(5);
+      expect(prof.meanBrierEpigenome).toBeGreaterThanOrEqual(0);
+      expect(prof.meanBrierEpigenome).toBeLessThanOrEqual(1);
+    }
+  });
 });
+
 

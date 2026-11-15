@@ -39,6 +39,19 @@ import {
 } from './dnaAuditLogService';
 import type { GenomicAuditReport } from '../training/genomicAuditService';
 import { applyOptimizedWeights, calculateWeightDriftMetrics } from './optimizationController';
+import {
+  computeEpigenomeMatrixHpc,
+  computeSequenceOrderMetricsHpc,
+  scoreEpigenomeWalkForwardStepHpc,
+} from '../wasm/lotoEngineBridge';
+import {
+  conformalInterval,
+  coverageFromSampleSize,
+  computeEce,
+  looEceAfterCalibration,
+  type ConformalInterval,
+  type CalibrationPairs,
+} from './onlineCalibrationService';
 
 export type ChromosomalArm =
   | 'STOCHASTIC_INFERENCE'
@@ -200,6 +213,24 @@ export function getChromosomalArm(key: AlgoKey): ChromosomalArm {
 }
 
 /**
+ * Encode deux séquences d'AlgoKey en indices entiers déterministes pour le noyau HPC O(K²).
+ */
+function encodeSequencesForHpc(seqA: AlgoKey[], seqB: AlgoKey[]): { a: Uint32Array; b: Uint32Array } {
+  const indexMap = new Map<AlgoKey, number>();
+  let nextId = 1;
+  for (const k of seqA) {
+    if (!indexMap.has(k)) indexMap.set(k, nextId++);
+  }
+  for (const k of seqB) {
+    if (!indexMap.has(k)) indexMap.set(k, nextId++);
+  }
+  return {
+    a: Uint32Array.from(seqA.map((k) => indexMap.get(k)!)),
+    b: Uint32Array.from(seqB.map((k) => indexMap.get(k)!)),
+  };
+}
+
+/**
  * Calcule la distance de Kendall-Tau normalisée [0, 1] entre deux séquences ordonnées d'AlgoKey.
  * 0 = ordre strictement identique ; 1 = ordre totalement inversé.
  */
@@ -207,26 +238,8 @@ export function computeNormalizedKendallTauDistance(
   seqA: AlgoKey[],
   seqB: AlgoKey[]
 ): number {
-  const common = seqA.filter((k) => seqB.includes(k));
-  const n = common.length;
-  if (n < 2) return 0;
-
-  const rankB = new Map<AlgoKey, number>();
-  seqB.forEach((k, idx) => rankB.set(k, idx));
-
-  let discordant = 0;
-  for (let i = 0; i < n; i++) {
-    const rBi = rankB.get(common[i]) ?? 0;
-    for (let j = i + 1; j < n; j++) {
-      const rBj = rankB.get(common[j]) ?? 0;
-      if (rBi > rBj) {
-        discordant++;
-      }
-    }
-  }
-
-  const maxPairs = (n * (n - 1)) / 2;
-  return maxPairs > 0 ? discordant / maxPairs : 0;
+  const { a, b } = encodeSequencesForHpc(seqA, seqB);
+  return computeSequenceOrderMetricsHpc(a, b).kendallTau;
 }
 
 /**
@@ -236,21 +249,8 @@ export function computeNormalizedSpearmanFootrule(
   seqA: AlgoKey[],
   seqB: AlgoKey[]
 ): number {
-  const common = seqA.filter((k) => seqB.includes(k));
-  const n = common.length;
-  if (n < 2) return 0;
-
-  const rankA = new Map<AlgoKey, number>();
-  const rankB = new Map<AlgoKey, number>();
-  seqA.forEach((k, idx) => rankA.set(k, idx));
-  seqB.forEach((k, idx) => rankB.set(k, idx));
-
-  let absDiffSum = 0;
-  for (const k of common) {
-    absDiffSum += Math.abs((rankA.get(k) ?? 0) - (rankB.get(k) ?? 0));
-  }
-  const maxFootrule = Math.floor((n * n) / 2);
-  return maxFootrule > 0 ? Math.min(1, absDiffSum / maxFootrule) : 0;
+  const { a, b } = encodeSequencesForHpc(seqA, seqB);
+  return computeSequenceOrderMetricsHpc(a, b).spearmanFootrule;
 }
 
 /**
@@ -600,78 +600,145 @@ export function synthesizeDnaGeneSequenceAndWeights(
     });
   }
 
-  // 4.e Lignée ADN (ModelDnaRecord[]) -> Stabilité inter-générationnelle & Épistasie longitudinale
+  // 4.e Lignée ADN (ModelDnaRecord[]) -> Sérialisation déterministe pour le noyau épistasique HPC
   const cleanLineage = dnaLineage.filter(
     (rec) => !rec.drawName || rec.drawName.trim().toLowerCase() === drawName.trim().toLowerCase()
   );
-  const weightSeriesByGene: Record<AlgoKey, number[]> = {} as Record<AlgoKey, number[]>;
-  validKeys.forEach((k) => {
-    weightSeriesByGene[k] = [];
-  });
-  cleanLineage.forEach((rec) => {
-    validKeys.forEach((k) => {
+  const L = cleanLineage.length;
+  const lineageWeightsFlat = new Float64Array(L * K);
+  cleanLineage.forEach((rec, t) => {
+    validKeys.forEach((k, g) => {
       const w = Number(rec.weights?.[k]);
-      weightSeriesByGene[k].push(Number.isFinite(w) ? w : initialWeights[k]);
+      lineageWeightsFlat[t * K + g] = Number.isFinite(w) ? w : initialWeights[k];
     });
   });
 
-  const geneStability: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-  const uniformShare = 1 / Math.max(1, K);
-  validKeys.forEach((k) => {
-    const series = weightSeriesByGene[k];
-    if (series.length < 2) {
-      geneStability[k] = 1.0;
-      return;
-    }
-    const mean = series.reduce((a, b) => a + b, 0) / series.length;
-    const variance = series.reduce((s, v) => s + (v - mean) ** 2, 0) / series.length;
-    geneStability[k] = Math.exp(-Math.sqrt(variance) / uniformShare);
-  });
+  // 5 & 6. Agrégation préalable des canaux d'analyse et exécution du noyau épistasique HPC (Rust/WASM ou fallback C^∞)
+  const normalizedEntropy =
+    bounds.shannonEntropy > 1.0
+      ? Math.min(1.0, bounds.shannonEntropy / Math.log2(90))
+      : Math.max(0, Math.min(1.0, bounds.shannonEntropy));
 
-  // Covariance épistasique longitudinale sur la lignée ADN
-  if (cleanLineage.length >= 3) {
-    const L = cleanLineage.length;
-    const means = validKeys.map((k) => {
-      const s = weightSeriesByGene[k];
-      return s.reduce((a, b) => a + b, 0) / L;
-    });
-    const stds = validKeys.map((k, idx) => {
-      const s = weightSeriesByGene[k];
-      const v = s.reduce((a, b) => a + (b - means[idx]) ** 2, 0) / L;
-      return Math.sqrt(v);
-    });
+  const hasForensicSource = R > 0;
+  const hasAutopsySource = combinedAutopsies.length > 0 || Boolean(batchAutopsy);
+  const hasGenomicSource = genomicEvaluatedCount > 0;
+  const hasDriftSource = Boolean(dnaDriftReport);
 
-    for (let i = 0; i < K; i++) {
-      for (let j = i + 1; j < K; j++) {
-        if (stds[i] > 1e-7 && stds[j] > 1e-7) {
-          let cov = 0;
-          const si = weightSeriesByGene[validKeys[i]];
-          const sj = weightSeriesByGene[validKeys[j]];
-          for (let t = 0; t < L; t++) {
-            cov += (si[t] - means[i]) * (sj[t] - means[j]);
-          }
-          const corr = (cov / L) / (stds[i] * stds[j]);
-          const wLin = Math.sqrt(L) / (Math.sqrt(L) + Math.sqrt(K));
-          rawEpistasis[i][j] += corr * wLin;
-          rawEpistasis[j][i] += corr * wLin;
-          epistasisSamples[i][j] += wLin;
-          epistasisSamples[j][i] += wLin;
-        }
-      }
+  const forensicCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  const autopsyCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  const genomicCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  const driftCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+
+  const rawEpistasisFlat = new Float64Array(K * K);
+  const epistasisSamplesFlat = new Float64Array(K * K);
+  for (let i = 0; i < K; i++) {
+    for (let j = 0; j < K; j++) {
+      rawEpistasisFlat[i * K + j] = rawEpistasis[i][j];
+      epistasisSamplesFlat[i * K + j] = epistasisSamples[i][j];
     }
   }
 
-  // 5. Finalisation de la matrice épistasique rétrécie (shrinkage continu vers l'indépendance 0)
+  const initialWeightsFlat = new Float64Array(K);
+  const armIds = new Uint8Array(K);
+  const proofFlags = new Uint8Array(K);
+  const proofScores = new Float64Array(K);
+  const baseAnalysisSignals = new Float64Array(K);
+  const forcedZeroFlags = new Uint8Array(K);
+
+  const ARM_TO_ID: Record<ChromosomalArm, number> = {
+    STOCHASTIC_INFERENCE: 0,
+    TEMPORAL_CADENCE: 1,
+    SPECTRAL_FRACTAL: 2,
+    TOPOLOGICAL_TRANSFER: 3,
+  };
+
+  validKeys.forEach((k, i) => {
+    initialWeightsFlat[i] = initialWeights[k] ?? 0;
+    armIds[i] = ARM_TO_ID[getChromosomalArm(k)] ?? 0;
+    const proof = proofMap[k];
+    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
+    proofFlags[i] = hasProof ? 1 : 0;
+    proofScores[i] = proof ? proof.proofScore : 0;
+
+    if (forcedZeroKeys.has(k)) {
+      forcedZeroFlags[i] = 1;
+      forensicCompByGene[k] = 0;
+      autopsyCompByGene[k] = 0;
+      genomicCompByGene[k] = 0;
+      driftCompByGene[k] = 0;
+      baseAnalysisSignals[i] = 0;
+      return;
+    }
+
+    const fVal = forensicW[k] > 0 ? Math.tanh(forensicAcc[k] / forensicW[k]) : 0;
+    const aVal = autopsyW[k] > 0 ? Math.tanh(autopsyAcc[k] / autopsyW[k]) : 0;
+    const gVal = hasGenomicSource ? genomicAcc[k] : 0;
+    const dVal = hasDriftSource ? driftAcc[k] : 0;
+
+    forensicCompByGene[k] = fVal;
+    autopsyCompByGene[k] = aVal;
+    genomicCompByGene[k] = gVal;
+    driftCompByGene[k] = dVal;
+
+    let num = 0;
+    let den = 0;
+    if (hasForensicSource && forensicW[k] > 0) {
+      num += 0.40 * fVal;
+      den += 0.40;
+    }
+    if (hasAutopsySource && autopsyW[k] > 0) {
+      num += 0.30 * aVal;
+      den += 0.30;
+    }
+    if (hasGenomicSource) {
+      num += 0.20 * gVal;
+      den += 0.20;
+    }
+    if (hasDriftSource) {
+      num += 0.10 * dVal;
+      den += 0.10;
+    }
+    baseAnalysisSignals[i] = den > 0 ? num / den : 0;
+  });
+
+  const totalEvidenceUnits =
+    R + combinedAutopsies.length + (genomicEvaluatedCount > 0 ? 1 : 0) + (dnaDriftReport ? 1 : 0);
+
+  const hpcMatrixRes = computeEpigenomeMatrixHpc({
+    rawEpistasisFlat,
+    epistasisSamplesFlat,
+    lineageWeightsFlat,
+    numLineage: L,
+    initialWeights: initialWeightsFlat,
+    armIds,
+    proofFlags,
+    proofScores,
+    baseAnalysisSignals,
+    forcedZeroFlags,
+    numGenes: K,
+    hurst: bounds.hurstExponent,
+    entropyNorm: normalizedEntropy,
+    totalEvidenceUnits,
+  });
+
+  const geneStability: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  const postMortemSignalByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  const epistaticSynergyByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+  const rawTargetWeights: Record<string, number> = {};
+
   const epistaticMatrix: number[][] = Array.from({ length: K }, () => new Array(K).fill(0));
   const epistaticCouplings: EpistaticCoupling[] = [];
-  const shrinkagePriorCount = Math.sqrt(K); // Echelle naturelle de régularisation sans nombre magique
 
   for (let i = 0; i < K; i++) {
+    const k = validKeys[i];
+    geneStability[k] = hpcMatrixRes.geneStability[i] ?? 1.0;
+    epistaticSynergyByGene[k] = hpcMatrixRes.epistaticSynergy[i] ?? 0;
+    postMortemSignalByGene[k] = hpcMatrixRes.postMortemSignal[i] ?? 0;
+    rawTargetWeights[k] = hpcMatrixRes.rawTargetWeights[i] ?? 0;
+
     for (let j = i + 1; j < K; j++) {
-      const samples = epistasisSamples[i][j];
-      const meanRaw = samples > 0 ? rawEpistasis[i][j] / samples : 0;
-      const shrunk = (samples / (samples + shrinkagePriorCount)) * meanRaw;
-      const clamped = Math.max(-1, Math.min(1, shrunk));
+      const clamped = hpcMatrixRes.epistaticMatrixFlat[i * K + j] ?? 0;
+      const samples = hpcMatrixRes.evidenceSamplesFlat[i * K + j] ?? 0;
       epistaticMatrix[i][j] = clamped;
       epistaticMatrix[j][i] = clamped;
 
@@ -696,132 +763,6 @@ export function synthesizeDnaGeneSequenceAndWeights(
   }
 
   epistaticCouplings.sort((a, b) => Math.abs(b.couplingStrength) - Math.abs(a.couplingStrength));
-
-  // 6. Synthèse du signal unifié par gène & interaction épistasique
-  const normalizedEntropy =
-    bounds.shannonEntropy > 1.0
-      ? Math.min(1.0, bounds.shannonEntropy / Math.log2(90))
-      : Math.max(0, Math.min(1.0, bounds.shannonEntropy));
-
-  // Pondération adaptative des canaux d'analyse (uniquement sur les sources réellement disponibles)
-  const hasForensicSource = R > 0;
-  const hasAutopsySource = combinedAutopsies.length > 0 || Boolean(batchAutopsy);
-  const hasGenomicSource = genomicEvaluatedCount > 0;
-  const hasDriftSource = Boolean(dnaDriftReport);
-
-  const postMortemSignalByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-  const forensicCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-  const autopsyCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-  const genomicCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-  const driftCompByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-  const epistaticSynergyByGene: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
-
-  validKeys.forEach((k, idx) => {
-    if (forcedZeroKeys.has(k)) {
-      postMortemSignalByGene[k] = 0;
-      forensicCompByGene[k] = 0;
-      autopsyCompByGene[k] = 0;
-      genomicCompByGene[k] = 0;
-      driftCompByGene[k] = 0;
-      epistaticSynergyByGene[k] = 0;
-      return;
-    }
-
-    const fVal = forensicW[k] > 0 ? Math.tanh(forensicAcc[k] / forensicW[k]) : 0;
-    const aVal = autopsyW[k] > 0 ? Math.tanh(autopsyAcc[k] / autopsyW[k]) : 0;
-    const gVal = hasGenomicSource ? genomicAcc[k] : 0;
-    const dVal = hasDriftSource ? driftAcc[k] : 0;
-
-    forensicCompByGene[k] = fVal;
-    autopsyCompByGene[k] = aVal;
-    genomicCompByGene[k] = gVal;
-    driftCompByGene[k] = dVal;
-
-    // Moyenne pondérée convexe sur les sources présentes
-    let num = 0;
-    let den = 0;
-    if (hasForensicSource && forensicW[k] > 0) {
-      num += 0.40 * fVal;
-      den += 0.40;
-    }
-    if (hasAutopsySource && autopsyW[k] > 0) {
-      num += 0.30 * aVal;
-      den += 0.30;
-    }
-    if (hasGenomicSource) {
-      num += 0.20 * gVal;
-      den += 0.20;
-    }
-    if (hasDriftSource) {
-      num += 0.10 * dVal;
-      den += 0.10;
-    }
-
-    const baseAnalysisSignal = den > 0 ? num / den : 0;
-
-    // Bonus / malus de preuve empirique BH : si preuve BH positive, le Z-score module continûment le signal
-    const proof = proofMap[k];
-    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-    const proofDrive = proof ? Math.tanh(proof.proofScore / 2.0) : 0;
-
-    // Signal de synergie épistasique avec les autres gènes actifs
-    let epSum = 0;
-    for (let j = 0; j < K; j++) {
-      if (j === idx) continue;
-      const partnerKey = validKeys[j];
-      const partnerExcess = (initialWeights[partnerKey] - uniformShare) * K;
-      epSum += epistaticMatrix[idx][j] * Math.tanh(partnerExcess);
-    }
-    const epSynergy = Math.tanh(epSum / Math.sqrt(K));
-    epistaticSynergyByGene[k] = epSynergy;
-
-    // Fusion continue : analyses post-mortem + preuve BH + synergie épistasique
-    // Sur bruit pur sans analyses ni preuve, le signal est strictement 0
-    const rawComposite =
-      0.65 * baseAnalysisSignal +
-      0.20 * (hasProof ? proofDrive : Math.min(0, proofDrive)) +
-      0.15 * epSynergy;
-
-    postMortemSignalByGene[k] = Math.max(-1, Math.min(1, rawComposite));
-  });
-
-  // 7. Modulation continue de régime (STRICTEMENT GATED PAR PREUVE EMPIRIQUE BH)
-  const persistenceBias = Math.tanh(2.5 * (bounds.hurstExponent - 0.5));
-  const complexityBias = Math.tanh(2.0 * (normalizedEntropy - 0.5));
-
-  const getRegimeModulation = (k: AlgoKey): number => {
-    const proof = proofMap[k];
-    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-    if (!hasProof) return 0; // Zéro boost de régime sans preuve empirique !
-    const proofStrength = Math.tanh(proof.proofScore);
-    const arm = getChromosomalArm(k);
-    if (arm === 'TEMPORAL_CADENCE') return -0.5 * persistenceBias * proofStrength;
-    if (arm === 'SPECTRAL_FRACTAL') return 0.5 * complexityBias * proofStrength;
-    if (arm === 'STOCHASTIC_INFERENCE') return 0.35 * (1 - Math.abs(persistenceBias)) * proofStrength;
-    return 0.4 * persistenceBias * proofStrength;
-  };
-
-  // 8. Pas naturel Exponentiated Gradient sur le simplexe avec régularisation KL & Proof Guard
-  const totalEvidenceUnits =
-    R + combinedAutopsies.length + (genomicEvaluatedCount > 0 ? 1 : 0) + (dnaDriftReport ? 1 : 0);
-  const eta =
-    totalEvidenceUnits > 0
-      ? 1.0 / Math.sqrt(K * (1.0 + 1.0 / Math.sqrt(totalEvidenceUnits)))
-      : 1.0 / K;
-
-  const rawTargetWeights: Record<string, number> = {};
-  validKeys.forEach((k) => {
-    if (forcedZeroKeys.has(k)) {
-      rawTargetWeights[k] = 0;
-      return;
-    }
-    const baseW = initialWeights[k] > 0 ? initialWeights[k] : uniformShare;
-    const totalDrive = postMortemSignalByGene[k] + getRegimeModulation(k);
-    // Facteur de stabilité longitudinal : freine doucement les oscillations de poids instables
-    const stabWeight = 0.5 + 0.5 * (geneStability[k] ?? 1.0);
-    const exponent = Math.max(-2.5, Math.min(2.5, eta * totalDrive * stabWeight * Math.sqrt(K)));
-    rawTargetWeights[k] = baseW * Math.exp(exponent);
-  });
 
   // Projection rigoureuse sur le simplexe avec plafond Proof-Guard (aucun gène non prouvé > baseW)
   const candidateWeights = projectWeightsWithProofGuard(
@@ -1246,11 +1187,15 @@ export interface DnaGeneWalkForwardStep {
   stepIndex: number;
   drawDate: string;
   trainDrawsCount: number;
+  regime: string;
+  hurst: number;
   actualWinners: number[];
   top5Epigenome: number[];
   top5Baseline: number[];
   hitsTop5Epigenome: number;
   hitsTop5Baseline: number;
+  expectedHitsTop5Epigenome: number;
+  expectedHitsTop5Baseline: number;
   hitsTop10Epigenome: number;
   hitsTop10Baseline: number;
   brierEpigenome: number;
@@ -1258,6 +1203,27 @@ export interface DnaGeneWalkForwardStep {
   kendallTauShift: number;
   epistaticCoherenceScore: number;
   sequenceSignature: string;
+}
+
+export interface DnaRegimeConformalProfile {
+  regime: string;
+  stepsCount: number;
+  meanHurst: number;
+  meanBrierEpigenome: number;
+  meanBrierBaseline: number;
+  brierSkillScoreVsBaseline: number;
+  meanHitsTop5Epigenome: number;
+  conformalInterval: ConformalInterval;
+  eceBeforeCalibration: number;
+}
+
+export interface DnaConformalCalibrationSummary {
+  globalInterval: ConformalInterval;
+  adaptiveCoverage: number;
+  eceBeforeCalibration: number;
+  eceAfterLooCalibration: number;
+  calibrationDeltaEce: number;
+  regimeProfiles: DnaRegimeConformalProfile[];
 }
 
 export type DnaGeneWalkForwardVerdict =
@@ -1288,8 +1254,27 @@ export interface DnaGeneWalkForwardResult {
   brierSkillScoreVsH0: number;
   brierSkillScoreVsBaseline: number;
   epigenomeZScoreVsH0: number;
+  conformalSummary: DnaConformalCalibrationSummary;
   steps: DnaGeneWalkForwardStep[];
   summaryText: string;
+}
+
+function buildEmptyConformalSummary(): DnaConformalCalibrationSummary {
+  return {
+    globalInterval: {
+      center: 0,
+      lower: 0,
+      upper: 5,
+      quantile: 5,
+      coverage: 0,
+      sampleSize: 0,
+    },
+    adaptiveCoverage: 0,
+    eceBeforeCalibration: 0,
+    eceAfterLooCalibration: 0,
+    calibrationDeltaEce: 0,
+    regimeProfiles: [],
+  };
 }
 
 /**
@@ -1297,7 +1282,8 @@ export interface DnaGeneWalkForwardResult {
  *
  * Évalue séquentiellement sur une fenêtre glissante stricte `[i+1 .. N-1] -> [i]` si les poids
  * synthétisés par EpiGenome-SQ améliorent réellement le taux de succès Top-5 et le Brier Score
- * par rapport aux poids initiaux de référence et à l'hypothèse nulle H0 (tirage uniforme 5/90).
+ * par rapport aux poids initiaux de référence et à l'hypothèse nulle H0 (tirage uniforme 5/90),
+ * tout en calculant la calibration conforme distribution-free par régime stochastique.
  */
 export async function evaluateDnaGeneSequencerWalkForward(input: {
   drawName: string;
@@ -1355,6 +1341,7 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
       brierSkillScoreVsH0: 0,
       brierSkillScoreVsBaseline: 0,
       epigenomeZScoreVsH0: 0,
+      conformalSummary: buildEmptyConformalSummary(),
       steps: [],
       summaryText: `Historique isolé insuffisant pour ${drawName} (${pureHistory.length} tirages ; minimum 11 requis pour une évaluation walk-forward causale).`,
     };
@@ -1362,8 +1349,28 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
 
   const validKeys = Object.values(AlgoKey);
   const K = validKeys.length;
+  const keyToIdx = new Map<AlgoKey, number>();
+  validKeys.forEach((k, idx) => keyToIdx.set(k, idx));
+
   let runningWeights: AlgoWeights = { ...baselineWeights };
   const steps: DnaGeneWalkForwardStep[] = [];
+  const stepFolds: CalibrationPairs[] = [];
+  const globalP: number[] = [];
+  const globalY: number[] = [];
+  const globalResiduals: number[] = [];
+  const byRegime = new Map<
+    string,
+    {
+      stepsCount: number;
+      hurstSum: number;
+      brierEpiSum: number;
+      brierBaseSum: number;
+      hits5EpiSum: number;
+      residuals: number[];
+      p: number[];
+      y: number[];
+    }
+  >();
 
   // Parcours chronologique strict : du tirage hors-échantillon le plus ancien (targetSteps - 1) au plus récent (0)
   for (let i = targetSteps - 1; i >= 0; i--) {
@@ -1425,72 +1432,99 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
       }
     });
 
-    const epiScores = new Float64Array(91);
-    const baseScores = new Float64Array(91);
     const trainHasMachine = drawHasMachineNumbers(drawName, trainHistory);
+    const pluginScoresFlat = new Float64Array(K * 90);
+    const epiWeightsFlat = new Float64Array(K);
+    const baseWeightsFlat = new Float64Array(K);
 
-    for (let num = 1; num <= 90; num++) {
-      let sEpi = 0;
-      let sBase = 0;
-      for (let idx = 0; idx < algorithmRegistry.length; idx++) {
-        const plugin = algorithmRegistry[idx];
-        if (!validKeys.includes(plugin.key)) continue;
-        if (!trainHasMachine && plugin.key === AlgoKey.MACHINE_TRANSFER) continue;
+    validKeys.forEach((k, gIdx) => {
+      epiWeightsFlat[gIdx] = Number(epiWeights[k]) || 0;
+      baseWeightsFlat[gIdx] = Number(baselineWeights[k]) || 0;
+    });
+
+    for (let idx = 0; idx < algorithmRegistry.length; idx++) {
+      const plugin = algorithmRegistry[idx];
+      const gIdx = keyToIdx.get(plugin.key);
+      if (gIdx === undefined) continue;
+      if (!trainHasMachine && plugin.key === AlgoKey.MACHINE_TRANSFER) continue;
+      const rowOff = gIdx * 90;
+      for (let num = 1; num <= 90; num++) {
         try {
           const ev = plugin.evaluate(num, context);
-          const rawS =
+          pluginScoresFlat[rowOff + (num - 1)] =
             typeof ev.score === 'number' && Number.isFinite(ev.score)
               ? Math.max(0, Math.min(100, ev.score)) / 100.0
               : 0;
-          sEpi += rawS * (Number(epiWeights[plugin.key]) || 0);
-          sBase += rawS * (Number(baselineWeights[plugin.key]) || 0);
         } catch {
-          // Canal neutre en cas d'exception isolée
+          pluginScoresFlat[rowOff + (num - 1)] = 0;
         }
       }
-      epiScores[num] = sEpi;
-      baseScores[num] = sBase;
     }
 
-    const scoreAndEval = (scoresArr: Float64Array) => {
-      let sum = 0;
-      for (let n = 1; n <= 90; n++) sum += scoresArr[n];
-      let brier = 0;
-      const ranked: { num: number; score: number }[] = [];
-      for (let n = 1; n <= 90; n++) {
-        const prob = sum > 0 ? scoresArr[n] / sum : 1.0 / 90.0;
-        const pInc = Math.max(0, Math.min(1, 5.0 * prob));
-        const y = actualSet.has(n) ? 1.0 : 0.0;
-        brier += (pInc - y) * (pInc - y);
-        ranked.push({ num: n, score: scoresArr[n] });
-      }
-      ranked.sort((a, b) => b.score - a.score || a.num - b.num);
-      const top5 = ranked.slice(0, 5).map((r) => r.num);
-      const top10 = ranked.slice(0, 10).map((r) => r.num);
-      return {
-        top5,
-        hitsTop5: top5.filter((n) => actualSet.has(n)).length,
-        hitsTop10: top10.filter((n) => actualSet.has(n)).length,
-        brier: brier / 90.0,
-      };
-    };
+    const winnersU8 = Uint8Array.from(actualWinners);
+    const hpcStep = scoreEpigenomeWalkForwardStepHpc({
+      pluginScoresFlat,
+      epiWeights: epiWeightsFlat,
+      baseWeights: baseWeightsFlat,
+      numGenes: K,
+      actualWinners: winnersU8,
+    });
 
-    const epiRes = scoreAndEval(epiScores);
-    const baseRes = scoreAndEval(baseScores);
+    const stepRegime = stepSynthesis.regimeContext.regime || 'STANDARD';
+    const stepHurst = stepSynthesis.regimeContext.hurst;
+    const residualTop5 = Math.abs(hpcStep.hitsTop5Epi - hpcStep.expectedHitsTop5Epi);
+    globalResiduals.push(residualTop5);
+
+    const stepP = Array.from(hpcStep.epiIncProbs);
+    const stepY = Array.from({ length: 90 }, (_, idx) => (actualSet.has(idx + 1) ? 1 : 0));
+    stepFolds.push({ p: stepP, y: stepY });
+    for (let n = 0; n < 90; n++) {
+      globalP.push(stepP[n]);
+      globalY.push(stepY[n]);
+    }
+
+    let regAcc = byRegime.get(stepRegime);
+    if (!regAcc) {
+      regAcc = {
+        stepsCount: 0,
+        hurstSum: 0,
+        brierEpiSum: 0,
+        brierBaseSum: 0,
+        hits5EpiSum: 0,
+        residuals: [],
+        p: [],
+        y: [],
+      };
+      byRegime.set(stepRegime, regAcc);
+    }
+    regAcc.stepsCount += 1;
+    regAcc.hurstSum += stepHurst;
+    regAcc.brierEpiSum += hpcStep.brierEpi;
+    regAcc.brierBaseSum += hpcStep.brierBase;
+    regAcc.hits5EpiSum += hpcStep.hitsTop5Epi;
+    regAcc.residuals.push(residualTop5);
+    for (let n = 0; n < 90; n++) {
+      regAcc.p.push(stepP[n]);
+      regAcc.y.push(stepY[n]);
+    }
 
     steps.push({
       stepIndex: steps.length + 1,
       drawDate: targetDraw.date,
       trainDrawsCount: trainHistory.length,
+      regime: stepRegime,
+      hurst: stepHurst,
       actualWinners,
-      top5Epigenome: epiRes.top5,
-      top5Baseline: baseRes.top5,
-      hitsTop5Epigenome: epiRes.hitsTop5,
-      hitsTop5Baseline: baseRes.hitsTop5,
-      hitsTop10Epigenome: epiRes.hitsTop10,
-      hitsTop10Baseline: baseRes.hitsTop10,
-      brierEpigenome: parseFloat(epiRes.brier.toFixed(6)),
-      brierBaseline: parseFloat(baseRes.brier.toFixed(6)),
+      top5Epigenome: Array.from(hpcStep.top5Epi),
+      top5Baseline: Array.from(hpcStep.top5Base),
+      hitsTop5Epigenome: hpcStep.hitsTop5Epi,
+      hitsTop5Baseline: hpcStep.hitsTop5Base,
+      expectedHitsTop5Epigenome: parseFloat(hpcStep.expectedHitsTop5Epi.toFixed(4)),
+      expectedHitsTop5Baseline: parseFloat(hpcStep.expectedHitsTop5Base.toFixed(4)),
+      hitsTop10Epigenome: hpcStep.hitsTop10Epi,
+      hitsTop10Baseline: hpcStep.hitsTop10Base,
+      brierEpigenome: parseFloat(hpcStep.brierEpi.toFixed(6)),
+      brierBaseline: parseFloat(hpcStep.brierBase.toFixed(6)),
       kendallTauShift: stepSynthesis.sequenceMetrics.kendallTauShiftVsActive,
       epistaticCoherenceScore: stepSynthesis.sequenceMetrics.epistaticCoherenceScore,
       sequenceSignature: stepSynthesis.sequenceMetrics.sequenceSignature,
@@ -1523,6 +1557,7 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
       brierSkillScoreVsH0: 0,
       brierSkillScoreVsBaseline: 0,
       epigenomeZScoreVsH0: 0,
+      conformalSummary: buildEmptyConformalSummary(),
       steps: [],
       summaryText: `Aucun pas hors-échantillon exploitable pour ${drawName}.`,
     };
@@ -1556,6 +1591,65 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
   const empiricalSlotRate = sumHits5Epi / totalSlots;
   const slotStdErr = Math.sqrt((p0 * (1.0 - p0)) / totalSlots);
   const epigenomeZScoreVsH0 = slotStdErr > 0 ? (empiricalSlotRate - p0) / slotStdErr : 0;
+
+  // Calibration conforme distribution-free & ECE globale / par régime
+  const adaptiveCoverage = coverageFromSampleSize(N);
+  const globalInterval = conformalInterval(
+    globalResiduals,
+    meanHitsTop5Epigenome,
+    5,
+    adaptiveCoverage
+  );
+  const eceBeforeCalibration = computeEce({ p: globalP, y: globalY });
+  const eceAfterLooCalibration =
+    stepFolds.length >= 2 ? looEceAfterCalibration(stepFolds) : eceBeforeCalibration;
+  const calibrationDeltaEce = eceBeforeCalibration - eceAfterLooCalibration;
+
+  const regimeProfiles: DnaRegimeConformalProfile[] = Array.from(byRegime.entries())
+    .map(([regime, acc]) => {
+      const mBrierEpi = acc.brierEpiSum / acc.stepsCount;
+      const mBrierBase = acc.brierBaseSum / acc.stepsCount;
+      const mHits5 = acc.hits5EpiSum / acc.stepsCount;
+      const regCov = coverageFromSampleSize(acc.stepsCount);
+      const regInterval = conformalInterval(acc.residuals, mHits5, 5, regCov);
+      const regBss = mBrierBase > 0 ? 1.0 - mBrierEpi / mBrierBase : 0;
+      const regEce = computeEce({ p: acc.p, y: acc.y });
+      return {
+        regime,
+        stepsCount: acc.stepsCount,
+        meanHurst: parseFloat((acc.hurstSum / acc.stepsCount).toFixed(4)),
+        meanBrierEpigenome: parseFloat(mBrierEpi.toFixed(6)),
+        meanBrierBaseline: parseFloat(mBrierBase.toFixed(6)),
+        brierSkillScoreVsBaseline: parseFloat(regBss.toFixed(4)),
+        meanHitsTop5Epigenome: parseFloat(mHits5.toFixed(4)),
+        conformalInterval: {
+          center: parseFloat(regInterval.center.toFixed(4)),
+          lower: parseFloat(regInterval.lower.toFixed(4)),
+          upper: parseFloat(regInterval.upper.toFixed(4)),
+          quantile: parseFloat(regInterval.quantile.toFixed(4)),
+          coverage: parseFloat(regInterval.coverage.toFixed(4)),
+          sampleSize: regInterval.sampleSize,
+        },
+        eceBeforeCalibration: parseFloat(regEce.toFixed(6)),
+      };
+    })
+    .sort((a, b) => b.stepsCount - a.stepsCount || a.regime.localeCompare(b.regime));
+
+  const conformalSummary: DnaConformalCalibrationSummary = {
+    globalInterval: {
+      center: parseFloat(globalInterval.center.toFixed(4)),
+      lower: parseFloat(globalInterval.lower.toFixed(4)),
+      upper: parseFloat(globalInterval.upper.toFixed(4)),
+      quantile: parseFloat(globalInterval.quantile.toFixed(4)),
+      coverage: parseFloat(globalInterval.coverage.toFixed(4)),
+      sampleSize: globalInterval.sampleSize,
+    },
+    adaptiveCoverage: parseFloat(adaptiveCoverage.toFixed(4)),
+    eceBeforeCalibration: parseFloat(eceBeforeCalibration.toFixed(6)),
+    eceAfterLooCalibration: parseFloat(eceAfterLooCalibration.toFixed(6)),
+    calibrationDeltaEce: parseFloat(calibrationDeltaEce.toFixed(6)),
+    regimeProfiles,
+  };
 
   let verdict: DnaGeneWalkForwardVerdict = 'PARITY_WITH_BASELINE';
   if (
@@ -1594,8 +1688,10 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
     brierSkillScoreVsH0: parseFloat(brierSkillScoreVsH0.toFixed(4)),
     brierSkillScoreVsBaseline: parseFloat(brierSkillScoreVsBaseline.toFixed(4)),
     epigenomeZScoreVsH0: parseFloat(epigenomeZScoreVsH0.toFixed(3)),
+    conformalSummary,
     steps,
     summaryText,
   };
 }
+
 

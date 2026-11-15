@@ -30,6 +30,7 @@ pub mod validation;
 pub mod interdraw_matrix;
 pub mod gap_range;
 pub mod pattern_discovery;
+pub mod epigenome;
 
 // Noyau mathématique pur (crate `loto-core`, sans wasm-bindgen).
 pub use loto_core::{combinatorics, hyperparams, stacking};
@@ -103,6 +104,8 @@ pub fn abi_hash() -> String {
         "ClosedLoopAutopsyResultHpc",
         "CooccurrenceTensorResult",
         "CrossHawkesWasmResult",
+        "EpigenomeMatrixWasmResult",
+        "EpigenomeWalkForwardWasmResult",
         "GapRangeAnalysisWasmResult",
         "GapRangeWalkForwardWasmResult",
         "HybridRegimeOptimizationHpc",
@@ -127,6 +130,7 @@ pub fn abi_hash() -> String {
         "compute_cross_hawkes_kernel",
         "compute_cyclic_candidates_hpc",
         "compute_domino_advection_wasm",
+        "compute_epigenome_matrix_wasm",
         "compute_fft_power_spectrum",
         "compute_frequency_counts_wasm",
         "compute_gap_range_analysis_wasm",
@@ -138,6 +142,7 @@ pub fn abi_hash() -> String {
         "compute_markov_transition_matrix_wasm",
         "compute_pair_pmi_wasm",
         "compute_robust_hurst_wasm",
+        "compute_sequence_order_metrics_wasm",
         "compute_spatial_grid_hpc",
         "compute_topological_lyapunov_wasm",
         "dot_product_f64",
@@ -149,6 +154,7 @@ pub fn abi_hash() -> String {
         "run_monte_carlo_whatif_hpc",
         "run_native_prediction_pipeline",
         "run_simulation_hpc",
+        "score_epigenome_walk_forward_step_wasm",
         "solve_combinatorial_annealing_wasm",
         "stack_channel_weights_wasm",
         "tensor_score_wasm",

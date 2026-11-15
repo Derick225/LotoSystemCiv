@@ -10,6 +10,10 @@ import {
   evaluateAlgoEmpiricalProof,
 } from "../../services/prediction/predictionFacade";
 import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
+import {
+  evaluateDnaGeneSequencerWalkForward,
+  type DnaGeneWalkForwardResult,
+} from "../../services/prediction/dnaGeneSequenceService";
 import { LOTTERY_CONSTANTS } from "../../services/lotteryService";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
@@ -124,7 +128,9 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     averageHits: number;
     hitDistribution: { zero: number; one: number; two: number; three: number; four: number; five: number };
   } | null>(null);
-  
+  const [conformalWfResult, setConformalWfResult] = useState<DnaGeneWalkForwardResult | null>(null);
+  const [isRunningConformalWf, setIsRunningConformalWf] = useState(false);
+
   // Dedicated Draw-Specific History State
   const [localHistory, setLocalHistory] = useState<any[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState<boolean>(false);
@@ -181,6 +187,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   }, [drawName, localHistory, history]);
 
   useEffect(() => {
+    setConformalWfResult(null);
     let isMounted = true;
     const loadWeights = async () => {
       const weights = await getAlgoWeights(drawName);
@@ -344,6 +351,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             (result.relativeGainPct != null ? ` | Gain relatif : ${result.relativeGainPct >= 0 ? "+" : ""}${result.relativeGainPct.toFixed(2)}%` : " | Gain relatif : n/d")
         );
         audioEngine.play("success");
+        void handleRunConformalCalibration(effectiveHistory, normalizeWeights(result.bestWeights), true);
       }
     } catch (e: any) {
       console.error(e);
@@ -508,6 +516,61 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       showToast("Erreur lors du benchmark rapide", "error");
     } finally {
       setIsBenchmarking(false);
+    }
+  };
+
+  // Calibration Conforme & Intervalles par Régime (EpiGenome-SQ OOS)
+  const handleRunConformalCalibration = async (
+    historyOverride?: any[],
+    weightsOverride?: AlgoWeights,
+    silent = false
+  ) => {
+    const sourceHistory = historyOverride && historyOverride.length > 0 ? historyOverride : cleanHistory;
+    if (sourceHistory.length < 11) {
+      if (!silent) {
+        showToast(
+          `Minimum 11 tirages isolés requis pour la calibration conforme (${sourceHistory.length}/11).`,
+          "error"
+        );
+      }
+      return;
+    }
+
+    setIsRunningConformalWf(true);
+    if (!silent) {
+      audioEngine.play("scan");
+    }
+    try {
+      const { getLocalForensicReports } = await import("../../services/postPredictionAnalysisService");
+      const allReports = await getLocalForensicReports().catch(() => []);
+      const wfRes = await evaluateDnaGeneSequencerWalkForward({
+        drawName,
+        history: sourceHistory,
+        currentWeights: weightsOverride ?? liveWeights,
+        forensicReports: allReports,
+      });
+      setConformalWfResult(wfRes);
+      if (wfRes.status === "COMPLETED") {
+        addLog(
+          `Calibration conforme (${wfRes.evaluatedDrawsCount} tirages OOS) : ` +
+            `Intervalle Top-5 [${wfRes.conformalSummary.globalInterval.lower.toFixed(2)} ; ${wfRes.conformalSummary.globalInterval.upper.toFixed(2)}] ` +
+            `(cov. ${(wfRes.conformalSummary.adaptiveCoverage * 100).toFixed(1)}%) | ` +
+            `ECE ${wfRes.conformalSummary.eceBeforeCalibration.toFixed(4)} → ${wfRes.conformalSummary.eceAfterLooCalibration.toFixed(4)}`
+        );
+        if (!silent) {
+          audioEngine.play("success");
+          showToast("Calibration conforme par régime calculée.", "success");
+        }
+      } else if (!silent) {
+        showToast(wfRes.summaryText, "info");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur de calibration conforme";
+      if (!silent) {
+        showToast(msg, "error");
+      }
+    } finally {
+      setIsRunningConformalWf(false);
     }
   };
 
@@ -1133,6 +1196,150 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                 ) : (
                   <div className="text-center py-6 text-slate-500 text-xs font-bold uppercase tracking-widest">
                     n/d — aucun backtest mesuré pour l'instant. Lancez une évolution pour générer la matrice.
+                  </div>
+                )}
+              </div>
+
+              {/* Conformal Calibration & Regime Prediction Intervals */}
+              <div className="bg-slate-900/40 p-6 rounded-3xl border border-slate-800/80 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/70 pb-3">
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
+                      <ShieldCheck size={14} className="text-cyan-400" />
+                      Calibration Conforme & Intervalles par Régime (EpiGenome-SQ OOS)
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Couverture distribution-free 1 − 1/√(n+1) sur résidus hors-échantillon · calibration monotone PAVA + Hermite LOO
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => void handleRunConformalCalibration()}
+                    disabled={isRunningConformalWf || cleanHistory.length < 11}
+                    className="px-3.5 py-1.5 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw size={12} className={isRunningConformalWf ? "animate-spin" : ""} />
+                    {isRunningConformalWf
+                      ? "Évaluation..."
+                      : conformalWfResult
+                      ? "Actualiser"
+                      : "Évaluer calibration conforme"}
+                  </button>
+                </div>
+
+                {conformalWfResult && conformalWfResult.status === "COMPLETED" ? (
+                  <div className="space-y-4">
+                    {/* Métriques globales sans surcharge de pilules */}
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 py-2 border-b border-slate-800/60 tabular-nums">
+                      <div>
+                        <div className="text-[11px] text-slate-400">Intervalle Conforme Top-5</div>
+                        <div className="text-base font-bold text-white font-mono mt-0.5">
+                          [{conformalWfResult.conformalSummary.globalInterval.lower.toFixed(2)} ; {conformalWfResult.conformalSummary.globalInterval.upper.toFixed(2)}]
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Centre {conformalWfResult.conformalSummary.globalInterval.center.toFixed(2)} · Couv. {(conformalWfResult.conformalSummary.adaptiveCoverage * 100).toFixed(1)}%
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] text-slate-400">ECE Brute → LOO Calibrée</div>
+                        <div className="text-base font-bold text-cyan-300 font-mono mt-0.5">
+                          {conformalWfResult.conformalSummary.eceBeforeCalibration.toFixed(4)} → {conformalWfResult.conformalSummary.eceAfterLooCalibration.toFixed(4)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Gain ECE {conformalWfResult.conformalSummary.calibrationDeltaEce >= 0 ? "+" : ""}{(conformalWfResult.conformalSummary.calibrationDeltaEce * 100).toFixed(2)}%
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] text-slate-400">Brier OOS (EpiGenome / Base)</div>
+                        <div className="text-base font-bold text-white font-mono mt-0.5">
+                          {conformalWfResult.meanBrierEpigenome.toFixed(5)} / {conformalWfResult.meanBrierBaseline.toFixed(5)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          H0 = {conformalWfResult.h0BrierScore.toFixed(5)} · n = {conformalWfResult.evaluatedDrawsCount}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] text-slate-400">Brier Skill Score vs Baseline</div>
+                        <div
+                          className={`text-base font-bold font-mono mt-0.5 ${
+                            conformalWfResult.brierSkillScoreVsBaseline >= 0
+                              ? "text-emerald-400"
+                              : "text-amber-400"
+                          }`}
+                        >
+                          {conformalWfResult.brierSkillScoreVsBaseline >= 0 ? "+" : ""}
+                          {(conformalWfResult.brierSkillScoreVsBaseline * 100).toFixed(2)}%
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          BSS vs H0 : {conformalWfResult.brierSkillScoreVsH0 >= 0 ? "+" : ""}
+                          {(conformalWfResult.brierSkillScoreVsH0 * 100).toFixed(2)}%
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Ventilation par Régime Stochastique */}
+                    {conformalWfResult.conformalSummary.regimeProfiles.length > 0 && (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs tabular-nums">
+                          <thead>
+                            <tr className="border-b border-slate-800 text-[10px] uppercase tracking-wider text-slate-400">
+                              <th className="py-2 pr-3">Régime (Hurst moyen)</th>
+                              <th className="py-2 px-3 text-right">Pas OOS</th>
+                              <th className="py-2 px-3 text-right">Intervalle Top-5</th>
+                              <th className="py-2 px-3 text-right">Couverture</th>
+                              <th className="py-2 px-3 text-right">Brier Epi / Base</th>
+                              <th className="py-2 px-3 text-right">BSS</th>
+                              <th className="py-2 pl-3 text-right">ECE</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60 font-mono">
+                            {conformalWfResult.conformalSummary.regimeProfiles.map((prof) => (
+                              <tr key={prof.regime} className="hover:bg-slate-950/40">
+                                <td className="py-2 pr-3 font-sans font-semibold text-slate-200">
+                                  {prof.regime}
+                                  <span className="ml-2 text-[10px] font-mono font-normal text-slate-500">
+                                    H={prof.meanHurst.toFixed(3)}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-right text-slate-300">{prof.stepsCount}</td>
+                                <td className="py-2 px-3 text-right text-white">
+                                  [{prof.conformalInterval.lower.toFixed(2)} ; {prof.conformalInterval.upper.toFixed(2)}]
+                                </td>
+                                <td className="py-2 px-3 text-right text-cyan-300">
+                                  {(prof.conformalInterval.coverage * 100).toFixed(1)}%
+                                </td>
+                                <td className="py-2 px-3 text-right text-slate-300">
+                                  {prof.meanBrierEpigenome.toFixed(5)} / {prof.meanBrierBaseline.toFixed(5)}
+                                </td>
+                                <td
+                                  className={`py-2 px-3 text-right font-semibold ${
+                                    prof.brierSkillScoreVsBaseline >= 0
+                                      ? "text-emerald-400"
+                                      : "text-amber-400"
+                                  }`}
+                                >
+                                  {prof.brierSkillScoreVsBaseline >= 0 ? "+" : ""}
+                                  {(prof.brierSkillScoreVsBaseline * 100).toFixed(2)}%
+                                </td>
+                                <td className="py-2 pl-3 text-right text-slate-300">
+                                  {prof.eceBeforeCalibration.toFixed(4)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-5 text-slate-500 text-xs">
+                    {cleanHistory.length < 11
+                      ? `Minimum 11 tirages isolés requis sur ${drawName} (${cleanHistory.length}/11).`
+                      : conformalWfResult?.status === "INSUFFICIENT_DATA"
+                      ? conformalWfResult.summaryText
+                      : "Cliquez sur « Évaluer calibration conforme » ou lancez une évolution pour calculer les intervalles de prédiction et le Brier hors-échantillon par régime."}
                   </div>
                 )}
               </div>
