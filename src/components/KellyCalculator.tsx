@@ -25,11 +25,13 @@ import {
 import { getBankroll } from "../services/userPreferencesService";
 import { useToast } from "./ui/Toast";
 import { BankrollRiskMonitor } from "./BankrollRiskMonitor";
+import type { Prediction } from "../types";
 
 interface KellyCalculatorProps {
   confidence: number;
   drawName?: string;
   recommendedNumbers?: number[];
+  empiricalSkill?: Prediction["empiricalSkill"];
 }
 
 export type GameMode = "STANDARD" | "DOUBLE_CHANCE" | "DOUBLE_CHANCE_MACHINE";
@@ -46,6 +48,10 @@ export interface ContinuousKellyInput {
     entropy?: number;
     volatility?: number;
   };
+  /** Facteur de rétention empirique hors-échantillon λ ∈ [0, 1] (optionnel pour rétrocompatibilité). */
+  empiricalSkillShrinkage?: number;
+  /** Lift empirique mesuré vs espérance uniforme 5/90 (optionnel). */
+  empiricalLift?: number;
 }
 
 export interface ContinuousKellyResult {
@@ -55,8 +61,27 @@ export interface ContinuousKellyResult {
   edge: number;
   kellyFraction: number;
   regimeModulator: number;
+  nullProbability?: number;
+  breakEvenProbability?: number;
+  hasProvenEdge?: boolean;
   advice: string;
 }
+
+const exactBinomial = (n: number, k: number): number => {
+  if (k < 0 || k > n) return 0;
+  if (k === 0 || k === n) return 1;
+  const effK = Math.min(k, n - k);
+  let res = 1;
+  for (let i = 1; i <= effK; i++) {
+    res = (res * (n - effK + i)) / i;
+  }
+  return res;
+};
+
+export const computeHypergeometricNullProbability = (kOrder: number): number => {
+  const denom = exactBinomial(90, kOrder);
+  return denom > 0 ? exactBinomial(5, kOrder) / denom : 0;
+};
 
 const extractBetOrder = (betType: string): number => {
   if (betType === "1N") return 1;
@@ -78,6 +103,8 @@ export const computeContinuousKellyAllocation = ({
   selectedBetType,
   portfolioMode,
   regime,
+  empiricalSkillShrinkage,
+  empiricalLift,
 }: ContinuousKellyInput): ContinuousKellyResult => {
   const safeConf = Number.isFinite(confidence) ? Math.max(1, Math.min(99, confidence)) : 50;
   const safeBankroll = Number.isFinite(bankroll) && bankroll > 0 ? bankroll : 0;
@@ -100,22 +127,39 @@ export const computeContinuousKellyAllocation = ({
     odds = currentPayouts.TURBO[selectedBetType as keyof typeof currentPayouts.TURBO].odds;
   }
 
-  // 3. Ordre combinatoire k du pari et seuil critique d'information C_crit(k) = k / (k + 1)
+  // 3. Ordre combinatoire k du pari et seuil critique d'information C_crit(k) = k / (k + 1.5)
   const kOrder = extractBetOrder(selectedBetType);
-  // Bonus structurel continu du bassin de tirage (Double Chance couvre 10 boules sur 90 vs 5 sur 90)
   const poolCoverageRatio = gameMode === "DOUBLE_CHANCE" ? 10.0 / 90.0 : 5.0 / 90.0;
   const modeSynergy = Math.pow(poolCoverageRatio / (5.0 / 90.0), 1.0 / (kOrder + 1.0));
 
   const effectiveConf = Math.max(0.01, Math.min(0.99, (safeConf / 100.0) * regimeModulator * modeSynergy));
   const criticalThreshold = kOrder / (kOrder + 1.5);
 
-  // 4. Lift d'information continu par rapport au point mort p_fair = 1 / (b + 1)
+  // 4. Probabilité de gain :
+  // - Mode calibré par preuve empirique hors-échantillon (λ ∈ [0,1]) : interpolation continue
+  //   entre la loi hypergéométrique nulle exacte C(5,k)/C(90,k) et le signal amplifié par le lift réel.
+  //   Lorsque λ = 0 (aucune preuve OOS), p = pNull combinatoire exacte (espérance négative -> 0 FCFA).
   const pFair = 1.0 / (odds + 1.0);
+  const pNull = computeHypergeometricNullProbability(kOrder);
   const infoLift = Math.exp(
     (effectiveConf - criticalThreshold) / (Math.sqrt(kOrder) * (1.0 - criticalThreshold))
   );
 
-  const p = Math.max(1e-6, Math.min(0.99, pFair * infoLift));
+  let p: number;
+  let hasProvenEdge = true;
+  const useShrinkageCalibration = typeof empiricalSkillShrinkage === "number" && Number.isFinite(empiricalSkillShrinkage);
+
+  if (useShrinkageCalibration) {
+    const lambda = Math.max(0.0, Math.min(1.0, empiricalSkillShrinkage as number));
+    const safeLift = typeof empiricalLift === "number" && Number.isFinite(empiricalLift) ? Math.max(0.5, empiricalLift) : 1.0;
+    const combinatorialLift = Math.pow(safeLift, kOrder) * Math.max(1.0, infoLift);
+    const pModelWithEdge = Math.max(pNull, Math.min(0.99, pNull * combinatorialLift));
+    p = Math.max(1e-7, Math.min(0.99, (1.0 - lambda) * pNull + lambda * pModelWithEdge));
+    hasProvenEdge = lambda > 0.02 && p > pFair;
+  } else {
+    p = Math.max(1e-6, Math.min(0.99, pFair * infoLift));
+  }
+
   const q = 1.0 - p;
   const b = odds;
 
@@ -135,14 +179,21 @@ export const computeContinuousKellyAllocation = ({
   const f = rawKelly > 0 ? Math.min(dynamicMaxRisk, rawKelly * continuousKellyDamping) : 0;
 
   if (f <= 0 || safeBankroll <= 0) {
+    const zeroReason =
+      useShrinkageCalibration && !hasProvenEdge
+        ? `Aucun avantage statistique hors-échantillon démontré (λ=${((empiricalSkillShrinkage || 0) * 100).toFixed(0)}%, Edge ${(edge * 100).toFixed(1)}% vs seuil 5/90). Capital strictement préservé.`
+        : `Espérance négative (Edge ${(edge * 100).toFixed(1)}%). Conserver le capital ou réduire l'ordre combinatoire.`;
     return {
       betAmount: 0,
       percentage: 0,
-      winProbability: parseFloat((p * 100).toFixed(3)),
+      winProbability: parseFloat((p * 100).toFixed(4)),
       edge: parseFloat((edge * 100).toFixed(2)),
       kellyFraction: 0,
       regimeModulator: parseFloat(regimeModulator.toFixed(3)),
-      advice: `Espérance négative (Edge ${(edge * 100).toFixed(1)}%). Conserver le capital ou réduire l'ordre combinatoire.`,
+      nullProbability: parseFloat((pNull * 100).toFixed(4)),
+      breakEvenProbability: parseFloat((pFair * 100).toFixed(4)),
+      hasProvenEdge: false,
+      advice: zeroReason,
     };
   }
 
@@ -152,10 +203,13 @@ export const computeContinuousKellyAllocation = ({
   return {
     betAmount: Math.max(0, roundedAmount),
     percentage: parseFloat((f * 100).toFixed(2)),
-    winProbability: parseFloat((p * 100).toFixed(3)),
+    winProbability: parseFloat((p * 100).toFixed(4)),
     edge: parseFloat((edge * 100).toFixed(2)),
     kellyFraction: parseFloat(continuousKellyDamping.toFixed(3)),
     regimeModulator: parseFloat(regimeModulator.toFixed(3)),
+    nullProbability: parseFloat((pNull * 100).toFixed(4)),
+    breakEvenProbability: parseFloat((pFair * 100).toFixed(4)),
+    hasProvenEdge: true,
     advice: portfolioMode
       ? `Portefeuille 4 tickets • Edge +${(edge * 100).toFixed(1)}% (Kelly fractionnaire γ=${(continuousKellyDamping * 100).toFixed(0)}%)`
       : `Allocation Kelly continue • Edge +${(edge * 100).toFixed(1)}% (Amortissement γ=${(continuousKellyDamping * 100).toFixed(0)}%)`,
@@ -166,9 +220,16 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
   confidence,
   drawName = "NATIONAL",
   recommendedNumbers = [7, 77],
+  empiricalSkill: empiricalSkillProp,
 }) => {
   const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
+  const storeLastPrediction = useNexusStore((state) => state.lastPrediction);
+  const activeEmpiricalSkill =
+    empiricalSkillProp ??
+    (storeLastPrediction && (!storeLastPrediction.drawName || storeLastPrediction.drawName === drawName)
+      ? storeLastPrediction.empiricalSkill
+      : undefined);
   const [bankroll, setBankroll] = useState<number>(() => getBankroll());
   const [gameMode, setGameMode] = useState<GameMode>("STANDARD");
   const [selectedBetType, setSelectedBetType] = useState<string>("2N");
@@ -226,6 +287,8 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
       selectedBetType,
       portfolioMode,
       regime,
+      empiricalSkillShrinkage: activeEmpiricalSkill?.shrinkage,
+      empiricalLift: activeEmpiricalSkill?.liftVsUniform,
     });
 
     // Amortissement continu par le risque budgétaire quotidien f*_damped = f* * damping
@@ -239,11 +302,12 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
     setBet({
       ...baseResult,
       betAmount: dampedBetAmount,
-      advice: isDrifting
-        ? `Surdépense détectée (${budgetMetrics.todaySpending.toLocaleString()} / ${budgetMetrics.dailyAverage.toLocaleString()} F). Mise amortie de ${(budgetMetrics.continuousRiskActivation * 100).toFixed(0)}% pour protéger le capital.`
-        : baseResult.advice,
+      advice:
+        isDrifting && dampedBetAmount > 0
+          ? `Surdépense détectée (${budgetMetrics.todaySpending.toLocaleString()} / ${budgetMetrics.dailyAverage.toLocaleString()} F). Mise amortie de ${(budgetMetrics.continuousRiskActivation * 100).toFixed(0)}% pour protéger le capital.`
+          : baseResult.advice,
     });
-  }, [confidence, bankroll, selectedBetType, gameMode, portfolioMode, regime, budgetMetrics]);
+  }, [confidence, bankroll, selectedBetType, gameMode, portfolioMode, regime, budgetMetrics, activeEmpiricalSkill]);
 
   const handleRecordCurrentBet = () => {
     if (!bet || bet.betAmount <= 0) {
@@ -427,6 +491,25 @@ export const KellyCalculator: React.FC<KellyCalculatorProps> = ({
             <p className="text-xs text-emerald-100/70 mt-2 font-medium border-t border-white/5 pt-2">
               "{bet.advice}"
             </p>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[10px] font-mono text-emerald-200/75">
+              <span>H0 combinatoire: {bet.nullProbability ?? "n/d"}%</span>
+              <span>•</span>
+              <span>Seuil mort: {bet.breakEvenProbability ?? "n/d"}%</span>
+              {activeEmpiricalSkill && (
+                <>
+                  <span>•</span>
+                  <span
+                    className={
+                      activeEmpiricalSkill.shrinkage > 0.02
+                        ? "text-emerald-300 font-bold"
+                        : "text-amber-300 font-bold"
+                    }
+                  >
+                    λ OOS: {(activeEmpiricalSkill.shrinkage * 100).toFixed(0)}% (Lift ×{activeEmpiricalSkill.liftVsUniform.toFixed(2)})
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-white/10 flex items-center justify-between gap-2">

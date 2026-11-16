@@ -23,6 +23,11 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const nexusLoading = useNexusStore((state) => state.loading);
     const activeSubTab = useNexusStore((state) => state.activeSubTab);
+    const lastPrediction = useNexusStore((state) => state.lastPrediction);
+    const activePrediction =
+      lastPrediction && (!lastPrediction.drawName || lastPrediction.drawName === drawName)
+        ? lastPrediction
+        : null;
     const [mode, setMode] = useState<
       "single" | "comparative" | "walkforward" | "replay" | "whatif" | "kelly"
     >("single");
@@ -193,7 +198,12 @@ export const SimulationTab: React.FC<{ drawName: string }> = React.memo(
           {mode === "kelly" && (
             <div className="animate-slide-up space-y-8">
               <BankrollRiskMonitor currentDrawName={drawName} />
-              <KellyCalculator confidence={75} drawName={drawName} />
+              <KellyCalculator
+                confidence={activePrediction?.confidence ?? 50}
+                drawName={drawName}
+                recommendedNumbers={activePrediction?.suggestedNumbers}
+                empiricalSkill={activePrediction?.empiricalSkill}
+              />
             </div>
           )}
         </div>

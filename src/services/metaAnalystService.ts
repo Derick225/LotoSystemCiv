@@ -1,9 +1,8 @@
-import { PlatinumResult, DrawResult, SymbioticContext, PlatinumScenario, PlatinumAudit, Prediction, PlatinumUserOptions, ForensicReport } from '../types';
+import { PlatinumResult, DrawResult, SymbioticContext, PlatinumScenario, PlatinumAudit, Prediction, PlatinumUserOptions, ForensicReport, AlgoWeights } from '../types';
 import { get, set } from 'idb-keyval';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { getAlgoWeights } from './prediction/predictionFacade';
 import { generateMasterPredictionCore } from './prediction/predictionFacade';
-import { useNexusStore } from '../store/useNexusStore';
 import { extractFeatures } from './prediction/featureExtractor';
 import { getLocalForensicReports } from './postPredictionAnalysisService';
 import { calculateDnaSieveWeights } from './temporalAnalysisService';
@@ -161,7 +160,8 @@ export async function generatePlatinumPredictionCore(
     onProgress?: (progress: number, message: string) => void,
     temporalDepth?: number,
     useSpatioTemporalHawkes: boolean = true,
-    preloadedForensicReports?: ForensicReport[]
+    preloadedForensicReports?: ForensicReport[],
+    customWeights?: AlgoWeights
 ): Promise<PlatinumResult> {
     // 0. ISOLATION ABSOLUE DU TIRAGE
     const history = purifyHistoryForDraw(drawName, rawHistory);
@@ -176,10 +176,11 @@ export async function generatePlatinumPredictionCore(
         shannonEntropyFilter: userOptions?.shannonEntropyFilter ?? false,
     };
 
-    // 1. ACQUISITION DES SIGNAUX MULTI-TENSORIELS
-    const storeWeights = typeof window !== 'undefined' ? (useNexusStore?.getState()?.globalWeights) : undefined;
-    const weights = (storeWeights && Object.keys(storeWeights).length > 0) ? storeWeights : await getAlgoWeights(drawName);
-    const finalTemporalDepth = temporalDepth ?? (typeof window !== 'undefined' ? useNexusStore?.getState()?.temporalDepth : 100) ?? 100;
+    // 1. ACQUISITION DES SIGNAUX MULTI-TENSORIELS (sans couplage au store)
+    const weights = (customWeights && Object.keys(customWeights).length > 0)
+        ? customWeights
+        : await getAlgoWeights(drawName);
+    const finalTemporalDepth = temporalDepth ?? 100;
     
     const masterPred = _basePrediction || await generateMasterPredictionCore(
         drawName,
@@ -817,6 +818,12 @@ export const performPlatinumAudit = (
     };
 };
 
+export interface PlatinumRuntimeOptions {
+    temporalDepth?: number;
+    useSpatioTemporalHawkes?: boolean;
+    weights?: AlgoWeights;
+}
+
 export async function generatePlatinumPrediction(
     drawName: string,
     history: DrawResult[],
@@ -825,11 +832,14 @@ export async function generatePlatinumPrediction(
     symbioticContext?: SymbioticContext | null,
     _basePrediction?: Prediction,
     onProgress?: (progress: number, message: string) => void,
+    runtimeOptions?: PlatinumRuntimeOptions,
 ): Promise<PlatinumResult> {
+    const temporalDepth = runtimeOptions?.temporalDepth ?? 100;
+    const useSpatioTemporalHawkes = runtimeOptions?.useSpatioTemporalHawkes ?? true;
+    const customWeights = runtimeOptions?.weights;
+
     if (typeof Worker !== 'undefined') {
         try {
-            const temporalDepth = useNexusStore.getState().temporalDepth ?? 100;
-            const useSpatioTemporalHawkes = useNexusStore.getState().useSpatioTemporalHawkes ?? true;
             const forensicReports = await getLocalForensicReports() || [];
 
             return await new Promise<PlatinumResult>((resolve, reject) => {
@@ -875,6 +885,7 @@ export async function generatePlatinumPrediction(
                     _basePrediction,
                     temporalDepth,
                     useSpatioTemporalHawkes,
+                    weightsToUse: customWeights,
                     preloadedForensicReports: forensicReports
                 });
             });
@@ -890,6 +901,10 @@ export async function generatePlatinumPrediction(
         userOptions,
         symbioticContext,
         _basePrediction,
-        onProgress
+        onProgress,
+        temporalDepth,
+        useSpatioTemporalHawkes,
+        undefined,
+        customWeights
     );
 }

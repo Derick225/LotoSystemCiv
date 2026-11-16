@@ -19,6 +19,7 @@ import { InstallButton } from "../ui/InstallButton";
 import { SharedStateBadge } from "../ui/SharedStateBadge";
 import { useToast } from "../ui/Toast";
 import { MobileBottomNav } from "./MobileBottomNav";
+import { ConfirmModal } from "../ui/ConfirmModal";
 
 const CommandPalette = lazy(() =>
   import("../ui/CommandPalette").then((m) => ({ default: m.CommandPalette })),
@@ -55,12 +56,19 @@ export const AppShell: React.FC<AppShellProps> = ({
   const [showPalette, setShowPalette] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [confirmDialog, setConfirmDialog] = useState<null | "reset_infra" | "sw_update">(null);
 
   const isFocusMode = useNexusStore((state) => state.isFocusMode);
   const setFocusMode = useNexusStore((state) => state.setFocusMode);
   const { dbConnection, isSyncing } = useSyncStatus();
   const hpcStatus = useHpcEngineStatus();
   const { showToast } = useToast();
+
+  useEffect(() => {
+    const handleSwUpdate = () => setConfirmDialog("sw_update");
+    window.addEventListener("pwa-update-available", handleSwUpdate);
+    return () => window.removeEventListener("pwa-update-available", handleSwUpdate);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -196,13 +204,8 @@ export const AppShell: React.FC<AppShellProps> = ({
           {/* Reset Infra Button */}
           <button
             onClick={() => {
-              if (
-                confirm(
-                  "Réinitialiser l'Infrastructure ? Cela videra le cache local et rechargera Nexus.",
-                )
-              ) {
-                useNexusStore.getState().resetInfrastructure();
-              }
+              audioEngine.play("click");
+              setConfirmDialog("reset_infra");
             }}
             className="relative w-12 h-12 rounded-2xl flex items-center justify-center text-amber-400 bg-amber-500/5 border border-amber-500/20 hover:bg-amber-500/10 transition-all duration-300 group"
           >
@@ -397,6 +400,32 @@ export const AppShell: React.FC<AppShellProps> = ({
           }}
         />
       </Suspense>
+
+      <ConfirmModal
+        isOpen={confirmDialog !== null}
+        variant={confirmDialog === "sw_update" ? "info" : "warning"}
+        title={
+          confirmDialog === "sw_update"
+            ? "Mise à jour disponible"
+            : "Réinitialiser l'Infrastructure"
+        }
+        message={
+          confirmDialog === "sw_update"
+            ? "Une nouvelle version de l'application est prête. Recharger maintenant pour l'appliquer ?"
+            : "Réinitialiser l'Infrastructure ? Cela videra le cache local et rechargera Nexus."
+        }
+        confirmLabel={confirmDialog === "sw_update" ? "Recharger" : "Réinitialiser"}
+        onConfirm={() => {
+          const action = confirmDialog;
+          setConfirmDialog(null);
+          if (action === "sw_update") {
+            window.__applySwUpdate?.();
+          } else if (action === "reset_infra") {
+            useNexusStore.getState().resetInfrastructure();
+          }
+        }}
+        onCancel={() => setConfirmDialog(null)}
+      />
     </div>
   );
 };

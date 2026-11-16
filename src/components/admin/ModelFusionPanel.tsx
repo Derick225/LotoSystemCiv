@@ -22,6 +22,9 @@ import {
   Database,
   Eye,
   Info,
+  Scan,
+  Flame,
+  Microscope,
 } from "lucide-react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
@@ -35,6 +38,7 @@ import {
   saveAlgoWeights,
   normalizeWeights,
   getDefaultWeights,
+  applyForensicCalibration,
 } from "../../services/prediction/weightsManager";
 import {
   getModelDnaHistory,
@@ -52,6 +56,9 @@ import {
 } from "../../services/prediction/dnaAuditService";
 import { computeSubAlgorithmDivergenceCorrelations } from "../../services/prediction/algorithmDivergenceCorrelationService";
 import { calculateFusion } from "../../services/fusionService";
+import { runBayesianOptimization } from "../../services/bayesianOptimizer";
+import { runSimulatedAnnealingOptimization } from "../../services/simulatedAnnealingOptimizer";
+import { getLocalForensicReports } from "../../services/postPredictionAnalysisService";
 import { DnaPerformanceDriftPanel } from "./DnaPerformanceDriftPanel";
 import { ConfirmModal } from "../ui/ConfirmModal";
 
@@ -127,6 +134,8 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   const history = useNexusStore((state) => state.history);
   const spectral = useNexusStore((state) => state.spectral);
   const lastPrediction = useNexusStore((state) => state.lastPrediction);
+  const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const setTemporalDepth = useNexusStore((state) => state.setTemporalDepth);
 
   // Local State
   const [activeTab, setActiveTab] = useState<ActiveViewTab>(initialTab || "weights");
@@ -142,6 +151,17 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isOrthogonalizing, setIsOrthogonalizing] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+
+  // Auto-Tuning state (Bayesian TPE, Deterministic SA, Forensic Patch)
+  const [isCalibratingBayes, setIsCalibratingBayes] = useState(false);
+  const [bayesProgress, setBayesProgress] = useState<{ progress: number; score: number } | null>(null);
+  const [isAnnealing, setIsAnnealing] = useState(false);
+  const [annealingProgress, setAnnealingProgress] = useState<{
+    progress: number;
+    bestScore: number;
+    currentScore: number;
+    temperature: number;
+  } | null>(null);
 
   // Search & Filter for Weights
   const [searchQuery, setSearchQuery] = useState("");
@@ -332,6 +352,187 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
       showToast("Erreur lors de l'analyse de co-dérive", "error");
     } finally {
       setIsOrthogonalizing(false);
+    }
+  };
+
+  // Mélange continu (aucune porte binaire) : w = base + α·(cible − base), α ∈ [0,1].
+  const blendWeightMatrices = (
+    base: AlgoWeights,
+    target: AlgoWeights,
+    alpha: number
+  ): AlgoWeights => {
+    const keys = new Set([...Object.keys(base), ...Object.keys(target)]);
+    const merged: Record<string, number> = {};
+    keys.forEach((k) => {
+      const b = Number((base as Record<string, number>)[k]) || 0;
+      const t = Number((target as Record<string, number>)[k]) || 0;
+      merged[k] = b + alpha * (t - b);
+    });
+    return normalizeWeights(merged as AlgoWeights);
+  };
+
+  // α = tanh(ΔE / |E_référence|) : dérive du gain d'énergie réellement mesuré.
+  const computeTrustAlpha = (finalScore: number, improvement: number): number => {
+    const baselineEnergy = improvement > 0 ? finalScore - improvement : finalScore;
+    if (!Number.isFinite(baselineEnergy) || Math.abs(baselineEnergy) < Number.EPSILON) {
+      return 0;
+    }
+    return Math.max(0, Math.tanh(improvement / Math.abs(baselineEnergy)));
+  };
+
+  const handleBayesianOptimization = async () => {
+    audioEngine.play("scan");
+    if (history.length < 25) {
+      audioEngine.play("error");
+      showToast("Historique insuffisant pour l'optimisation Bayésienne (Min 25).", "error");
+      return;
+    }
+    setIsCalibratingBayes(true);
+    setBayesProgress({ progress: 0, score: 0 });
+    showToast("Calibration Bayésienne en cours (TPE)...", "info");
+    try {
+      const result = await runBayesianOptimization(
+        selectedDrawName,
+        { initialSamples: 10, bayesianIterations: 20 },
+        (progress, best) => setBayesProgress({ progress, score: best })
+      );
+      const alpha = computeTrustAlpha(result.finalScore, result.improvement);
+      if (alpha > 0) {
+        const appliedTarget = blendWeightMatrices(
+          normalizeWeights(weights),
+          result.bestWeights,
+          alpha
+        );
+        const optResult = await applyOptimizedWeights({
+          drawName: selectedDrawName,
+          weights: appliedTarget,
+          origin: "HYPERPARAM_TUNER",
+          causalAuditTrail: [
+            `Optimisation Bayésienne (TPE) — Confiance α=${(alpha * 100).toFixed(1)}%`,
+            `Gain d'énergie objective mesuré: ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)}`,
+          ],
+          reason: `Optimisation Bayésienne TPE (ΔÉnergie ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)}, α=${(alpha * 100).toFixed(1)}%)`,
+          history,
+        });
+        setWeights(optResult.appliedWeights);
+        if (selectedDrawName === activeDrawName) {
+          await refreshData(selectedDrawName, true);
+        }
+        const historyList = await getModelDnaHistory(selectedDrawName, 30);
+        setDnaHistory(historyList);
+        setIsDirty(false);
+        audioEngine.play("success");
+        showToast(
+          optResult.wasDamped
+            ? `Optimisation Bayésienne appliquée avec amortissement (Δ=${(optResult.driftDelta * 100).toFixed(1)}%, α=${(alpha * 100).toFixed(1)}%).`
+            : `Optimisation Bayésienne appliquée (α=${(alpha * 100).toFixed(1)}%, ΔÉnergie +${result.improvement.toFixed(2)}).`,
+          optResult.wasDamped ? "warning" : "success"
+        );
+      } else {
+        audioEngine.play("error");
+        showToast("Aucun gain d'énergie mesuré par TPE : matrice inchangée.", "info");
+      }
+    } catch (e: unknown) {
+      audioEngine.play("error");
+      showToast((e instanceof Error ? e.message : String(e)) || "Erreur lors de l'optimisation.", "error");
+    } finally {
+      setIsCalibratingBayes(false);
+      setBayesProgress(null);
+    }
+  };
+
+  const handleSimulatedAnnealing = async () => {
+    if (!selectedDrawName) return;
+    if (history.length < 5) {
+      showToast("Historique de tirages insuffisant (min 5 requis).", "error");
+      return;
+    }
+    setIsAnnealing(true);
+    setAnnealingProgress({ progress: 0, bestScore: 0, currentScore: 0, temperature: 0 });
+    showToast("Optimisation par Recuit Simulé déterministe lancée...", "info");
+    try {
+      const result = await runSimulatedAnnealingOptimization(
+        selectedDrawName,
+        weights,
+        { historyDepth: temporalDepth },
+        (prog) => setAnnealingProgress(prog)
+      );
+      const alpha = computeTrustAlpha(result.finalScore, result.improvement);
+      if (alpha > 0) {
+        const appliedTarget = blendWeightMatrices(
+          normalizeWeights(weights),
+          result.bestWeights,
+          alpha
+        );
+        const optResult = await applyOptimizedWeights({
+          drawName: selectedDrawName,
+          weights: appliedTarget,
+          origin: "HYPERPARAM_TUNER",
+          causalAuditTrail: [
+            `Recuit Simulé déterministe — Confiance α=${(alpha * 100).toFixed(1)}%`,
+            `Gain d'énergie objective mesuré: ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)}`,
+          ],
+          reason: `Recuit Simulé (ΔÉnergie ${result.improvement >= 0 ? "+" : ""}${result.improvement.toFixed(2)}, α=${(alpha * 100).toFixed(1)}%)`,
+          history,
+        });
+        setWeights(optResult.appliedWeights);
+        if (selectedDrawName === activeDrawName) {
+          await refreshData(selectedDrawName, true);
+        }
+        const historyList = await getModelDnaHistory(selectedDrawName, 30);
+        setDnaHistory(historyList);
+        setIsDirty(false);
+        audioEngine.play("success");
+        showToast(
+          optResult.wasDamped
+            ? `Recuit Simulé appliqué avec amortissement (Δ=${(optResult.driftDelta * 100).toFixed(1)}%, α=${(alpha * 100).toFixed(1)}%).`
+            : `Recuit Simulé appliqué (α=${(alpha * 100).toFixed(1)}%, ΔÉnergie +${result.improvement.toFixed(2)}).`,
+          optResult.wasDamped ? "warning" : "success"
+        );
+      } else {
+        audioEngine.play("error");
+        showToast("Aucun gain d'énergie mesuré par le recuit : matrice inchangée.", "info");
+      }
+    } catch (e: unknown) {
+      audioEngine.play("error");
+      showToast((e instanceof Error ? e.message : String(e)) || "Erreur lors du recuit.", "error");
+    } finally {
+      setIsAnnealing(false);
+      setAnnealingProgress(null);
+    }
+  };
+
+  const handleApplyForensicPatches = async () => {
+    audioEngine.play("scan");
+    try {
+      const reports = await getLocalForensicReports();
+      const insights: Record<string, { action: string; improvement: number }> = {};
+      (Array.isArray(reports) ? reports : []).slice(0, 5).forEach((r) => {
+        if (!r || !Array.isArray(r.counterfactuals)) return;
+        r.counterfactuals.forEach((cf) => {
+          if (cf && cf.algo && cf.action && cf.rankImprovement !== undefined) {
+            if (!insights[cf.algo] || cf.rankImprovement > (insights[cf.algo].improvement || 0)) {
+              insights[cf.algo] = { action: cf.action, improvement: cf.rankImprovement };
+            }
+          }
+        });
+      });
+      const suggestions = Object.entries(insights).map(([algo, data]) => ({
+        algo,
+        action: data.action,
+        improvement: data.improvement,
+      }));
+      if (suggestions.length === 0) {
+        showToast("Aucun patch Forensic disponible pour le moment.", "info");
+        return;
+      }
+      const calibrated = applyForensicCalibration(weights, suggestions, history.length);
+      setWeights(calibrated);
+      setIsDirty(true);
+      audioEngine.play("success");
+      showToast(`Patch Forensic appliqué (${suggestions.length} facteurs) — enregistrez pour persister.`, "success");
+    } catch (e) {
+      showToast("Erreur lors du chargement des correctifs Forensic", "error");
     }
   };
 
@@ -614,7 +815,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
 
         {/* Global Action Toolbar */}
         <div className="mt-6 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleAutoNormalize}
               className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all flex items-center gap-1.5 cursor-pointer border border-slate-700"
@@ -634,6 +835,45 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                 className={`text-purple-400 ${isOrthogonalizing ? "animate-spin" : ""}`}
               />
               {isOrthogonalizing ? "Analyse..." : "Dé-Redondance"}
+            </button>
+            <button
+              onClick={handleApplyForensicPatches}
+              disabled={isCalibratingBayes || isAnnealing}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
+              title="Appliquer les suggestions contre-factuelles issues des autopsies Forensic"
+            >
+              <Microscope size={13} className="text-rose-400" />
+              Patch Forensic
+            </button>
+            <button
+              onClick={handleBayesianOptimization}
+              disabled={isCalibratingBayes || isAnnealing}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-teal-600/90 hover:bg-teal-500 text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+              title="Optimisation Bayésienne TPE déterministe"
+            >
+              {isCalibratingBayes && bayesProgress !== null ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Scan size={13} />
+              )}
+              {isCalibratingBayes && bayesProgress !== null
+                ? `TPE ${bayesProgress.progress}%`
+                : "Bayes-Tune"}
+            </button>
+            <button
+              onClick={handleSimulatedAnnealing}
+              disabled={isCalibratingBayes || isAnnealing}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-600/90 hover:bg-amber-500 text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+              title="Optimisation par Recuit Simulé déterministe"
+            >
+              {isAnnealing && annealingProgress !== null ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Flame size={13} />
+              )}
+              {isAnnealing && annealingProgress !== null
+                ? `SA ${annealingProgress.progress}%`
+                : "SA-Tune"}
             </button>
             <button
               onClick={handleResetToCanonical}
@@ -656,26 +896,80 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
             </button>
           </div>
 
-          {/* Quick Snapshot Creator */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <input
-              type="text"
-              placeholder="Tag snapshot (ex: Calib_Prod_v2)"
-              value={snapshotTag}
-              onChange={(e) => setSnapshotTag(e.target.value)}
-              className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-48"
-            />
-            <button
-              onClick={handleCreateSnapshot}
-              disabled={isTakingSnapshot || !snapshotTag.trim() || !auditReport}
-              title={!auditReport ? "Audit ADN requis pour mesurer le score de précision" : undefined}
-              className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer shadow-md"
-            >
-              <Dna size={13} />
-              Créer Snapshot ADN
-            </button>
+          <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+            {/* Profondeur Mémoire (temporalDepth) */}
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl">
+              <span className="text-[10px] font-black uppercase text-slate-400 whitespace-nowrap">
+                Mémoire
+              </span>
+              <input
+                type="range"
+                min="10"
+                max="500"
+                step="10"
+                value={temporalDepth || 100}
+                onChange={(e) => setTemporalDepth(Number(e.target.value))}
+                className="w-20 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                title="Profondeur mémoire utilisée par l'analyse et le recuit"
+              />
+              <span className="text-[10px] font-mono text-indigo-400 whitespace-nowrap">
+                {temporalDepth}
+              </span>
+            </div>
+
+            {/* Quick Snapshot Creator */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <input
+                type="text"
+                placeholder="Tag snapshot (ex: Calib_Prod_v2)"
+                value={snapshotTag}
+                onChange={(e) => setSnapshotTag(e.target.value)}
+                className="px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-full sm:w-44"
+              />
+              <button
+                onClick={handleCreateSnapshot}
+                disabled={isTakingSnapshot || !snapshotTag.trim() || !auditReport}
+                title={!auditReport ? "Audit ADN requis pour mesurer le score de précision" : undefined}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer shadow-md"
+              >
+                <Dna size={13} />
+                Créer Snapshot ADN
+              </button>
+            </div>
           </div>
         </div>
+
+        {bayesProgress && (
+          <div className="mt-4 pt-3 border-t border-slate-800/60">
+            <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-teal-400 mb-1.5">
+              <span>Optimisation Bayésienne TPE</span>
+              <span>Énergie interne: {bayesProgress.score.toFixed(1)}</span>
+            </div>
+            <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-teal-500 transition-all duration-300"
+                style={{ width: `${bayesProgress.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {annealingProgress && (
+          <div className="mt-4 pt-3 border-t border-slate-800/60">
+            <div className="flex justify-between text-[10px] uppercase font-black tracking-widest text-amber-400 mb-1.5">
+              <span>Recuit Simulé Déterministe</span>
+              <span>
+                Temp: {annealingProgress.temperature.toFixed(4)} | Énergie: {annealingProgress.bestScore.toFixed(1)}
+              </span>
+            </div>
+            <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all duration-300"
+                style={{ width: `${annealingProgress.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 2. SUB-TABS NAVIGATION */}

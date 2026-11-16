@@ -1,5 +1,4 @@
 import { DrawResult, AntColonyPath, OracleVocalContext } from '../types';
-import { useNexusStore } from '../store/useNexusStore';
 import { LCG } from '../utils/mathUtils';
 import { calculateFractalIndex, calculateShannonEntropy } from './mathService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
@@ -39,13 +38,15 @@ const shuffleArray = <T>(arr: T[], prng: LCG): T[] => {
 export const runAntColonyOptimization = async (
     history: DrawResult[], 
     vocalContext?: OracleVocalContext | null,
-    timeoutMs: number = DEFAULT_TIMEOUT
+    timeoutMs: number = DEFAULT_TIMEOUT,
+    drawName?: string
 ): Promise<AntColonyPath[]> => {
     // Besoin d'un minimum d'historique pour construire le graphe heuristique
     if (!history) return [];
     
-    const activeDraw = useNexusStore.getState().drawName || "Reveil";
-    const purifiedHistory = purifyHistoryForDraw(activeDraw, history);
+    const inferredDraw = drawName || history.find((d) => d?.drawName || d?.draw_name)?.drawName || history.find((d) => d?.draw_name)?.draw_name || "";
+    const activeDraw = inferredDraw || "__isolated_aco__";
+    const purifiedHistory = inferredDraw ? purifyHistoryForDraw(inferredDraw, history) : history;
     
     if (purifiedHistory.length < 15) return fallbackHeuristic(purifiedHistory);
 
@@ -104,7 +105,7 @@ export const runAntColonyOptimization = async (
                 isOracleBiased: isOracle,
                 confidence
             };
-            const variations = generateVariations(hpcRes.bestNumbers, purifiedHistory, vocalContext, confidence);
+            const variations = generateVariations(hpcRes.bestNumbers, purifiedHistory, vocalContext, confidence, activeDraw);
             return [optimizedBestPath, ...variations];
         } catch {
             return fallbackHeuristic(purifiedHistory);
@@ -138,7 +139,7 @@ export const runAntColonyOptimization = async (
                         pheromoneDensity: confidence / 100.0
                     };
 
-                    const variations = generateVariations(bestPath.numbers, purifiedHistory, vocalContext, confidence);
+                    const variations = generateVariations(bestPath.numbers, purifiedHistory, vocalContext, confidence, activeDraw);
                     
                     resolve([optimizedBestPath, ...variations]);
                 } else {
@@ -178,7 +179,8 @@ const generateVariations = (
     base: number[], 
     history: DrawResult[],
     vocalContext?: OracleVocalContext | null,
-    baseConfidence: number = 80
+    baseConfidence: number = 80,
+    drawName?: string
 ): AntColonyPath[] => {
     const variations: AntColonyPath[] = [];
     const oracleTargets = vocalContext?.targets || [];
@@ -188,7 +190,7 @@ const generateVariations = (
     // ZÉRO HASARD (AGENTS.md) : aucun repli sur Date.now() qui rendrait le seed
     // (et donc les variations ACO) non reproductible. À historique vide, le seed
     // reste une fonction déterministe du chemin de base et du tirage actif.
-    const activeDraw = useNexusStore.getState().drawName || "Reveil";
+    const activeDraw = drawName || history.find((d) => d?.drawName || d?.draw_name)?.drawName || history.find((d) => d?.draw_name)?.draw_name || "__isolated_aco__";
     const timestamp = history.length > 0
         ? getStringHash(history[0].date)
         : getStringHash(`${base.join('-')}#${activeDraw}`);

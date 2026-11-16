@@ -150,6 +150,7 @@ export function computeRobustHurstHpc(signal: number[] | Float64Array): number {
     try {
       return wasmModuleInstance.compute_robust_hurst_wasm(signalArray);
     } catch (e) {
+      recordWasmFallback('compute_robust_hurst_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Hurst, passage au fallback :', e);
     }
   }
@@ -195,6 +196,7 @@ export function computeFftPowerSpectrumHpc(signal: number[] | Float64Array): Flo
       const psd = wasmModuleInstance.compute_fft_power_spectrum(signalArray);
       return new Float64Array(psd);
     } catch (e) {
+      recordWasmFallback('compute_fft_power_spectrum', e);
       console.error('[LOTO-ENGINE] Erreur WASM FFT, passage au fallback :', e);
     }
   }
@@ -238,6 +240,7 @@ export function computeCrossHawkesKernelHpc(params: {
         totalEnergy: res.total_energy,
       };
     } catch (e) {
+      recordWasmFallback('compute_cross_hawkes_kernel', e);
       console.error('[LOTO-ENGINE] Erreur WASM Hawkes, passage au fallback :', e);
     }
   }
@@ -282,6 +285,7 @@ export function computeMarkovTransitionHpc(
       );
       return new Float64Array(mat);
     } catch (e) {
+      recordWasmFallback('compute_markov_transition_matrix_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Markov, passage au fallback :', e);
     }
   }
@@ -343,6 +347,7 @@ export function solveCombinatorialAnnealingHpc(params: {
         iterations_run: res.iterations_run,
       };
     } catch (e) {
+      recordWasmFallback('solve_combinatorial_annealing_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Recuit Simulé, passage au fallback :', e);
     }
   }
@@ -386,6 +391,7 @@ export function computeTopologicalLyapunovHpc(
         topological_entropy: res.topological_entropy,
       };
     } catch (e) {
+      recordWasmFallback('compute_topological_lyapunov_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Lyapunov, passage au fallback :', e);
     }
   }
@@ -434,6 +440,7 @@ export function computeCooccurrenceTensorHpc(
         totalPairsEvaluated: res.total_pairs_evaluated,
       };
     } catch (e) {
+      recordWasmFallback('compute_cooccurrence_tensor_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Cooccurrence Tensor, passage au fallback :', e);
     }
   }
@@ -552,6 +559,7 @@ export function computeDominoAdvectionHpc(
         kineticDissipationRate: res.kinetic_dissipation_rate,
       };
     } catch (e) {
+      recordWasmFallback('compute_domino_advection_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Domino Advection, passage au fallback :', e);
     }
   }
@@ -623,6 +631,7 @@ export function computeButterflyLyapunovHpc(
         isChaotic: res.is_chaotic,
       };
     } catch (e) {
+      recordWasmFallback('compute_butterfly_lyapunov_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Butterfly Lyapunov, passage au fallback :', e);
     }
   }
@@ -687,6 +696,7 @@ export function computeGraphHeatKernelHpc(
         traceEnergy: res.trace_energy,
       };
     } catch (e) {
+      recordWasmFallback('compute_graph_heat_kernel_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Graph Heat Kernel, passage au fallback :', e);
     }
   }
@@ -816,6 +826,7 @@ export function computeChainReactionResonanceHpc(
         percolationDensity: res.percolation_density,
       };
     } catch (e) {
+      recordWasmFallback('compute_chain_reaction_resonance_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Chain Reaction, passage au fallback :', e);
     }
   }
@@ -1107,6 +1118,7 @@ export function runAntColonyOptimizationHpc(params: {
         generationsRun: res.generations_run,
       };
     } catch (e) {
+      recordWasmFallback('run_aco_swarm_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM ACO, passage au fallback vectorisé :', e);
     }
   }
@@ -1363,6 +1375,7 @@ export function computeHybridRegimeWeightsHpc(params: {
         stabilityIndex: res.stability_index,
       };
     } catch (e) {
+      recordWasmFallback('compute_hybrid_regime_weights_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Hybrid Regime Weights, passage au fallback :', e);
     }
   }
@@ -1440,6 +1453,7 @@ export function computeFrequencyCountsHpc(
       const res = wasmModuleInstance.compute_frequency_counts_wasm(flat, numDraws, cols);
       return new Int32Array(res);
     } catch (e) {
+      recordWasmFallback('compute_frequency_counts_wasm', e);
       console.error('[LOTO-ENGINE] Erreur WASM Frequency Counts, passage au fallback :', e);
     }
   }
@@ -1597,6 +1611,7 @@ export function appendSingleDrawToStore(
         new Uint8Array(machine.slice(0, 5))
       );
     } catch (e) {
+      recordWasmFallback('append_single_draw', e);
       console.warn('[LOTO-ENGINE] Erreur appendSingleDraw WASM, passage au fallback :', e);
     }
   }
@@ -1660,6 +1675,7 @@ export function getStoreFrequencies(drawName: string): Int32Array {
       const freqs = store.get_frequencies(normName);
       if (freqs && freqs.length > 0) return new Int32Array(freqs);
     } catch (e) {
+      recordWasmFallback('get_frequencies', e);
       console.warn('[LOTO-ENGINE] Erreur get_frequencies WASM :', e);
     }
   }
@@ -1679,6 +1695,7 @@ export function getStoreCurrentGaps(drawName: string): Int32Array {
       const gaps = store.get_current_gaps(normName);
       if (gaps && gaps.length > 0) return new Int32Array(gaps);
     } catch (e) {
+      recordWasmFallback('get_current_gaps', e);
       console.warn('[LOTO-ENGINE] Erreur get_current_gaps WASM :', e);
     }
   }
@@ -3019,6 +3036,7 @@ export function computeBivariateCrossDyadsHpc(
         };
       }
     } catch (e) {
+      recordWasmFallback('compute_bivariate_dyads_wasm', e);
       console.warn('[LOTO-ENGINE] Erreur WASM compute_bivariate_dyads, passage au fallback :', e);
     }
   }
@@ -3219,6 +3237,7 @@ export function runMonteCarloWhatIfHpc(params: {
       }
       return stats;
     } catch (e) {
+      recordWasmFallback('run_what_if_monte_carlo_hpc', e);
       console.warn('[LOTO-ENGINE] WASM Monte Carlo What-If failed, using vectorized fallback :', e);
     }
   }
@@ -3315,6 +3334,7 @@ export function computeKlDivergenceHpc(
       const kl = wasmModuleInstance.compute_kl_divergence_hpc(pBaseF64, pSimF64);
       return parseFloat(Math.max(0, kl).toFixed(5));
     } catch (e) {
+      recordWasmFallback('compute_kl_divergence_hpc', e);
       console.warn('[LOTO-ENGINE] WASM KL Divergence failed, using fallback :', e);
     }
   }
@@ -3385,6 +3405,7 @@ export function runFinancialSimulationHpc(params: {
       }
       return output;
     } catch (e) {
+      recordWasmFallback('run_simulation_hpc', e);
       console.warn('[LOTO-ENGINE] WASM financial simulation failed, using fallback :', e);
     }
   }
@@ -3534,6 +3555,7 @@ export function computeClosedLoopAutopsyHpc(params: {
       }
       return out;
     } catch (e) {
+      recordWasmFallback('compute_closed_loop_autopsy_wasm', e);
       console.warn('[LOTO-ENGINE] WASM Closed Loop Autopsy failed, using fallback :', e);
     }
   }
@@ -3739,6 +3761,7 @@ export function computeSpatialGridHpc(
       }
       return out;
     } catch (e) {
+      recordWasmFallback('compute_spatial_grid_hpc', e);
       console.warn('[LOTO-ENGINE] WASM compute_spatial_grid_hpc error, using fallback :', e);
     }
   }
@@ -4891,6 +4914,7 @@ export function computeGapRangeAnalysisHpc(
       if (typeof res.free === 'function') res.free();
       return out;
     } catch (e) {
+      recordWasmFallback('compute_gap_range_analysis_wasm', e);
       console.warn('[LOTO-ENGINE] WASM compute_gap_range_analysis_wasm error, using fallback :', e);
     }
   }
@@ -4934,6 +4958,7 @@ export function computeGapRangeWalkForwardHpc(
       if (typeof res.free === 'function') res.free();
       return out;
     } catch (e) {
+      recordWasmFallback('compute_gap_range_walk_forward_wasm', e);
       console.warn('[LOTO-ENGINE] WASM compute_gap_range_walk_forward_wasm error, using fallback :', e);
     }
   }
@@ -5123,6 +5148,7 @@ export function mineCyclePatternsHpc(
       if (typeof res.free === 'function') res.free();
       return out;
     } catch (e) {
+      recordWasmFallback('mine_cycle_patterns_wasm', e);
       console.warn('[LOTO-ENGINE] WASM mine_cycle_patterns_wasm error, using fallback :', e);
     }
   }
@@ -5595,6 +5621,7 @@ export function computeEpigenomeMatrixHpc(
         engine: 'RUST_WASM',
       };
     } catch (e) {
+      recordWasmFallback('compute_epigenome_matrix_wasm', e);
       console.warn('[WASM] Fallback compute_epigenome_matrix_wasm :', e);
     } finally {
       if (res && typeof res.free === 'function') {
@@ -5782,6 +5809,7 @@ export function computeSequenceOrderMetricsHpc(
         };
       }
     } catch (e) {
+      recordWasmFallback('compute_sequence_order_metrics_wasm', e);
       console.warn('[WASM] Fallback compute_sequence_order_metrics_wasm :', e);
     }
   }
@@ -5855,6 +5883,7 @@ export function scoreEpigenomeWalkForwardStepHpc(
         engine: 'RUST_WASM',
       };
     } catch (e) {
+      recordWasmFallback('score_epigenome_walk_forward_step_wasm', e);
       console.warn('[WASM] Fallback score_epigenome_walk_forward_step_wasm :', e);
     } finally {
       if (res && typeof res.free === 'function') {

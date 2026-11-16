@@ -4,7 +4,6 @@ import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { getPrimaryInterDrawFamily, drawHasMachineNumbers, THEORETICAL_CARRYOVER_PROB } from "../../constants";
 import { getAlgoWeights, getDefaultWeights, normalizeWeights, validateAlgoWeightsByProof, AlgoWeightsProofReport } from "./weightsManager";
-import { useNexusStore } from "../../store/useNexusStore";
 import { calculateShannonEntropy, calculateFractalIndex } from "../mathService";
 import { calculateACValue } from "../mathCore";
 import { EXACT_CONSECUTIVE_MOMENTS } from "../../shared/drawTheory";
@@ -150,10 +149,21 @@ export interface StrictValidationReport {
   complianceAudit: ComplianceAuditItem[];
 }
 
+export interface StrictValidationRuntimeConfig {
+  weights?: AlgoWeights;
+  temporalDepth?: number;
+  isForensicOptimized?: boolean;
+  useSpatioTemporalHawkes?: boolean;
+}
+
 export interface StrictValidationOptions {
   drawName: string;
   rawHistory?: DrawResult[];
   prediction?: Prediction | null;
+  weights?: AlgoWeights;
+  temporalDepth?: number;
+  isForensicOptimized?: boolean;
+  useSpatioTemporalHawkes?: boolean;
   testDepth?: number; // Number of historical draws to validate against
   onProgress?: (progress: number, message: string) => void;
 }
@@ -169,9 +179,9 @@ export interface StrictValidationOptions {
 export const extractDrawAlgorithmicParameters = async (
   drawName: string,
   rawHistory: DrawResult[],
-  causalBacktest: boolean = false
+  causalBacktest: boolean = false,
+  runtimeConfig?: StrictValidationRuntimeConfig
 ): Promise<DrawAlgorithmicParameters> => {
-  const storeState = useNexusStore.getState();
   const cleanHistory = purifyHistoryForDraw(drawName, rawHistory);
   
   // 1. Récupération des poids actifs.
@@ -180,8 +190,8 @@ export const extractDrawAlgorithmicParameters = async (
   //    Mode nominal : priorité aux poids customisés du store si cohérents, sinon DB/defaults.
   let activeWeights = causalBacktest
     ? getDefaultWeights()
-    : (storeState.globalWeights && Object.keys(storeState.globalWeights).length > 0
-        ? { ...storeState.globalWeights } as AlgoWeights
+    : (runtimeConfig?.weights && Object.keys(runtimeConfig.weights).length > 0
+        ? { ...runtimeConfig.weights } as AlgoWeights
         : await getAlgoWeights(drawName));
 
   // 2. Détection de la présence de numéros machine
@@ -216,9 +226,9 @@ export const extractDrawAlgorithmicParameters = async (
     drawName,
     family,
     historySize: cleanHistory.length,
-    temporalDepth: storeState.temporalDepth ?? 100,
-    isForensicOptimized: storeState.isForensicOptimized ?? false,
-    useSpatioTemporalHawkes: storeState.useSpatioTemporalHawkes ?? false,
+    temporalDepth: runtimeConfig?.temporalDepth ?? 100,
+    isForensicOptimized: runtimeConfig?.isForensicOptimized ?? false,
+    useSpatioTemporalHawkes: runtimeConfig?.useSpatioTemporalHawkes ?? false,
     hasMachineNumbers: hasMachine,
     machineTransferWeight: activeWeights[AlgoKey.MACHINE_TRANSFER] || 0,
     isMachineTransferCompliant: !hasMachine ? (activeWeights[AlgoKey.MACHINE_TRANSFER] === 0) : true,
@@ -443,9 +453,16 @@ export const validateStructuralTicketStrictly = (
 export const runStrictDrawValidation = async (
   options: StrictValidationOptions
 ): Promise<StrictValidationReport> => {
-  const { drawName, testDepth = 15, onProgress } = options;
-  const storeState = useNexusStore.getState();
-  const rawHistory = options.rawHistory || storeState.history;
+  const {
+    drawName,
+    testDepth = 15,
+    onProgress,
+    weights,
+    temporalDepth = 100,
+    isForensicOptimized = false,
+    useSpatioTemporalHawkes = false,
+  } = options;
+  const rawHistory = options.rawHistory || [];
 
   onProgress?.(5, `Isolation stricte du tirage "${drawName}"...`);
   const cleanHistory = purifyHistoryForDraw(drawName, rawHistory);
@@ -456,13 +473,20 @@ export const runStrictDrawValidation = async (
     );
   }
 
+  const runtimeConfig: StrictValidationRuntimeConfig = {
+    weights,
+    temporalDepth,
+    isForensicOptimized,
+    useSpatioTemporalHawkes,
+  };
+
   // Étape 1 : Extraction des paramètres algorithmiques du tirage
   onProgress?.(15, "Extraction et certification des paramètres algorithmiques actifs...");
-  const parameters = await extractDrawAlgorithmicParameters(drawName, cleanHistory);
+  const parameters = await extractDrawAlgorithmicParameters(drawName, cleanHistory, false, runtimeConfig);
 
   // Étape 2 : Validation structurelle du ticket actuel (si disponible)
   onProgress?.(25, "Validation structurelle du vecteur de prédiction actif...");
-  const targetPrediction = options.prediction || storeState.lastPrediction;
+  const targetPrediction = options.prediction ?? null;
   let structural: StructuralValidationResult | null = null;
   if (targetPrediction && targetPrediction.suggestedNumbers && targetPrediction.suggestedNumbers.length >= 5) {
     structural = validateStructuralTicketStrictly(targetPrediction, parameters);

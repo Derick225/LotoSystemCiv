@@ -3,7 +3,6 @@ import { logger } from "../../utils/logger";
 import { isSupabaseConfigured } from "../supabaseClient";
 import { apiClient } from "../../core/api/apiClient";
 import { TUNING } from "./microSgd";
-import { useNexusStore } from "../../store/useNexusStore";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 import { calculateShannonEntropy } from "../mathService";
 import { LCG } from "../../utils/mathUtils";
@@ -88,24 +87,13 @@ export const buildTicketCoherenceScorer = (
 
 
 /**
- * Récupération sécurisée de l'état du store Zustand sans crash dans les Web Workers ou SSR
+ * Valeurs par défaut pures et déterministes pour l'exécution hors store (Workers / SSR / Tests).
+ * Les appelants UI transmettent leurs préférences explicitement via les overrides de contexte.
  */
-export const getStoreStateSafely = () => {
-  if (typeof window !== 'undefined') {
-    try {
-      const state = useNexusStore.getState();
-      if (state) {
-        return {
-          useSpatioTemporalHawkes: state.useSpatioTemporalHawkes ?? true,
-          useCloudEngine: state.useCloudEngine ?? false,
-        };
-      }
-    } catch {
-      // Ignorer si le store n'est pas initialisé
-    }
-  }
-  return { useSpatioTemporalHawkes: true, useCloudEngine: false };
-};
+export const getStoreStateSafely = () => ({
+  useSpatioTemporalHawkes: true,
+  useCloudEngine: false,
+});
 
 /**
  * SCÉNARIO A : Dataset Insuffisant / Mode Dégradé Statistique Continu

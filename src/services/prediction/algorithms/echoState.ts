@@ -1,7 +1,6 @@
 import { AlgorithmPlugin } from '../algorithmRegistry';
 import { AlgoKey } from '../../../shared/prediction.types';
 import { LCG } from '../../../utils/mathUtils';
-import { useNexusStore } from '../../../store/useNexusStore';
 
 // Déterministe et statique, partagé par tous les appels
 const RESERVOIR_SIZE = 64;
@@ -68,8 +67,9 @@ export const echoStateNetworkPlugin: AlgorithmPlugin = {
     // Si l'historique est trop court, on skip
     if (!ctx.history || ctx.history.length < 10) return;
 
-    // Utiliser le nom du tirage issu du contexte en priorité pour respecter scrupuleusement la TIRAGE ISOLATION RULE
-    const activeDraw = ctx.drawName || (typeof useNexusStore !== 'undefined' ? useNexusStore.getState?.()?.drawName : undefined) || "Reveil";
+    // Utiliser exclusivement le nom du tirage issu du contexte ou de l'historique pour préserver la TIRAGE ISOLATION RULE
+    const historyDraw = ctx.history.find((d) => d?.drawName || d?.draw_name);
+    const activeDraw = ctx.drawName || historyDraw?.drawName || historyDraw?.draw_name || "__anonymous_esn__";
 
     // 1. Dérivation dynamique du rayon spectral basée sur l'entropie de Shannon
     // Un régime hautement chaotique (entropie élevée) nécessite un rayon spectral plus faible (ex: 0.8)

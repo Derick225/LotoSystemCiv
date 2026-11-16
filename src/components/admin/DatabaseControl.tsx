@@ -28,6 +28,7 @@ import {
 import { audioEngine } from "../../utils/audioEngine";
 import { keys as idbKeys, clear as idbClear, delMany as idbDelMany, getMany as idbGetMany, setMany as idbSetMany } from "idb-keyval";
 import { ConfirmModal } from "../ui/ConfirmModal";
+import { useSyncStatus } from "../../hooks/useSyncStatus";
 
 // Les jetons de session (Supabase Auth `sb-*-auth-token`, clés NEXUS) sont
 // exclus des snapshots exportés et jamais écrasés lors d'une importation.
@@ -36,6 +37,7 @@ const isAuthStorageKey = (key: string): boolean =>
 
 export const DatabaseControl: React.FC = () => {
   const { showToast } = useToast();
+  const { isOnline, idbStats, lastChecked, checkStatus } = useSyncStatus();
   // Les compteurs cloud restent null tant qu'aucune mesure réelle n'a abouti :
   // l'UI affiche « n/d » plutôt qu'un zéro inventé.
   const [metrics, setMetrics] = useState({
@@ -75,6 +77,7 @@ export const DatabaseControl: React.FC = () => {
   const refreshMetrics = async () => {
     audioEngine.play("click");
     setLoading(true);
+    checkStatus();
     const startPing = performance.now();
 
     // 1. Calculate LocalStorage size
@@ -570,6 +573,46 @@ export const DatabaseControl: React.FC = () => {
             )}
           </div>
         ))}
+      </div>
+
+      {/* Sync & IndexedDB Asset Breakdown (consolidated from legacy Telemetry view) */}
+      <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span
+            className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider border ${
+              isOnline
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                : "bg-rose-500/10 text-rose-400 border-rose-500/30"
+            }`}
+          >
+            {isOnline ? "Transport Réseau Actif" : "Hors Ligne"}
+          </span>
+          <span className="text-[11px] font-mono text-slate-400">
+            Dernière sonde : {lastChecked.toLocaleTimeString()}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 w-full lg:w-auto text-center">
+          {[
+            { label: "Prédictions IDB", value: idbStats.history },
+            { label: "Rapports Forensic", value: idbStats.forensics },
+            { label: "Sessions Apprent.", value: idbStats.learning },
+            { label: "Autopsies", value: idbStats.snapshots },
+            { label: "Charge Estimée", value: idbStats.totalStorage },
+          ].map((stat) => (
+            <div
+              key={stat.label}
+              className="px-3 py-2 bg-slate-950/80 rounded-xl border border-slate-800"
+            >
+              <span className="block text-[9px] font-black uppercase text-slate-500 tracking-wider">
+                {stat.label}
+              </span>
+              <span className="text-xs font-mono font-black text-slate-200">
+                {stat.value}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* SQL & Backup Grid */}

@@ -13,7 +13,6 @@ import {
   EmpiricalCalibration,
   FALLBACK_CALIBRATION,
 } from "../../shared/prediction.types";
-import { useNexusStore } from "../../store/useNexusStore";
 import { analyzeForManipulation } from "./integrityEngine";
 import { DOMAIN_SIZE } from "./detectors";
 import {
@@ -63,10 +62,10 @@ export const generateForensicReport = (
   algoWeights: Record<AlgoKey, number> = DEFAULT_ALGO_WEIGHTS,
   predictionMatrix?: Record<number, ScoreBreakdown>,
 ): ForensicReport => {
-  const storeWeights = typeof window !== 'undefined' ? useNexusStore.getState?.()?.globalWeights : null;
-  const resolvedAlgoWeights = (algoWeights && Object.keys(algoWeights).length > 0 && algoWeights !== DEFAULT_ALGO_WEIGHTS)
-    ? algoWeights
-    : (storeWeights && Object.keys(storeWeights).length > 0 ? storeWeights : algoWeights || DEFAULT_ALGO_WEIGHTS);
+  const resolvedAlgoWeights =
+    algoWeights && Object.keys(algoWeights).length > 0
+      ? algoWeights
+      : DEFAULT_ALGO_WEIGHTS;
 
   const sortedCombo = [...combo].sort((a, b) => a - b);
   const n = sortedCombo.length;

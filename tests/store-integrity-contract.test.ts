@@ -212,4 +212,30 @@ describe('Store Integrity & Probability Contract Tests', () => {
     // Couverture minimale de numéros distincts sur les 5 tickets
     expect(portfolio.uniqueNumbersCovered).toBeGreaterThanOrEqual(18);
   });
+
+  it('7. Interior-Edit Invalidation: detects middle draw mutations and updates store frequencies without ghost numbers', () => {
+    const initial: DrawResult[] = [
+      { id: 'd3', drawName: TEST_DRAW, date: '2026-03-05', gagnants: [1, 2, 3, 4, 5], version: 1 },
+      { id: 'd2', drawName: TEST_DRAW, date: '2026-03-04', gagnants: [10, 20, 30, 40, 50], version: 1 },
+      { id: 'd1', drawName: TEST_DRAW, date: '2026-03-01', gagnants: [60, 61, 62, 63, 64], version: 1 },
+    ];
+
+    syncHistoryToRustStore(initial, TEST_DRAW);
+    expect(getStoreDrawCount(TEST_DRAW)).toBe(3);
+    expect(getStoreFrequencies(TEST_DRAW)[50]).toBe(1);
+    expect(getStoreFrequencies(TEST_DRAW)[89]).toBe(0);
+
+    // Correction d'un tirage intermédiaire (indice 1) sans modifier ni la taille ni les bornes 0 et length-1
+    const edited: DrawResult[] = [
+      initial[0],
+      { id: 'd2', drawName: TEST_DRAW, date: '2026-03-04', gagnants: [10, 20, 30, 40, 89], version: 2 },
+      initial[2],
+    ];
+
+    syncHistoryToRustStore(edited, TEST_DRAW);
+    const updatedFreqs = getStoreFrequencies(TEST_DRAW);
+    expect(getStoreDrawCount(TEST_DRAW)).toBe(3);
+    expect(updatedFreqs[50]).toBe(0); // L'ancien numéro corrigé est bien purgé
+    expect(updatedFreqs[89]).toBe(1); // Le nouveau numéro corrigé est bien synchronisé
+  });
 });

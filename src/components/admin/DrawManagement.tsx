@@ -21,7 +21,6 @@ import {
   LayoutGrid,
   Calendar,
   Download,
-  Stethoscope,
   RefreshCw,
   FileSpreadsheet,
   CheckCircle2,
@@ -35,7 +34,6 @@ import {
   Search,
   ArrowUpDown,
 } from "lucide-react";
-import { DataIntegrityMonitor } from "./DataIntegrityMonitor";
 import { audioEngine } from "../../utils/audioEngine";
 import { useNexusStore } from "../../store/useNexusStore";
 import { isDrawWithoutMachine } from "../../constants";
@@ -103,7 +101,7 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
   const [results, setResults] = useState<DrawResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<
-    "manual" | "bulk" | "audit" | "export" | "purge"
+    "manual" | "bulk" | "export" | "purge"
   >("manual");
 
   // Purge / Bulk Delete State
@@ -855,15 +853,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[10px] md:text-xs font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === "export" ? "bg-white text-slate-900 shadow-xl" : "bg-white/5 text-slate-400 hover:bg-white/10"}`}
           >
             <DownloadCloud size={12} /> Export
-          </button>
-          <button
-            onClick={() => {
-              audioEngine.play("click");
-              setActiveSubTab("audit");
-            }}
-            className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[10px] md:text-xs font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === "audit" ? "bg-emerald-600 text-white shadow-xl" : "bg-white/5 text-slate-400 hover:bg-white/10"}`}
-          >
-            <Stethoscope size={12} /> Audit
           </button>
           <button
             onClick={() => {
@@ -1635,13 +1624,6 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* TAB CONTENT: AUDIT */}
-      {activeSubTab === "audit" && (
-        <div className="w-full mx-auto">
-          <DataIntegrityMonitor drawName={drawName} />
         </div>
       )}
 

@@ -209,6 +209,9 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
   const volatility = useNexusStore((state) => state.volatility);
   const regularity = useNexusStore((state) => state.regularity);
   const symbioticContext = useNexusStore((state) => state.symbioticContext);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
+  const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
 
   const [result, setResult] = useState<PlatinumResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -310,6 +313,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
           setLoadingProgress(progress);
           setLoadingStep(message);
         },
+        {
+          temporalDepth,
+          useSpatioTemporalHawkes,
+          weights: globalWeights,
+        },
       );
 
       setResult(data);
@@ -383,6 +391,11 @@ export const MetaAnalystTab: React.FC<MetaAnalystTabProps> = ({ drawName }) => {
             setLoadingStep(
               `Backtest rétroactif ${trialIndex + 1}/${trialsCount} : ${message}`,
             );
+          },
+          {
+            temporalDepth,
+            useSpatioTemporalHawkes,
+            weights: globalWeights,
           },
         );
 

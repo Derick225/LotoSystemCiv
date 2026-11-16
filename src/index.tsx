@@ -40,15 +40,18 @@ window.addEventListener('beforeinstallprompt', (e) => {
   window.dispatchEvent(new Event('pwa-prompt-ready'));
 });
 
+declare global {
+  interface Window {
+    __applySwUpdate?: () => void;
+  }
+}
+
 // Register PWA service worker
 const updateSW = registerSW({
   onNeedRefresh() {
-    try {
-      if (typeof window !== 'undefined' && window.confirm && window.confirm('Une nouvelle version est disponible. Recharger ?')) {
-        updateSW(true);
-      }
-    } catch (e) {
-      console.warn("PWA update confirmation skipped due to frame sandbox restrictions", e);
+    if (typeof window !== 'undefined') {
+      window.__applySwUpdate = () => updateSW(true);
+      window.dispatchEvent(new CustomEvent('pwa-update-available'));
     }
   },
   onOfflineReady() {

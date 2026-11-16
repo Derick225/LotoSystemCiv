@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Download } from "lucide-react";
 import { audioEngine } from "../../utils/audioEngine";
+import { useToast } from "./Toast";
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: Array<string>;
@@ -12,6 +13,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export const InstallButton: React.FC = () => {
+  const { showToast } = useToast();
   const [deferredPrompt, setDeferredPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -66,8 +68,9 @@ export const InstallButton: React.FC = () => {
     const promptToUse = deferredPrompt || window.deferredPWAInstallPrompt;
 
     if (!promptToUse) {
-      alert(
+      showToast(
         "L'installation n'est pas encore prête ou votre navigateur ne la supporte pas directement.",
+        "info",
       );
       return;
     }

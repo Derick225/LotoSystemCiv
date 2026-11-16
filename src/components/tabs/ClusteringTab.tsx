@@ -127,7 +127,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
         calculateRegularity(history),
         performKMeansClusteringAsync(history),
         calculateSuccessionMatrixAsync(history),
-        calculateCorrelationMatrixAsync(history),
+        calculateCorrelationMatrixAsync(history, drawName),
       ])
         .then(([regData, kMeansPoints, markovMap, corrMap]) => {
           setRegularity(regData);
@@ -154,7 +154,7 @@ export const ClusteringTab: React.FC<ClusteringTabProps> = ({ drawName }) => {
           setCalculating(false);
         });
     }
-  }, [history]);
+  }, [history, drawName]);
 
   const filteredPoints = useMemo(() => {
     if (!activeFilter) return points;

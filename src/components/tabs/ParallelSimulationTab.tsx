@@ -36,6 +36,9 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
   const history = useNexusStore((state) => state.history);
   const drawName = useNexusStore((state) => state.drawName);
   const globalWeights = useNexusStore((state) => state.globalWeights);
+  const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
+  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
   const [reports, setReports] = useState<{
     flat: BacktestReport;
     martingale: BacktestReport;
@@ -61,6 +64,8 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
         depth,
         initialBankroll,
         unitBet,
+        undefined,
+        { temporalDepth, isForensicOptimized, useSpatioTemporalHawkes },
       );
       audioEngine.play("success");
       setReports(results);
@@ -70,7 +75,7 @@ export const ParallelSimulationTab: React.FC = React.memo(() => {
     } finally {
       setLoading(false);
     }
-  }, [drawName, history, globalWeights, depth, initialBankroll, unitBet]);
+  }, [drawName, history, globalWeights, depth, initialBankroll, unitBet, temporalDepth, isForensicOptimized, useSpatioTemporalHawkes]);
 
   const bestStrategy = useMemo(() => {
     if (!reports) return null;

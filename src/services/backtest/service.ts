@@ -2,7 +2,6 @@ import { fetchResults } from "../lotteryService";
 import { LCG } from "../../utils/mathUtils";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { generateMasterPrediction } from "../prediction/predictionFacade";
-import { useNexusStore } from "../../store/useNexusStore";
 import { detectGameRegime } from "../mathService";
 import { getAlgoWeights, normalizeWeights } from "../prediction/weightsManager";
 import { drawHasMachineNumbers } from "../../constants";
@@ -131,6 +130,12 @@ const computeBootstrapCI = async (data: number[], iterations: number = 200, prng
   };
 };
 
+export interface BacktestTrainingOptions {
+  temporalDepth?: number;
+  isForensicOptimized?: boolean;
+  useSpatioTemporalHawkes?: boolean;
+}
+
 export const runBacktestTraining = async (
   drawName: string,
   history: DrawResult[],
@@ -138,6 +143,7 @@ export const runBacktestTraining = async (
   onProgress?: (progress: number) => void,
   customWeights?: any,
   skipTraining: boolean = true,
+  options?: BacktestTrainingOptions,
 ): Promise<TrainingReport> => {
   const validationResult = BacktestInputSchema.safeParse({ drawName, sampleSize: requestedSampleSize });
   if (!validationResult.success) {
@@ -192,10 +198,10 @@ export const runBacktestTraining = async (
   let hwrl_total = 0;
   const confidencesAndOutcomes: { conf: number; outcome: number }[] = [];
 
-  const storeState = useNexusStore?.getState?.();
-  const baseWeights = customWeights ||
-    (storeState?.globalWeights && Object.keys(storeState.globalWeights).length > 0 ? storeState.globalWeights : null) ||
-    (await getAlgoWeights(drawName));
+  const baseWeights =
+    customWeights && Object.keys(customWeights).length > 0
+      ? customWeights
+      : await getAlgoWeights(drawName);
 
   const resolvedWeights = { ...baseWeights };
   const hasMachine = drawHasMachineNumbers(drawName, allResults);
@@ -204,8 +210,9 @@ export const runBacktestTraining = async (
   }
   const weightsToUse = normalizeWeights(resolvedWeights);
 
-  const isForensicOptimized = storeState?.isForensicOptimized ?? false;
-  const useSpatioTemporalHawkes = storeState?.useSpatioTemporalHawkes ?? false;
+  const isForensicOptimized = options?.isForensicOptimized ?? false;
+  const useSpatioTemporalHawkes = options?.useSpatioTemporalHawkes ?? false;
+  const temporalDepth = options?.temporalDepth ?? 100;
 
   let foldScores: number[] = [];
   const windowScores: number[] = [];
@@ -223,7 +230,6 @@ export const runBacktestTraining = async (
 
     const historyAtThatTime = allResults.slice(trainDataStart);
 
-    const temporalDepth = storeState?.temporalDepth ?? 100;
     const prediction = await generateMasterPrediction(
       drawName,
       historyAtThatTime,

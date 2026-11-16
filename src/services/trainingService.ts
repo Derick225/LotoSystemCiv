@@ -5,7 +5,6 @@ import {
   getAlgoWeights,
   hashWeights,
 } from "./prediction/predictionFacade";
-import { useNexusStore } from "../store/useNexusStore";
 import { detectGameRegime } from "./mathService";
 import type {
   AlgoWeights,
@@ -440,10 +439,11 @@ export const evolveNeuralDNA = async (
 export const applyOnlineLearning = async (
   drawName: string,
   history: DrawResult[],
-  userFeedbackScore?: number
-): Promise<void> => {
+  userFeedbackScore?: number,
+  temporalDepth: number = 100,
+  onWeightsUpdated?: (weights: AlgoWeights) => void
+): Promise<AlgoWeights> => {
   const currentWeights = await getAlgoWeights(drawName);
-  const temporalDepth = useNexusStore.getState()?.temporalDepth ?? 100;
   const purifiedHistory = purifyHistoryForDraw(drawName, history);
 
   const updatedWeights = await applyOnlineLearningCore(
@@ -455,7 +455,8 @@ export const applyOnlineLearning = async (
   );
 
   await saveAlgoWeights(drawName, updatedWeights);
-  useNexusStore.getState().updateGlobalWeights(updatedWeights);
+  onWeightsUpdated?.(updatedWeights);
+  return updatedWeights;
 };
 
 /**
@@ -640,6 +641,11 @@ export const runBacktestTrainingAsync = async (
   onProgress?: (progress: number) => void,
   customWeights?: any,
   skipTraining: boolean = true,
+  options?: {
+    temporalDepth?: number;
+    isForensicOptimized?: boolean;
+    useSpatioTemporalHawkes?: boolean;
+  },
 ): Promise<TrainingReport> => {
   const purifiedHistory = purifyHistoryForDraw(drawName, history);
   return runBacktestWorker<TrainingReport>(
@@ -648,7 +654,8 @@ export const runBacktestTrainingAsync = async (
     sampleSize,
     onProgress,
     customWeights,
-    skipTraining
+    skipTraining,
+    options
   );
 };
 

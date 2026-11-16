@@ -70,6 +70,7 @@ import { ExportService } from "../../services/exportService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { drawHasMachineNumbers } from "../../constants";
 import { StrictDrawValidationModal } from "../StrictDrawValidationModal";
+import { ConfirmModal } from "../ui/ConfirmModal";
 
 interface BacktestResult {
   drawId: string;
@@ -120,6 +121,12 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
   const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
   const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
   const [isStrictModalOpen, setIsStrictModalOpen] = useState<boolean>(false);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
 
   // Statistiques d'âge des logs pour l'optimisation du stockage local
   const oldLogsStats = useMemo(() => {
@@ -157,33 +164,32 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
     }
   };
 
-  const handleManualPurgeOldLogs = async () => {
+  const handleManualPurgeOldLogs = () => {
     audioEngine.play("click");
     if (oldLogsStats.count === 0) {
       showToast("Aucun log ayant plus de 90 jours n'a été détecté dans le registre local.", "info");
       return;
     }
 
-    if (
-      !confirm(
-        `Confirmer la purge de ${oldLogsStats.count} log(s) de prédictions ayant plus de 90 jours pour le tirage "${drawName}" ?`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      setIsPurgingOldLogs(true);
-      const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
-      await loadHistoryData();
-      audioEngine.play("success");
-      showToast(`${purgedCount} log(s) de prédictions (> 90 jours) purgé(s) avec succès.`, "success");
-    } catch (err) {
-      console.error("Erreur purge manuelle:", err);
-      showToast("Erreur lors de la purge des anciens logs.", "error");
-    } finally {
-      setIsPurgingOldLogs(false);
-    }
+    setConfirmState({
+      title: "Purger les anciens logs",
+      message: `Confirmer la purge de ${oldLogsStats.count} log(s) de prédictions ayant plus de 90 jours pour le tirage "${drawName}" ?`,
+      confirmLabel: "Purger",
+      onConfirm: async () => {
+        try {
+          setIsPurgingOldLogs(true);
+          const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
+          await loadHistoryData();
+          audioEngine.play("success");
+          showToast(`${purgedCount} log(s) de prédictions (> 90 jours) purgé(s) avec succès.`, "success");
+        } catch (err) {
+          console.error("Erreur purge manuelle:", err);
+          showToast("Erreur lors de la purge des anciens logs.", "error");
+        } finally {
+          setIsPurgingOldLogs(false);
+        }
+      },
+    });
   };
 
   const handleCopyInferenceTicket = (numbers: number[]) => {
@@ -648,10 +654,10 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         skipTraining,
         adversarialMode,
         forcedOutsiderCount,
-        false,
+        isForensicOptimized,
         undefined,
         undefined,
-        undefined,
+        useSpatioTemporalHawkes,
         false // 100% Local Rust/WASM execution
       );
 
@@ -2429,19 +2435,20 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
               </button>
 
               <button
-                onClick={async () => {
+                onClick={() => {
                   audioEngine.play("click");
-                  if (
-                    confirm(
-                      `Voulez-vous réinitialiser l'intégralité du registre Forensic Log pour le tirage "${drawName}" ?`,
-                    )
-                  ) {
-                    const { clearPredictionHistory } =
-                      await import("../../services/predictionHistoryService");
-                    await clearPredictionHistory(drawName);
-                    loadHistoryData();
-                    showToast("Registre Forensic Log réinitialisé.", "info");
-                  }
+                  setConfirmState({
+                    title: "Réinitialiser le Forensic Log",
+                    message: `Voulez-vous réinitialiser l'intégralité du registre Forensic Log pour le tirage "${drawName}" ?`,
+                    confirmLabel: "Réinitialiser",
+                    onConfirm: async () => {
+                      const { clearPredictionHistory } =
+                        await import("../../services/predictionHistoryService");
+                      await clearPredictionHistory(drawName);
+                      loadHistoryData();
+                      showToast("Registre Forensic Log réinitialisé.", "info");
+                    },
+                  });
                 }}
                 disabled={localHistory.length === 0}
                 className="px-3.5 py-2.5 text-[10px] font-black text-slate-400 hover:text-rose-400 uppercase tracking-widest flex items-center gap-2 transition-colors border border-slate-800 hover:border-rose-900/50 bg-slate-950/60 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
@@ -3123,14 +3130,19 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
                           </button>
 
                           <button
-                            onClick={async (e) => {
+                            onClick={(e) => {
                               e.stopPropagation();
                               audioEngine.play("click");
-                              if (confirm("Supprimer cette entrée du registre Forensic ?")) {
-                                await deletePrediction(item.id);
-                                loadHistoryData();
-                                showToast("Entrée supprimée du Forensic Log.", "info");
-                              }
+                              setConfirmState({
+                                title: "Supprimer cette entrée",
+                                message: "Supprimer cette entrée du registre Forensic ?",
+                                confirmLabel: "Supprimer",
+                                onConfirm: async () => {
+                                  await deletePrediction(item.id);
+                                  loadHistoryData();
+                                  showToast("Entrée supprimée du Forensic Log.", "info");
+                                },
+                              });
                             }}
                             title="Supprimer cette entrée"
                             className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 hover:bg-rose-950/30 rounded-xl border border-slate-800 hover:border-rose-900/40 transition-all cursor-pointer"
@@ -3297,6 +3309,20 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         isOpen={isStrictModalOpen}
         onClose={() => setIsStrictModalOpen(false)}
         drawName={drawName}
+      />
+
+      <ConfirmModal
+        isOpen={confirmState !== null}
+        variant="danger"
+        title={confirmState?.title || ""}
+        message={confirmState?.message || ""}
+        confirmLabel={confirmState?.confirmLabel || "Confirmer"}
+        onConfirm={() => {
+          const fn = confirmState?.onConfirm;
+          setConfirmState(null);
+          fn?.();
+        }}
+        onCancel={() => setConfirmState(null)}
       />
     </div>
   );

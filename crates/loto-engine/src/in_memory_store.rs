@@ -223,7 +223,7 @@ impl<'de> Deserialize<'de> for IncrementalStats {
 }
 
 /// Dépôt mémoire contigu pour un type de tirage spécifique (ex: NATIONAL, LUCKY TUESDAY)
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct DrawTimeline {
     pub draw_name: String,
     pub network_id: String, // "hebdomadaire" ou "quotidien"
@@ -231,6 +231,29 @@ pub struct DrawTimeline {
     pub stats: IncrementalStats,
     #[serde(skip)]
     pub seen_draws: HashSet<u128>,
+}
+
+impl<'de> Deserialize<'de> for DrawTimeline {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Repr {
+            draw_name: String,
+            network_id: String,
+            history: Vec<CompactDraw>,
+            stats: IncrementalStats,
+        }
+
+        let repr = Repr::deserialize(deserializer)?;
+        let mut timeline = Self {
+            draw_name: repr.draw_name,
+            network_id: repr.network_id,
+            history: repr.history,
+            stats: repr.stats,
+            seen_draws: HashSet::new(),
+        };
+        timeline.rebuild_seen_index();
+        Ok(timeline)
+    }
 }
 
 impl DrawTimeline {

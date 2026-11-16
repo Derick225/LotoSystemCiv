@@ -12,7 +12,6 @@ import {
 } from './modelDnaKnowledgeBase';
 import { computeDrawCriticalThreshold } from './dnaAuditService';
 import { updateWeightsWithKalmanFilter } from './kalmanWeightsFilter';
-import { useNexusStore } from '../../store/useNexusStore';
 import { logger } from '../../utils/logger';
 
 export interface OptimizationRequest {
@@ -221,19 +220,7 @@ export async function applyOptimizedWeights(
     throw dnaErr;
   }
 
-  // 6. Synchronisation mémoire immédiate du Store Nexus (seulement pour une mise à jour en temps réel)
-  if (!isRetroactive) {
-    try {
-      const store = useNexusStore.getState();
-      if (store.drawName === drawName) {
-        useNexusStore.setState({ globalWeights: appliedWeights });
-      }
-    } catch (err) {
-      logger.debug({ err }, '[OptimizationController] Notification store non bloquante');
-    }
-  }
-
-  // 8. Déclenchement des événements réactifs universels
+  // 6. Déclenchement des événements réactifs universels (sans couplage direct au store)
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('OPTIMIZED_WEIGHTS_APPLIED', {

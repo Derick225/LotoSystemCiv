@@ -38,19 +38,14 @@ import {
   CheckCircle2,
   AlertTriangle,
   RotateCw,
-  Dna,
   History,
-  Clock,
   Radio,
   SlidersHorizontal,
   X,
   Target,
 } from "lucide-react";
-import { NeuralDarwinismLab } from "../NeuralDarwinismLab";
-import { DeterministicReplayInspector } from "../DeterministicReplayInspector";
 import { NeuralFeedbackPanel } from "../NeuralFeedbackPanel";
 import { TrainingEvolutionDrawer } from "../TrainingEvolutionDrawer";
-import { NeuralAutoOptimizationPanel } from "../forensic/NeuralAutoOptimizationPanel";
 import type { AlgoWeights, TrainingReport } from "../../types";
 import { ExportService } from "../../services/exportService";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
@@ -73,7 +68,7 @@ const formatLabel = (key: string) => LABELS_MAP[key as AlgoKey] || key;
 
 type OptimizerType = "meta" | "pso" | "genetic" | "bayesian" | "gradient";
 type PresetStrategy = "BALANCED" | "HYPER_CONVERGENCE" | "EXPLORATORY" | "REGULARIZED_L2";
-type SubTabType = "training" | "neural-opt" | "darwinian" | "replay" | "feedback";
+type SubTabType = "training" | "feedback";
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
@@ -741,10 +736,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       {/* SUB-TABS NAVIGATION PILLS */}
       <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto custom-scrollbar">
         {[
-          { id: "training", label: "Entraînement Continu & Gradient", icon: Zap },
-          { id: "neural-opt", label: "Auto-Optimisation Rétropropagation", icon: BrainCircuit },
-          { id: "darwinian", label: "Laboratoire Darwinien Bio-Inspiré", icon: Dna },
-          { id: "replay", label: "Replay Déterministe & Step-by-Step", icon: Clock },
+          { id: "training", label: "Entraînement Continu & Calibration", icon: Zap },
           { id: "feedback", label: "Feedback Neuronal & Calibrage", icon: Radio },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -1349,35 +1341,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         </div>
       )}
 
-      {/* VIEW 2: NEURAL BACKPROPAGATION AUTO-OPTIMIZATION */}
-      {activeSubTab === "neural-opt" && (
-        <NeuralAutoOptimizationPanel
-          drawName={drawName}
-          history={cleanHistory}
-          currentWeights={liveWeights}
-          onApplyWeights={(newWeights) => {
-            // La persistance + l'archivage ADN sont assurés par la passerelle
-            // d'optimisation unifiée (applyOptimizedWeights) dans le panneau.
-            // Ce callback ne fait que resynchroniser l'état local parent.
-            setLiveWeights(newWeights);
-            setOriginalWeights(newWeights);
-            setFineTuningWeights(newWeights);
-            showToast("Poids optimisés par rétropropagation appliqués avec succès !", "success");
-          }}
-        />
-      )}
-
-      {/* VIEW 3: BIO-INSPIRED DARWINIAN LAB */}
-      {activeSubTab === "darwinian" && (
-        <NeuralDarwinismLab drawName={drawName} />
-      )}
-
-      {/* VIEW 4: DETERMINISTIC REPLAY INSPECTOR */}
-      {activeSubTab === "replay" && (
-        <DeterministicReplayInspector drawName={drawName} />
-      )}
-
-      {/* VIEW 5: NEURAL FEEDBACK & CALIBRATION */}
+      {/* VIEW 2: NEURAL FEEDBACK & CALIBRATION */}
       {activeSubTab === "feedback" && (
         <NeuralFeedbackPanel drawName={drawName} />
       )}

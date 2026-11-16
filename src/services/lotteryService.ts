@@ -10,6 +10,7 @@ import {
   computeFrequencyCountsHpc,
   initializeLotoEngineWasm,
   appendSingleDrawToStore,
+  clearStoreTimeline,
   getStoreFrequencies,
   getStoreCurrentGaps,
   getStoreDrawCount,
@@ -148,10 +149,44 @@ export const clearHistorySyncFingerprint = (targetDrawName?: string): void => {
   }
 };
 
+const hashDrawsDigest = (draws: DrawResult[], drawKey: string): string => {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  const mixChar = (code: number) => {
+    h1 ^= code & 0xff;
+    h1 = Math.imul(h1, 0x01000193);
+    h2 ^= (code >>> 0) + ((h1 >>> 6) & 0xff);
+    h2 = Math.imul(h2, 0x85ebca6b);
+  };
+  for (let i = 0; i < drawKey.length; i++) mixChar(drawKey.charCodeAt(i));
+  mixChar(draws.length);
+
+  for (let idx = 0; idx < draws.length; idx++) {
+    const d = draws[idx];
+    const date = d?.date || '';
+    const dName = d?.drawName || '';
+    for (let i = 0; i < date.length; i++) mixChar(date.charCodeAt(i));
+    mixChar(0x3a);
+    for (let i = 0; i < dName.length; i++) mixChar(dName.charCodeAt(i));
+    mixChar(0x7c);
+    const gag = d?.gagnants;
+    if (Array.isArray(gag)) {
+      for (let j = 0; j < gag.length; j++) mixChar(gag[j] | 0);
+    }
+    mixChar(0x2f);
+    const mach = d?.machine;
+    if (Array.isArray(mach)) {
+      for (let j = 0; j < mach.length; j++) mixChar(mach[j] | 0);
+    }
+    mixChar(0x0a);
+  }
+  return `${drawKey}:${draws.length}:${(h1 >>> 0).toString(16)}_${(h2 >>> 0).toString(16)}`;
+};
+
 /**
  * Synchronise l'historique contigu en mémoire vive dans le store Rust Core (WASM).
  * Applique :
- * 1. Un contrôle d'idempotence strict par empreinte (zéro ré-injection cumulative).
+ * 1. Un contrôle d'idempotence strict O(N) sur l'ensemble des enregistrements (détecte toute édition interne).
  * 2. Un tri chronologique ascendant (flèche du temps) pour que history.last() soit le plus récent.
  * 3. La conversion en secondes POSIX des horodatages.
  * 4. La validation hermétique unitaire (5 entiers uniques ∈ [1, 90], zéro synthétique).
@@ -160,16 +195,20 @@ export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: str
   if (!draws || draws.length === 0) return;
   const drawKey = (targetDrawName || 'GLOBAL').trim().toUpperCase();
 
-  // Empreinte d'idempotence robuste basée sur le drawKey, la cardinalité et les signatures des bornes
-  const newest = draws[0];
-  const oldest = draws[draws.length - 1];
-  const fingerprint = `${drawKey}:${draws.length}:${newest?.date || ''}:${newest?.gagnants?.join(',') || ''}:${oldest?.date || ''}:${oldest?.gagnants?.join(',') || ''}`;
+  const fingerprint = hashDrawsDigest(draws, drawKey);
+  const previousFingerprint = lastSyncedFingerprintByDraw.get(drawKey);
 
-  if (lastSyncedFingerprintByDraw.get(drawKey) === fingerprint) {
-    return; // Déjà synchronisé, no-op strict
+  if (previousFingerprint === fingerprint) {
+    return; // Déjà synchronisé à l'identique, no-op strict
   }
 
   try {
+    // Si une timeline précédemment gérée a été modifiée (y compris édition médiane ou suppression),
+    // réinitialiser proprement pour éviter de conserver d'anciens enregistrements obsolètes.
+    if (previousFingerprint !== undefined && targetDrawName) {
+      clearStoreTimeline(drawKey);
+    }
+
     // Inversion chronologique stricte : du plus ancien au plus récent
     const chronological = [...draws].reverse();
 

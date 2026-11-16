@@ -40,6 +40,18 @@ describe('CONTRAT NAVIGATION & ADAPTATION MOBILE ANDROID', () => {
     // 4. Navigation vers Flux / Station
     store.navigateToModule('Flux');
     expect(useNexusStore.getState().activeMainTab).toBe('Flux');
+
+    // 5. Normalisation des onglets Admin (suppression des doublons tuning / telemetry)
+    store.navigateToModule('admin', 'tuning');
+    expect(useNexusStore.getState().activeMainTab).toBe('admin');
+    expect(useNexusStore.getState().activeSubTab).toBe('fusion');
+
+    store.navigateToModule('admin', 'telemetry');
+    expect(useNexusStore.getState().activeMainTab).toBe('admin');
+    expect(useNexusStore.getState().activeSubTab).toBe('database');
+
+    store.navigateToModule('admin', 'management');
+    expect(useNexusStore.getState().activeSubTab).toBe('management');
   });
 
   it('valide la colorisation continue et deterministe des 90 boules pour les ecrans tactiles', () => {

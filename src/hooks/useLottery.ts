@@ -169,13 +169,13 @@ export const useNexusAnalytics = (drawName: string, history: DrawResult[] | unde
         queryFn: async () => {
             if (!history || history.length < 10) return null;
 
-            // Calculs Mathématiques via Workers
+            // Calculs Mathématiques via Workers avec isolation explicite du tirage
             const [spec, wav, frac, regData, corr, forestRes] = await Promise.all([
-                calculateSpectralMetricsAsync(history),
-                calculateWaveletMetricsAsync(history),
-                calculateFractalMetricsAsync(history),
+                calculateSpectralMetricsAsync(history, drawName),
+                calculateWaveletMetricsAsync(history, drawName),
+                calculateFractalMetricsAsync(history, drawName),
                 Promise.resolve(calculateRegularity(history)), // Synchrone mais rapide
-                calculateCorrelationMatrixAsync(history),
+                calculateCorrelationMatrixAsync(history, drawName),
                 runDecisionForest(history, 'consensus', undefined, drawName)
             ]);
 

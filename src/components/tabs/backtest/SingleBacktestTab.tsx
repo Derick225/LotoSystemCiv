@@ -21,6 +21,7 @@ import {
   ArrowUpRight,
   Zap,
 } from "lucide-react";
+import { useNexusStore } from "../../../store/useNexusStore";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -44,6 +45,9 @@ interface SingleBacktestTabProps {
 
 export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
   ({ drawName, history, globalWeights }) => {
+    const temporalDepth = useNexusStore((state) => state.temporalDepth);
+    const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
+    const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
     const [simulating, setSimulating] = useState(false);
     const [progress, setProgress] = useState(0);
     const [report, setReport] = useState<BacktestReport | null>(null);
@@ -84,6 +88,7 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
           initialBankroll,
           unitBet,
           payoutModel,
+          { temporalDepth, isForensicOptimized, useSpatioTemporalHawkes },
         );
 
         if (isMounted.current) {
@@ -106,6 +111,9 @@ export const SingleBacktestTab: React.FC<SingleBacktestTabProps> = React.memo(
       initialBankroll,
       unitBet,
       payoutModel,
+      temporalDepth,
+      isForensicOptimized,
+      useSpatioTemporalHawkes,
     ]);
 
     // Enhanced Risk Metrics & Underwater Drawdown Series

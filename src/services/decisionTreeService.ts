@@ -1,9 +1,9 @@
 import type { DrawResult, ForestVote, DecisionNode } from '../types';
 import { calculateFractalIndex } from './mathService';
-import { useNexusStore } from '../store/useNexusStore';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { packMatrix, packArray } from './workers/zeroCopy';
 import { calculateDnaSieveWeights } from './temporalAnalysisService';
+import { getAlgoWeights } from './prediction/weightsManager';
 import type { AlgoWeights } from '../shared/prediction.types';
 import { LCG } from '../utils/mathUtils';
 import { getMirrorNumber, getComplement90 } from '../config/networks';
@@ -470,8 +470,13 @@ export const runDecisionForest = async (
   const startTime = Date.now();
   if (!rawHistory || rawHistory.length === 0) return { votes: [], dataset: [] };
 
-  const activeDrawName = drawName || useNexusStore.getState().drawName || "Reveil";
-  const history = purifyHistoryForDraw(activeDrawName, rawHistory);
+  const historySampleWithDraw = rawHistory.find((d) => Boolean(d?.drawName || d?.draw_name));
+  const inferredDrawName = drawName || historySampleWithDraw?.drawName || historySampleWithDraw?.draw_name || "";
+  const activeDrawName = inferredDrawName || "__isolated_forest__";
+  const history = inferredDrawName ? purifyHistoryForDraw(inferredDrawName, rawHistory) : rawHistory;
+  const resolvedWeights: AlgoWeights | undefined = weights && Object.keys(weights).length > 0
+    ? weights
+    : (inferredDrawName ? await getAlgoWeights(inferredDrawName).catch(() => undefined) : undefined);
 
   if (history.length < 40) {
     console.warn("Historique insuffisant pour Decision Forest (Min 40).");
@@ -646,7 +651,7 @@ export const runDecisionForest = async (
       }
 
       // Calcul du Tamis de l'ADN Algorithmique Actuel (Tamis ADN Actif - ZÉRO NOMBRE MAGIQUE, CONTINU & DÉTERMINISTE)
-      const dnaReport = calculateDnaSieveWeights(history, weights, activeDrawName);
+      const dnaReport = calculateDnaSieveWeights(history, resolvedWeights, inferredDrawName || undefined);
       const { multipliers: dnaMultipliers, affinityPercent: dnaAffinity, dominantAlgos, stdDevDna, meanDna } = dnaReport;
 
       // Intensité du tamisage différentiable continu basée sur le SNR de l'ADN

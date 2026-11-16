@@ -125,7 +125,7 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
 
   const loadAco = async () => {
     try {
-      const paths = await runAntColonyOptimization(history, vocalContext);
+      const paths = await runAntColonyOptimization(history, vocalContext, undefined, drawName);
       setAcoPaths(paths);
     } catch (e) {
       console.error(e);

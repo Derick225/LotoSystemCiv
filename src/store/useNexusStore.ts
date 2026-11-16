@@ -237,6 +237,23 @@ export const useNexusStore = create<NexusState>()(
               }
             }
           });
+
+          window.addEventListener("OPTIMIZED_WEIGHTS_APPLIED", (e: any) => {
+            const currentDraw = useNexusStore.getState().drawName;
+            if (e?.detail?.drawName === currentDraw && e?.detail?.appliedWeights) {
+              const currentWeights = useNexusStore.getState().globalWeights;
+              if (JSON.stringify(currentWeights) !== JSON.stringify(e.detail.appliedWeights)) {
+                set({ globalWeights: e.detail.appliedWeights });
+              }
+            }
+          });
+
+          window.addEventListener("NEXUS_NEURAL_FEEDBACK_LOGS", (e: any) => {
+            const logs = e?.detail?.logs;
+            if (Array.isArray(logs) && logs.length > 0) {
+              useNexusStore.getState().addNeuralFeedbackLogs(logs);
+            }
+          });
         }
 
         const nextDraw = getNextScheduledDraw();
@@ -302,6 +319,9 @@ export const useNexusStore = create<NexusState>()(
           targetSub = "history_dna";
         } else if (lower === "admin") {
           targetMain = "admin";
+          const subLower = (targetSub || "").trim().toLowerCase();
+          if (subLower === "tuning") targetSub = "fusion";
+          else if (subLower === "telemetry") targetSub = "database";
         }
 
         set({ activeMainTab: targetMain, activeSubTab: targetSub });

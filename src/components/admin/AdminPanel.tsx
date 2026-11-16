@@ -1,21 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { ModelFusionPanel } from "./ModelFusionPanel";
-import { ExpertTuningPanel } from "./ExpertTuningPanel";
 import { DrawManagement } from "./DrawManagement";
 import { TrainingTab } from "../tabs/TrainingTab";
 import { DatabaseControl } from "./DatabaseControl";
 import { DataIntegrityMonitor } from "./DataIntegrityMonitor";
 import { UserManagement } from "./UserManagement";
-import { SyncMonitoringDashboard } from "../SyncMonitoringDashboard";
 import {
   Server,
   BrainCircuit,
   Activity,
-  Sliders,
   Database,
   ShieldCheck,
   Users,
-  RadioTower,
   GitMerge,
 } from "lucide-react";
 import { ALL_DRAWS } from "../../constants";
@@ -42,18 +38,29 @@ export const AdminPanel: React.FC = () => {
     }
   }, [selectedDraw, setDrawName, refreshData]);
 
-  // Ensure active tab starts at fusion or tuning
-  const currentTab = (activeSubTab || "fusion") as
+  type AdminTab =
     | "fusion"
-    | "tuning"
     | "training"
     | "management"
-    | "users"
     | "integrity"
-    | "database"
-    | "telemetry";
+    | "users"
+    | "database";
 
-  const setActiveTab = (tab: string) => navigateToModule("admin", tab);
+  const currentTab: AdminTab = (() => {
+    if (activeSubTab === "tuning" || activeSubTab === "fusion") return "fusion";
+    if (activeSubTab === "telemetry" || activeSubTab === "database") return "database";
+    if (
+      activeSubTab === "training" ||
+      activeSubTab === "management" ||
+      activeSubTab === "integrity" ||
+      activeSubTab === "users"
+    ) {
+      return activeSubTab;
+    }
+    return "fusion";
+  })();
+
+  const setActiveTab = (tab: AdminTab) => navigateToModule("admin", tab);
 
   return (
     <div className="space-y-8 animate-fade-in pb-20">
@@ -78,36 +85,30 @@ export const AdminPanel: React.FC = () => {
 
         <div className="flex items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-[2rem] border border-slate-200 dark:border-slate-700 overflow-x-auto scrollbar-hide w-full md:max-w-full">
           {[
-            { id: "fusion", label: "Fusion Modèles", icon: <GitMerge size={14} /> },
-            { id: "tuning", label: "Tuning", icon: <Sliders size={14} /> },
+            { id: "fusion" as AdminTab, label: "Modèles & Tuning", icon: <GitMerge size={14} /> },
             {
-              id: "training",
+              id: "training" as AdminTab,
               label: "Training",
               icon: <BrainCircuit size={14} />,
             },
             {
-              id: "management",
+              id: "management" as AdminTab,
               label: "Registre",
               icon: <Database size={14} />,
             },
-            { id: "users", label: "Utilisateurs", icon: <Users size={14} /> },
             {
-              id: "integrity",
+              id: "integrity" as AdminTab,
               label: "Intégrité",
               icon: <ShieldCheck size={14} />,
             },
-            { id: "database", label: "Infra", icon: <Activity size={14} /> },
-            {
-              id: "telemetry",
-              label: "Telemetry",
-              icon: <RadioTower size={14} />,
-            },
+            { id: "users" as AdminTab, label: "Utilisateurs", icon: <Users size={14} /> },
+            { id: "database" as AdminTab, label: "Infra & Sync", icon: <Activity size={14} /> },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => {
                 audioEngine.play("click");
-                setActiveTab(tab.id as never);
+                setActiveTab(tab.id);
               }}
               className={`px-5 py-3 rounded-2xl text-[10px] font-black uppercase transition-all whitespace-nowrap flex items-center gap-3 ${currentTab === tab.id ? "bg-white dark:bg-indigo-600 shadow-xl text-indigo-600 dark:text-white scale-105 z-10" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"}`}
             >
@@ -119,8 +120,7 @@ export const AdminPanel: React.FC = () => {
 
       <main className="px-4 animate-slide-up">
         {currentTab !== "database" &&
-          currentTab !== "users" &&
-          currentTab !== "telemetry" && (
+          currentTab !== "users" && (
             <div className="mb-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="relative group w-full md:min-w-[280px] md:w-auto">
                 <select
@@ -151,19 +151,15 @@ export const AdminPanel: React.FC = () => {
           {currentTab === "fusion" && (
             <ModelFusionPanel selectedDrawName={selectedDraw} />
           )}
-          {currentTab === "tuning" && (
-            <ExpertTuningPanel selectedDrawName={selectedDraw} />
-          )}
           {currentTab === "training" && <TrainingTab drawName={selectedDraw} />}
           {currentTab === "management" && (
             <DrawManagement drawName={selectedDraw} />
           )}
-          {currentTab === "users" && <UserManagement />}
           {currentTab === "integrity" && (
             <DataIntegrityMonitor drawName={selectedDraw} />
           )}
+          {currentTab === "users" && <UserManagement />}
           {currentTab === "database" && <DatabaseControl />}
-          {currentTab === "telemetry" && <SyncMonitoringDashboard />}
         </div>
       </main>
     </div>

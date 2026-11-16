@@ -119,6 +119,11 @@ export const runBacktestWorker = async <T = unknown>(
   onProgress?: (progress: number) => void,
   customWeights?: unknown,
   skipTraining: boolean = true,
+  options?: {
+    temporalDepth?: number;
+    isForensicOptimized?: boolean;
+    useSpatioTemporalHawkes?: boolean;
+  },
 ): Promise<T> => {
   return new Promise<T>((resolve, reject) => {
     let worker: Worker;
@@ -162,7 +167,8 @@ export const runBacktestWorker = async <T = unknown>(
       totalCols: packed.totalCols,
       sampleSize, 
       customWeights,
-      skipTraining
+      skipTraining,
+      options
     }, [packed.historyBuffer]);
   });
 };

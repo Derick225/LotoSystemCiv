@@ -31,6 +31,7 @@ export const usePredictionGenerator = (drawName: string) => {
     const symbioticContext = useNexusStore(state => state.symbioticContext);
     const fractal = useNexusStore(state => state.fractal);
     const isForensicOptimized = useNexusStore(state => state.isForensicOptimized);
+    const useSpatioTemporalHawkes = useNexusStore(state => state.useSpatioTemporalHawkes);
 
     const [isComputing, setIsComputing] = useState(false);
     const [computingStep, setComputingStep] = useState<string>("");
@@ -282,7 +283,7 @@ export const usePredictionGenerator = (drawName: string) => {
                     setComputingStep(step);
                 },
                 undefined,
-                undefined,
+                useSpatioTemporalHawkes,
                 false // Pure Local Execution (Zéro Cloud) pour Oracle Base
             );
             

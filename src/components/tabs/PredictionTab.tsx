@@ -740,6 +740,49 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                     </div>
                   )}
 
+                  {/* Calibration Empirique Hors-Échantillon vs Loi Nulle 5/90 */}
+                  {activePrediction.empiricalSkill && (
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                          {activePrediction.empiricalSkill.shrinkage > 0.02 ? (
+                            <ShieldCheck size={12} className="text-emerald-500" />
+                          ) : (
+                            <ShieldAlert size={12} className="text-amber-500" />
+                          )}
+                          Signal vs Loi Nulle 5/90
+                        </span>
+                        <span
+                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${
+                            activePrediction.empiricalSkill.shrinkage >= 0.15
+                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : activePrediction.empiricalSkill.shrinkage > 0.02
+                                ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                          }`}
+                        >
+                          {activePrediction.empiricalSkill.shrinkage >= 0.15
+                            ? "Signal Calibré"
+                            : activePrediction.empiricalSkill.shrinkage > 0.02
+                              ? "Signal Faible"
+                              : "Équiprobable H0"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-500 dark:text-slate-400">Rétention Signal (λ)</span>
+                        <span className="font-mono font-bold text-slate-700 dark:text-slate-300">
+                          {(activePrediction.empiricalSkill.shrinkage * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-500 dark:text-slate-400">Lift Top-K vs 5/90</span>
+                        <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                          ×{activePrediction.empiricalSkill.liftVsUniform.toFixed(2)} ({activePrediction.empiricalSkill.expectedHitsTopK.toFixed(3)} vs {activePrediction.empiricalSkill.uniformExpectedHitsTopK.toFixed(3)} hits)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Adaptive Continuous Hyperparameters */}
                   <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
                     <div className="flex justify-between items-center text-[11px]">

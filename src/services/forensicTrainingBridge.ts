@@ -115,7 +115,8 @@ export const generateLearningSession = async (
 export const applyForensicAdjustments = async (
   learningSession: LearningSession,
   baseWeights?: AlgoWeights,
-  dryRun: boolean = false
+  dryRun: boolean = false,
+  onFeedbackLogs?: (logs: NeuralFeedbackLog[]) => void
 ): Promise<AlgoWeights> => {
   const drawName = learningSession.drawName;
   const currentWeights = baseWeights || await getAlgoWeights(drawName);
@@ -172,44 +173,42 @@ export const applyForensicAdjustments = async (
     };
     saveAdaptiveRules(drawName, updatedRules);
 
-    if (typeof window !== 'undefined') {
-      try {
-        const { useNexusStore } = await import('../store/useNexusStore');
+    // Génération et diffusion découplée des logs de feedback neuronal
+    const feedbackLogs: NeuralFeedbackLog[] = [];
+    learningSession.adjustments?.forEach((adj, idx) => {
+      const algo = adj.algo as AlgoKey;
+      const oldW = currentWeights[algo] ?? 0;
+      const newW = optResult.appliedWeights[algo] ?? 0;
+      const diff = newW - oldW;
+      if (Math.abs(diff) > 0.0001) {
+        const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
 
-        // Génération et enregistrement des logs de feedback neuronal en temps réel
-        const feedbackLogs: NeuralFeedbackLog[] = [];
-        learningSession.adjustments?.forEach((adj, idx) => {
-          const algo = adj.algo as AlgoKey;
-          const oldW = currentWeights[algo] ?? 0;
-          const newW = optResult.appliedWeights[algo] ?? 0;
-          const diff = newW - oldW;
-          if (Math.abs(diff) > 0.0001) {
-            const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
-            
-            // Calcul d'un identifiant 100% déterministe via seed canonique
-            const idSeed = `${drawName}_${algo}_${Date.now()}`;
-            const feedbackLogId = generateDeterministicId("log", idx, idSeed);
+        // Calcul d'un identifiant 100% déterministe via seed canonique
+        const idSeed = `${drawName}_${algo}_${Date.now()}`;
+        const feedbackLogId = generateDeterministicId("log", idx, idSeed);
 
-            feedbackLogs.push({
-              id: feedbackLogId,
-              timestamp: Date.now(),
-              drawName,
-              algo,
-              oldWeight: oldW,
-              newWeight: newW,
-              direction: diff > 0 ? 'BOOST' : (diff < 0 ? 'REDUCE' : 'STABILIZE'),
-              impactPercentage: parseFloat(impactPercentage.toFixed(2)),
-              reason: adj.reason || "Ajustement adaptatif de calibrage d'ADN"
-            });
-          }
+        feedbackLogs.push({
+          id: feedbackLogId,
+          timestamp: Date.now(),
+          drawName,
+          algo,
+          oldWeight: oldW,
+          newWeight: newW,
+          direction: diff > 0 ? 'BOOST' : (diff < 0 ? 'REDUCE' : 'STABILIZE'),
+          impactPercentage: parseFloat(impactPercentage.toFixed(2)),
+          reason: adj.reason || "Ajustement adaptatif de calibrage d'ADN"
         });
+      }
+    });
 
-        if (feedbackLogs.length > 0) {
-          useNexusStore.getState().addNeuralFeedbackLogs(feedbackLogs);
-        }
-      } catch (err) {
-        // Safe fallback in non-browser environments
-        console.warn("Could not log neural feedback in store:", err);
+    if (feedbackLogs.length > 0) {
+      onFeedbackLogs?.(feedbackLogs);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('NEXUS_NEURAL_FEEDBACK_LOGS', {
+            detail: { drawName, logs: feedbackLogs },
+          })
+        );
       }
     }
   }

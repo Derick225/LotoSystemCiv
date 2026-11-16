@@ -53,6 +53,10 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
   const { showToast } = useToast();
   const history = useNexusStore((state) => state.history);
   const lastPrediction = useNexusStore((state) => state.lastPrediction);
+  const globalWeights = useNexusStore((state) => state.globalWeights);
+  const temporalDepth = useNexusStore((state) => state.temporalDepth);
+  const isForensicOptimized = useNexusStore((state) => state.isForensicOptimized);
+  const useSpatioTemporalHawkes = useNexusStore((state) => state.useSpatioTemporalHawkes);
 
   const [activeTab, setActiveTab] = useState<"audit" | "weightsProof" | "structural" | "historical">("audit");
   const [filterStatus, setFilterStatus] = useState<"all" | "PROUVE" | "DAMPED" | "VIOLATION">("all");
@@ -70,7 +74,12 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
     if (!isOpen || !drawName) return;
     let active = true;
 
-    extractDrawAlgorithmicParameters(drawName, history)
+    extractDrawAlgorithmicParameters(drawName, history, false, {
+      weights: globalWeights,
+      temporalDepth,
+      isForensicOptimized,
+      useSpatioTemporalHawkes,
+    })
       .then((params) => {
         if (active) {
           setLiveParams(params);
@@ -83,7 +92,7 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
     return () => {
       active = false;
     };
-  }, [isOpen, drawName, history]);
+  }, [isOpen, drawName, history, globalWeights, temporalDepth, isForensicOptimized, useSpatioTemporalHawkes]);
 
   // Déclencheur de la validation stricte complète
   const handleExecuteValidation = async () => {
@@ -97,6 +106,10 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
         drawName,
         rawHistory: history,
         prediction: lastPrediction?.drawName === drawName ? lastPrediction : null,
+        weights: globalWeights,
+        temporalDepth,
+        isForensicOptimized,
+        useSpatioTemporalHawkes,
         testDepth,
         onProgress: (p, step) => {
           setProgress(p);
@@ -128,7 +141,12 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
     try {
       const updatedWeights = enforceStrictWeightsProof(drawName, history, liveParams?.activeWeights);
       await saveAlgoWeights(drawName, updatedWeights);
-      const updatedParams = await extractDrawAlgorithmicParameters(drawName, history);
+      const updatedParams = await extractDrawAlgorithmicParameters(drawName, history, false, {
+        weights: updatedWeights,
+        temporalDepth,
+        isForensicOptimized,
+        useSpatioTemporalHawkes,
+      });
       setLiveParams(updatedParams);
       if (report) {
         setReport({

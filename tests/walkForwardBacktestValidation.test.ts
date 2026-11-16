@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { runBacktestTraining } from '../src/services/backtest/service';
 import { denoiseFeaturesKernelPCA } from '../src/services/mathCore';
 import { applyPCADenoising, ScoredNumber } from '../src/services/prediction/scoringEngine';
-import { computeContinuousKellyAllocation } from '../src/components/KellyCalculator';
+import {
+  computeContinuousKellyAllocation,
+  computeHypergeometricNullProbability,
+} from '../src/components/KellyCalculator';
 import { AlgoKey, AlgoWeights } from '../src/shared/prediction.types';
 import { DrawResult } from '../src/types';
 
@@ -226,6 +229,27 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
 
       expect(alloc1N.edge).toBeGreaterThan(alloc5N.edge);
       expect(alloc5N.betAmount).toBe(0); // Protection du capital sur 5N lorsque la confiance n'atteint pas le seuil critique
+    });
+
+    it('protège strictement le capital (0 FCFA) sous preuve empirique nulle (λ = 0) face à la loi hypergéométrique exacte 5/90', () => {
+      expect(computeHypergeometricNullProbability(1)).toBeCloseTo(5 / 90, 10);
+      expect(computeHypergeometricNullProbability(2)).toBeCloseTo(10 / 4005, 10);
+
+      const uncalibratedZeroSkill = computeContinuousKellyAllocation({
+        confidence: 85,
+        bankroll: 50000,
+        gameMode: 'STANDARD',
+        selectedBetType: '2N',
+        portfolioMode: false,
+        regime: { regime: 'trend', hurst: 0.7, entropy: 0.3, volatility: 0.15 },
+        empiricalSkillShrinkage: 0,
+        empiricalLift: 1.0,
+      });
+
+      expect(uncalibratedZeroSkill.betAmount).toBe(0);
+      expect(uncalibratedZeroSkill.kellyFraction).toBe(0);
+      expect(uncalibratedZeroSkill.edge).toBeLessThan(0);
+      expect(uncalibratedZeroSkill.hasProvenEdge).toBe(false);
     });
   });
 });

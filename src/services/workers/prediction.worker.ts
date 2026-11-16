@@ -71,7 +71,8 @@ self.onmessage = async (e: MessageEvent) => {
         },
         temporalDepth,
         useSpatioTemporalHawkes,
-        preloadedForensicReports
+        preloadedForensicReports,
+        weightsToUse
       );
       self.postMessage({ taskId, success: true, result });
     } else {

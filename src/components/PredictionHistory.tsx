@@ -49,6 +49,7 @@ import { TicketXRay } from "./TicketXRay";
 import { StorageOptimizationModal } from "./StorageOptimizationModal";
 import { audioEngine } from "../utils/audioEngine";
 import { logError, AppError } from "../utils/AppError";
+import { ConfirmModal } from "./ui/ConfirmModal";
 
 interface PredictionHistoryProps {
   drawName: string;
@@ -72,6 +73,12 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
   const [autoPurgeEnabled, setAutoPurgeState] = useState<boolean>(() => isAutoPurgeEnabled());
   const [isPurgingOldLogs, setIsPurgingOldLogs] = useState<boolean>(false);
   const [isStorageModalOpen, setIsStorageModalOpen] = useState<boolean>(false);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => Promise<void> | void;
+  } | null>(null);
   const attemptedLinksRef = useRef<Set<string>>(new Set());
   const isLinkingRef = useRef(false);
 
@@ -108,27 +115,31 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
     }
   };
 
-  const handleManualPurgeOldLogs = async () => {
+  const handleManualPurgeOldLogs = () => {
     audioEngine.play("click");
     if (oldLogsStats.count === 0) {
       showToast("Aucun log de plus de 90 jours à purger.", "info");
       return;
     }
-    if (!confirm(`Purger ${oldLogsStats.count} log(s) de prédictions ayant plus de 90 jours ?`)) {
-      return;
-    }
-    try {
-      setIsPurgingOldLogs(true);
-      const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
-      await loadData();
-      audioEngine.play("success");
-      showToast(`${purgedCount} log(s) purgé(s) avec succès.`, "success");
-    } catch (err) {
-      console.error("Purge error:", err);
-      showToast("Erreur lors de la purge des anciens logs.", "error");
-    } finally {
-      setIsPurgingOldLogs(false);
-    }
+    setConfirmState({
+      title: "Purger les anciens logs",
+      message: `Purger ${oldLogsStats.count} log(s) de prédictions ayant plus de 90 jours ?`,
+      confirmLabel: "Purger",
+      onConfirm: async () => {
+        try {
+          setIsPurgingOldLogs(true);
+          const { purgedCount } = await purgeOldPredictionLogs(drawName, STORAGE_RETENTION_CONSTANTS.RETENTION_DAYS_DEFAULT);
+          await loadData();
+          audioEngine.play("success");
+          showToast(`${purgedCount} log(s) purgé(s) avec succès.`, "success");
+        } catch (err) {
+          console.error("Purge error:", err);
+          showToast("Erreur lors de la purge des anciens logs.", "error");
+        } finally {
+          setIsPurgingOldLogs(false);
+        }
+      },
+    });
   };
 
   const loadData = useCallback(async () => {
@@ -154,20 +165,25 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
     loadData();
   }, [loadData]);
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     audioEngine.play("click");
-    if (confirm("Supprimer définitivement cette prédiction de l'historique ?")) {
-      await deletePrediction(id);
-      setHistory((prev) => prev.filter((h) => h.id !== id));
-      setSelectedItemIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      audioEngine.play("success");
-      showToast("Prédiction définitivement supprimée.", "info");
-    }
+    setConfirmState({
+      title: "Supprimer la prédiction",
+      message: "Supprimer définitivement cette prédiction de l'historique ?",
+      confirmLabel: "Supprimer",
+      onConfirm: async () => {
+        await deletePrediction(id);
+        setHistory((prev) => prev.filter((h) => h.id !== id));
+        setSelectedItemIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        audioEngine.play("success");
+        showToast("Prédiction définitivement supprimée.", "info");
+      },
+    });
   };
 
   const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
@@ -193,28 +209,32 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
     }
   };
 
-  const handleDeleteSelected = async () => {
+  const handleDeleteSelected = () => {
     const count = selectedItemIds.size;
     if (count === 0) return;
-    if (!confirm(`Supprimer définitivement les ${count} prédiction(s) sélectionnée(s) de l'historique ?`)) {
-      return;
-    }
-    try {
-      setIsDeletingBatch(true);
-      audioEngine.play("click");
-      const idsArray = Array.from(selectedItemIds);
-      await deleteMultiplePredictions(idsArray);
-      setHistory((prev) => prev.filter((h) => !selectedItemIds.has(h.id)));
-      setSelectedItemIds(new Set());
-      setIsSelectionMode(false);
-      audioEngine.play("success");
-      showToast(`${count} prédiction(s) supprimée(s) avec persistance.`, "success");
-    } catch (err) {
-      console.error("Batch delete error:", err);
-      showToast("Erreur lors de la suppression par lot.", "error");
-    } finally {
-      setIsDeletingBatch(false);
-    }
+    setConfirmState({
+      title: "Suppression par lot",
+      message: `Supprimer définitivement les ${count} prédiction(s) sélectionnée(s) de l'historique ?`,
+      confirmLabel: `Supprimer (${count})`,
+      onConfirm: async () => {
+        try {
+          setIsDeletingBatch(true);
+          audioEngine.play("click");
+          const idsArray = Array.from(selectedItemIds);
+          await deleteMultiplePredictions(idsArray);
+          setHistory((prev) => prev.filter((h) => !selectedItemIds.has(h.id)));
+          setSelectedItemIds(new Set());
+          setIsSelectionMode(false);
+          audioEngine.play("success");
+          showToast(`${count} prédiction(s) supprimée(s) avec persistance.`, "success");
+        } catch (err) {
+          console.error("Batch delete error:", err);
+          showToast("Erreur lors de la suppression par lot.", "error");
+        } finally {
+          setIsDeletingBatch(false);
+        }
+      },
+    });
   };
 
   // O(1) Lookups for performance
@@ -466,15 +486,20 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
           )}
 
           <button
-            onClick={async () => {
+            onClick={() => {
               audioEngine.play("click");
-              if (confirm("Vider définitivement l'historique complet pour ce tirage ?")) {
-                await clearPredictionHistory(drawName);
-                setHistory([]);
-                setSelectedItemIds(new Set());
-                audioEngine.play("success");
-                showToast("Historique vidé définitivement.", "info");
-              }
+              setConfirmState({
+                title: "Vider l'historique",
+                message: "Vider définitivement l'historique complet pour ce tirage ?",
+                confirmLabel: "Tout vider",
+                onConfirm: async () => {
+                  await clearPredictionHistory(drawName);
+                  setHistory([]);
+                  setSelectedItemIds(new Set());
+                  audioEngine.play("success");
+                  showToast("Historique vidé définitivement.", "info");
+                },
+              });
             }}
             className="text-[10px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest flex items-center gap-1.5 transition-colors cursor-pointer px-2 py-1.5"
           >
@@ -942,6 +967,19 @@ export const PredictionHistory: React.FC<PredictionHistoryProps> = ({
         isOpen={isStorageModalOpen}
         onClose={() => setIsStorageModalOpen(false)}
         onDataChanged={loadData}
+      />
+      <ConfirmModal
+        isOpen={confirmState !== null}
+        variant="danger"
+        title={confirmState?.title || ""}
+        message={confirmState?.message || ""}
+        confirmLabel={confirmState?.confirmLabel || "Confirmer"}
+        onConfirm={() => {
+          const fn = confirmState?.onConfirm;
+          setConfirmState(null);
+          fn?.();
+        }}
+        onCancel={() => setConfirmState(null)}
       />
     </div>
   );

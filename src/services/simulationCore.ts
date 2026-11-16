@@ -2,7 +2,6 @@ import { AlgoWeights } from "../types";
 import { DrawResult } from "../types";
 import { generateMasterPrediction } from "./prediction/predictionFacade";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
-import { useNexusStore } from "../store/useNexusStore";
 import { getPayoutMultiplier, drawHasMachineNumbers } from "../constants";
 import { AlgoKey } from "../shared/prediction.types";
 import { normalizeWeights } from "./prediction/weightsManager";
@@ -42,6 +41,9 @@ export interface SimulationConfig {
   initialBankroll?: number;
   unitBet?: number;
   payoutModel?: string;
+  temporalDepth?: number;
+  isForensicOptimized?: boolean;
+  useSpatioTemporalHawkes?: boolean;
 }
 
 
@@ -70,10 +72,9 @@ export async function runSimulationCore(config: SimulationConfig) {
   }
   const effectiveWeights = normalizeWeights(sanitizedWeights);
 
-  const storeState = useNexusStore?.getState?.();
-  const isForensicOptimized = storeState?.isForensicOptimized ?? false;
-  const useSpatioTemporalHawkes = storeState?.useSpatioTemporalHawkes ?? false;
-  const temporalDepth = storeState?.temporalDepth ?? 100;
+  const isForensicOptimized = config.isForensicOptimized ?? false;
+  const useSpatioTemporalHawkes = config.useSpatioTemporalHawkes ?? false;
+  const temporalDepth = config.temporalDepth ?? 100;
 
   const simWindow = history.slice(0, depth).reverse();
   const INITIAL_BANKROLL = initialBankroll || 50000;

@@ -1205,14 +1205,14 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
               });
               // Mettre à jour le cache mémoire
               weightsCache.set(drawName, { weights: freshWeights, timestamp: Date.now() });
-              
-              // Mettre à jour le store si l'utilisateur est toujours sur ce tirage
+
+              // Notifier de manière découplée les abonnés UI/Store sans couplage circulaire
               if (typeof window !== 'undefined') {
-                const { useNexusStore } = await import('../../store/useNexusStore');
-                const activeDraw = useNexusStore.getState().drawName;
-                if (activeDraw === drawName) {
-                  useNexusStore.getState().setGlobalWeights(freshWeights);
-                }
+                window.dispatchEvent(
+                  new CustomEvent('NEXUS_WEIGHTS_UPDATED', {
+                    detail: { drawName, weights: freshWeights },
+                  })
+                );
               }
             }
           }
@@ -1285,26 +1285,12 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
       const payload = { weights: normalized, updatedAt: new Date().toISOString() };
       await set(`nexus_config_${drawName}`, payload);
 
-      // Diffuse l'événement pour notifier tous les composants et onglets en temps réel
+      // Diffuse l'événement pour notifier tous les composants, le store et les onglets en temps réel
       window.dispatchEvent(
         new CustomEvent('NEXUS_WEIGHTS_UPDATED', {
           detail: { drawName, weights: normalized },
         })
       );
-
-      // Synchroniser le store si le tirage actif correspond
-      try {
-        const { useNexusStore } = await import('../../store/useNexusStore');
-        const activeDraw = useNexusStore.getState().drawName;
-        if (activeDraw === drawName) {
-          const currentStoreWeights = useNexusStore.getState().globalWeights;
-          if (JSON.stringify(currentStoreWeights) !== JSON.stringify(normalized)) {
-            useNexusStore.setState({ globalWeights: normalized });
-          }
-        }
-      } catch (err) {
-        // Silenced
-      }
     }
     // Debounce de 2.5 secondes sur l'écriture Supabase (table unique model_weights_config)
     // pour éviter toute saturation de quota lors d'ajustements rapides
