@@ -6,20 +6,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
-interface AbiReport {
-  rustSourceExports: string[];
-  compiledDtsExports: string[];
-  bridgeInvokedSymbols: string[];
-  missingInCompiled: string[];
-  missingInRustSource: string[];
+function collectBridgeInvokedSymbols(wasmDir: string): string[] {
+  const symbols = new Set<string>();
+  const entries = fs.readdirSync(wasmDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+    const content = fs.readFileSync(path.join(wasmDir, entry.name), 'utf8');
+    const wasmCallMatches = Array.from(content.matchAll(/(?:wasmModuleInstance|getWasmModuleInstance\(\))\??\.(\w+)/g)).map(m => m[1]);
+    const storeCallMatches = Array.from(content.matchAll(/store\??\.(\w+)/g)).map(m => m[1]);
+    for (const s of [...wasmCallMatches, ...storeCallMatches]) {
+      symbols.add(s);
+    }
+  }
+  return Array.from(symbols).sort();
 }
 
 function verifyAbi(): void {
-  console.log('=== VÉRIFICATION DE LA COHÉRENCE ABI RUST / WASM / TS ===\n');
+  const isStrict = process.argv.includes('--strict');
+  console.log(`=== VÉRIFICATION DE LA COHÉRENCE ABI RUST / WASM / TS${isStrict ? ' [MODE STRICT]' : ''} ===\n`);
 
   const libRsPath = path.join(rootDir, 'crates', 'loto-engine', 'src', 'lib.rs');
   const dtsPath = path.join(rootDir, 'crates', 'loto-engine', 'pkg', 'loto_engine.d.ts');
-  const bridgePath = path.join(rootDir, 'src', 'services', 'wasm', 'lotoEngineBridge.ts');
+  const wasmDir = path.join(rootDir, 'src', 'services', 'wasm');
 
   // 1. Lire la liste canonique des exports déclarés dans lib.rs
   const libRsContent = fs.readFileSync(libRsPath, 'utf8');
@@ -41,16 +49,12 @@ function verifyAbi(): void {
     compiledDtsExports = Array.from(new Set([...classMatches, ...funcMatches])).sort();
   }
 
-  // 3. Extraire les symboles WASM appelés dans le bridge
-  const bridgeContent = fs.readFileSync(bridgePath, 'utf8');
-  const wasmCallMatches = Array.from(bridgeContent.matchAll(/wasmModuleInstance\??\.(\w+)/g)).map(m => m[1]);
-  const storeCallMatches = Array.from(bridgeContent.matchAll(/store\??\.(\w+)/g)).map(m => m[1]);
-  const bridgeInvokedSymbols = Array.from(new Set([...wasmCallMatches, ...storeCallMatches])).sort();
+  // 3. Extraire les symboles WASM appelés dans tous les sous-modules src/services/wasm/*.ts
+  const bridgeInvokedSymbols = collectBridgeInvokedSymbols(wasmDir);
 
   // Comparaisons
   const missingInCompiled = rustSourceExports.filter(sym => !compiledDtsExports.includes(sym));
   const missingInRustSource = bridgeInvokedSymbols.filter(sym => {
-    // Filtrer les méthodes d'instance de store et les utilitaires standards
     const isExportOrMethod = rustSourceExports.includes(sym) ||
       ['append_single_draw', 'get_frequencies', 'get_current_gaps', 'get_draw_count', 'clear_draw', 'bootstrap_json', 'generate_portfolio', 'analyze_draw', 'get_network_id', 'compute_interdraw_coupling', 'compute_network_domino_wasm', 'compute_walk_forward_calibration', 'clear_and_reload', 'rebuild_all_seen_indexes', 'compute_bivariate_dyads_wasm'].includes(sym);
     return !isExportOrMethod;
@@ -58,13 +62,17 @@ function verifyAbi(): void {
 
   console.log(`- Exports déclarés dans le code source Rust : ${rustSourceExports.length}`);
   console.log(`- Exports présents dans le binaire compilé actuel (.d.ts) : ${compiledDtsExports.length}`);
-  console.log(`- Fonctions/méthodes WASM appelées par le bridge TS : ${bridgeInvokedSymbols.length}\n`);
+  console.log(`- Fonctions/méthodes WASM appelées par les bridges TS : ${bridgeInvokedSymbols.length}\n`);
 
   if (missingInCompiled.length > 0) {
     console.warn(`[ATTENTION] ${missingInCompiled.length} symboles du code source Rust ne sont pas encore compilés dans le binaire actuel :`);
     missingInCompiled.forEach(sym => console.warn(`   ❌ ${sym}`));
     console.warn('\nCes fonctions s\'exécutent actuellement via les fallbacks TypeScript déterministes C^∞.');
     console.warn('Reconstruction requise avec : npm run build:wasm\n');
+    if (isStrict) {
+      console.error('[ERREUR ABI STRICTE] Divergence entre sources Rust et binaire .wasm compilé.');
+      process.exit(1);
+    }
   } else {
     console.log('✅ Tous les exports Rust sont présents dans le paquet compilé.');
   }
@@ -74,7 +82,7 @@ function verifyAbi(): void {
     missingInRustSource.forEach(sym => console.error(`   🚨 ${sym}`));
     process.exit(1);
   } else {
-    console.log('✅ Tous les appels du bridge correspondent à des fonctions déclarées dans le moteur.');
+    console.log('✅ Tous les appels des bridges correspondent à des fonctions déclarées dans le moteur.');
   }
 
   console.log('\n=== VÉRIFICATION DU CONTRAT ABI TERMINÉE AVEC SUCCÈS ===');

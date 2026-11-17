@@ -4,6 +4,7 @@ import { useNexusStore } from '../store/useNexusStore';
 import { useSession } from './useAuth';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
+import { logger } from '../utils/logger';
 
 export const useRealtimeSync = () => {
     const { session } = useSession();
@@ -20,12 +21,12 @@ export const useRealtimeSync = () => {
         const triggerBackgroundSync = async () => {
             const now = Date.now();
             if (now - lastSyncTime < MIN_SYNC_INTERVAL_MS) {
-                console.log("[Background Sync] Cooldown active, skipping sync to optimize battery and network.");
+                logger.debug("[Background Sync] Cooldown active, skipping sync to optimize battery and network.");
                 return;
             }
             lastSyncTime = now;
 
-            console.log(`[Background Sync] App focus / visibility detected. Executing progressive background sync for: ${drawName}...`);
+            logger.debug({ drawName }, `[Background Sync] App focus / visibility detected. Executing progressive background sync`);
 
             try {
                 // 1. Refresh draw results silently in the background
@@ -35,9 +36,9 @@ export const useRealtimeSync = () => {
                 const { syncAllHistory } = await import('../services/predictionHistoryService');
                 await syncAllHistory(drawName);
 
-                console.log("[Background Sync] Progressive background sync successfully completed.");
+                logger.debug("[Background Sync] Progressive background sync successfully completed.");
             } catch (err) {
-                console.warn("[Background Sync] Error during background progressive sync:", err);
+                logger.warn({ err }, "[Background Sync] Error during background progressive sync");
             }
         };
 
@@ -91,7 +92,7 @@ export const useRealtimeSync = () => {
             )
             .subscribe((status, _err) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log("📡 Synchro Temps-Réel ACTIF [Public].");
+                    logger.info("📡 Synchro Temps-Réel ACTIF [Public].");
                 }
             });
 
@@ -100,7 +101,7 @@ export const useRealtimeSync = () => {
             const customEvent = e as CustomEvent;
             const targetDraw = customEvent.detail?.drawName || drawName;
             if (targetDraw && targetDraw === drawName) {
-                console.log(`[Local Sync Event] Refraîchissement des données pour : ${targetDraw}`);
+                logger.debug({ targetDraw }, `[Local Sync Event] Rafraîchissement des données`);
                 refreshData(targetDraw, true);
             }
         };
@@ -142,11 +143,11 @@ export const useRealtimeSync = () => {
                 filter: `user_id=eq.${session.user.id}`
             }, (payload) => {
                  // Notification silencieuse ou rafraîchissement si l'utilisateur a généré sur un autre device
-                 console.log("Nouvelle prédiction détectée (Multi-Device).", payload.new);
+                 logger.debug({ record: payload.new }, "Nouvelle prédiction détectée (Multi-Device).");
             })
             .subscribe((status) => {
                 if (status === 'SUBSCRIBED') {
-                    console.log("🔐 Synchro Temps-Réel ACTIF [Privé].");
+                    logger.info("🔐 Synchro Temps-Réel ACTIF [Privé].");
                 }
             });
 

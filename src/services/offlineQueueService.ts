@@ -6,6 +6,7 @@ import {
   OfflineQueuePayloadType,
   OfflineQueuePayloadTypeSchema,
 } from './schemas/syncSchemas';
+import { logger } from '../utils/logger';
 
 export type { OfflineQueueItem, OfflineQueuePayloadType };
 
@@ -89,8 +90,8 @@ class OfflineQueueService {
     this.listenerInitialized = true;
 
     window.addEventListener('online', () => {
-      console.log('[OfflineQueue] Reconnexion réseau détectée. Lancement de la réconciliation...');
-      this.processQueue().catch((err: unknown) => console.warn('[OfflineQueue] Échec de réconciliation :', err));
+      logger.info('[OfflineQueue] Reconnexion réseau détectée. Lancement de la réconciliation...');
+      this.processQueue().catch((err: unknown) => logger.warn({ err }, '[OfflineQueue] Échec de réconciliation'));
     });
 
     if (this.isNavigatorOnline()) {

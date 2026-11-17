@@ -183,13 +183,13 @@ export const applyForensicAdjustments = async (
       if (Math.abs(diff) > 0.0001) {
         const impactPercentage = oldW > 0 ? (diff / oldW) * 100 : diff * 100;
 
-        // Calcul d'un identifiant 100% déterministe via seed canonique
-        const idSeed = `${drawName}_${algo}_${Date.now()}`;
+        // Calcul d'un identifiant 100% déterministe via seed canonique (sans horloge murale)
+        const idSeed = `${learningSession.id}_${drawName}_${algo}_${oldW.toFixed(6)}_${newW.toFixed(6)}`;
         const feedbackLogId = generateDeterministicId("log", idx, idSeed);
 
         feedbackLogs.push({
           id: feedbackLogId,
-          timestamp: Date.now(),
+          timestamp: learningSession.timestamp || Date.now(),
           drawName,
           algo,
           oldWeight: oldW,

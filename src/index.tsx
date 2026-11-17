@@ -17,6 +17,7 @@ import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 import { offlineQueueService } from './services/offlineQueueService';
 import { initializeLotoEngineWasm } from './services/wasm/lotoEngineBridge';
+import { logger } from './utils/logger';
 
 // Initialisation du réconciliateur de queue hors-ligne IndexedDB / Supabase
 offlineQueueService.initReconciler();
@@ -55,7 +56,7 @@ const updateSW = registerSW({
     }
   },
   onOfflineReady() {
-    console.log('Nexus Engine SW: Ready for offline use');
+    logger.info('Nexus Engine SW: Ready for offline use');
   },
 });
 

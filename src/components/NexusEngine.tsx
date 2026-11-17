@@ -20,6 +20,7 @@ import {
   getLocalForensicReports,
 } from "../services/postPredictionAnalysisService";
 import { AppError, logError } from "../utils/AppError";
+import { logger } from "../utils/logger";
 import { useAutonomousAgent } from "../hooks/useAutonomousAgent";
 import { purifyHistoryForDraw } from "../utils/arrayUtils";
 
@@ -69,7 +70,7 @@ export const NexusEngine: React.FC = () => {
   // Force refetch on store rehydration
   useEffect(() => {
     const handleRehydrated = () => {
-      console.log(
+      logger.debug(
         "[NexusEngine] Store rehydration detected, forcing full state synchronization...",
       );
       refetchHistory();

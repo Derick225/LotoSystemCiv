@@ -1,6 +1,7 @@
 import { get, set, del, keys as idbKeys, clear } from "idb-keyval";
 import { getCanonicalDrawHistoryHash } from "../../utils/mathUtils";
 import { getDrawNetworkId } from "../../config/networks";
+import { logger } from "../../utils/logger";
 
 /**
  * Configuration centralisée des durées de vie du cache (TTL) par domaine métier.
@@ -286,8 +287,9 @@ class CacheService {
     const oldCount = this.recentDrawCounts.get(drawName) || 0;
     if (newTotalCount > oldCount) {
       this.recentDrawCounts.set(drawName, newTotalCount);
-      console.log(
-        `[CacheService] New draw registered for ${drawName} (Count: ${newTotalCount}). Dependent caches will auto-invalidate on access.`
+      logger.debug(
+        { drawName, newTotalCount },
+        `[CacheService] New draw registered. Dependent caches will auto-invalidate on access.`
       );
     }
   }
@@ -405,8 +407,9 @@ class CacheService {
       }
     }
 
-    console.log(
-      `[CacheService] Garbage Collection complete. Cleared ${clearedCount} stale entries.`,
+    logger.debug(
+      { clearedCount },
+      `[CacheService] Garbage Collection complete.`
     );
     return clearedCount;
   }
@@ -539,7 +542,7 @@ class CacheService {
     }
 
     if (memoryPurged > 0 || idbPurged > 0) {
-      console.log(`[CacheService] Purge des tirages simulés complétée : ${memoryPurged} clés mémoire, ${idbPurged} entrées IDB assainies.`);
+      logger.info({ memoryPurged, idbPurged }, `[CacheService] Purge des tirages simulés complétée.`);
     }
 
     return { memoryPurged, idbPurged };

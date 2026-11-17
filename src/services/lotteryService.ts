@@ -5,6 +5,7 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 import { getProjectionsAsync, getFollowersAnalysisAsync } from './mathService';
 import { apiClient } from '../core/api/apiClient';
 import { AppError, logError, getErrorMessage } from '../utils/AppError';
+import { logger } from '../utils/logger';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 import {
   computeFrequencyCountsHpc,
@@ -840,7 +841,7 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
       if (match && match.id === resultToMatch.id) {
           const existingReport = await getForensicReportByPredictionId(pred.id);
           if (!existingReport) {
-            console.log(`[Autopsy Locale] Execution forensics pour prédiction ${pred.id}`);
+            logger.debug({ predictionId: pred.id }, `[Autopsy Locale] Execution forensics`);
             const report = await performForensicAnalysis(
               drawName,
               resultToMatch.date,
@@ -861,10 +862,10 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
               const learningSession = await generateLearningSession(report, cleanHistory);
               if (learningSession && learningSession.adjustments && learningSession.adjustments.length > 0) {
                 await applyForensicAdjustments(learningSession);
-                console.log(`[Closed-Loop Auto-Feedback] Poids algorithmiques mis à jour de manière continue pour ${drawName}`);
+                logger.info({ drawName }, `[Closed-Loop Auto-Feedback] Poids algorithmiques mis à jour`);
               }
             } catch (closedLoopErr) {
-              console.warn("[Closed-Loop Auto-Feedback] Auto-ajustement non critique :", closedLoopErr);
+              logger.warn({ err: closedLoopErr }, "[Closed-Loop Auto-Feedback] Auto-ajustement non critique");
             }
           }
           if (pred.drawResultId !== resultToMatch.id) {
@@ -877,16 +878,16 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
     try {
       const reconciledDnaCount = await reconcileDnaLogsWithDrawResult(drawName, resultToMatch, cleanHistory);
       if (reconciledDnaCount > 0) {
-        console.log(`[ADN Audit] ${reconciledDnaCount} log(s) ADN réconcilié(s) avec le tirage ${resultToMatch.date}`);
+        logger.info({ reconciledDnaCount, date: resultToMatch.date }, `[ADN Audit] Log(s) ADN réconcilié(s)`);
       }
     } catch (dnaErr) {
-      console.warn("[ADN Audit] Erreur lors de la réconciliation ADN:", dnaErr);
+      logger.warn({ err: dnaErr }, "[ADN Audit] Erreur lors de la réconciliation ADN");
     }
 
     if (autopsiesRun > 0) {
-       console.log(`[Autopsie] ${autopsiesRun} autopsie(s) effectuée(s).`);
+       logger.info({ autopsiesRun }, `[Autopsie] Autopsie(s) effectuée(s).`);
     } else {
-       console.log(`[Autopsie] Enregistrement d'un nouveau tirage sans autopsie.`);
+       logger.debug(`[Autopsie] Enregistrement d'un nouveau tirage sans autopsie.`);
     }
   } catch (e) {
     console.error("Local automation trigger failed:", e);
