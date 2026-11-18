@@ -51,6 +51,19 @@ import {
   looEceAfterCalibration,
   ConformalInterval,
 } from './onlineCalibrationService';
+import {
+  FORENSIC_MODEL_VERSION,
+  UNIFORM_BRIER_BASELINE,
+  UNIFORM_EXPECTED_HITS_TOP5,
+  UNIFORM_LOG_LOSS_BASELINE,
+  computeCautiousAggregatedWeightUpdate,
+  evaluateMarginalPredictions,
+  runChronologicalWalkForwardValidation,
+  type BaselineComparisonMetrics,
+  type GeneCounterfactualAttribution,
+  type LearningAuditPayload,
+  type WalkForwardValidationReport,
+} from '../../../supabase/functions/_shared/forensic-learning-engine.ts';
 
 export interface NearMissItem {
   actualWinner: number;
@@ -83,11 +96,16 @@ export interface AlgoGradientBreakdown {
   attributionToWinners: number;
   recommendedWeight: number;
   deltaPercent: number;
+  counterfactualScore?: number;
+  deltaLogLossAblation?: number;
+  deltaBrierAblation?: number;
+  winnerLiftAblation?: number;
 }
 
 export interface ClosedLoopAutopsyReport {
   drawName: string;
   targetDrawDate: string;
+  modelVersion?: string;
   actualWinners: number[];
   actualMachine: number[];
   top5Predicted: number[];
@@ -100,7 +118,27 @@ export interface ClosedLoopAutopsyReport {
   klDivergence: number;
   crossEntropy: number;
   brierScore: number;
+  logLoss?: number;
+  ece?: number;
+  marginalSum?: number;
   calibrationAccuracy: number; // 0 - 100%
+  brierSkillVsUniform?: number;
+  logLossSkillVsUniform?: number;
+  brierSkillVsHistorical?: number | null;
+  logLossSkillVsHistorical?: number | null;
+  uniformBaseline?: {
+    expectedHitsTop5: number;
+    brierScore: number;
+    logLoss: number;
+  };
+  historicalBaseline?: {
+    sampleCount: number;
+    expectedHitsTop5: number;
+    actualHitsTop5: number;
+    brierScore: number;
+    logLoss: number;
+  };
+  learningAudit?: LearningAuditPayload;
   algoGradients: AlgoGradientBreakdown[];
   correctedWeights: AlgoWeights;
   initialWeights: AlgoWeights;
@@ -114,7 +152,7 @@ export interface ClosedLoopAutopsyReport {
   interDrawAudit?: InterDrawPostMortemAudit;
   /** Attribution causale par contrefactuel continu : ablation + réallocation par canal */
   channelAttribution?: ChannelCounterfactualImpact[];
-  /** Échantillon brut de calibration : marginales prédites (index n−1 ↔ numéro n) et issues */
+  /** Échantillon brut de calibration : marginales cohérentes (Σ = 5, index n−1 ↔ numéro n) et issues */
   calibrationSample?: { probabilities: number[]; outcomes: number[] };
 }
 
@@ -422,46 +460,29 @@ export const executeClosedLoopAutopsy = async (
     }
   });
 
-  // 6. Métriques d'Entropie Croisée, Divergence KL & Score de Brier sur marginales d'inclusion (somme = K)
+  // 6. Évaluation propre sur marginales cohérentes (Σ q_i = 5 exactement) & séparation des frôlements
+  const K = actualWinners.length || 5;
+  const marginalEval = evaluateMarginalPredictions({
+    marginals90: Array.from({ length: 90 }, (_, i) => ensembleScores[i + 1]),
+    actualWinners,
+    top5Predicted,
+    priorDraws: priorHistory,
+  });
+
   let klDiv = 0;
   let crossEnt = 0;
-  let brierSum = 0;
-  const K = actualWinners.length || 5;
   const pActualUniformOnWinners = 1.0 / K;
-
   for (let num = 1; num <= 90; num++) {
-    const isWinner = actualWinnersSet.has(num);
-    const pSimplex = Math.max(1e-6, probEnsemble[num]);
-    const qMarginal = Math.min(1.0, K * probEnsemble[num]);
-    const pTarget = isWinner ? pActualUniformOnWinners : 0;
-
-    if (isWinner) {
-      klDiv += pTarget * Math.log((pTarget + 1e-9) / pSimplex);
-      crossEnt -= pTarget * Math.log(pSimplex);
-    }
-    brierSum += Math.pow(qMarginal - (isWinner ? 1.0 : 0.0), 2);
+    if (!actualWinnersSet.has(num)) continue;
+    const pSimplex = Math.max(1e-6, marginalEval.marginals90[num - 1] / K);
+    klDiv += pActualUniformOnWinners * Math.log((pActualUniformOnWinners + 1e-9) / pSimplex);
+    crossEnt -= pActualUniformOnWinners * Math.log(pSimplex);
   }
 
-  const brierScore = brierSum / 90.0;
-  // Référence exacte d'un prédicteur uniforme sur les marginales d'inclusion (q_i = K/90) :
-  // Brier_uniform = (K/90)*(1 - K/90)^2 + (1 - K/90)*(K/90)^2 = (K/90)*(1 - K/90) ≈ 0.052469
-  const pUniformMarginal = K / 90.0;
-  const expectedUniformBrier = pUniformMarginal * (1.0 - pUniformMarginal);
-  // Calibration continue : Brier = 0 (parfait) -> 100%, Brier = expectedUniformBrier (hasard uniforme) -> 50%
-  const calibrationAccuracy = Math.max(
-    0,
-    Math.min(
-      100,
-      Math.round(
-        100 *
-          Math.exp((-brierScore / Math.max(1e-6, expectedUniformBrier)) * Math.LN2)
-      )
-    )
-  );
+  const brierScore = marginalEval.brierScore;
+  const calibrationAccuracy = marginalEval.calibrationAccuracy;
 
-  // 6.5 Attribution causale par contrefactuel continu (AGENTS.md : zéro seuil binaire,
-  // 100% déterministe). Mesure ce que chaque canal a réellement causé au résultat
-  // d'ensemble — au-delà de l'attribution descriptive sur les gagnants.
+  // 6.5 Attribution causale par contrefactuel continu (ablation par gène : ΔLogLoss, ΔBrier, lift gagnants vs non-gagnants)
   const channelAttribution = computeChannelAttribution({
     channelKeys: validKeys,
     algoScores,
@@ -471,8 +492,7 @@ export const executeClosedLoopAutopsy = async (
     labels: LABELS_MAP as Record<string, string>,
   });
 
-  // 7. Calibration Dynamique du Taux d'Apprentissage η(t) par Dérive Temporelle
-  // Formule canonique : η(t) = η0 / (1 + λ * D_KL(P || Q)) avec η0 = 1 / sqrt(K_active)
+  // 7. Calibration Dynamique du Taux d'Apprentissage & Régime
   const activeAlgoCount =
     validKeys.filter((k) => (normalizedCurrent[k] ?? 0) > 0).length || validKeys.length;
   const eta0 = 1.0 / Math.sqrt(activeAlgoCount);
@@ -481,18 +501,12 @@ export const executeClosedLoopAutopsy = async (
     eta0,
     10
   );
-  // Régulation continue du gradient par l'exposant de Hurst et l'entropie de Shannon du régime
   const regimeInfo = detectGameRegime(priorHistory);
-  // Modulation sigmoïdale différentiable selon la persistance de Hurst (centrée en 0.5) :
-  // Phi(H) = 2.0 / (1.0 + exp(-4.0 * (H - 0.5)))
-  const hurstModulator = 2.0 / (1.0 + Math.exp(-4.0 * (regimeInfo.hurst - 0.5)));
-  // Amortissement continu si l'entropie normalisée approche le bruit thermique pur (évite le surapprentissage stochastique)
-  const entropyDampener = Math.exp(-0.5 * Math.max(0, regimeInfo.entropy - 0.7));
-  const rawLearningRate = temporalDriftMetrics.learningRate * hurstModulator * entropyDampener;
-  const learningRate = Math.max(
-    0.01,
-    Math.min(0.5, rawLearningRate)
-  );
+  const maxEntropy = Math.log2(90);
+  const normalizedEntropy =
+    regimeInfo.entropy > 1.0
+      ? Math.min(1.0, regimeInfo.entropy / maxEntropy)
+      : Math.max(0.0, Math.min(1.0, regimeInfo.entropy));
 
   // 7.5. Matrice de Profil Cyclique & Exposant de Lyapunov
   const cyclicPhaseProfile = calculateCyclicPhaseProfileMatrix(
@@ -500,77 +514,103 @@ export const executeClosedLoopAutopsy = async (
     advancedMetrics?.topologicalLyapunov as Record<number, number>
   );
 
-  const algoGradients: AlgoGradientBreakdown[] = [];
-  const rawUpdatedWeights: Record<string, number> = {};
+  // Conversion directe de l'ablation contrefactuelle par canal vers le moteur unifié d'apprentissage prudent
+  const attributionByKey = new Map<string, ChannelCounterfactualImpact>();
+  channelAttribution.forEach((c) => attributionByKey.set(c.key, c));
 
+  const geneAttributionsForDraw: GeneCounterfactualAttribution[] = validKeys.map((key) => {
+    const attr = attributionByKey.get(key);
+    return {
+      key,
+      weight: normalizedCurrent[key] ?? 0,
+      deltaLogLossAblation: attr?.deltaLogLossAblation ?? 0,
+      deltaBrierAblation: attr?.deltaBrierAblation ?? 0,
+      deltaHitsTop5Ablation: attr?.deltaHitsTop5Ablation ?? 0,
+      winnerLiftAblation: attr?.winnerLiftAblation ?? 0,
+      counterfactualScore: attr?.counterfactualScore ?? 0,
+    };
+  });
+
+  const singleForcedZero = new Set<string>(Array.from(RETIRED_ALGO_WEIGHT_KEYS));
+  if (!hasMachineData) {
+    singleForcedZero.add(AlgoKey.MACHINE_TRANSFER);
+  }
+
+  const singleUpdate = computeCautiousAggregatedWeightUpdate({
+    currentWeights: normalizedCurrent as Record<string, number>,
+    drawAttributionsWindow: [geneAttributionsForDraw],
+    windowMetrics: [
+      {
+        exactHits: marginalEval.exactHits,
+        brierScore: marginalEval.brierScore,
+        logLoss: marginalEval.logLoss,
+        ece: marginalEval.ece,
+        historicalBrier: marginalEval.historicalBaseline?.brierScore ?? null,
+        historicalLogLoss: marginalEval.historicalBaseline?.logLoss ?? null,
+        historicalHits: marginalEval.historicalBaseline?.actualHitsTop5 ?? null,
+      },
+    ],
+    entropyNormalized: normalizedEntropy,
+    hurstExponent: regimeInfo.hurst,
+    baseLearningRate: temporalDriftMetrics.learningRate,
+    forcedZeroKeys: singleForcedZero,
+    modelVersion: FORENSIC_MODEL_VERSION,
+  });
+
+  // Modulation topologique de phase cyclique très douce après normalisation prudente
+  const phaseModulatedRaw: Record<string, number> = {};
   validKeys.forEach((key) => {
+    const baseProposed = singleUpdate.updatedWeights[key] ?? 0;
+    if (singleForcedZero.has(key) || baseProposed <= 0) {
+      phaseModulatedRaw[key] = 0;
+      return;
+    }
+    const phaseModifier = cyclicPhaseProfile.algoWeightModifiers[key] || 0.0;
+    const phaseMultiplier = Math.exp(phaseModifier * singleUpdate.audit.sampleAttenuation * 0.25);
+    phaseModulatedRaw[key] = baseProposed * phaseMultiplier;
+  });
+
+  const correctedWeights = normalizeWeights(phaseModulatedRaw as AlgoWeights);
+  const learningRate = singleUpdate.audit.effectiveLearningRate;
+
+  const algoGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
     const scores = algoScores[key];
     let sumScore = 0;
     for (let i = 1; i <= 90; i++) sumScore += scores[i];
-    const meanScore = sumScore / 90.0;
 
-    // Écart-type robuste de l'algo sur les 90 numéros (normalisation du gradient)
-    let sumSqDev = 0;
-    for (let i = 1; i <= 90; i++) sumSqDev += Math.pow(scores[i] - meanScore, 2);
-    const stdScore = Math.sqrt(sumSqDev / 90.0) || 1e-6;
-
-    // Attribution mesurée exclusivement sur les gagnants réels (zéro dilution par miroirs/voisins)
     let attributionWinners = 0;
     actualWinners.forEach((w) => {
       attributionWinners += scores[w] || 0;
     });
     const avgWinnerScore = attributionWinners / K;
 
-    // Gradient z-scoré : normalise par l'écart-type de l'algo pour éviter que les algos
-    // à forte variance dominent artificiellement le gradient (biais de variance).
-    const signalGain = (avgWinnerScore - meanScore) / stdScore;
-    const gradient = -signalGain; // Négatif si le gène a distingué les gagnants au-dessus de sa moyenne
+    const attr = attributionByKey.get(key);
+    const cfScore = attr?.counterfactualScore ?? 0;
+    const gradient = -cfScore;
+    const currentW = Number.isFinite(normalizedCurrent[key]) ? normalizedCurrent[key] : 0;
+    const recW = Number.isFinite(correctedWeights[key]) ? correctedWeights[key] : 0;
 
-    // Modulation continue selon la phase cyclique du jeu
-    const phaseModifier = cyclicPhaseProfile.algoWeightModifiers[key] || 0.0;
-    const phaseMultiplier = Math.exp(phaseModifier * 0.5);
-
-    // Respect strict des poids nuls (canaux retirés ou transfert machine sans données)
-    const currentW = Number.isFinite(normalizedCurrent[key])
-      ? normalizedCurrent[key]
-      : 0;
-    const updateMultiplier = Math.exp(-learningRate * gradient * 4.0) * phaseMultiplier;
-    const newWeight =
-      currentW > 0 && (!(!hasMachineData && key === AlgoKey.MACHINE_TRANSFER))
-        ? currentW * updateMultiplier
-        : 0;
-    rawUpdatedWeights[key] = newWeight;
-
-    algoGradients.push({
+    return {
       key,
       label: LABELS_MAP[key] || key,
       currentWeight: currentW,
-      gradient,
+      gradient: parseFloat(gradient.toFixed(6)),
       predictedScoreSum: sumScore,
       attributionToWinners: avgWinnerScore,
-      recommendedWeight: newWeight,
-      deltaPercent: 0,
-    });
+      recommendedWeight: recW,
+      deltaPercent: currentW > 0 ? ((recW - currentW) / currentW) * 100 : 0,
+      counterfactualScore: attr?.counterfactualScore ?? 0,
+      deltaLogLossAblation: attr?.deltaLogLossAblation ?? 0,
+      deltaBrierAblation: attr?.deltaBrierAblation ?? 0,
+      winnerLiftAblation: attr?.winnerLiftAblation ?? 0,
+    };
   });
 
-  if (!hasMachineData) {
-    rawUpdatedWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
-  }
-
-  const correctedWeights = normalizeWeights(rawUpdatedWeights as AlgoWeights);
-
-  algoGradients.forEach((g) => {
-    g.recommendedWeight = Number.isFinite(correctedWeights[g.key])
-      ? correctedWeights[g.key]
-      : 0;
-    g.deltaPercent =
-      g.currentWeight > 0
-        ? ((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100
-        : 0;
+  // Tri par score contrefactuel décroissant puis attribution gagnants
+  algoGradients.sort((a, b) => {
+    const diff = (b.counterfactualScore ?? 0) - (a.counterfactualScore ?? 0);
+    return Math.abs(diff) > 1e-9 ? diff : b.attributionToWinners - a.attributionToWinners;
   });
-
-  // Tri par attribution décroissante
-  algoGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
 
   // 8. Évaluation Rétroactive Multi-Scénarios & Divergence KL par Scénario
   const simulatedScoredNumbers = Array.from({ length: 90 }, (_, i) => {
@@ -713,6 +753,7 @@ export const executeClosedLoopAutopsy = async (
   return {
     drawName,
     targetDrawDate: targetDraw.date,
+    modelVersion: FORENSIC_MODEL_VERSION,
     actualWinners,
     actualMachine,
     top5Predicted,
@@ -725,7 +766,17 @@ export const executeClosedLoopAutopsy = async (
     klDivergence: klDiv,
     crossEntropy: crossEnt,
     brierScore,
+    logLoss: marginalEval.logLoss,
+    ece: marginalEval.ece,
+    marginalSum: marginalEval.marginalSum,
     calibrationAccuracy,
+    brierSkillVsUniform: marginalEval.brierSkillVsUniform,
+    logLossSkillVsUniform: marginalEval.logLossSkillVsUniform,
+    brierSkillVsHistorical: marginalEval.brierSkillVsHistorical,
+    logLossSkillVsHistorical: marginalEval.logLossSkillVsHistorical,
+    uniformBaseline: marginalEval.uniformBaseline,
+    historicalBaseline: marginalEval.historicalBaseline,
+    learningAudit: singleUpdate.audit,
     algoGradients,
     correctedWeights,
     initialWeights: normalizedCurrent,
@@ -739,7 +790,7 @@ export const executeClosedLoopAutopsy = async (
     interDrawAudit,
     channelAttribution,
     calibrationSample: {
-      probabilities: Array.from({ length: 90 }, (_, i) => probEnsemble[i + 1]),
+      probabilities: marginalEval.marginals90,
       outcomes: Array.from({ length: 90 }, (_, i) => (actualWinnersSet.has(i + 1) ? 1 : 0)),
     },
   };
@@ -1037,15 +1088,22 @@ export interface OnlineCalibrationSummary {
 
 export interface BatchClosedLoopAutopsyResult {
   drawName: string;
+  modelVersion?: string;
   batchSize: number;
   meanCalibrationAccuracy: number;
   meanBrierScore: number;
+  meanLogLoss?: number;
+  brierSkillVsUniform?: number;
+  logLossSkillVsUniform?: number;
+  brierSkillVsHistorical?: number | null;
+  uncertaintySE?: number;
   totalDirectHitsTop5: number;
   totalDirectHitsTop10: number;
   totalNearMisses: number;
   aggregatedGradients: AlgoGradientBreakdown[];
   aggregatedChannelAttribution: AggregatedChannelAttribution[];
   onlineCalibration?: OnlineCalibrationSummary;
+  learningAudit?: LearningAuditPayload;
   recommendedWeights: AlgoWeights;
   reports: ClosedLoopAutopsyReport[];
 }
@@ -1147,73 +1205,121 @@ export const executeBatchClosedLoopAutopsy = async (
   // Strictement sur priorHistoryForBatch (zéro fuite temporelle des tirages cibles 0..depth-1)
   const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistoryForBatch);
 
-  // Calcul des gradients moyens et des nouveaux poids proposés
-  const rawUpdatedWeights: Record<string, number> = {};
+  // Agrégation contrefactuelle multi-tirages PAR GÈNE (N = effectiveCount tirages) via le moteur unifié
   const baseWeightsClean: AlgoWeights = { ...currentWeights };
+  RETIRED_ALGO_WEIGHT_KEYS.forEach((k) => {
+    baseWeightsClean[k] = 0;
+  });
   if (!hasMachineData) {
     baseWeightsClean[AlgoKey.MACHINE_TRANSFER] = 0;
   }
   const currentNormalized = normalizeWeights(baseWeightsClean);
-  const meanLearningRate =
-    reports.reduce((acc, r) => acc + r.learningRate, 0) / effectiveCount;
 
   const lockedMaxKeys = new Set<AlgoKey>();
   const forcedZeroKeys = new Set<AlgoKey>();
+  RETIRED_ALGO_WEIGHT_KEYS.forEach((k) => forcedZeroKeys.add(k));
   if (!hasMachineData) {
     forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
   }
-
-  const aggregatedGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
-    const meanGrad = (gradientSums[key] || 0) / effectiveCount;
-    const meanAttr = (winnerAttributionSums[key] || 0) / effectiveCount;
-    const currentW = Number.isFinite(currentNormalized[key])
-      ? currentNormalized[key]
-      : 0;
-
+  validKeys.forEach((key) => {
     const proof = proofMap[key];
     const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-    if (!hasProof) {
-      lockedMaxKeys.add(key);
-    }
+    if (!hasProof) lockedMaxKeys.add(key);
+  });
 
-    const newWeight =
-      currentW > 0 && !forcedZeroKeys.has(key)
-        ? currentW * Math.exp(-meanLearningRate * meanGrad * 3.0)
-        : 0;
-    rawUpdatedWeights[key] = newWeight;
+  const drawAttributionsWindow: GeneCounterfactualAttribution[][] = reports.map((rep) => {
+    const byKey = new Map((rep.channelAttribution || []).map((c) => [c.key, c]));
+    return validKeys.map((key) => {
+      const c = byKey.get(key);
+      return {
+        key,
+        weight: currentNormalized[key] ?? 0,
+        deltaLogLossAblation: c?.deltaLogLossAblation ?? 0,
+        deltaBrierAblation: c?.deltaBrierAblation ?? 0,
+        deltaHitsTop5Ablation: c?.deltaHitsTop5Ablation ?? 0,
+        winnerLiftAblation: c?.winnerLiftAblation ?? 0,
+        counterfactualScore: c?.counterfactualScore ?? 0,
+      };
+    });
+  });
 
-    return {
-      key,
-      label: LABELS_MAP[key] || key,
-      currentWeight: currentW,
-      gradient: parseFloat(meanGrad.toFixed(4)),
-      predictedScoreSum: 0,
-      attributionToWinners: parseFloat(meanAttr.toFixed(4)),
-      recommendedWeight: newWeight,
-      deltaPercent: 0,
-    };
+  const windowMetrics = reports.map((rep) => ({
+    exactHits: rep.directHitsTop5.length,
+    brierScore: rep.brierScore,
+    logLoss: rep.logLoss ?? UNIFORM_LOG_LOSS_BASELINE,
+    ece: rep.ece ?? 0,
+    historicalBrier: rep.historicalBaseline?.brierScore ?? null,
+    historicalLogLoss: rep.historicalBaseline?.logLoss ?? null,
+    historicalHits: rep.historicalBaseline?.actualHitsTop5 ?? null,
+  }));
+
+  const priorRegime = detectGameRegime(priorHistoryForBatch);
+  const maxEntropy = Math.log2(90);
+  const normEntropy =
+    priorRegime.entropy > 1.0
+      ? Math.min(1.0, priorRegime.entropy / maxEntropy)
+      : Math.max(0.0, Math.min(1.0, priorRegime.entropy));
+
+  const batchUpdate = computeCautiousAggregatedWeightUpdate({
+    currentWeights: currentNormalized as Record<string, number>,
+    drawAttributionsWindow,
+    windowMetrics: windowMetrics.length > 0 ? windowMetrics : [{
+      exactHits: 0,
+      brierScore: UNIFORM_BRIER_BASELINE,
+      logLoss: UNIFORM_LOG_LOSS_BASELINE,
+    }],
+    entropyNormalized: normEntropy,
+    hurstExponent: priorRegime.hurst,
+    forcedZeroKeys: new Set(Array.from(forcedZeroKeys)),
+    lockedMaxKeys: new Set(Array.from(lockedMaxKeys)),
+    modelVersion: FORENSIC_MODEL_VERSION,
   });
 
   const recommendedWeights = projectWeightsWithProofGuard(
-    rawUpdatedWeights,
+    batchUpdate.updatedWeights,
     currentNormalized,
     lockedMaxKeys,
     forcedZeroKeys
   );
 
-  aggregatedGradients.forEach((g) => {
-    g.recommendedWeight = Number.isFinite(recommendedWeights[g.key])
-      ? recommendedWeights[g.key]
+  const aggAttrMap = new Map(
+    batchUpdate.audit.aggregatedAttributions.map((a) => [a.key, a])
+  );
+
+  const aggregatedGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
+    const agg = aggAttrMap.get(key);
+    const meanAttr = (winnerAttributionSums[key] || 0) / effectiveCount;
+    const currentW = Number.isFinite(currentNormalized[key])
+      ? currentNormalized[key]
       : 0;
-    g.deltaPercent =
-      g.currentWeight > 0
-        ? parseFloat(
-            (((g.recommendedWeight - g.currentWeight) / g.currentWeight) * 100).toFixed(1)
-          )
-        : 0;
+    const recW = Number.isFinite(recommendedWeights[key])
+      ? recommendedWeights[key]
+      : 0;
+    const cfScore = agg?.meanCounterfactualScore ?? 0;
+
+    return {
+      key,
+      label: LABELS_MAP[key] || key,
+      currentWeight: currentW,
+      gradient: parseFloat((-cfScore).toFixed(4)),
+      predictedScoreSum: 0,
+      attributionToWinners: parseFloat(meanAttr.toFixed(4)),
+      recommendedWeight: recW,
+      deltaPercent:
+        currentW > 0
+          ? parseFloat((((recW - currentW) / currentW) * 100).toFixed(1))
+          : 0,
+      counterfactualScore: cfScore,
+      deltaLogLossAblation: agg?.meanDeltaLogLoss ?? 0,
+      deltaBrierAblation: agg?.meanDeltaBrier ?? 0,
+      winnerLiftAblation: agg?.meanWinnerLift ?? 0,
+    };
   });
 
-  aggregatedGradients.sort((a, b) => b.attributionToWinners - a.attributionToWinners);
+  aggregatedGradients.sort((a, b) => {
+    const diff = (b.counterfactualScore ?? 0) - (a.counterfactualScore ?? 0);
+    return Math.abs(diff) > 1e-9 ? diff : b.attributionToWinners - a.attributionToWinners;
+  });
 
   const aggregatedChannelAttribution: AggregatedChannelAttribution[] = validKeys
     .map((key) => {
@@ -1286,18 +1392,83 @@ export const executeBatchClosedLoopAutopsy = async (
     };
   }
 
+  const meanLogLoss =
+    reports.length > 0
+      ? reports.reduce((acc, r) => acc + (r.logLoss ?? UNIFORM_LOG_LOSS_BASELINE), 0) /
+        effectiveCount
+      : UNIFORM_LOG_LOSS_BASELINE;
+
   return {
     drawName,
+    modelVersion: FORENSIC_MODEL_VERSION,
     batchSize: effectiveCount,
     meanCalibrationAccuracy: parseFloat(meanCalibration.toFixed(1)),
     meanBrierScore: parseFloat(meanBrier.toFixed(4)),
+    meanLogLoss: parseFloat(meanLogLoss.toFixed(5)),
+    brierSkillVsUniform: batchUpdate.audit.calibration.brierSkillVsUniform,
+    logLossSkillVsUniform: batchUpdate.audit.calibration.logLossSkillVsUniform,
+    brierSkillVsHistorical: batchUpdate.audit.calibration.brierSkillVsHistorical,
+    uncertaintySE: batchUpdate.audit.uncertaintySE,
     totalDirectHitsTop5: totalHitsTop5,
     totalDirectHitsTop10: totalHitsTop10,
     totalNearMisses,
     aggregatedGradients,
     aggregatedChannelAttribution,
     onlineCalibration,
+    learningAudit: batchUpdate.audit,
     recommendedWeights,
     reports,
   };
+};
+
+/**
+ * Validation chronologique stricte en Walk-Forward sur plusieurs périodes
+ * sans aucune fuite temporelle future, comparée au hasard uniforme (E[hits]=25/90≈0.278)
+ * et à la référence historique empirique.
+ */
+export const executeWalkForwardAutopsyValidation = (
+  drawName: string,
+  rawHistory: DrawResult[],
+  baseWeights: AlgoWeights,
+  options?: {
+    warmupDraws?: number;
+    periodCount?: number;
+  }
+): WalkForwardValidationReport => {
+  const purified = purifyHistoryForDraw(drawName, rawHistory);
+  // purifyHistoryForDraw est du plus récent au plus ancien ; on trie strictement du plus ancien au plus récent
+  const chronological = [...purified]
+    .sort((a, b) => parseDateSafely(a.date).getTime() - parseDateSafely(b.date).getTime())
+    .map((d) => ({
+      date: d.date,
+      gagnants: d.gagnants || [],
+      machine: d.machine || [],
+    }));
+
+  const geneKeys = Object.values(AlgoKey).filter((k) => !RETIRED_ALGO_WEIGHT_KEYS.has(k));
+  const initWeights: Record<string, number> = {};
+  geneKeys.forEach((k) => {
+    initWeights[k] = Number.isFinite(baseWeights[k]) ? baseWeights[k] : 0;
+  });
+
+  return runChronologicalWalkForwardValidation({
+    drawName,
+    chronologicalDrawsOldestFirst: chronological,
+    geneKeys,
+    initialWeights: initWeights,
+    warmupDraws: options?.warmupDraws,
+    periodCount: options?.periodCount ?? 3,
+  });
+};
+
+export type {
+  BaselineComparisonMetrics,
+  LearningAuditPayload,
+  WalkForwardValidationReport,
+};
+export {
+  FORENSIC_MODEL_VERSION,
+  UNIFORM_BRIER_BASELINE,
+  UNIFORM_EXPECTED_HITS_TOP5,
+  UNIFORM_LOG_LOSS_BASELINE,
 };

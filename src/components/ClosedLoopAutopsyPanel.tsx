@@ -4,9 +4,15 @@ import {
   executeClosedLoopAutopsy,
   executeClosedLoopAutoAdjustment,
   executeBatchClosedLoopAutopsy,
+  executeWalkForwardAutopsyValidation,
   ClosedLoopAutopsyReport,
   ClosedLoopAutoAdjustmentResult,
   BatchClosedLoopAutopsyResult,
+  WalkForwardValidationReport,
+  FORENSIC_MODEL_VERSION,
+  UNIFORM_EXPECTED_HITS_TOP5,
+  UNIFORM_BRIER_BASELINE,
+  UNIFORM_LOG_LOSS_BASELINE,
 } from "../services/prediction/closedLoopAutopsyService";
 import { applyOptimizedWeights } from "../services/prediction/optimizationController";
 import {
@@ -68,6 +74,8 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
   const [isApplyingEpigenome, setIsApplyingEpigenome] = useState<boolean>(false);
   const [epigenomeResult, setEpigenomeResult] = useState<DnaGeneSynthesisResult | null>(null);
+  const [walkForwardReport, setWalkForwardReport] = useState<WalkForwardValidationReport | null>(null);
+  const [isRunningWalkForward, setIsRunningWalkForward] = useState<boolean>(false);
 
   // Filtrage strict par tirage (Tirage Isolation)
   const drawHistory = useMemo(() => {
@@ -153,7 +161,32 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
     }
   };
 
+  const handleRunWalkForward = () => {
+    if (drawHistory.length < 6) {
+      showToast("Au moins 6 tirages requis pour la validation Walk-Forward chronologique.", "error");
+      return;
+    }
+    try {
+      setIsRunningWalkForward(true);
+      audioEngine.play("scan");
+      const wf = executeWalkForwardAutopsyValidation(drawName, history, globalWeights, {
+        periodCount: 3,
+      });
+      setWalkForwardReport(wf);
+      showToast(
+        `Walk-Forward chronologique exécuté (${wf.evaluatedDraws} tirages hors-échantillon, BSS ${(wf.overall.brierSkillVsUniform * 100).toFixed(2)}%)`,
+        "success"
+      );
+      audioEngine.play("success");
+    } catch (e: any) {
+      showToast(e?.message || "Erreur lors de la validation Walk-Forward", "error");
+    } finally {
+      setIsRunningWalkForward(false);
+    }
+  };
+
   useEffect(() => {
+    setWalkForwardReport(null);
     runAutopsy(selectedDrawIndex);
   }, [drawName, selectedDrawIndex, drawHistory.length]);
 
@@ -388,6 +421,16 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
             </button>
 
             <button
+              onClick={handleRunWalkForward}
+              disabled={isRunningWalkForward || loading || drawHistory.length < 6}
+              className="px-3 py-2.5 bg-emerald-950/70 hover:bg-emerald-900/70 text-emerald-300 rounded-xl text-xs font-black transition-all border border-emerald-700/40 flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+              title="Validation chronologique sans fuite (Walk-Forward vs Uniforme & Historique)"
+            >
+              <HistoryIcon size={13} className={isRunningWalkForward ? "animate-spin" : ""} />
+              <span>Walk-Forward</span>
+            </button>
+
+            <button
               onClick={handleExportUniversalJSON}
               disabled={!report || loading}
               className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black transition-all border border-white/5 flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
@@ -461,6 +504,108 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
               <span>{isApplyingEpigenome ? "Séquençage..." : "Synthétiser via EpiGenome-SQ"}</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* WALK-FORWARD CHRONOLOGICAL VALIDATION PANEL */}
+      {walkForwardReport && (
+        <div className="p-6 bg-slate-900/80 rounded-3xl border border-emerald-500/30 space-y-4 shadow-xl animate-fade-in">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <HistoryIcon size={16} className="text-emerald-400" />
+                <h4 className="text-xs font-black uppercase tracking-wider text-white">
+                  Validation Walk-Forward Chronologique (Zéro Fuite)
+                </h4>
+                <span className="px-2 py-0.5 bg-slate-950 text-slate-300 border border-white/10 rounded text-[10px] font-mono">
+                  {walkForwardReport.modelVersion} &bull; N={walkForwardReport.evaluatedDraws} tirages
+                </span>
+              </div>
+              <p className="text-xs text-slate-300">
+                {walkForwardReport.warningNote}
+              </p>
+            </div>
+            <span
+              className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                walkForwardReport.overall.isStatisticallySignificantEdge
+                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
+                  : "bg-amber-500/15 text-amber-300 border-amber-500/40"
+              }`}
+            >
+              {walkForwardReport.overall.isStatisticallySignificantEdge
+                ? "Avantage Hors-Échantillon Vérifié"
+                : "Mode Prudence Recommandé"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
+            <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 space-y-1">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">
+                Hits Moyens Top 5 (±SE)
+              </span>
+              <span className="text-sm font-black text-emerald-300 block">
+                {walkForwardReport.overall.modelMeanHits.toFixed(3)} ± {walkForwardReport.overall.modelHitsSE.toFixed(3)}
+              </span>
+              <span className="text-[9px] text-slate-500 block">
+                IC95% [{walkForwardReport.overall.modelHitsCI95[0].toFixed(3)}, {walkForwardReport.overall.modelHitsCI95[1].toFixed(3)}] &bull; Unif {UNIFORM_EXPECTED_HITS_TOP5.toFixed(3)}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 space-y-1">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">
+                Brier vs Baselines
+              </span>
+              <span className="text-sm font-black text-cyan-300 block">
+                {walkForwardReport.overall.modelMeanBrier.toFixed(5)}
+              </span>
+              <span className="text-[9px] text-slate-500 block">
+                Unif {UNIFORM_BRIER_BASELINE.toFixed(5)} &bull; Hist {walkForwardReport.overall.historicalMeanBrier.toFixed(5)}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 space-y-1">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">
+                Log-Loss Binaire
+              </span>
+              <span className="text-sm font-black text-indigo-300 block">
+                {walkForwardReport.overall.modelMeanLogLoss.toFixed(5)}
+              </span>
+              <span className="text-[9px] text-slate-500 block">
+                Unif {UNIFORM_LOG_LOSS_BASELINE.toFixed(5)} &bull; LLSS {(walkForwardReport.overall.logLossSkillVsUniform * 100).toFixed(2)}%
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-950/70 rounded-xl border border-white/5 space-y-1">
+              <span className="text-[9px] font-bold text-slate-500 uppercase block">
+                Skill & Calibration (ECE)
+              </span>
+              <span className="text-sm font-black text-amber-300 block">
+                BSS {(walkForwardReport.overall.brierSkillVsUniform * 100).toFixed(2)}%
+              </span>
+              <span className="text-[9px] text-slate-500 block">
+                ECE {walkForwardReport.overall.ece.toFixed(4)} &bull; Hist BSS {(walkForwardReport.overall.brierSkillVsHistorical * 100).toFixed(2)}%
+              </span>
+            </div>
+          </div>
+
+          {walkForwardReport.periods.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] font-mono">
+              {walkForwardReport.periods.map((p) => (
+                <div key={p.periodIndex} className="p-3 bg-slate-950/50 rounded-xl border border-white/5 space-y-1">
+                  <div className="flex justify-between text-slate-300 font-bold">
+                    <span>{p.label} (N={p.sampleSize})</span>
+                    <span className="text-slate-500">{p.startDate} → {p.endDate}</span>
+                  </div>
+                  <div className="text-slate-400">
+                    Hits: <strong className="text-white">{p.modelMeanHits.toFixed(3)}±{p.modelHitsSE.toFixed(3)}</strong> (Hist {p.historicalMeanHits.toFixed(3)})
+                  </div>
+                  <div className="text-slate-400">
+                    BSS Unif: <strong className={p.brierSkillVsUniform > 0 ? "text-emerald-400" : "text-rose-400"}>{(p.brierSkillVsUniform * 100).toFixed(2)}%</strong> &bull; ECE {p.ece.toFixed(4)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -580,54 +725,65 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
             </div>
           )}
 
-          {/* KPI CARDS (DIVERGENCE KL, BRIER SCORE, HITS) */}
+          {/* KPI CARDS (MARGINALES COHÉRENTES Σ=5, BRIER / LOG-LOSS VS BASELINES, HITS) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="p-5 bg-slate-900/70 rounded-2xl border border-white/5 space-y-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                Précision Calibration
+                Calibration Marginales (Σ={(report.marginalSum ?? 5).toFixed(2)})
               </span>
               <span className="text-2xl font-black font-mono text-emerald-400 block">
                 {report.calibrationAccuracy}%
               </span>
-              <span className="text-[9px] text-slate-500 font-mono">
-                Brier Score : {report.brierScore.toFixed(4)}
+              <span className="text-[9px] text-slate-500 font-mono block">
+                Brier : {report.brierScore.toFixed(5)} (Unif {UNIFORM_BRIER_BASELINE.toFixed(5)})
+              </span>
+              <span className="text-[9px] text-slate-500 font-mono block">
+                ECE : {(report.ece ?? 0).toFixed(4)} &bull; BSS {((report.brierSkillVsUniform ?? 0) * 100).toFixed(1)}%
               </span>
             </div>
 
             <div className="p-5 bg-slate-900/70 rounded-2xl border border-white/5 space-y-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                Divergence KL (D_KL)
+                Log-Loss & Divergence KL
               </span>
               <span className="text-2xl font-black font-mono text-indigo-400 block">
-                {report.klDivergence.toFixed(3)}
+                {(report.logLoss ?? UNIFORM_LOG_LOSS_BASELINE).toFixed(4)}
               </span>
-              <span className="text-[9px] text-slate-500 font-mono">
-                Entropie Croisée : {report.crossEntropy.toFixed(2)}
+              <span className="text-[9px] text-slate-500 font-mono block">
+                Unif {UNIFORM_LOG_LOSS_BASELINE.toFixed(4)} &bull; D_KL {report.klDivergence.toFixed(3)}
+              </span>
+              <span className="text-[9px] text-slate-500 font-mono block">
+                Modèle : {report.modelVersion || FORENSIC_MODEL_VERSION}
               </span>
             </div>
 
             <div className="p-5 bg-slate-900/70 rounded-2xl border border-white/5 space-y-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                Gagnants Capturés (Top 10)
+                Hits Exacts (Baseline {UNIFORM_EXPECTED_HITS_TOP5.toFixed(3)})
               </span>
               <span className="text-2xl font-black font-mono text-cyan-400 block">
-                {report.directHitsTop10.length} / 5
+                {report.directHitsTop5.length} / 5
               </span>
-              <span className="text-[9px] text-slate-500 font-mono">
-                Top 5 : {report.directHitsTop5.length} exacts ({report.directHitsTop5.join(", ") || "0"})
+              <span className="text-[9px] text-slate-500 font-mono block">
+                Top 10 : {report.directHitsTop10.length}/5 &bull; Exacts : {report.directHitsTop5.join(", ") || "0"}
+              </span>
+              <span className="text-[9px] text-slate-500 font-mono block">
+                Near-misses exclus des poids
               </span>
             </div>
 
             <div className="p-5 bg-slate-900/70 rounded-2xl border border-white/5 space-y-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                Taux d'Apprentissage η(t)
+                Taux Prudent η(t)
               </span>
               <span className="text-2xl font-black font-mono text-amber-400 block">
                 {(report.learningRate * 100).toFixed(2)}%
               </span>
               <span className="text-[9px] text-slate-500 font-mono truncate block">
-                {report.temporalDriftMetrics 
-                  ? `Résistance Dérive: ${(report.temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%` 
+                {report.learningAudit
+                  ? `Prudence ${report.learningAudit.prudenceModeActive ? "ACTIVE" : "STD"} (Attén. ${(report.learningAudit.sampleAttenuation * 100).toFixed(1)}%)`
+                  : report.temporalDriftMetrics
+                  ? `Résistance Dérive: ${(report.temporalDriftMetrics.driftResistanceFactor * 100).toFixed(1)}%`
                   : "Dérive Temporelle"}
               </span>
             </div>
@@ -850,12 +1006,17 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
               </div>
             </div>
 
-            {/* FRÔLEMENTS & NEAR-MISSES */}
+            {/* FRÔLEMENTS & NEAR-MISSES (DIAGNOSTIC UNIQUEMENT) */}
             <div className="p-6 bg-slate-900/60 rounded-3xl border border-white/5 space-y-4">
-              <h4 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
-                <Compass size={15} className="text-indigo-400" />
-                Détection des Near-Misses & Frôlements Spatiaux
-              </h4>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h4 className="text-xs font-black uppercase tracking-wider text-white flex items-center gap-2">
+                  <Compass size={15} className="text-indigo-400" />
+                  Détection des Near-Misses (Diagnostic seul)
+                </h4>
+                <span className="px-2 py-0.5 bg-slate-950 text-slate-400 border border-white/10 rounded text-[9px] font-mono">
+                  Exclus de l'apprentissage
+                </span>
+              </div>
 
               {report.nearMisses.length === 0 ? (
                 <p className="text-xs text-slate-400 italic py-6 text-center">

@@ -20,6 +20,16 @@
  * la distribution uniforme exacte est utilisée, comme dans l'autopsie.
  */
 
+import {
+  DOMAIN_SIZE as TOTAL_NUMBERS,
+  DRAW_PICK_SIZE as DRAW_SIZE,
+  PROB_EPSILON,
+  UNIFORM_BRIER_BASELINE,
+  UNIFORM_LOG_LOSS_BASELINE,
+  UNIFORM_MARGINAL_PROB,
+  projectScoresToCoherentMarginals,
+} from '../../../supabase/functions/_shared/forensic-learning-engine.ts';
+
 export interface ChannelAttributionInput {
   /** Clés des canaux dans l'ordre déterministe de l'appelant (Object.values(AlgoKey)) */
   channelKeys: string[];
@@ -47,8 +57,14 @@ export interface ChannelCounterfactualImpact {
   deltaHitsTop5Ablation: number;
   /** ΔBrier (ablation moins complet). Positif = le canal a réduit l'erreur quadratique */
   deltaBrierAblation: number;
+  /** ΔLog-Loss binaire (ablation moins complet). Positif = le canal a réduit le log-loss */
+  deltaLogLossAblation: number;
   /** Δentropie croisée (ablation moins complet). Positif = le canal a réduit la surprise */
   deltaCrossEntropyAblation: number;
+  /** Contraste marginal (Δq gagnants − Δq non-gagnants) attribué au canal */
+  winnerLiftAblation: number;
+  /** Score d'attribution contrefactuelle sans dimension normalisé par les baselines uniformes */
+  counterfactualScore: number;
   /** Δcalibration % (ablation moins complet). Positif = le canal a amélioré la calibration */
   deltaCalibrationAblation: number;
   /** Δhits Top-5 sous réallocation continue de la masse w_k (contre-factuel moins complet) */
@@ -66,19 +82,18 @@ export interface ChannelCounterfactualImpact {
 interface EnsembleOutcome {
   top5: number[];
   hitsTop5: number;
+  marginals90: number[];
   brier: number;
+  logLoss: number;
   crossEntropy: number;
   calibration: number;
 }
 
-const TOTAL_NUMBERS = 90;
-const DRAW_SIZE = 5;
 const FLOAT_GUARD = 1e-12;
 /**
- * Recalcule le résultat d'ensemble avec les formules exactes de
- * closedLoopAutopsyService (mêmes marginales q = K·p, même référence
- * uniforme, même mapping exponentiel de calibration) pour garantir que
- * les Δ contrefactuels sont comparables aux métriques publiées.
+ * Recalcule le résultat d'ensemble avec les marginales cohérentes (Σ q_i = K = 5)
+ * issues du moteur unifié `forensic-learning-engine.ts` afin de garantir que les Δ
+ * contrefactuels sont identiques à ceux utilisés pour la mise à jour des poids.
  */
 const evaluateEnsemble = (
   ensemble: ArrayLike<number>,
@@ -109,25 +124,30 @@ const evaluateEnsemble = (
   const pUniformMarginal = K / TOTAL_NUMBERS;
   const expectedUniformBrier = pUniformMarginal * (1.0 - pUniformMarginal);
   const pWinner = 1.0 / K;
+  const marginals90 = projectScoresToCoherentMarginals(prob, K);
 
   let brierSum = 0;
+  let logLossSum = 0;
   let crossEntropy = 0;
   for (let n = 1; n <= TOTAL_NUMBERS; n++) {
     const isWinner = winners.has(n);
-    const pSimplex = Math.max(1e-6, prob[n]);
-    const qMarginal = Math.min(1.0, K * prob[n]);
+    const y = isWinner ? 1.0 : 0.0;
+    const pSimplex = Math.max(PROB_EPSILON, prob[n]);
+    const qMarginal = Math.max(PROB_EPSILON, Math.min(1.0 - PROB_EPSILON, marginals90[n - 1]));
     if (isWinner) {
       crossEntropy -= pWinner * Math.log(pSimplex);
     }
-    brierSum += Math.pow(qMarginal - (isWinner ? 1.0 : 0.0), 2);
+    brierSum += Math.pow(qMarginal - y, 2);
+    logLossSum -= y * Math.log(qMarginal) + (1.0 - y) * Math.log(1.0 - qMarginal);
   }
   const brier = brierSum / TOTAL_NUMBERS;
+  const logLoss = logLossSum / TOTAL_NUMBERS;
   const calibration = Math.max(
     0,
     Math.min(100, 100 * Math.exp((-brier / Math.max(FLOAT_GUARD, expectedUniformBrier)) * Math.LN2))
   );
 
-  return { top5, hitsTop5, brier, crossEntropy, calibration };
+  return { top5, hitsTop5, marginals90, brier, logLoss, crossEntropy, calibration };
 };
 
 const meanOf = (values: number[]): number =>
@@ -241,6 +261,26 @@ export const computeChannelAttribution = (
     }
     const reallocOutcome = evaluateEnsemble(reallocated, winners);
 
+    const kCount = Math.max(1, winners.size);
+    const nonWinnerCount = Math.max(1, TOTAL_NUMBERS - kCount);
+    let winnerDeltaQSum = 0;
+    let nonWinnerDeltaQSum = 0;
+    for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+      const dq = fullOutcome.marginals90[n - 1] - reallocOutcome.marginals90[n - 1];
+      if (winners.has(n)) winnerDeltaQSum += dq;
+      else nonWinnerDeltaQSum += dq;
+    }
+    const winnerLiftAblation =
+      w > 0 ? winnerDeltaQSum / kCount - nonWinnerDeltaQSum / nonWinnerCount : 0;
+    const deltaLogLossAblation = w > 0 ? reallocOutcome.logLoss - fullOutcome.logLoss : 0;
+    const deltaBrierVal = w > 0 ? ablationOutcome.brier - fullOutcome.brier : 0;
+    const counterfactualScore =
+      w > 0
+        ? deltaLogLossAblation / UNIFORM_LOG_LOSS_BASELINE +
+          deltaBrierVal / UNIFORM_BRIER_BASELINE +
+          winnerLiftAblation / UNIFORM_MARGINAL_PROB
+        : 0;
+
     return {
       key,
       label: labels?.[key] ?? key,
@@ -248,8 +288,11 @@ export const computeChannelAttribution = (
       additiveShareTop5: sharesTop5[key] ?? 0,
       additiveShareWinners: sharesWinners[key] ?? 0,
       deltaHitsTop5Ablation: fullOutcome.hitsTop5 - ablationOutcome.hitsTop5,
-      deltaBrierAblation: ablationOutcome.brier - fullOutcome.brier,
+      deltaBrierAblation: deltaBrierVal,
+      deltaLogLossAblation,
       deltaCrossEntropyAblation: ablationOutcome.crossEntropy - fullOutcome.crossEntropy,
+      winnerLiftAblation,
+      counterfactualScore: Number.isFinite(counterfactualScore) ? counterfactualScore : 0,
       deltaCalibrationAblation: ablationOutcome.calibration - fullOutcome.calibration,
       deltaHitsTop5Reallocation: fullOutcome.hitsTop5 - reallocOutcome.hitsTop5,
       deltaBrierReallocation: reallocOutcome.brier - fullOutcome.brier,
