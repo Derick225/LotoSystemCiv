@@ -175,7 +175,12 @@ export function unpackMatrix(
   if (Array.isArray(input)) return input;
   if (!input || ((input instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && input instanceof SharedArrayBuffer)) && input.byteLength === 0)) return [];
 
-  const arr = input instanceof Float64Array ? input : new Float64Array(input as any);
+  const arr =
+    input instanceof Float64Array
+      ? input
+      : ArrayBuffer.isView(input)
+        ? new Float64Array(input.buffer, input.byteOffset, Math.floor(input.byteLength / 8))
+        : new Float64Array(input);
   const rCount = rows ?? (cols ? Math.floor(arr.length / cols) : 0);
   const cCount = cols ?? (rows ? Math.floor(arr.length / rows) : 0);
 
@@ -211,7 +216,12 @@ export function packArray(arr: number[]): PackedArray {
 export function unpackArray(input: ArrayBuffer | SharedArrayBuffer | Float64Array | number[]): number[] {
   if (Array.isArray(input)) return input;
   if (!input) return [];
-  const arr = input instanceof Float64Array ? input : new Float64Array(input as any);
+  const arr =
+    input instanceof Float64Array
+      ? input
+      : ArrayBuffer.isView(input)
+        ? new Float64Array(input.buffer, input.byteOffset, Math.floor(input.byteLength / 8))
+        : new Float64Array(input);
   return Array.from(arr);
 }
 
@@ -286,7 +296,9 @@ export function unpackFloat32Vector(input: ArrayBuffer | SharedArrayBuffer | Flo
   if (input instanceof Float32Array) return input;
   if (Array.isArray(input)) return Float32Array.from(input);
   if (!input || ((input instanceof ArrayBuffer || (typeof SharedArrayBuffer !== 'undefined' && input instanceof SharedArrayBuffer)) && input.byteLength === 0)) return new Float32Array(0);
-  return new Float32Array(input as any);
+  return ArrayBuffer.isView(input)
+    ? new Float32Array(input.buffer, input.byteOffset, Math.floor(input.byteLength / 4))
+    : new Float32Array(input);
 }
 
 export interface PackedMonteCarloDenseBatch {
@@ -466,7 +478,12 @@ export interface AdaptiveCoeffs {
  * Computes empirical topological similarity coefficients (cLinear, cGrid, cMirror, cHarmonic, cDecade)
  * dynamically from tensor contexts or draw history, eliminating all magic numbers in evaluation functions.
  */
-export function computeAdaptiveCoeffs(items: any[]): AdaptiveCoeffs {
+export interface AdaptiveCoeffsItem {
+  targetWinners?: number[];
+  gagnants?: number[];
+}
+
+export function computeAdaptiveCoeffs(items: AdaptiveCoeffsItem[]): AdaptiveCoeffs {
   let empiricalLinearCount = 0;
   let empiricalGridCount = 0;
   let empiricalMirrorCount = 0;

@@ -38,6 +38,22 @@ import { audioEngine } from "../../utils/audioEngine";
 import { useNexusStore } from "../../store/useNexusStore";
 import { isDrawWithoutMachine } from "../../constants";
 import { ConfirmModal } from "../ui/ConfirmModal";
+import {
+  DRAW_EXCEPTIONS_UPDATED_EVENT,
+  QUICK_EXCEPTION_TEMPLATES,
+  getDrawException,
+  isAutoPresetHolidaysEnabled,
+  setAutoPresetHolidaysEnabled,
+  listEffectiveExceptionsForYear,
+  listManualDrawExceptions,
+  upsertDrawException,
+  suppressPresetHoliday,
+  removeDrawException,
+  toFrenchDate,
+  type DrawException,
+  type DrawExceptionType,
+} from "../../services/drawScheduleExceptionService";
+import { PauseCircle, ShieldCheck, X } from "lucide-react";
 
 interface DrawManagementProps {
   drawName: string;
@@ -101,8 +117,23 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
   const [results, setResults] = useState<DrawResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<
-    "manual" | "bulk" | "export" | "purge"
+    "manual" | "bulk" | "export" | "purge" | "exceptions"
   >("manual");
+
+  // Exceptions calendaires (Jours fériés / Tirages annulés)
+  const [autoPresetHolidays, setAutoPresetHolidays] = useState<boolean>(() =>
+    isAutoPresetHolidaysEnabled()
+  );
+  const [exceptionsYear, setExceptionsYear] = useState<number>(() =>
+    new Date().getFullYear()
+  );
+  const [excDate, setExcDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+  const [excScope, setExcScope] = useState<"draw" | "all">("draw");
+  const [excType, setExcType] = useState<DrawExceptionType>("CANCELLED");
+  const [excLabel, setExcLabel] = useState<string>("");
+  const [exceptionsTick, setExceptionsTick] = useState<number>(0);
 
   // Purge / Bulk Delete State
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -157,6 +188,16 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     setDeleteEndDate("");
     setPurgeConfirmed(false);
   }, [drawName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => {
+      setAutoPresetHolidays(isAutoPresetHolidaysEnabled());
+      setExceptionsTick((t) => t + 1);
+    };
+    window.addEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handler);
+  }, []);
 
   const loadData = async () => {
     setLoading(true);
@@ -809,6 +850,47 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     return previewData;
   }, [previewData, viewFilter]);
 
+  const effectiveExceptions = useMemo(
+    () => listEffectiveExceptionsForYear(exceptionsYear, drawName),
+    [exceptionsYear, drawName, exceptionsTick]
+  );
+
+  const suppressedOverrides = useMemo(
+    () => listManualDrawExceptions().filter((e) => e.suppressed && e.date.startsWith(`${exceptionsYear}-`)),
+    [exceptionsYear, exceptionsTick]
+  );
+
+  const formDateException = useMemo(
+    () => (formDate ? getDrawException(formDate, drawName) : null),
+    [formDate, drawName, exceptionsTick]
+  );
+
+  const handleSaveException = () => {
+    if (!excDate) {
+      showToast("Veuillez sélectionner une date.", "error");
+      return;
+    }
+    audioEngine.play("click");
+    upsertDrawException({
+      date: excDate,
+      drawName: excScope === "all" ? "*" : drawName,
+      type: excType,
+      label:
+        excLabel.trim() ||
+        (excType === "HOLIDAY"
+          ? "Jour férié"
+          : excType === "POSTPONED"
+          ? "Tirage reporté"
+          : "Tirage annulé"),
+    });
+    audioEngine.play("success");
+    showToast(
+      `Exception enregistrée pour le ${toFrenchDate(excDate)} (${excScope === "all" ? "Tous les tirages" : drawName}).`,
+      "success"
+    );
+    setExcLabel("");
+  };
+
   return (
     <div className="space-y-6 animate-fade-in w-full max-w-7xl mx-auto px-2 md:px-0">
       {/* Header Actions Card */}
@@ -862,6 +944,15 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
             className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[10px] md:text-xs font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === "purge" ? "bg-rose-600 text-white shadow-xl" : "bg-white/5 text-slate-400 hover:bg-white/10"}`}
           >
             <Trash2 size={12} /> Suppression
+          </button>
+          <button
+            onClick={() => {
+              audioEngine.play("click");
+              setActiveSubTab("exceptions");
+            }}
+            className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl transition-all border border-white/5 text-[10px] md:text-xs font-black uppercase flex items-center justify-center gap-2 whitespace-nowrap ${activeSubTab === "exceptions" ? "bg-amber-500 text-slate-950 shadow-xl" : "bg-white/5 text-slate-400 hover:bg-white/10"}`}
+          >
+            <PauseCircle size={12} /> Fériés / Annulés
           </button>
         </div>
       </div>
@@ -1037,6 +1128,27 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                   </>
                 )}
               </div>
+
+              {formDateException && (
+                <div
+                  className={`p-3 rounded-2xl border text-[11px] font-semibold flex items-start gap-2 ${
+                    formDateException.type === "HOLIDAY"
+                      ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300"
+                      : "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/40 text-rose-800 dark:text-rose-300"
+                  }`}
+                >
+                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+                  <span>
+                    Date signalée comme{" "}
+                    <strong>
+                      {formDateException.type === "HOLIDAY"
+                        ? "Jour Férié"
+                        : "Tirage Annulé"}
+                    </strong>{" "}
+                    ({formDateException.label}). Enregistrer un résultat officiel prévaudra pour ce créneau.
+                  </span>
+                </div>
+              )}
 
               <div className="pt-4 flex gap-4">
                 <button
@@ -1621,6 +1733,275 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     )}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB CONTENT: HOLIDAYS & CANCELLED DRAWS */}
+      {activeSubTab === "exceptions" && (
+        <div className="space-y-6 animate-fade-in w-full">
+          <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 p-6 rounded-3xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 rounded-2xl">
+                <PauseCircle size={24} />
+              </div>
+              <div>
+                <h3 className="font-black text-amber-950 dark:text-amber-100 uppercase text-sm md:text-base">
+                  Calendrier des Jours Fériés & Tirages Annulés
+                </h3>
+                <p className="text-xs text-amber-700 dark:text-amber-300/80 font-medium">
+                  Empêche l'auto-sync, le compte à rebours et l'audit d'intégrité d'attendre des résultats inexistants (sans jamais fabriquer de faux tirages).
+                </p>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2.5 bg-white dark:bg-slate-900 px-4 py-2.5 rounded-2xl border border-amber-200 dark:border-amber-800/50 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={autoPresetHolidays}
+                onChange={(e) => {
+                  audioEngine.play("click");
+                  setAutoPresetHolidaysEnabled(e.target.checked);
+                  showToast(
+                    e.target.checked
+                      ? "Jours fériés civils Côte d'Ivoire activés automatiquement."
+                      : "Jours fériés civils automatiques désactivés.",
+                    "info"
+                  );
+                }}
+                className="rounded border-slate-300 text-amber-500 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+              />
+              <span className="text-[11px] font-black uppercase text-slate-700 dark:text-slate-200">
+                Fériés civils CI auto
+              </span>
+            </label>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Formulaire d'ajout d'une exception */}
+            <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-xl space-y-5">
+              <h4 className="font-black text-slate-800 dark:text-white uppercase text-xs md:text-sm flex items-center gap-2">
+                <Plus size={16} className="text-amber-500" /> Déclarer un Jour Sans Résultat
+              </h4>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5 block">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={excDate}
+                    onChange={(e) => setExcDate(e.target.value)}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 rounded-xl font-bold text-xs text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 focus:border-amber-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5 block">
+                    Nature
+                  </label>
+                  <select
+                    value={excType}
+                    onChange={(e) => setExcType(e.target.value as DrawExceptionType)}
+                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 rounded-xl font-bold text-xs text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 focus:border-amber-500 outline-none"
+                  >
+                    <option value="HOLIDAY">Jour Férié</option>
+                    <option value="CANCELLED">Tirage Annulé</option>
+                    <option value="POSTPONED">Tirage Reporté</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5 block">
+                  Portée d'application
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExcScope("draw")}
+                    className={`p-2.5 rounded-xl text-[10px] font-black uppercase border transition-all cursor-pointer ${
+                      excScope === "draw"
+                        ? "bg-indigo-600 text-white border-indigo-500 shadow"
+                        : "bg-slate-50 dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    Uniquement {drawName}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExcScope("all")}
+                    className={`p-2.5 rounded-xl text-[10px] font-black uppercase border transition-all cursor-pointer ${
+                      excScope === "all"
+                        ? "bg-amber-500 text-slate-950 border-amber-400 shadow"
+                        : "bg-slate-50 dark:bg-slate-900 text-slate-500 border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    Toute la journée (Tous tirages)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider mb-1.5 block">
+                  Motif / Libellé
+                </label>
+                <input
+                  type="text"
+                  value={excLabel}
+                  onChange={(e) => setExcLabel(e.target.value)}
+                  placeholder="Ex: Tabaski, Lundi de Pâques, Incident technique..."
+                  className="w-full p-3 bg-slate-50 dark:bg-slate-900 rounded-xl font-bold text-xs text-slate-700 dark:text-white border border-slate-200 dark:border-slate-700 focus:border-amber-500 outline-none"
+                />
+                <div className="flex flex-wrap gap-1.5 mt-2.5">
+                  {QUICK_EXCEPTION_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.label}
+                      type="button"
+                      onClick={() => {
+                        setExcLabel(tpl.label);
+                        setExcType(tpl.type);
+                        if (tpl.type === "HOLIDAY") setExcScope("all");
+                      }}
+                      className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-900 hover:bg-amber-500/15 text-slate-600 dark:text-slate-300 hover:text-amber-500 text-[10px] font-bold border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+                    >
+                      + {tpl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveException}
+                className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-2xl text-xs uppercase tracking-widest shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Save size={14} /> Enregistrer l'exception
+              </button>
+            </div>
+
+            {/* Liste des exceptions de l'année */}
+            <div className="bg-white dark:bg-slate-800 p-6 md:p-8 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-xl flex flex-col h-[540px]">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h4 className="font-black text-slate-800 dark:text-white uppercase text-xs md:text-sm">
+                    Exceptions Actives ({effectiveExceptions.length})
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                    Périmètre : {drawName} + Journées fériées globales
+                  </p>
+                </div>
+                <select
+                  value={exceptionsYear}
+                  onChange={(e) => setExceptionsYear(Number(e.target.value))}
+                  className="px-3 py-1.5 bg-slate-50 dark:bg-slate-900 rounded-xl text-xs font-black border border-slate-200 dark:border-slate-700 outline-none"
+                >
+                  {[exceptionsYear - 1, exceptionsYear, exceptionsYear + 1].map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                {effectiveExceptions.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-xs text-slate-400 italic">
+                    Aucune exception pour {exceptionsYear}.
+                  </div>
+                ) : (
+                  effectiveExceptions.map((exc: DrawException) => (
+                    <div
+                      key={exc.id}
+                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-700/70 flex justify-between items-center gap-3"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-black text-slate-800 dark:text-white">
+                            {toFrenchDate(exc.date)}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase ${
+                              exc.type === "HOLIDAY"
+                                ? "bg-amber-500/15 text-amber-600 dark:text-amber-300"
+                                : "bg-rose-500/15 text-rose-600 dark:text-rose-300"
+                            }`}
+                          >
+                            {exc.type === "HOLIDAY"
+                              ? "Jour Férié"
+                              : exc.type === "POSTPONED"
+                              ? "Reporté"
+                              : "Annulé"}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md bg-slate-200/70 dark:bg-slate-800 text-[9px] font-bold text-slate-600 dark:text-slate-300">
+                            {exc.drawName === "*" ? "Tous les tirages" : exc.drawName}
+                          </span>
+                        </div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">
+                          {exc.label}
+                        </div>
+                      </div>
+
+                      {exc.source === "preset_holiday" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            audioEngine.play("click");
+                            suppressPresetHoliday(exc.date, drawName);
+                            showToast(
+                              `Tirage ${drawName} marqué comme maintenu le ${toFrenchDate(exc.date)}.`,
+                              "info"
+                            );
+                          }}
+                          title={`Signaler que ${drawName} a bien eu lieu malgré ce jour férié`}
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-[10px] font-black uppercase shrink-0 cursor-pointer flex items-center gap-1"
+                        >
+                          <ShieldCheck size={12} /> Maintenir
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            audioEngine.play("click");
+                            removeDrawException(exc.id);
+                            showToast("Exception supprimée.", "info");
+                          }}
+                          title="Supprimer cette exception"
+                          className="p-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 shrink-0 cursor-pointer"
+                        >
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+                  ))
+                )}
+
+                {suppressedOverrides.length > 0 && (
+                  <div className="pt-3 mt-3 border-t border-slate-200 dark:border-slate-700 space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500 block">
+                      Jours fériés maintenus exceptionnellement ({suppressedOverrides.length})
+                    </span>
+                    {suppressedOverrides.map((ov) => (
+                      <div
+                        key={ov.id}
+                        className="p-2.5 rounded-xl bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 flex justify-between items-center text-[11px]"
+                      >
+                        <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                          {toFrenchDate(ov.date)} • {ov.drawName === "*" ? "Tous" : ov.drawName} — {ov.label}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeDrawException(ov.id)}
+                          className="text-[10px] font-black uppercase text-slate-500 hover:text-rose-500 cursor-pointer"
+                        >
+                          Rétablir Férié
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

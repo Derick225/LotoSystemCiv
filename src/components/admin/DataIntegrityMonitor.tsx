@@ -25,6 +25,42 @@ import {
   InterDrawFamilyId,
   isDrawWithoutMachine,
 } from "../../constants";
+import {
+  analyzeMissingExpectedDraws,
+  DRAW_EXCEPTIONS_UPDATED_EVENT,
+  upsertDrawException,
+  type MissingDrawAnalysis,
+} from "../../services/drawScheduleExceptionService";
+import { Calendar, PauseCircle } from "lucide-react";
+
+const parseStrictDrawDate = (dateStr?: string | null): Date | null => {
+  if (!dateStr) return null;
+  const s = String(dateStr).trim();
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  if (dmy) {
+    const day = parseInt(dmy[1], 10);
+    const month = parseInt(dmy[2], 10) - 1;
+    const year = parseInt(dmy[3], 10);
+    const d = new Date(year, month, day, 12, 0, 0, 0);
+    if (!isNaN(d.getTime()) && d.getDate() === day && d.getMonth() === month) {
+      return d;
+    }
+    return null;
+  }
+  const iso = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if (iso) {
+    const year = parseInt(iso[1], 10);
+    const month = parseInt(iso[2], 10) - 1;
+    const day = parseInt(iso[3], 10);
+    const d = new Date(year, month, day, 12, 0, 0, 0);
+    if (!isNaN(d.getTime()) && d.getDate() === day && d.getMonth() === month) {
+      return d;
+    }
+    return null;
+  }
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : parsed;
+};
 
 export interface IntegrityAnomaly {
   id: string;
@@ -58,6 +94,8 @@ export interface DetailedIntegrityReport {
   duplicates: DrawResult[];
   /** null lorsque aucune date parsable n'existe dans l'historique. */
   lastGapDays: number | null;
+  effectiveLastGapDays?: number | null;
+  missingAnalysis?: MissingDrawAnalysis;
 }
 
 export interface FamilyAuditSummary {
@@ -223,9 +261,9 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
         });
       }
 
-      // 4. Check Date Format Validity
-      const parsedTime = new Date(d.date).getTime();
-      if (isNaN(parsedTime) || d.date === "Invalid Date" || !d.date) {
+      // 4. Check Date Format Validity (supporte DD/MM/YYYY et YYYY-MM-DD sans faux positif)
+      const parsedDateObj = parseStrictDrawDate(d.date);
+      if (!parsedDateObj) {
         anomalies.push({
           id: d.id,
           drawName: targetDraw,
@@ -250,9 +288,9 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
     const maxEntropy = Math.log(90);
     const entropyRatio = parseFloat((shannonEntropy / maxEntropy).toFixed(4));
 
-    // 6. Analyse chronologique : la fraîcheur ne se mesure que sur des dates parsables.
+    // 6. Analyse chronologique : la fraîcheur exclut les absences documentées (jours fériés / annulés).
     const parsedTimes = data
-      .map((d) => new Date(d.date).getTime())
+      .map((d) => parseStrictDrawDate(d.date)?.getTime() ?? NaN)
       .filter((t) => Number.isFinite(t));
     const lastGapDays =
       parsedTimes.length > 0
@@ -263,6 +301,9 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
             ),
           )
         : null;
+
+    const missingAnalysis = analyzeMissingExpectedDraws(targetDraw, data, 90);
+    const effectiveGapForScore = missingAnalysis.effectiveLastGapDays ?? lastGapDays;
 
     // Un tirage portant plusieurs anomalies reste UN tirage invalide (jamais décompté
     // plusieurs fois : l'ancienne soustraction du nombre d'anomalies pouvait rendre
@@ -276,7 +317,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
       Math.max(0, validCount),
       scoringAnomalies.length,
       shannonEntropy,
-      lastGapDays
+      effectiveGapForScore
     );
 
     return {
@@ -290,6 +331,8 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
       anomalies,
       duplicates,
       lastGapDays,
+      effectiveLastGapDays: effectiveGapForScore,
+      missingAnalysis,
     };
   };
 
@@ -365,6 +408,14 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
 
   useEffect(() => {
     analyzeAll();
+    if (typeof window === "undefined") return;
+    const handleExceptionsUpdated = () => {
+      analyzeAll();
+    };
+    window.addEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handleExceptionsUpdated);
+    return () => {
+      window.removeEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handleExceptionsUpdated);
+    };
   }, [drawName]);
 
   const handleAutoCleanDuplicates = async () => {
@@ -580,6 +631,17 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                     : "n/d (aucune date parsable)"}
                 </span>
               </div>
+              {report.missingAnalysis && (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="font-bold text-slate-400 uppercase tracking-wider">
+                    Jours Fériés / Annulés (90j)
+                  </span>
+                  <span className="font-mono font-black text-amber-500">
+                    {report.missingAnalysis.documentedSkips.length} documenté
+                    {report.missingAnalysis.documentedSkips.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Direct Repair Actions */}
@@ -693,6 +755,87 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
               </div>
             </div>
           )}
+
+          {/* Diagnostic Calendrier : Jours fériés / Annulés vs Créneaux manquants (90j) */}
+          {report.missingAnalysis &&
+            (report.missingAnalysis.documentedSkips.length > 0 ||
+              report.missingAnalysis.unexplainedMissingDates.length > 0) && (
+              <div className="p-6 bg-slate-50 dark:bg-slate-900/60 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <h4 className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    <Calendar size={15} className="text-indigo-500" />
+                    Calendrier & Absences de Résultats (90 derniers jours)
+                  </h4>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Aucune ligne factice injectée (AGENTS.md)
+                  </span>
+                </div>
+
+                {report.missingAnalysis.documentedSkips.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <PauseCircle size={12} />
+                      Absences documentées (sans pénalité d'intégrité)
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {report.missingAnalysis.documentedSkips.map((s) => (
+                        <span
+                          key={s.dateIso}
+                          className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border ${
+                            s.type === "HOLIDAY"
+                              ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-300"
+                              : "bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-300"
+                          }`}
+                        >
+                          {s.frDate} • {s.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {report.missingAnalysis.unexplainedMissingDates.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5">
+                      <AlertTriangle size={12} className="text-slate-400" />
+                      Créneaux hebdomadaires sans résultat ni exception déclarée (
+                      {report.missingAnalysis.unexplainedMissingDates.length})
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {report.missingAnalysis.unexplainedMissingDates.slice(0, 12).map((u) => (
+                        <div
+                          key={u.dateIso}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px]"
+                        >
+                          <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
+                            {u.frDate}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              audioEngine.play("click");
+                              upsertDrawException({
+                                date: u.dateIso,
+                                drawName: report.drawName,
+                                type: "CANCELLED",
+                                label: "Tirage annulé / Non tenu",
+                              });
+                              showToast(
+                                `Date ${u.frDate} déclarée comme tirage annulé pour ${report.drawName}.`,
+                                "success"
+                              );
+                            }}
+                            className="px-2 py-0.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-600 dark:text-amber-300 text-[10px] font-black uppercase transition-colors cursor-pointer"
+                          >
+                            Déclarer Annulé
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
         </div>
       )}
 

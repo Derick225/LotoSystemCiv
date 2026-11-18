@@ -949,7 +949,7 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
       {viewMode === "calendar" && (
         <div className="animate-fade-in mx-auto w-full overflow-x-auto pb-4 shrink-0">
           <div className="min-w-max flex justify-center p-4">
-            <HeatmapCalendar history={purifiedHistory} />
+            <HeatmapCalendar history={purifiedHistory} drawName={currentDrawName} />
           </div>
         </div>
       )}

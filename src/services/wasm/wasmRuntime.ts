@@ -115,18 +115,25 @@ export function getAbiHash(): string {
   return 'e3b0c44298fc1c14';
 }
 
+export interface WasmDisposable {
+  free?: () => void;
+}
+
 /**
  * Accesseur polymorphe sécurisé pour les propriétés / getters WebAssembly.
  * Prévient les erreurs de type TypeError si wasm-bindgen expose un getter sous forme de propriété JS.
  */
-export function readWasmField<T>(target: any, prop: string, fallback: T): T {
-  if (!target) return fallback;
+export function readWasmField<T>(target: unknown, prop: string, fallback: T): T {
+  if (!target || typeof target !== 'object') return fallback;
   try {
-    const val = target[prop];
+    const record = target as Record<string, unknown>;
+    const val = record[prop];
     if (typeof val === 'function') {
-      return val.call(target);
+      const fn = val as () => T | undefined | null;
+      const called = fn.call(target);
+      return called !== undefined && called !== null ? called : fallback;
     }
-    return val !== undefined && val !== null ? val : fallback;
+    return val !== undefined && val !== null ? (val as T) : fallback;
   } catch {
     return fallback;
   }

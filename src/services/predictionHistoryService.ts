@@ -10,6 +10,12 @@ import { getDeterministicUUID } from '../utils/mathUtils';
 import { offlineQueueService } from './offlineQueueService';
 import { parseDateSafely, formatDateSafely } from '../utils/dateUtils';
 import { logActivePredictionDna } from './prediction/dnaAuditLogService';
+import {
+  getDrawException,
+  getScheduledWeekdaysForDraw,
+  toCanonicalIsoDate,
+  type DrawException,
+} from './drawScheduleExceptionService';
 
 const ORCHESTRATION_PREFIX = 'orch_patterns_';
 const LEARNING_SESSION_KEY_PREFIX = 'learning_sess_';
@@ -231,6 +237,86 @@ export const findMatchingResultForPrediction = (prediction: PredictionHistoryIte
   }
   
   return bestMatch;
+};
+
+export interface PredictionResolutionStatus {
+  status: 'verified' | 'holiday' | 'cancelled' | 'pending';
+  result: DrawResult | null;
+  exception: DrawException | null;
+  targetDateIso: string;
+}
+
+/**
+ * Détermine si une prédiction enregistrée a un résultat officiel, est en attente,
+ * ou visait un créneau annulé / tombé un jour férié.
+ */
+export const getPredictionResolutionStatus = (
+  prediction: PredictionHistoryItem,
+  historyUpdates: DrawResult[]
+): PredictionResolutionStatus => {
+  const directMatch =
+    (prediction.drawResultId
+      ? historyUpdates.find((r) => r.id === prediction.drawResultId) || null
+      : null) || findMatchingResultForPrediction(prediction, historyUpdates);
+
+  if (directMatch) {
+    return {
+      status: 'verified',
+      result: directMatch,
+      exception: null,
+      targetDateIso: directMatch.date
+        ? toCanonicalIsoDate(directMatch.date)
+        : toCanonicalIsoDate(prediction.timestamp),
+    };
+  }
+
+  // Identifier le premier créneau planifié du tirage à partir de prediction.timestamp - tolérance
+  const predDate = new Date(prediction.timestamp);
+  const scheduled = getScheduledWeekdaysForDraw(prediction.drawName || '');
+  let targetDateIso = toCanonicalIsoDate(predDate);
+
+  if (scheduled.length > 0) {
+    for (let dayOffset = 0; dayOffset <= 7; dayOffset++) {
+      const candidate = new Date(
+        predDate.getFullYear(),
+        predDate.getMonth(),
+        predDate.getDate() + dayOffset
+      );
+      const slot = scheduled.find((s) => s.dayIndex === candidate.getDay());
+      if (!slot) continue;
+      const [h, m] = slot.time.split(':').map(Number);
+      const slotTs = new Date(
+        candidate.getFullYear(),
+        candidate.getMonth(),
+        candidate.getDate(),
+        h,
+        m,
+        0,
+        0
+      ).getTime();
+      if (slotTs >= prediction.timestamp - TIME_CONSTANTS.GRACE_PERIOD_MS) {
+        targetDateIso = toCanonicalIsoDate(candidate);
+        break;
+      }
+    }
+  }
+
+  const exception = getDrawException(targetDateIso, prediction.drawName);
+  if (exception) {
+    return {
+      status: exception.type === 'HOLIDAY' ? 'holiday' : 'cancelled',
+      result: null,
+      exception,
+      targetDateIso,
+    };
+  }
+
+  return {
+    status: 'pending',
+    result: null,
+    exception: null,
+    targetDateIso,
+  };
 };
 
 // ... (existing imports)

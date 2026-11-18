@@ -8,6 +8,14 @@ import { AppError, logError, getErrorMessage } from '../utils/AppError';
 import { logger } from '../utils/logger';
 import { globalCache, CACHE_TTL } from './cache/CacheService';
 import {
+  getDrawException,
+  getWeekdayReferenceDateIso,
+  findNextActiveScheduledSlot,
+  toCanonicalIsoDate,
+  type DrawException,
+  type SkippedDrawSlot,
+} from './drawScheduleExceptionService';
+import {
   computeFrequencyCountsHpc,
   initializeLotoEngineWasm,
   appendSingleDrawToStore,
@@ -619,7 +627,37 @@ export const fetchResults = async (drawName: string, force?: boolean): Promise<{
   return { data };
 };
 
-export const getDailySummary = async (day: string) => {
+export interface DailySummaryItem {
+  time: string;
+  name: string;
+  result: DrawResult | null;
+  targetDateIso?: string;
+  hasResultForTargetDate?: boolean;
+  exception?: DrawException | null;
+  isSkipped?: boolean;
+}
+
+const enrichDailySummaryWithExceptions = (
+  day: string,
+  items: { time: string; name: string; result: DrawResult | null }[]
+): DailySummaryItem[] => {
+  const targetDateIso = getWeekdayReferenceDateIso(day);
+  return items.map((item) => {
+    const resultDateIso = item.result?.date ? toCanonicalIsoDate(item.result.date) : null;
+    const hasResultForTargetDate = Boolean(resultDateIso && resultDateIso === targetDateIso);
+    const exception = getDrawException(targetDateIso, item.name);
+    const isSkipped = Boolean(exception && !hasResultForTargetDate);
+    return {
+      ...item,
+      targetDateIso,
+      hasResultForTargetDate,
+      exception,
+      isSkipped,
+    };
+  });
+};
+
+export const getDailySummary = async (day: string): Promise<DailySummaryItem[]> => {
   const draws = DRAW_SCHEDULE[day] || {};
   const sortedTimes = Object.keys(draws).sort(); 
   const drawNames = sortedTimes.map((time) => draws[time]);
@@ -627,7 +665,7 @@ export const getDailySummary = async (day: string) => {
 
   const cachedSummary = await globalCache.get<{ time: string; name: string; result: DrawResult | null }[]>(summaryCacheKey);
   if (cachedSummary && cachedSummary.length > 0 && cachedSummary.some(s => s.result !== null)) {
-    return cachedSummary;
+    return enrichDailySummaryWithExceptions(day, cachedSummary);
   }
   
   if (isSupabaseConfigured() && navigator.onLine) {
@@ -662,7 +700,7 @@ export const getDailySummary = async (day: string) => {
           result: latestByDraw.get(draws[time]) || null
         }));
         await globalCache.set(summaryCacheKey, summaryResult, CACHE_TTL.SHORT);
-        return summaryResult;
+        return enrichDailySummaryWithExceptions(day, summaryResult);
       }
     } catch (err) {
       console.warn('[getDailySummary] Batch fetch fallback:', err);
@@ -684,37 +722,43 @@ export const getDailySummary = async (day: string) => {
   
   const fallbackSummary = await Promise.all(promises);
   await globalCache.set(summaryCacheKey, fallbackSummary, CACHE_TTL.SHORT);
-  return fallbackSummary;
+  return enrichDailySummaryWithExceptions(day, fallbackSummary);
 };
 
-export const getNextScheduledDraw = () => {
-  const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-  const now = new Date();
-  const todayName = days[now.getDay()];
-  const schedule = DRAW_SCHEDULE[todayName];
-  if (!schedule) return null;
-  const times = Object.keys(schedule).sort((a, b) => {
-      const [h1, m1] = a.split(':').map(Number);
-      const [h2, m2] = b.split(':').map(Number);
-      return (h1 * 60 + m1) - (h2 * 60 + m2);
-  });
-  const currentTimestamp = now.getTime();
-  const nextTime = times.find(t => {
-      const [h, m] = t.split(':').map(Number);
-      const drawDate = new Date(now);
-      drawDate.setHours(h, m, 0, 0);
-      return drawDate.getTime() > currentTimestamp;
-  });
-  if (nextTime) {
-      return { time: nextTime, name: schedule[nextTime], day: todayName };
-  } else {
-      const tomorrowIndex = (now.getDay() + 1) % 7;
-      const tomorrowName = days[tomorrowIndex];
-      const tomorrowSchedule = DRAW_SCHEDULE[tomorrowName];
-      const tomorrowTimes = Object.keys(tomorrowSchedule).sort();
-      const firstDraw = tomorrowTimes[0];
-      return { time: firstDraw, name: tomorrowSchedule[firstDraw], day: tomorrowName };
+export interface NextScheduledDrawInfo {
+  time: string;
+  name: string;
+  day: string;
+  dateIso: string;
+  targetTimestamp: number;
+  skippedSlots: SkippedDrawSlot[];
+}
+
+export const getNextScheduledDraw = (fromDate: Date = new Date()): NextScheduledDrawInfo | null => {
+  const activeSlot = findNextActiveScheduledSlot(DRAW_SCHEDULE, fromDate, 14);
+  if (activeSlot) {
+    return activeSlot;
   }
+
+  // Repli ultime si 14 jours complets étaient exceptionnellement neutralisés
+  const days = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+  const tomorrowIndex = (fromDate.getDay() + 1) % 7;
+  const tomorrowName = days[tomorrowIndex];
+  const tomorrowSchedule = DRAW_SCHEDULE[tomorrowName];
+  if (!tomorrowSchedule) return null;
+  const tomorrowTimes = Object.keys(tomorrowSchedule).sort();
+  const firstDraw = tomorrowTimes[0];
+  const target = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + 1);
+  const [h, m] = firstDraw.split(':').map(Number);
+  target.setHours(h, m, 0, 0);
+  return {
+    time: firstDraw,
+    name: tomorrowSchedule[firstDraw],
+    day: tomorrowName,
+    dateIso: toCanonicalIsoDate(target),
+    targetTimestamp: target.getTime(),
+    skippedSlots: [],
+  };
 };
 
 export const fetchRecentStats = async (days: number = 7, drawName?: string) => {

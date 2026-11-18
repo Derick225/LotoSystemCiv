@@ -16,6 +16,11 @@ import {
 import { calculateSpatialMetrics } from '../services/spatialService';
 import { calculateOrchestrationScores } from '../services/orchestrationService';
 import { runDecisionForest } from '../services/decisionTreeService';
+import {
+  DRAW_EXCEPTIONS_UPDATED_EVENT,
+  getDrawException,
+  getWeekdayReferenceDateIso,
+} from '../services/drawScheduleExceptionService';
 import { useEffect } from 'react';
 
 export const lotteryKeys = {
@@ -87,14 +92,36 @@ export const useDrawHistory = (drawName: string) => {
 export const getInitialDailySummary = (day: string) => {
   const draws = DRAW_SCHEDULE[day] || {};
   const sortedTimes = Object.keys(draws).sort();
-  return sortedTimes.map((time) => ({
-    time,
-    name: draws[time],
-    result: null as DrawResult | null,
-  }));
+  const targetDateIso = getWeekdayReferenceDateIso(day);
+  return sortedTimes.map((time) => {
+    const name = draws[time];
+    const exception = getDrawException(targetDateIso, name);
+    return {
+      time,
+      name,
+      result: null as DrawResult | null,
+      targetDateIso,
+      hasResultForTargetDate: false,
+      exception,
+      isSkipped: Boolean(exception),
+    };
+  });
 };
 
 export const useDailySummary = (day: string) => {
+    const queryClient = useQueryClient();
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const handleExceptionsChange = () => {
+            queryClient.invalidateQueries({ queryKey: lotteryKeys.dailySummary(day) });
+        };
+        window.addEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handleExceptionsChange);
+        return () => {
+            window.removeEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handleExceptionsChange);
+        };
+    }, [day, queryClient]);
+
     return useQuery({
         queryKey: lotteryKeys.dailySummary(day),
         queryFn: () => getDailySummary(day),

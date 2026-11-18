@@ -35,7 +35,7 @@ ctx.onmessage = async (e: MessageEvent) => {
             }
         }
 
-        const dateStr = String((hist[0] as any)?.date || 'default');
+        const dateStr = String(hist[0]?.date || 'default');
         let seedHash = 2166136261;
         for (let i = 0; i < dateStr.length; i++) {
             seedHash ^= dateStr.charCodeAt(i);
@@ -64,7 +64,8 @@ ctx.onmessage = async (e: MessageEvent) => {
                 confidence: hpcResult.confidence
             }
         });
-    } catch (err: any) {
-        ctx.postMessage({ error: err?.message || "Erreur interne Rust/WASM ACO Worker" });
+    } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Erreur interne Rust/WASM ACO Worker";
+        ctx.postMessage({ error: message });
     }
 };

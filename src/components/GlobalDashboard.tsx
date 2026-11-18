@@ -10,7 +10,15 @@ import React, {
 import {
   getNextScheduledDraw,
   checkAndSyncRecentResults,
+  type DailySummaryItem,
 } from "../services/lotteryService";
+import {
+  DRAW_EXCEPTIONS_UPDATED_EVENT,
+  isDrawSkippedOnDate,
+  toCanonicalIsoDate,
+  toFrenchDate,
+  type SkippedDrawSlot,
+} from "../services/drawScheduleExceptionService";
 import { analyzeIntraDraw } from "../services/intraDrawService";
 import { useNexusStore } from "../store/useNexusStore";
 import { useDailySummary, lotteryKeys } from "../hooks/useLottery";
@@ -43,6 +51,8 @@ import {
   Brain,
   Wifi,
   WifiOff,
+  PauseCircle,
+  AlertTriangle,
 } from "lucide-react";
 import { generateTacticalReport } from "../services/reportService";
 import { useToast } from "./ui/Toast";
@@ -51,11 +61,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { audioEngine } from "../utils/audioEngine";
 import { SLOT_CONFIG } from "../constants";
 
-interface SummaryItem {
-  time: string;
-  name: string;
-  result: DrawResult | null;
-}
+type SummaryItem = DailySummaryItem;
 
 interface GlobalDashboardProps {
   onSelectDraw: (draw: Draw) => void;
@@ -450,13 +456,16 @@ const NextDrawWidget = React.memo(
     day,
     time,
     name,
+    skippedSlots,
   }: {
     isUrgent: boolean;
     timeLeft: string;
     day: string;
     time: string;
     name: string;
+    skippedSlots?: SkippedDrawSlot[];
   }) => {
+    const firstSkipped = skippedSlots && skippedSlots.length > 0 ? skippedSlots[0] : null;
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.98 }}
@@ -468,7 +477,7 @@ const NextDrawWidget = React.memo(
         ></div>
 
         <div className="relative z-10 flex flex-col h-full">
-          <div className="flex justify-between items-start">
+          <div className="flex justify-between items-start gap-2 flex-wrap">
             <div className="inline-flex items-center gap-2 md:gap-3 px-3 md:px-5 py-1.5 md:py-2 bg-white/5 rounded-full border border-white/10 backdrop-blur-2xl">
               <Clock
                 className={`w-3.5 h-3.5 md:w-5 md:h-5 ${isUrgent ? "text-rose-400 animate-spin" : "text-indigo-400"}`}
@@ -477,6 +486,14 @@ const NextDrawWidget = React.memo(
                 {day} {time}
               </span>
             </div>
+            {firstSkipped && (
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-500/15 text-amber-300 rounded-full border border-amber-500/30 text-[8px] md:text-[10px] font-black uppercase tracking-wider">
+                <PauseCircle size={12} />
+                <span>
+                  {skippedSlots!.length} créneau{skippedSlots!.length > 1 ? "x" : ""} sauté{skippedSlots!.length > 1 ? "s" : ""} ({firstSkipped.exception.label})
+                </span>
+              </div>
+            )}
             {isUrgent && (
               <span className="px-2.5 md:px-4 py-1 md:py-1.5 bg-rose-600 text-white text-[7px] md:text-[9px] font-black uppercase rounded-lg animate-pulse shadow-lg shadow-rose-600/40">
                 Urgent
@@ -510,12 +527,16 @@ const calculateNextDrawSnapshot = () => {
   const next = getNextScheduledDraw();
   if (!next) return null;
   const now = new Date();
-  const [h, m] = next.time.split(":").map(Number);
-  const targetDate = new Date();
-  targetDate.setHours(h, m, 0, 0);
-  if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
+  let targetMs = next.targetTimestamp;
+  if (!Number.isFinite(targetMs)) {
+    const [h, m] = next.time.split(":").map(Number);
+    const targetDate = new Date();
+    targetDate.setHours(h, m, 0, 0);
+    if (targetDate < now) targetDate.setDate(targetDate.getDate() + 1);
+    targetMs = targetDate.getTime();
+  }
 
-  const diffMs = targetDate.getTime() - now.getTime();
+  const diffMs = Math.max(0, targetMs - now.getTime());
   const isUrgent = diffMs < 600000;
   const hh = Math.floor(diffMs / 3600000);
   const mm = Math.floor((diffMs % 3600000) / 60000);
@@ -527,6 +548,7 @@ const calculateNextDrawSnapshot = () => {
     isUrgent,
     time: next.time,
     day: next.day,
+    skippedSlots: next.skippedSlots || [],
   };
 };
 
@@ -537,6 +559,7 @@ const IsolatedNextDrawWidget = React.memo(() => {
     isUrgent: boolean;
     time: string;
     day: string;
+    skippedSlots?: SkippedDrawSlot[];
   } | null>(calculateNextDrawSnapshot);
 
   useEffect(() => {
@@ -546,7 +569,11 @@ const IsolatedNextDrawWidget = React.memo(() => {
     };
     updateDraw();
     const timer = setInterval(updateDraw, 1000);
-    return () => clearInterval(timer);
+    window.addEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, updateDraw);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, updateDraw);
+    };
   }, []);
 
   if (!nextDraw) return null;
@@ -558,6 +585,7 @@ const IsolatedNextDrawWidget = React.memo(() => {
       day={nextDraw.day}
       time={nextDraw.time}
       name={nextDraw.name}
+      skippedSlots={nextDraw.skippedSlots}
     />
   );
 });
@@ -655,7 +683,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
 
           if (diffMs <= 60000) {
             const drawNameKey = todaySchedule[time];
-            const dateStr = now.toISOString().split("T")[0];
+            const dateStr = toCanonicalIsoDate(now);
+            // Ne pas tenter de synchronisation automatique un jour férié ou sur un tirage annulé
+            if (isDrawSkippedOnDate(dateStr, drawNameKey)) {
+              continue;
+            }
             const storageKey = `nexus_autosync_${drawNameKey}_${dateStr}`;
 
             if (!localStorage.getItem(storageKey)) {
@@ -895,9 +927,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                           className="h-56 md:h-64 bg-white/5 rounded-2xl md:rounded-[2.5rem] animate-pulse border border-white/5 mx-auto w-full"
                         ></div>
                       ))
-                    : (summary as SummaryItem[]).map((item, idx) => {
-                        const isCompleted = item.result !== null;
-                        const isNext = nextDrawInfo?.name === item.name;
+                    : (summary as SummaryItem[]).map((item) => {
+                        const isSkipped = Boolean(item.isSkipped && item.exception);
+                        const isHoliday = item.exception?.type === "HOLIDAY";
+                        const isCompleted = !isSkipped && item.result !== null;
+                        const isNext = !isSkipped && nextDrawInfo?.name === item.name;
                         const config = SLOT_CONFIG[item.time] || {
                           color: "text-slate-400",
                           icon: "⏱️",
@@ -918,7 +952,17 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                                 name: item.name,
                               });
                             }}
-                            className={`group p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-[2.5rem] border transition-all duration-300 cursor-pointer active:scale-[0.98] md:hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${isCompleted ? "bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-xl" : isNext ? "bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20" : "bg-black/40 border-white/5 opacity-70 hover:opacity-100"}`}
+                            className={`group p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-[2.5rem] border transition-all duration-300 cursor-pointer active:scale-[0.98] md:hover:scale-[1.03] flex flex-col h-full relative overflow-hidden mx-auto w-full ${
+                              isSkipped
+                                ? isHoliday
+                                  ? "bg-amber-500/5 border-amber-500/30 hover:border-amber-400/60"
+                                  : "bg-rose-500/5 border-rose-500/30 hover:border-rose-400/60"
+                                : isCompleted
+                                ? "bg-indigo-600/5 border-emerald-500/20 hover:border-emerald-500/50 shadow-xl"
+                                : isNext
+                                ? "bg-indigo-600/10 border-indigo-500/40 hover:border-indigo-500 ring-1 ring-indigo-500/20"
+                                : "bg-black/40 border-white/5 opacity-70 hover:opacity-100"
+                            }`}
                           >
                             <div className="flex justify-between items-start mb-4 md:mb-6 relative z-10">
                               <div className="flex items-center gap-2">
@@ -926,12 +970,25 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                                   {config.icon}
                                 </span>
                                 <span
-                                  className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest ${isCompleted ? "text-emerald-400 font-bold" : "text-slate-400"}`}
+                                  className={`text-[9px] md:text-[11px] font-black uppercase tracking-widest ${
+                                    isSkipped
+                                      ? isHoliday
+                                        ? "text-amber-400"
+                                        : "text-rose-400"
+                                      : isCompleted
+                                      ? "text-emerald-400 font-bold"
+                                      : "text-slate-400"
+                                  }`}
                                 >
                                   {item.time}
                                 </span>
                               </div>
-                              {isCompleted ? (
+                              {isSkipped ? (
+                                <PauseCircle
+                                  size={14}
+                                  className={isHoliday ? "text-amber-400" : "text-rose-400"}
+                                />
+                              ) : isCompleted ? (
                                 <Signal
                                   size={12}
                                   className="text-emerald-500 animate-pulse"
@@ -951,7 +1008,31 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                             </h3>
 
                             <div className="mt-auto relative z-10">
-                              {item.result ? (
+                              {isSkipped && item.exception ? (
+                                <div
+                                  className={`py-5 md:py-6 px-3 rounded-[2rem] border-2 border-dashed flex flex-col items-center justify-center text-center gap-1.5 ${
+                                    isHoliday
+                                      ? "bg-amber-950/20 border-amber-500/30"
+                                      : "bg-rose-950/20 border-rose-500/30"
+                                  }`}
+                                >
+                                  <span
+                                    className={`text-[9px] md:text-[10px] font-black uppercase tracking-widest ${
+                                      isHoliday ? "text-amber-300" : "text-rose-300"
+                                    }`}
+                                  >
+                                    {isHoliday ? "Jour Férié — Pas de tirage" : "Tirage Annulé"}
+                                  </span>
+                                  <span className="text-[9px] font-bold text-slate-300 line-clamp-2">
+                                    {item.exception.label}
+                                  </span>
+                                  {item.targetDateIso && (
+                                    <span className="text-[8px] font-mono text-slate-500">
+                                      {toFrenchDate(item.targetDateIso)}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : item.result ? (
                                 <div className="space-y-3 md:space-y-6">
                                   <div className="flex gap-1.5 sm:gap-2 flex-nowrap overflow-x-auto scrollbar-hide justify-start items-center py-1">
                                     {item.result.gagnants.map((n) => (

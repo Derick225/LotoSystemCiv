@@ -5,7 +5,32 @@ import {
   getWasmModuleInstance,
   isLotoEngineWasmReady,
   recordWasmFallback,
+  type WasmDisposable,
 } from './wasmRuntime';
+
+interface EpigenomeMatrixWasmHandle extends WasmDisposable {
+  num_genes?: number;
+  epistatic_matrix_flat: Iterable<number>;
+  evidence_samples_flat: Iterable<number>;
+  gene_stability: Iterable<number>;
+  epistatic_synergy: Iterable<number>;
+  post_mortem_signal: Iterable<number>;
+  raw_target_weights: Iterable<number>;
+}
+
+interface EpigenomeWalkForwardStepWasmHandle extends WasmDisposable {
+  hits_top5_epi?: number;
+  hits_top5_base?: number;
+  hits_top10_epi?: number;
+  hits_top10_base?: number;
+  brier_epi?: number;
+  brier_base?: number;
+  expected_hits_top5_epi?: number;
+  expected_hits_top5_base?: number;
+  top5_epi: Iterable<number>;
+  top5_base: Iterable<number>;
+  epi_inc_probs: Iterable<number>;
+}
 
 export interface EpigenomeMatrixHpcInput {
   rawEpistasisFlat: Float64Array;
@@ -87,9 +112,9 @@ export function computeEpigenomeMatrixHpc(
 
   const wasmModuleInstance = getWasmModuleInstance();
   if (isLotoEngineWasmReady() && wasmModuleInstance?.compute_epigenome_matrix_wasm) {
-    let res: any = null;
+    let res: EpigenomeMatrixWasmHandle | null = null;
     try {
-      res = wasmModuleInstance.compute_epigenome_matrix_wasm(
+      const wasmRes = wasmModuleInstance.compute_epigenome_matrix_wasm(
         input.rawEpistasisFlat,
         input.epistasisSamplesFlat,
         input.lineageWeightsFlat,
@@ -105,14 +130,18 @@ export function computeEpigenomeMatrixHpc(
         input.entropyNorm,
         input.totalEvidenceUnits
       );
+      res = wasmRes;
+      if (!wasmRes) {
+        throw new Error('compute_epigenome_matrix_wasm returned null');
+      }
       return {
-        numGenes: Number(res.num_genes ?? K),
-        epistaticMatrixFlat: new Float64Array(res.epistatic_matrix_flat),
-        evidenceSamplesFlat: new Float64Array(res.evidence_samples_flat),
-        geneStability: new Float64Array(res.gene_stability),
-        epistaticSynergy: new Float64Array(res.epistatic_synergy),
-        postMortemSignal: new Float64Array(res.post_mortem_signal),
-        rawTargetWeights: new Float64Array(res.raw_target_weights),
+        numGenes: Number(wasmRes.num_genes ?? K),
+        epistaticMatrixFlat: new Float64Array(wasmRes.epistatic_matrix_flat),
+        evidenceSamplesFlat: new Float64Array(wasmRes.evidence_samples_flat),
+        geneStability: new Float64Array(wasmRes.gene_stability),
+        epistaticSynergy: new Float64Array(wasmRes.epistatic_synergy),
+        postMortemSignal: new Float64Array(wasmRes.post_mortem_signal),
+        rawTargetWeights: new Float64Array(wasmRes.raw_target_weights),
         engine: 'RUST_WASM',
       };
     } catch (e) {
@@ -356,27 +385,31 @@ export function scoreEpigenomeWalkForwardStepHpc(
 ): EpigenomeWalkForwardStepHpcOutput {
   const wasmModuleInstance = getWasmModuleInstance();
   if (isLotoEngineWasmReady() && wasmModuleInstance?.score_epigenome_walk_forward_step_wasm) {
-    let res: any = null;
+    let res: EpigenomeWalkForwardStepWasmHandle | null = null;
     try {
-      res = wasmModuleInstance.score_epigenome_walk_forward_step_wasm(
+      const wasmRes = wasmModuleInstance.score_epigenome_walk_forward_step_wasm(
         input.pluginScoresFlat,
         input.epiWeights,
         input.baseWeights,
         input.numGenes,
         input.actualWinners
       );
+      res = wasmRes;
+      if (!wasmRes) {
+        throw new Error('score_epigenome_walk_forward_step_wasm returned null');
+      }
       return {
-        hitsTop5Epi: Number(res.hits_top5_epi) || 0,
-        hitsTop5Base: Number(res.hits_top5_base) || 0,
-        hitsTop10Epi: Number(res.hits_top10_epi) || 0,
-        hitsTop10Base: Number(res.hits_top10_base) || 0,
-        brierEpi: Number(res.brier_epi) || 0,
-        brierBase: Number(res.brier_base) || 0,
-        expectedHitsTop5Epi: Number(res.expected_hits_top5_epi) || 0,
-        expectedHitsTop5Base: Number(res.expected_hits_top5_base) || 0,
-        top5Epi: new Uint8Array(res.top5_epi),
-        top5Base: new Uint8Array(res.top5_base),
-        epiIncProbs: new Float64Array(res.epi_inc_probs),
+        hitsTop5Epi: Number(wasmRes.hits_top5_epi) || 0,
+        hitsTop5Base: Number(wasmRes.hits_top5_base) || 0,
+        hitsTop10Epi: Number(wasmRes.hits_top10_epi) || 0,
+        hitsTop10Base: Number(wasmRes.hits_top10_base) || 0,
+        brierEpi: Number(wasmRes.brier_epi) || 0,
+        brierBase: Number(wasmRes.brier_base) || 0,
+        expectedHitsTop5Epi: Number(wasmRes.expected_hits_top5_epi) || 0,
+        expectedHitsTop5Base: Number(wasmRes.expected_hits_top5_base) || 0,
+        top5Epi: new Uint8Array(wasmRes.top5_epi),
+        top5Base: new Uint8Array(wasmRes.top5_base),
+        epiIncProbs: new Float64Array(wasmRes.epi_inc_probs),
         engine: 'RUST_WASM',
       };
     } catch (e) {

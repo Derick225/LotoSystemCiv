@@ -29,9 +29,6 @@ import {
   computeTensorScoreHpc,
   computeTopologicalProximityVectorHpc,
   WasmLyapunovResult,
-  WasmAnnealingResult,
-  WasmHawkesResult,
-  WasmCooccurrenceResult,
 } from './lotoEngineBridge';
 import { collectTransferables } from '../workers/zeroCopy';
 
@@ -51,10 +48,51 @@ export interface BarycenterPointHpc {
   date?: string;
 }
 
+interface WasmHpcWorkerPayload {
+  flatDraws?: Int32Array | number[];
+  numDraws?: number;
+  results?: { gagnants: number[]; date?: string }[];
+  limit?: number;
+  x?: Float64Array | number[];
+  y?: Float64Array | number[];
+  algoScores?: Record<string, number[] | Float64Array>;
+  keys?: readonly string[];
+  historyDraws?: Int32Array | number[];
+  winCols?: number;
+  horizonLimit?: number;
+  numStates?: number;
+  predDrawsFlat?: Int32Array | number[];
+  targetDrawsFlat?: Int32Array | number[];
+  activePredNumbers?: number[];
+  signal?: number[] | Float64Array;
+  winners?: number[] | Int32Array;
+  featuresFlat?: Float64Array | number[];
+  weights?: Float64Array | number[];
+  numNumbers?: number;
+  numFeatures?: number;
+  // Pass-through parameters for combinatorial annealing & cross-Hawkes
+  scores?: Float64Array | number[];
+  cooccurrences?: Int32Array | number[];
+  maxCombSize?: number;
+  numIterations?: number;
+  initialTemp?: number;
+  alpha?: number;
+  beta?: number;
+  decayRate?: number;
+  [key: string]: unknown;
+}
+
 class WasmHpcWorkerPool {
   private worker: Worker | null = null;
   private isReady: boolean = false;
-  private pendingCallbacks: Map<string, { resolve: (val: any) => void; reject: (err: any) => void; timer: ReturnType<typeof setTimeout> }> = new Map();
+  private pendingCallbacks: Map<
+    string,
+    {
+      resolve: (val: unknown) => void;
+      reject: (err: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  > = new Map();
   private taskCounter: number = 0;
   private totalTasksExecuted: number = 0;
   private fallbackCount: number = 0;
@@ -84,8 +122,9 @@ class WasmHpcWorkerPool {
         { type: 'module' }
       );
 
-      this.worker.onmessage = (e: MessageEvent) => {
+      this.worker.onmessage = (e: MessageEvent<{ taskId?: string; success?: boolean; result?: unknown; error?: string }>) => {
         const { taskId, success, result, error } = e.data || {};
+        if (!taskId) return;
         const pending = this.pendingCallbacks.get(taskId);
         if (pending) {
           clearTimeout(pending.timer);
@@ -103,7 +142,7 @@ class WasmHpcWorkerPool {
         console.warn('[WasmHpcWorkerPool] Erreur sur le worker dédié, repli sur le pont direct :', err);
         this.isReady = false;
         // Purge et rejet des tâches en attente
-        for (const [taskId, pending] of Array.from(this.pendingCallbacks.entries())) {
+        for (const [, pending] of Array.from(this.pendingCallbacks.entries())) {
           clearTimeout(pending.timer);
           pending.reject(new Error("Le Web Worker WASM HPC s'est arrêté inopinément."));
         }
@@ -148,7 +187,7 @@ class WasmHpcWorkerPool {
    */
   public async executeTask<T>(
     task: string,
-    payload: any = {},
+    payload: WasmHpcWorkerPayload = {},
     transferables: Transferable[] = []
   ): Promise<T> {
     if (!this.isWorkerOperational()) {
@@ -168,14 +207,14 @@ class WasmHpcWorkerPool {
           try {
             const fallbackResult = this.executeSyncFallback<T>(task, payload);
             resolve(fallbackResult);
-          } catch (e) {
+          } catch {
             reject(new Error(`Timeout du Worker WASM pour la tâche ${task}`));
           }
         }
       }, 8000);
 
       this.pendingCallbacks.set(taskId, {
-        resolve,
+        resolve: (val: unknown) => resolve(val as T),
         reject,
         timer,
       });
@@ -194,7 +233,7 @@ class WasmHpcWorkerPool {
           },
           transferables
         );
-      } catch (postErr) {
+      } catch {
         // En cas d'échec de clonage Transferable, retenter sans transferables ou exécuter en fallback
         try {
           this.worker!.postMessage({ taskId, task, payload });
@@ -211,91 +250,94 @@ class WasmHpcWorkerPool {
   /**
    * Fallback synchrone déterministe via lotoEngineBridge en cas d'absence de Worker.
    */
-  private executeSyncFallback<T>(task: string, p: any): Promise<T> | T {
+  private executeSyncFallback<T>(task: string, p: WasmHpcWorkerPayload): Promise<T> | T {
     this.fallbackCount++;
-    switch (task) {
-      case 'PING':
-        return { status: 'PONG_FALLBACK', timestamp: Date.now() } as any;
+    const runTask = (): unknown => {
+      switch (task) {
+        case 'PING':
+          return { status: 'PONG_FALLBACK', timestamp: Date.now() };
 
-      case 'SPATIAL_GRID_HPC': {
-        const flatDraws = p.flatDraws instanceof Int32Array
-          ? p.flatDraws
-          : new Int32Array(p.flatDraws || []);
-        const numDraws = p.numDraws || Math.floor(flatDraws.length / 5);
-        const spatial = computeSpatialGridHpc(flatDraws, numDraws);
-        return {
-          gridDensity: spatial.gridDensity,
-          gravityPulls: spatial.gravityPulls,
-          barycenterX: spatial.barycenterX,
-          barycenterY: spatial.barycenterY,
-          entropy: spatial.entropy,
-          densityThreshold: spatial.densityThreshold,
-        } as any;
+        case 'SPATIAL_GRID_HPC': {
+          const flatDraws = p.flatDraws instanceof Int32Array
+            ? p.flatDraws
+            : new Int32Array(p.flatDraws || []);
+          const numDraws = p.numDraws || Math.floor(flatDraws.length / 5);
+          const spatial = computeSpatialGridHpc(flatDraws, numDraws);
+          return {
+            gridDensity: spatial.gridDensity,
+            gravityPulls: spatial.gravityPulls,
+            barycenterX: spatial.barycenterX,
+            barycenterY: spatial.barycenterY,
+            entropy: spatial.entropy,
+            densityThreshold: spatial.densityThreshold,
+          };
+        }
+
+        case 'BARYCENTER_TRAJECTORY_HPC':
+          return computeBarycenterTrajectoryHpc(p.results || [], p.limit || 20);
+
+        case 'PEARSON_CORRELATION_HPC': {
+          const x = p.x instanceof Float64Array ? p.x : new Float64Array(p.x || []);
+          const y = p.y instanceof Float64Array ? p.y : new Float64Array(p.y || []);
+          return computePearsonCorrelationHpc(x, y);
+        }
+
+        case 'PEARSON_MATRIX_HPC':
+          return computePearsonCorrelationMatrixHpc(p.algoScores || {}, p.keys || []);
+
+        case 'TOPOLOGICAL_LYAPUNOV_HPC':
+          return computeTopologicalLyapunovHpc(
+            p.historyDraws || [],
+            p.numDraws || 0,
+            p.winCols || 5,
+            p.horizonLimit || 30
+          );
+
+        case 'COMBINATORIAL_ANNEALING_HPC':
+          return solveCombinatorialAnnealingHpc(p as Parameters<typeof solveCombinatorialAnnealingHpc>[0]);
+
+        case 'CROSS_HAWKES_HPC':
+          return computeCrossHawkesKernelHpc(p as Parameters<typeof computeCrossHawkesKernelHpc>[0]);
+
+        case 'MARKOV_TRANSITIONS_HPC':
+          return computeMarkovTransitionHpc(
+            p.historyDraws instanceof Int32Array ? p.historyDraws : new Int32Array(p.historyDraws || []),
+            p.numDraws || 0,
+            p.winCols || 5,
+            p.numStates || 90
+          );
+
+        case 'COOCCURRENCE_TENSOR_HPC':
+          return computeCooccurrenceTensorHpc(
+            p.predDrawsFlat instanceof Int32Array ? p.predDrawsFlat : new Int32Array(p.predDrawsFlat || []),
+            p.targetDrawsFlat instanceof Int32Array ? p.targetDrawsFlat : new Int32Array(p.targetDrawsFlat || []),
+            p.numDraws || 0,
+            p.winCols || 5,
+            p.activePredNumbers || []
+          );
+
+        case 'HURST_HPC':
+          return computeRobustHurstHpc(p.signal || []);
+
+        case 'SPECTRAL_FFT_HPC':
+          return computeFftPowerSpectrumHpc(p.signal || []);
+
+        case 'TOPOLOGICAL_PROXIMITY_HPC': {
+          const winners = p.winners instanceof Int32Array ? p.winners : (p.winners || []);
+          return computeTopologicalProximityVectorHpc(winners);
+        }
+
+        case 'TENSOR_SCORE_HPC': {
+          const feat = p.featuresFlat instanceof Float64Array ? p.featuresFlat : new Float64Array(p.featuresFlat || []);
+          const w = p.weights instanceof Float64Array ? p.weights : new Float64Array(p.weights || []);
+          return computeTensorScoreHpc(feat, w, p.numNumbers || 90, p.numFeatures || 1);
+        }
+
+        default:
+          throw new Error(`Fallback inconnu pour la tâche: ${task}`);
       }
-
-      case 'BARYCENTER_TRAJECTORY_HPC':
-        return computeBarycenterTrajectoryHpc(p.results || [], p.limit || 20) as any;
-
-      case 'PEARSON_CORRELATION_HPC': {
-        const x = p.x instanceof Float64Array ? p.x : new Float64Array(p.x || []);
-        const y = p.y instanceof Float64Array ? p.y : new Float64Array(p.y || []);
-        return computePearsonCorrelationHpc(x, y) as any;
-      }
-
-      case 'PEARSON_MATRIX_HPC':
-        return computePearsonCorrelationMatrixHpc(p.algoScores || {}, p.keys || []) as any;
-
-      case 'TOPOLOGICAL_LYAPUNOV_HPC':
-        return computeTopologicalLyapunovHpc(
-          p.historyDraws,
-          p.numDraws,
-          p.winCols || 5,
-          p.horizonLimit || 30
-        ) as any;
-
-      case 'COMBINATORIAL_ANNEALING_HPC':
-        return solveCombinatorialAnnealingHpc(p) as any;
-
-      case 'CROSS_HAWKES_HPC':
-        return computeCrossHawkesKernelHpc(p) as any;
-
-      case 'MARKOV_TRANSITIONS_HPC':
-        return computeMarkovTransitionHpc(
-          p.historyDraws,
-          p.numDraws,
-          p.winCols || 5,
-          p.numStates || 90
-        ) as any;
-
-      case 'COOCCURRENCE_TENSOR_HPC':
-        return computeCooccurrenceTensorHpc(
-          p.predDrawsFlat,
-          p.targetDrawsFlat,
-          p.numDraws,
-          p.winCols || 5,
-          p.activePredNumbers || []
-        ) as any;
-
-      case 'HURST_HPC':
-        return computeRobustHurstHpc(p.signal) as any;
-
-      case 'SPECTRAL_FFT_HPC':
-        return computeFftPowerSpectrumHpc(p.signal) as any;
-
-      case 'TOPOLOGICAL_PROXIMITY_HPC': {
-        const winners = p.winners instanceof Int32Array ? p.winners : (p.winners || []);
-        return computeTopologicalProximityVectorHpc(winners) as any;
-      }
-
-      case 'TENSOR_SCORE_HPC': {
-        const feat = p.featuresFlat instanceof Float64Array ? p.featuresFlat : new Float64Array(p.featuresFlat || []);
-        const w = p.weights instanceof Float64Array ? p.weights : new Float64Array(p.weights || []);
-        return computeTensorScoreHpc(feat, w, p.numNumbers || 90, p.numFeatures) as any;
-      }
-
-      default:
-        throw new Error(`Fallback inconnu pour la tâche: ${task}`);
-    }
+    };
+    return runTask() as T;
   }
 
   // --- API SPÉCIALISÉES HAUTE PERFORMANCE (HPC) ---
