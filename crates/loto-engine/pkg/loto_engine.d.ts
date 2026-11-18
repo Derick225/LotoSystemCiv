@@ -95,6 +95,89 @@ export class CyclicCandidateHpc {
     score: number;
 }
 
+export class EpigenomeMatrixWasmResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly epistatic_matrix_flat: Float64Array;
+    readonly epistatic_synergy: Float64Array;
+    readonly evidence_samples_flat: Float64Array;
+    readonly gene_stability: Float64Array;
+    readonly post_mortem_signal: Float64Array;
+    readonly raw_target_weights: Float64Array;
+    num_genes: number;
+}
+
+export class EpigenomeWalkForwardWasmResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly epi_inc_probs: Float64Array;
+    readonly top5_base: Uint8Array;
+    readonly top5_epi: Uint8Array;
+    brier_base: number;
+    brier_epi: number;
+    expected_hits_top5_base: number;
+    expected_hits_top5_epi: number;
+    hits_top10_base: number;
+    hits_top10_epi: number;
+    hits_top5_base: number;
+    hits_top5_epi: number;
+}
+
+export class GapRangeAnalysisWasmResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly ball_active_channels: Uint8Array;
+    readonly ball_channel_z_flat: Float64Array;
+    readonly ball_current_gaps: Int32Array;
+    readonly ball_stouffer_p: Float64Array;
+    readonly ball_stouffer_z: Float64Array;
+    readonly bin_z_scores: Float64Array;
+    readonly blended_probs: Float64Array;
+    readonly drought_draws: Int32Array;
+    readonly drought_pressure: Float64Array;
+    readonly drought_z_scores: Float64Array;
+    readonly model_weights: Float64Array;
+    readonly optimal_five: Uint8Array;
+    readonly pool_baseline_probs: Float64Array;
+    readonly reserve_two: Uint8Array;
+    readonly top_predicted_bins: Uint8Array;
+    readonly tranche_quotas: Uint8Array;
+    readonly transition_matrix_order1: Float64Array;
+    expected_next_mean: number;
+    kl_m1: number;
+    kl_m2: number;
+    selection_confidence: number;
+    ticket_stouffer_z: number;
+    total_analyzed_draws: number;
+    wasserstein_bandwidth: number;
+}
+
+export class GapRangeWalkForwardWasmResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly step_actual_counts: Uint8Array;
+    readonly step_brier_scores: Float64Array;
+    readonly step_draw_indices: Int32Array;
+    readonly step_optimal_five_hits: Uint8Array;
+    readonly step_predicted_top3: Uint8Array;
+    avg_balls_covered_per_draw: number;
+    avg_selection_hits_per_draw: number;
+    brier_skill_score: number;
+    eval_count: number;
+    h0_brier_score: number;
+    mean_brier_score: number;
+    min_train_draws: number;
+    selection_at_least_one_hit_rate: number;
+    top1_h0_chance_rate: number;
+    top1_success_rate: number;
+    top3_ball_coverage_rate: number;
+    top3_h0_chance_rate: number;
+}
+
 export class HawkesOutputHpc {
     private constructor();
     free(): void;
@@ -139,6 +222,10 @@ export class InMemoryDrawStore {
      * Réinitialise l'historique d'un tirage spécifique
      */
     clear_draw(draw_name: string): void;
+    /**
+     * Analyse bivariée des dyades croisées et matrice de transition entre tirage source et cible
+     */
+    compute_bivariate_dyads_wasm(source_draw: string, target_draw: string, min_z_score: number): WasmBivariateReport;
     /**
      * Calcule le couplage continu d'interconnexion entre deux tirages du store
      * Zéro coupure binaire, poids continu dans ]0.0, 1.0[ selon AGENTS.md
@@ -216,6 +303,32 @@ export class NativePredictionResult {
     readonly scores: Float64Array;
     readonly top_10: Uint8Array;
     readonly top_5: Uint8Array;
+}
+
+export class PatternMiningWasmResult {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    active_cycle_draws_count: number;
+    active_cycle_index: number;
+    completed_cycles_count: number;
+    min_pair_cycles_threshold: number;
+    overall_cycle_entropy: number;
+    total_cycles: number;
+    readonly active_cycle_numbers: Uint8Array;
+    readonly ball_cycle_counts: Uint32Array;
+    readonly pair_cycle_indices_flat: Uint32Array;
+    readonly pair_cycle_offsets: Uint32Array;
+    readonly pair_cycle_supports: Uint32Array;
+    readonly pair_tuples: Uint32Array;
+    readonly same_draw_pair_counts: Uint32Array;
+    readonly source_ball_counts: Uint32Array;
+    readonly transition_cycle_indices_flat: Uint32Array;
+    readonly transition_cycle_offsets: Uint32Array;
+    readonly transition_tuples: Uint32Array;
+    readonly triplet_cycle_indices_flat: Uint32Array;
+    readonly triplet_cycle_offsets: Uint32Array;
+    readonly triplet_tuples: Uint32Array;
 }
 
 /**
@@ -310,6 +423,20 @@ export class WalkForwardReport {
     readonly calibration_quality_label: string;
 }
 
+/**
+ * Rapport complet d'analyse bivariée des dyades croisées
+ */
+export class WasmBivariateReport {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    get_dyad(index: number): WasmCrossDyad | undefined;
+    mean_coupling_z: number;
+    total_paired_draws: number;
+    readonly dyads_count: number;
+    readonly transition_matrix_flat: Float64Array;
+}
+
 export class WasmButterflyResult {
     private constructor();
     free(): void;
@@ -330,6 +457,22 @@ export class WasmChainReactionResult {
     percolation_density: number;
     readonly avalanche_critical_numbers: Int32Array;
     readonly resonance_spectrum: Float64Array;
+}
+
+/**
+ * Représentation typée d'une dyade croisée statistiquement significative
+ */
+export class WasmCrossDyad {
+    private constructor();
+    free(): void;
+    [Symbol.dispose](): void;
+    readonly expected_occurrences: number;
+    readonly lift: number;
+    readonly occurrences: number;
+    readonly significance_score: number;
+    readonly source_number: number;
+    readonly target_number: number;
+    readonly z_score: number;
 }
 
 export class WasmDominoResult {
@@ -446,6 +589,8 @@ export function compute_cyclic_candidates_hpc(current_gaps: Float64Array, avg_ga
  */
 export function compute_domino_advection_wasm(history_flat: Int32Array, draws_count: number, damping_gamma: number): WasmDominoResult;
 
+export function compute_epigenome_matrix_wasm(raw_epistasis_flat: Float64Array, epistasis_samples_flat: Float64Array, lineage_weights_flat: Float64Array, num_lineage: number, initial_weights: Float64Array, arm_ids: Uint8Array, proof_flags: Uint8Array, proof_scores: Float64Array, base_analysis_signals: Float64Array, forced_zero_flags: Uint8Array, num_genes: number, hurst: number, entropy_norm: number, total_evidence_units: number): EpigenomeMatrixWasmResult;
+
 /**
  * Calcule la Transformée de Fourier Rapide (FFT) via `rustfft` sur une tranche de signal `&[f64]`.
  * Applique un fenêtrage de Hann continu C^∞ pour éliminer les discontinuités spectrales de bord.
@@ -457,6 +602,15 @@ export function compute_fft_power_spectrum(signal: Float64Array): Float64Array;
  * Retourne un vecteur de taille 91 où l'index `n` (1..=90) contient le nombre d'apparitions.
  */
 export function compute_frequency_counts_wasm(flat_draws: Int32Array, num_draws: number, win_cols: number): Int32Array;
+
+export function compute_gap_range_analysis_wasm(chrono_draws_flat: Int32Array, num_draws: number, win_cols: number): GapRangeAnalysisWasmResult;
+
+/**
+ * Évaluation Walk-Forward strictement hors-échantillon (zéro fuite future) :
+ * à chaque tirage `t` dans `[total_draws - eval_count, total_draws - 1]`,
+ * le modèle est entraîné uniquement sur le préfixe `0..t` puis scoré sur `t`.
+ */
+export function compute_gap_range_walk_forward_wasm(chrono_draws_flat: Int32Array, num_draws: number, win_cols: number, window_size: number): GapRangeWalkForwardWasmResult;
 
 /**
  * 1. Effet de Cascade : Noyau de Chaleur de Graphe (Graph Heat Kernel exp(-tL))
@@ -510,6 +664,8 @@ export function compute_pair_pmi_wasm(pred_draws_flat: Int32Array, target_draws_
  */
 export function compute_robust_hurst_wasm(signal: Float64Array): number;
 
+export function compute_sequence_order_metrics_wasm(seq_a: Uint32Array, seq_b: Uint32Array): Float64Array;
+
 /**
  * Calcule le champ spatial complet (densité, puits de gravité, barycentre, seuil Probit)
  */
@@ -543,6 +699,8 @@ export function engine_version(): string;
  */
 export function init_engine(): void;
 
+export function mine_cycle_patterns_wasm(chrono_draws_flat: Int32Array, num_draws: number, win_cols: number, cycle_length: number, min_support_override: number, include_transitions: boolean): PatternMiningWasmResult;
+
 /**
  * Évalue les probabilités d'état futur par projection Markovienne d'ordre 1
  * sur le dernier tirage gagnant `last_draw_numbers` (5 entiers).
@@ -568,6 +726,8 @@ export function run_native_prediction_pipeline(flat_winners: Uint8Array, num_dra
  * Évalue le moteur financier de backtest en O(N) déterministe avec zéro allocation intermédiaire.
  */
 export function run_simulation_hpc(hits_history: Int32Array, confidences: Float64Array, multipliers: Float64Array, strategy_code: number, initial_bankroll: number, unit_bet: number): SimulationResultHpc;
+
+export function score_epigenome_walk_forward_step_wasm(plugin_scores_flat: Float64Array, epi_weights: Float64Array, base_weights: Float64Array, num_genes: number, actual_winners: Uint8Array): EpigenomeWalkForwardWasmResult;
 
 /**
  * Optimisation Combinatoire par Recuit Simulé (Simulated Annealing) Haute Performance
@@ -604,6 +764,10 @@ export interface InitOutput {
     readonly __wbg_crosshawkeswasmresult_free: (a: number, b: number) => void;
     readonly __wbg_cyclicbatchreporthpc_free: (a: number, b: number) => void;
     readonly __wbg_cycliccandidatehpc_free: (a: number, b: number) => void;
+    readonly __wbg_epigenomematrixwasmresult_free: (a: number, b: number) => void;
+    readonly __wbg_epigenomewalkforwardwasmresult_free: (a: number, b: number) => void;
+    readonly __wbg_gaprangeanalysiswasmresult_free: (a: number, b: number) => void;
+    readonly __wbg_gaprangewalkforwardwasmresult_free: (a: number, b: number) => void;
     readonly __wbg_get_acoresulthpc_best_score: (a: number) => number;
     readonly __wbg_get_acoresulthpc_confidence: (a: number) => number;
     readonly __wbg_get_acoresulthpc_generations_run: (a: number) => number;
@@ -620,6 +784,34 @@ export interface InitOutput {
     readonly __wbg_get_cycliccandidatehpc_phase_resonance: (a: number) => number;
     readonly __wbg_get_cycliccandidatehpc_quality_factor: (a: number) => number;
     readonly __wbg_get_cycliccandidatehpc_score: (a: number) => number;
+    readonly __wbg_get_epigenomematrixwasmresult_num_genes: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_brier_base: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_brier_epi: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_expected_hits_top5_base: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_expected_hits_top5_epi: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_hits_top10_base: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_hits_top10_epi: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_hits_top5_base: (a: number) => number;
+    readonly __wbg_get_epigenomewalkforwardwasmresult_hits_top5_epi: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_expected_next_mean: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_kl_m1: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_kl_m2: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_selection_confidence: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_ticket_stouffer_z: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_total_analyzed_draws: (a: number) => number;
+    readonly __wbg_get_gaprangeanalysiswasmresult_wasserstein_bandwidth: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_avg_balls_covered_per_draw: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_avg_selection_hits_per_draw: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_brier_skill_score: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_eval_count: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_h0_brier_score: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_mean_brier_score: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_min_train_draws: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_selection_at_least_one_hit_rate: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_top1_h0_chance_rate: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_top1_success_rate: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_top3_ball_coverage_rate: (a: number) => number;
+    readonly __wbg_get_gaprangewalkforwardwasmresult_top3_h0_chance_rate: (a: number) => number;
     readonly __wbg_get_hybridregimeoptimizationhpc_confidence: (a: number) => number;
     readonly __wbg_get_hybridregimeoptimizationhpc_stability_index: (a: number) => number;
     readonly __wbg_get_montecarloballstat_ball: (a: number) => number;
@@ -631,6 +823,12 @@ export interface InitOutput {
     readonly __wbg_get_nativepredictionresult_confidence_score: (a: number) => number;
     readonly __wbg_get_nativepredictionresult_hurst_exponent: (a: number) => number;
     readonly __wbg_get_nativepredictionresult_shannon_entropy: (a: number) => number;
+    readonly __wbg_get_patternminingwasmresult_active_cycle_draws_count: (a: number) => number;
+    readonly __wbg_get_patternminingwasmresult_active_cycle_index: (a: number) => number;
+    readonly __wbg_get_patternminingwasmresult_completed_cycles_count: (a: number) => number;
+    readonly __wbg_get_patternminingwasmresult_min_pair_cycles_threshold: (a: number) => number;
+    readonly __wbg_get_patternminingwasmresult_overall_cycle_entropy: (a: number) => number;
+    readonly __wbg_get_patternminingwasmresult_total_cycles: (a: number) => number;
     readonly __wbg_get_prioranalysisreport_dominant_period: (a: number) => number;
     readonly __wbg_get_prioranalysisreport_hurst_exponent: (a: number) => number;
     readonly __wbg_get_prioranalysisreport_shannon_entropy: (a: number) => number;
@@ -663,6 +861,8 @@ export interface InitOutput {
     readonly __wbg_get_walkforwardreport_mean_hits: (a: number) => number;
     readonly __wbg_get_walkforwardreport_platt_alpha: (a: number) => number;
     readonly __wbg_get_walkforwardreport_platt_beta: (a: number) => number;
+    readonly __wbg_get_wasmbivariatereport_mean_coupling_z: (a: number) => number;
+    readonly __wbg_get_wasmbivariatereport_total_paired_draws: (a: number) => number;
     readonly __wbg_get_wasmbutterflyresult_is_chaotic: (a: number) => number;
     readonly __wbg_get_wasmbutterflyresult_lyapunov_exponent: (a: number) => number;
     readonly __wbg_get_wasmbutterflyresult_phase_attractor_x: (a: number) => number;
@@ -683,6 +883,7 @@ export interface InitOutput {
     readonly __wbg_montecarloballstat_free: (a: number, b: number) => void;
     readonly __wbg_montecarloreporthpc_free: (a: number, b: number) => void;
     readonly __wbg_nativepredictionresult_free: (a: number, b: number) => void;
+    readonly __wbg_patternminingwasmresult_free: (a: number, b: number) => void;
     readonly __wbg_prioranalysisreport_free: (a: number, b: number) => void;
     readonly __wbg_set_acoresulthpc_best_score: (a: number, b: number) => void;
     readonly __wbg_set_acoresulthpc_confidence: (a: number, b: number) => void;
@@ -700,6 +901,34 @@ export interface InitOutput {
     readonly __wbg_set_cycliccandidatehpc_phase_resonance: (a: number, b: number) => void;
     readonly __wbg_set_cycliccandidatehpc_quality_factor: (a: number, b: number) => void;
     readonly __wbg_set_cycliccandidatehpc_score: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomematrixwasmresult_num_genes: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_brier_base: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_brier_epi: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_expected_hits_top5_base: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_expected_hits_top5_epi: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_hits_top10_base: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_hits_top10_epi: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_hits_top5_base: (a: number, b: number) => void;
+    readonly __wbg_set_epigenomewalkforwardwasmresult_hits_top5_epi: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_expected_next_mean: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_kl_m1: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_kl_m2: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_selection_confidence: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_ticket_stouffer_z: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_total_analyzed_draws: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangeanalysiswasmresult_wasserstein_bandwidth: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_avg_balls_covered_per_draw: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_avg_selection_hits_per_draw: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_brier_skill_score: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_eval_count: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_h0_brier_score: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_mean_brier_score: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_min_train_draws: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_selection_at_least_one_hit_rate: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_top1_h0_chance_rate: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_top1_success_rate: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_top3_ball_coverage_rate: (a: number, b: number) => void;
+    readonly __wbg_set_gaprangewalkforwardwasmresult_top3_h0_chance_rate: (a: number, b: number) => void;
     readonly __wbg_set_hybridregimeoptimizationhpc_confidence: (a: number, b: number) => void;
     readonly __wbg_set_hybridregimeoptimizationhpc_stability_index: (a: number, b: number) => void;
     readonly __wbg_set_montecarloballstat_ball: (a: number, b: number) => void;
@@ -711,6 +940,12 @@ export interface InitOutput {
     readonly __wbg_set_nativepredictionresult_confidence_score: (a: number, b: number) => void;
     readonly __wbg_set_nativepredictionresult_hurst_exponent: (a: number, b: number) => void;
     readonly __wbg_set_nativepredictionresult_shannon_entropy: (a: number, b: number) => void;
+    readonly __wbg_set_patternminingwasmresult_active_cycle_draws_count: (a: number, b: number) => void;
+    readonly __wbg_set_patternminingwasmresult_active_cycle_index: (a: number, b: number) => void;
+    readonly __wbg_set_patternminingwasmresult_completed_cycles_count: (a: number, b: number) => void;
+    readonly __wbg_set_patternminingwasmresult_min_pair_cycles_threshold: (a: number, b: number) => void;
+    readonly __wbg_set_patternminingwasmresult_overall_cycle_entropy: (a: number, b: number) => void;
+    readonly __wbg_set_patternminingwasmresult_total_cycles: (a: number, b: number) => void;
     readonly __wbg_set_prioranalysisreport_dominant_period: (a: number, b: number) => void;
     readonly __wbg_set_prioranalysisreport_hurst_exponent: (a: number, b: number) => void;
     readonly __wbg_set_prioranalysisreport_shannon_entropy: (a: number, b: number) => void;
@@ -743,6 +978,8 @@ export interface InitOutput {
     readonly __wbg_set_walkforwardreport_mean_hits: (a: number, b: number) => void;
     readonly __wbg_set_walkforwardreport_platt_alpha: (a: number, b: number) => void;
     readonly __wbg_set_walkforwardreport_platt_beta: (a: number, b: number) => void;
+    readonly __wbg_set_wasmbivariatereport_mean_coupling_z: (a: number, b: number) => void;
+    readonly __wbg_set_wasmbivariatereport_total_paired_draws: (a: number, b: number) => void;
     readonly __wbg_set_wasmbutterflyresult_is_chaotic: (a: number, b: number) => void;
     readonly __wbg_set_wasmbutterflyresult_lyapunov_exponent: (a: number, b: number) => void;
     readonly __wbg_set_wasmbutterflyresult_phase_attractor_x: (a: number, b: number) => void;
@@ -762,8 +999,10 @@ export interface InitOutput {
     readonly __wbg_spectralanalysisresult_free: (a: number, b: number) => void;
     readonly __wbg_topologicallyapunovresult_free: (a: number, b: number) => void;
     readonly __wbg_walkforwardreport_free: (a: number, b: number) => void;
+    readonly __wbg_wasmbivariatereport_free: (a: number, b: number) => void;
     readonly __wbg_wasmbutterflyresult_free: (a: number, b: number) => void;
     readonly __wbg_wasmchainreactionresult_free: (a: number, b: number) => void;
+    readonly __wbg_wasmcrossdyad_free: (a: number, b: number) => void;
     readonly __wbg_wasmdominoresult_free: (a: number, b: number) => void;
     readonly __wbg_wasmheatkernelresult_free: (a: number, b: number) => void;
     readonly __wbg_wasmpredictionportfolio_free: (a: number, b: number) => void;
@@ -783,8 +1022,11 @@ export interface InitOutput {
     readonly compute_cross_hawkes_kernel: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
     readonly compute_cyclic_candidates_hpc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
     readonly compute_domino_advection_wasm: (a: number, b: number, c: number, d: number) => number;
+    readonly compute_epigenome_matrix_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number, u: number, v: number, w: number) => number;
     readonly compute_fft_power_spectrum: (a: number, b: number, c: number) => void;
     readonly compute_frequency_counts_wasm: (a: number, b: number, c: number, d: number, e: number) => void;
+    readonly compute_gap_range_analysis_wasm: (a: number, b: number, c: number, d: number) => number;
+    readonly compute_gap_range_walk_forward_wasm: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly compute_graph_heat_kernel_wasm: (a: number, b: number, c: number, d: number) => number;
     readonly compute_hawkes_intensity_hpc: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly compute_hybrid_regime_weights_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => number;
@@ -792,6 +1034,7 @@ export interface InitOutput {
     readonly compute_markov_transition_matrix_wasm: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly compute_pair_pmi_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
     readonly compute_robust_hurst_wasm: (a: number, b: number) => number;
+    readonly compute_sequence_order_metrics_wasm: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly compute_spatial_grid_hpc: (a: number, b: number, c: number) => number;
     readonly compute_topological_lyapunov_wasm: (a: number, b: number, c: number, d: number, e: number) => number;
     readonly cooccurrencetensorresult_conditioned_pair_hits: (a: number, b: number) => void;
@@ -811,6 +1054,37 @@ export interface InitOutput {
     readonly cyclicbatchreporthpc_get_score: (a: number, b: number) => number;
     readonly dot_product_f64: (a: number, b: number, c: number, d: number) => number;
     readonly engine_version: (a: number) => void;
+    readonly epigenomematrixwasmresult_epistatic_matrix_flat: (a: number, b: number) => void;
+    readonly epigenomematrixwasmresult_epistatic_synergy: (a: number, b: number) => void;
+    readonly epigenomematrixwasmresult_evidence_samples_flat: (a: number, b: number) => void;
+    readonly epigenomematrixwasmresult_gene_stability: (a: number, b: number) => void;
+    readonly epigenomematrixwasmresult_post_mortem_signal: (a: number, b: number) => void;
+    readonly epigenomematrixwasmresult_raw_target_weights: (a: number, b: number) => void;
+    readonly epigenomewalkforwardwasmresult_epi_inc_probs: (a: number, b: number) => void;
+    readonly epigenomewalkforwardwasmresult_top5_base: (a: number, b: number) => void;
+    readonly epigenomewalkforwardwasmresult_top5_epi: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_ball_active_channels: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_ball_channel_z_flat: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_ball_current_gaps: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_ball_stouffer_p: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_ball_stouffer_z: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_bin_z_scores: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_blended_probs: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_drought_draws: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_drought_pressure: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_drought_z_scores: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_model_weights: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_optimal_five: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_pool_baseline_probs: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_reserve_two: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_top_predicted_bins: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_tranche_quotas: (a: number, b: number) => void;
+    readonly gaprangeanalysiswasmresult_transition_matrix_order1: (a: number, b: number) => void;
+    readonly gaprangewalkforwardwasmresult_step_actual_counts: (a: number, b: number) => void;
+    readonly gaprangewalkforwardwasmresult_step_brier_scores: (a: number, b: number) => void;
+    readonly gaprangewalkforwardwasmresult_step_draw_indices: (a: number, b: number) => void;
+    readonly gaprangewalkforwardwasmresult_step_optimal_five_hits: (a: number, b: number) => void;
+    readonly gaprangewalkforwardwasmresult_step_predicted_top3: (a: number, b: number) => void;
     readonly hawkesoutputhpc_intensities: (a: number, b: number) => void;
     readonly hybridregimeoptimizationhpc_optimized_weights: (a: number, b: number) => void;
     readonly init_engine: () => void;
@@ -819,6 +1093,7 @@ export interface InitOutput {
     readonly inmemorydrawstore_bootstrap_json: (a: number, b: number, c: number, d: number) => void;
     readonly inmemorydrawstore_clear_and_reload: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly inmemorydrawstore_clear_draw: (a: number, b: number, c: number) => void;
+    readonly inmemorydrawstore_compute_bivariate_dyads_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
     readonly inmemorydrawstore_compute_interdraw_coupling: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly inmemorydrawstore_compute_network_domino_wasm: (a: number, b: number, c: number, d: number, e: number) => void;
     readonly inmemorydrawstore_compute_walk_forward_calibration: (a: number, b: number, c: number, d: number, e: number) => void;
@@ -829,6 +1104,7 @@ export interface InitOutput {
     readonly inmemorydrawstore_get_network_id: (a: number, b: number, c: number, d: number) => void;
     readonly inmemorydrawstore_new: () => number;
     readonly inmemorydrawstore_rebuild_all_seen_indexes: (a: number) => void;
+    readonly mine_cycle_patterns_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly montecarloreporthpc_count: (a: number) => number;
     readonly montecarloreporthpc_get_ball: (a: number, b: number) => number;
     readonly montecarloreporthpc_get_mean: (a: number, b: number) => number;
@@ -839,12 +1115,27 @@ export interface InitOutput {
     readonly nativepredictionresult_scores: (a: number, b: number) => void;
     readonly nativepredictionresult_top_10: (a: number, b: number) => void;
     readonly nativepredictionresult_top_5: (a: number, b: number) => void;
+    readonly patternminingwasmresult_active_cycle_numbers: (a: number, b: number) => void;
+    readonly patternminingwasmresult_ball_cycle_counts: (a: number, b: number) => void;
+    readonly patternminingwasmresult_pair_cycle_indices_flat: (a: number, b: number) => void;
+    readonly patternminingwasmresult_pair_cycle_offsets: (a: number, b: number) => void;
+    readonly patternminingwasmresult_pair_cycle_supports: (a: number, b: number) => void;
+    readonly patternminingwasmresult_pair_tuples: (a: number, b: number) => void;
+    readonly patternminingwasmresult_same_draw_pair_counts: (a: number, b: number) => void;
+    readonly patternminingwasmresult_source_ball_counts: (a: number, b: number) => void;
+    readonly patternminingwasmresult_transition_cycle_indices_flat: (a: number, b: number) => void;
+    readonly patternminingwasmresult_transition_cycle_offsets: (a: number, b: number) => void;
+    readonly patternminingwasmresult_transition_tuples: (a: number, b: number) => void;
+    readonly patternminingwasmresult_triplet_cycle_indices_flat: (a: number, b: number) => void;
+    readonly patternminingwasmresult_triplet_cycle_offsets: (a: number, b: number) => void;
+    readonly patternminingwasmresult_triplet_tuples: (a: number, b: number) => void;
     readonly prioranalysisreport_regime_label: (a: number, b: number) => void;
     readonly project_markov_next_state: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
     readonly run_aco_optimization_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: bigint) => number;
     readonly run_monte_carlo_whatif_hpc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: bigint) => number;
     readonly run_native_prediction_pipeline: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly run_simulation_hpc: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
+    readonly score_epigenome_walk_forward_step_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => number;
     readonly simulationresulthpc_balances: (a: number, b: number) => void;
     readonly simulationresulthpc_drawdowns: (a: number, b: number) => void;
     readonly solve_combinatorial_annealing_wasm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: bigint) => number;
@@ -861,8 +1152,18 @@ export interface InitOutput {
     readonly topologicallyapunovresult_lyapunov_exponent: (a: number) => number;
     readonly topologicallyapunovresult_topological_entropy: (a: number) => number;
     readonly walkforwardreport_calibration_quality_label: (a: number, b: number) => void;
+    readonly wasmbivariatereport_dyads_count: (a: number) => number;
+    readonly wasmbivariatereport_get_dyad: (a: number, b: number) => number;
+    readonly wasmbivariatereport_transition_matrix_flat: (a: number, b: number) => void;
     readonly wasmchainreactionresult_avalanche_critical_numbers: (a: number, b: number) => void;
     readonly wasmchainreactionresult_resonance_spectrum: (a: number, b: number) => void;
+    readonly wasmcrossdyad_expected_occurrences: (a: number) => number;
+    readonly wasmcrossdyad_lift: (a: number) => number;
+    readonly wasmcrossdyad_occurrences: (a: number) => number;
+    readonly wasmcrossdyad_significance_score: (a: number) => number;
+    readonly wasmcrossdyad_source_number: (a: number) => number;
+    readonly wasmcrossdyad_target_number: (a: number) => number;
+    readonly wasmcrossdyad_z_score: (a: number) => number;
     readonly wasmdominoresult_domino_energies: (a: number, b: number) => void;
     readonly wasmdominoresult_empty: (a: number) => number;
     readonly wasmdominoresult_kinetic_dissipation_rate: (a: number) => number;

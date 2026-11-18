@@ -16,13 +16,13 @@ use crate::in_memory_store::{CompactDraw, TOTAL_NUMBERS, NUMBERS_PER_DRAW};
 #[wasm_bindgen]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WasmCrossDyad {
-    pub source_number: u8,
-    pub target_number: u8,
-    pub occurrences: u32,
-    pub expected_occurrences: f64,
-    pub z_score: f64,
-    pub lift: f64,
-    pub significance_score: f64, // [0, 100] continue
+    source_number: u8,
+    target_number: u8,
+    occurrences: u32,
+    expected_occurrences: f64,
+    z_score: f64,
+    lift: f64,
+    significance_score: f64, // [0, 100] continue
 }
 
 #[wasm_bindgen]
