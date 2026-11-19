@@ -17,13 +17,18 @@ import { audioEngine } from "../../utils/audioEngine";
 import {
   runUnifiedDnaGeneSequencer,
   evaluateDnaGeneSequencerWalkForward,
+  evaluateNetworkWalkForward,
   CHROMOSOMAL_ARM_LABELS,
   type ChromosomalArm,
   type GeneExpressionState,
   type DnaGeneSynthesisResult,
   type DnaGeneNode,
   type DnaGeneWalkForwardResult,
+  type NetworkWalkForwardResult,
 } from "../../services/prediction/dnaGeneSequenceService";
+import { getDrawNetworkId, INTER_DRAW_NETWORKS } from "../../constants";
+import { fetchResults } from "../../services/lotteryService";
+import type { DrawResult } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 
 const ARM_SHORT_LABELS: Record<ChromosomalArm, string> = {
@@ -104,6 +109,8 @@ export const DnaGeneSequencerPanel: React.FC<{
   const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [walkForward, setWalkForward] = useState<DnaGeneWalkForwardResult | null>(null);
   const [wfLoading, setWfLoading] = useState<boolean>(false);
+  const [networkWf, setNetworkWf] = useState<NetworkWalkForwardResult | null>(null);
+  const [networkWfLoading, setNetworkWfLoading] = useState<boolean>(false);
 
   const handleRunWalkForward = async () => {
     try {
@@ -143,8 +150,47 @@ export const DnaGeneSequencerPanel: React.FC<{
     }
   }, [drawName, history, globalWeights, reports]);
 
+  const handleRunNetworkWalkForward = async () => {
+    try {
+      setNetworkWfLoading(true);
+      audioEngine.play("scan");
+      const networkId = getDrawNetworkId(drawName) ?? "hebdomadaire";
+      const drawNames = INTER_DRAW_NETWORKS[networkId].drawNames;
+      const entries = await Promise.all(
+        drawNames.map(async (name): Promise<[string, DrawResult[]]> => {
+          try {
+            const res = await fetchResults(name);
+            if (res.data && res.data.length > 0) return [name, res.data];
+          } catch {
+            // fallback local sur historique actif si correspondant
+          }
+          return [name, name.toLowerCase() === drawName.toLowerCase() ? history : []];
+        })
+      );
+      const historyByDraw = Object.fromEntries(entries);
+      const netRes = await evaluateNetworkWalkForward({
+        networkId,
+        history,
+        historyByDraw,
+        forensicReports: reports,
+      });
+      setNetworkWf(netRes);
+      audioEngine.play("success");
+      showToast(
+        `Évaluation réseau ${networkId} : N=${netRes.totalOosDrawsCount} pas OOS sur ${netRes.drawsEvaluated.length} tirage(s), p=${netRes.permutationTest.pValueTwoSided.toFixed(3)}.`,
+        netRes.totalOosDrawsCount > 0 ? "success" : "info"
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur d'évaluation réseau";
+      showToast(`Erreur walk-forward réseau : ${msg}`, "error");
+    } finally {
+      setNetworkWfLoading(false);
+    }
+  };
+
   useEffect(() => {
     setWalkForward(null);
+    setNetworkWf(null);
     runDryAnalysis();
   }, [runDryAnalysis]);
 
@@ -280,9 +326,9 @@ export const DnaGeneSequencerPanel: React.FC<{
               Ordonnancement des Gènes &amp; Régulation des Poids Post-Mortem
             </h3>
             <p className="text-sm text-slate-400 leading-relaxed">
-              Fusionne les rapports post-mortem, les autopsies en boucle fermée, la dérive ADN et la lignée
-              génomique afin d'ordonner la séquence des 25 gènes par bras chromosomique tout en maintenant le
-              plafond statistique Benjamini-Hochberg sur les canaux non prouvés.
+              Fusionne par précision inverse les rapports post-mortem, les autopsies en boucle fermée,
+              la dérive ADN et la lignée génomique tout en appliquant un rétrécissement Empirical-Bayes
+              dérivé du test de rang Mann-Whitney (Westfall-Young max-T).
             </p>
           </div>
 
@@ -339,7 +385,7 @@ export const DnaGeneSequencerPanel: React.FC<{
           </div>
 
           <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
-            <div className="text-xs text-slate-400 font-medium">Preuve Empirique BH &amp; Diversité</div>
+            <div className="text-xs text-slate-400 font-medium">Preuve Rang WY max-T &amp; Diversité</div>
             <div className="text-2xl font-mono font-bold text-white tabular-nums">
               {provenGenesCount}
               <span className="text-xs text-slate-400 font-normal ml-1.5">
@@ -674,7 +720,7 @@ export const DnaGeneSequencerPanel: React.FC<{
                     onClick={() => handleSort("proofZScore")}
                     className="inline-flex items-center gap-1 hover:text-white cursor-pointer"
                   >
-                    Preuve BH <ArrowUpDown size={11} />
+                    Preuve WY max-T <ArrowUpDown size={11} />
                   </button>
                 </th>
               </tr>
@@ -761,7 +807,7 @@ export const DnaGeneSequencerPanel: React.FC<{
                         </span>
                       ) : (
                         <span className="text-slate-500">
-                          Plafonné (Z={node.proofZScore.toFixed(2)})
+                          EB Rétréci (Z={node.proofZScore.toFixed(2)})
                         </span>
                       )}
                     </td>
@@ -785,14 +831,27 @@ export const DnaGeneSequencerPanel: React.FC<{
               Entraîne strictement sur l&apos;historique antérieur [t+1..N-1] et mesure le gain réel hors-échantillon face aux poids initiaux et au hasard pur (25,4 % ≥ 1 hit).
             </p>
           </div>
-          <button
-            onClick={handleRunWalkForward}
-            disabled={wfLoading || loading}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={wfLoading ? "animate-spin text-cyan-400" : "text-cyan-400"} />
-            {wfLoading ? "Évaluation OOS..." : "Lancer Walk-Forward"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={handleRunWalkForward}
+              disabled={wfLoading || networkWfLoading || loading}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={wfLoading ? "animate-spin text-cyan-400" : "text-cyan-400"} />
+              {wfLoading ? "Évaluation OOS..." : "Lancer Walk-Forward"}
+            </button>
+
+            <button
+              onClick={handleRunNetworkWalkForward}
+              disabled={networkWfLoading || wfLoading || loading}
+              className="px-4 py-2.5 bg-slate-950 hover:bg-slate-800 text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-semibold flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
+            >
+              <Activity size={14} className={networkWfLoading ? "animate-spin" : ""} />
+              {networkWfLoading
+                ? "Agrégation Réseau..."
+                : `Walk-Forward Réseau (${getDrawNetworkId(drawName) === "quotidien" ? "Quotidien · 22" : "Hebdo · 6"})`}
+            </button>
+          </div>
         </div>
 
         {walkForward && (
@@ -820,14 +879,17 @@ export const DnaGeneSequencerPanel: React.FC<{
 
             {walkForward.status === "COMPLETED" && (
               <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                   <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
-                    <div className="text-xs text-slate-400">Taux ≥ 1 Hit Top-5 (OOS)</div>
+                    <div className="text-xs text-slate-400">Test Permutation (N={walkForward.permutationTest.sampleSize})</div>
                     <div className="text-xl font-mono font-bold text-white tabular-nums">
-                      {(walkForward.atLeastOneHitRateEpigenome * 100).toFixed(1)}%
+                      p={walkForward.permutationTest.pValueTwoSided.toFixed(3)}
+                      <span className="text-xs text-slate-400 font-normal ml-1.5">
+                        (p₁={walkForward.permutationTest.pValueOneSidedPositive.toFixed(3)})
+                      </span>
                     </div>
                     <div className="text-[11px] font-mono text-slate-400 tabular-nums">
-                      Base {(walkForward.atLeastOneHitRateBaseline * 100).toFixed(1)}% · H0 {(walkForward.h0AtLeastOneHitRate * 100).toFixed(1)}%
+                      IC95% [{walkForward.permutationTest.ciLower95 >= 0 ? "+" : ""}{walkForward.permutationTest.ciLower95.toFixed(3)} ; {walkForward.permutationTest.ciUpper95 >= 0 ? "+" : ""}{walkForward.permutationTest.ciUpper95.toFixed(3)}] · {walkForward.permutationTest.exactEnumeration ? "Exact 2^N" : "MC seedé"}
                     </div>
                   </div>
 
@@ -841,11 +903,11 @@ export const DnaGeneSequencerPanel: React.FC<{
                         }`}
                       >
                         ({walkForward.deltaMeanHitsTop5 >= 0 ? "+" : ""}
-                        {walkForward.deltaMeanHitsTop5.toFixed(2)})
+                        {walkForward.deltaMeanHitsTop5.toFixed(3)})
                       </span>
                     </div>
                     <div className="text-[11px] font-mono text-slate-400 tabular-nums">
-                      Base {walkForward.meanHitsTop5Baseline.toFixed(2)} · H0 {walkForward.h0MeanHitsTop5.toFixed(2)}
+                      Base {walkForward.meanHitsTop5Baseline.toFixed(2)} · H0 {walkForward.h0MeanHitsTop5.toFixed(2)} · Hedge {walkForward.hedgeComparison.meanHitsTop5Hedge.toFixed(2)}
                     </div>
                   </div>
 
@@ -860,18 +922,33 @@ export const DnaGeneSequencerPanel: React.FC<{
                       {(walkForward.brierSkillScoreVsBaseline * 100).toFixed(2)}%
                     </div>
                     <div className="text-[11px] font-mono text-slate-400 tabular-nums">
-                      BSS vs H0 : {(walkForward.brierSkillScoreVsH0 * 100).toFixed(2)}%
+                      vs H0 : {(walkForward.brierSkillScoreVsH0 * 100).toFixed(2)}% · Hedge BSS {(walkForward.hedgeComparison.brierSkillScoreVsBaseline * 100).toFixed(2)}%
                     </div>
                   </div>
 
                   <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
-                    <div className="text-xs text-slate-400">Z-Score Binomial vs H0</div>
+                    <div className="text-xs text-slate-400">Log-Loss &amp; AUC (5/90)</div>
                     <div className="text-xl font-mono font-bold text-white tabular-nums">
-                      {walkForward.epigenomeZScoreVsH0 >= 0 ? "+" : ""}
-                      {walkForward.epigenomeZScoreVsH0.toFixed(2)}σ
+                      {walkForward.meanLogLossEpigenome.toFixed(4)}
+                      <span className="text-xs text-cyan-400 font-normal ml-1.5">
+                        AUC {walkForward.meanAucEpigenome.toFixed(3)}
+                      </span>
                     </div>
                     <div className="text-[11px] font-mono text-slate-400 tabular-nums">
-                      {walkForward.evaluatedDrawsCount} tirages · Top-10 moy {walkForward.meanHitsTop10Epigenome.toFixed(2)}
+                      Base LL {walkForward.meanLogLossBaseline.toFixed(4)} · τ={walkForward.calibratedTauSummary.finalTauEpi.toFixed(2)}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Taux ≥ 1 Hit &amp; Z vs H0</div>
+                    <div className="text-xl font-mono font-bold text-white tabular-nums">
+                      {(walkForward.atLeastOneHitRateEpigenome * 100).toFixed(1)}%
+                      <span className="text-xs text-slate-400 font-normal ml-1.5">
+                        ({walkForward.epigenomeZScoreVsH0 >= 0 ? "+" : ""}{walkForward.epigenomeZScoreVsH0.toFixed(2)}σ)
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      Base {(walkForward.atLeastOneHitRateBaseline * 100).toFixed(1)}% · H0 {(walkForward.h0AtLeastOneHitRate * 100).toFixed(1)}%
                     </div>
                   </div>
                 </div>
@@ -884,8 +961,9 @@ export const DnaGeneSequencerPanel: React.FC<{
                         <th className="py-2.5 px-3">Date Cible</th>
                         <th className="py-2.5 px-3 text-right">Train</th>
                         <th className="py-2.5 px-3">Séquence Active</th>
-                        <th className="py-2.5 px-3 text-right">Top-5 Epi vs Base</th>
+                        <th className="py-2.5 px-3 text-right">Top-5 Epi / Base / Hedge</th>
                         <th className="py-2.5 px-3 text-right">Brier Epi / Base</th>
+                        <th className="py-2.5 px-3 text-right">LogLoss / AUC</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/70 text-xs font-mono tabular-nums">
@@ -909,10 +987,132 @@ export const DnaGeneSequencerPanel: React.FC<{
                             >
                               {st.hitsTop5Epigenome}
                             </span>
-                            <span className="text-slate-500"> / {st.hitsTop5Baseline}</span>
+                            <span className="text-slate-500"> / {st.hitsTop5Baseline} / {st.hedgeHitsTop5}</span>
                           </td>
                           <td className="py-2 px-3 text-right text-slate-300">
                             {st.brierEpigenome.toFixed(4)} / {st.brierBaseline.toFixed(4)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-300">
+                            {st.logLossEpigenome.toFixed(4)} · {st.aucEpigenome.toFixed(3)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {networkWf && (
+          <div className="pt-4 border-t border-slate-800 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+              <div className="text-slate-200">
+                Agrégation Réseau <span className="text-cyan-400 font-semibold uppercase">{networkWf.networkId}</span>{" "}
+                (évaluation seule · {networkWf.drawsEvaluated.length} tirage(s) isolé(s), N={networkWf.totalOosDrawsCount} pas OOS)
+              </div>
+              <span
+                className={
+                  networkWf.verdict === "OUTPERFORMS_BASELINE"
+                    ? "text-emerald-400 font-semibold"
+                    : networkWf.verdict === "UNDERPERFORMS_BASELINE"
+                      ? "text-amber-400 font-semibold"
+                      : "text-slate-400"
+                }
+              >
+                {networkWf.verdict === "OUTPERFORMS_BASELINE"
+                  ? "Surperformance réseau vérifiée"
+                  : networkWf.verdict === "UNDERPERFORMS_BASELINE"
+                    ? "Sous la Baseline sur le réseau"
+                    : networkWf.verdict === "PARITY_WITH_BASELINE"
+                      ? "Parité statistique réseau"
+                      : "Données réseau insuffisantes"}
+              </span>
+            </div>
+
+            {networkWf.totalOosDrawsCount > 0 && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Permutation Réseau (N={networkWf.permutationTest.sampleSize})</div>
+                    <div className="text-lg font-mono font-bold text-white tabular-nums">
+                      p={networkWf.permutationTest.pValueTwoSided.toFixed(3)} · p₁={networkWf.permutationTest.pValueOneSidedPositive.toFixed(3)}
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      IC95% [{networkWf.permutationTest.ciLower95 >= 0 ? "+" : ""}{networkWf.permutationTest.ciLower95.toFixed(3)} ; {networkWf.permutationTest.ciUpper95 >= 0 ? "+" : ""}{networkWf.permutationTest.ciUpper95.toFixed(3)}] · {networkWf.permutationTest.exactEnumeration ? "Exact 2^N" : "MC seedé"}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Hits Top-5 Réseau (Epi / Base)</div>
+                    <div className="text-lg font-mono font-bold text-white tabular-nums">
+                      {networkWf.meanHitsTop5Epigenome.toFixed(3)} / {networkWf.meanHitsTop5Baseline.toFixed(3)}
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      Δ = {networkWf.deltaMeanHitsTop5 >= 0 ? "+" : ""}{networkWf.deltaMeanHitsTop5.toFixed(4)}
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">BSS Réseau vs Baseline</div>
+                    <div
+                      className={`text-lg font-mono font-bold tabular-nums ${
+                        networkWf.brierSkillScoreVsBaseline >= 0 ? "text-emerald-400" : "text-amber-400"
+                      }`}
+                    >
+                      {networkWf.brierSkillScoreVsBaseline >= 0 ? "+" : ""}
+                      {(networkWf.brierSkillScoreVsBaseline * 100).toFixed(2)}%
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      Estimateurs strictement par tirage
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
+                    <div className="text-xs text-slate-400">Log-Loss &amp; AUC Moyens</div>
+                    <div className="text-lg font-mono font-bold text-white tabular-nums">
+                      {networkWf.meanLogLossEpigenome.toFixed(4)} · AUC {networkWf.meanAucEpigenome.toFixed(3)}
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-400 tabular-nums">
+                      {networkWf.drawsEvaluated.length} tirage(s) évalué(s)
+                    </div>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto border border-slate-800 rounded-xl">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-950/90 border-b border-slate-800 text-[11px] font-mono text-slate-400 uppercase tracking-wider">
+                        <th className="py-2 px-3">Tirage Isolé</th>
+                        <th className="py-2 px-3 text-right">Pas OOS</th>
+                        <th className="py-2 px-3 text-right">Hits Epi / Base</th>
+                        <th className="py-2 px-3 text-right">BSS</th>
+                        <th className="py-2 px-3 text-right">LogLoss / AUC</th>
+                        <th className="py-2 px-3 text-right">p (Perm.)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/70 text-xs font-mono tabular-nums">
+                      {networkWf.perDrawResults.map((d) => (
+                        <tr key={d.drawName} className="hover:bg-slate-950/50">
+                          <td className="py-2 px-3 text-slate-200 font-sans font-medium">{d.drawName}</td>
+                          <td className="py-2 px-3 text-right text-slate-400">{d.evaluatedDrawsCount}</td>
+                          <td className="py-2 px-3 text-right text-slate-200">
+                            {d.meanHitsTop5Epigenome.toFixed(2)} / {d.meanHitsTop5Baseline.toFixed(2)}
+                          </td>
+                          <td
+                            className={`py-2 px-3 text-right ${
+                              d.brierSkillScoreVsBaseline >= 0 ? "text-emerald-400" : "text-amber-400"
+                            }`}
+                          >
+                            {d.brierSkillScoreVsBaseline >= 0 ? "+" : ""}
+                            {(d.brierSkillScoreVsBaseline * 100).toFixed(2)}%
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-300">
+                            {d.meanLogLossEpigenome.toFixed(4)} · {d.meanAucEpigenome.toFixed(3)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-300">
+                            {d.permutationTest.pValueTwoSided.toFixed(3)}
                           </td>
                         </tr>
                       ))}

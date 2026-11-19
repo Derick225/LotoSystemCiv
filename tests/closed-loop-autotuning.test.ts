@@ -267,6 +267,13 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     });
     expect(neuralRes.trainingSampleCount).toBeGreaterThan(0);
     expect(neuralRes.validationSampleCount).toBeGreaterThan(0);
+    const neuralSum = Object.values(neuralRes.optimizedWeights).reduce((a, b) => a + b, 0);
+    expect(neuralSum).toBeCloseTo(1.0, 4);
+    for (const g of neuralRes.algoGradients) {
+      expect(g.ebCredibility).toBeGreaterThanOrEqual(0);
+      expect(g.ebCredibility).toBeLessThanOrEqual(1);
+      expect(g.gatingAction).not.toBe('PROOF_LOCKED');
+    }
 
     // Vérification de l'échelle relative du biais expert : un delta négatif (-0.20) amortit sans tuer le poids à 0
     const dampenedWeights = applyExpertBiasesToWeights(

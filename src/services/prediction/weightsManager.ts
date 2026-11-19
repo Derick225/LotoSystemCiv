@@ -8,6 +8,8 @@ import { drawHasMachineNumbers, getMirrorNumber, getComplement90, getDrawNetwork
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { algorithmRegistry, type AlgorithmContext } from './algorithmRegistry';
 import { calculateStatisticalBounds } from '../mathService';
+import { LCG } from '../../utils/mathUtils';
+import { deriveSeedFromHistory } from '../../utils/deterministicSeed';
 
 export const getDefaultWeights = (): AlgoWeights => ({ ...DEFAULT_ALGO_WEIGHTS });
 
@@ -173,28 +175,30 @@ export interface AlgoProofMetric {
   empiricalHitRate: number;
   baselineRate: number;
   confidence: number;
-  // p-value unilatérale brute (queue supérieure) du z-score du canal sous H0.
+  // p-value unilatérale brute (queue supérieure) du z-score de rang (Mann-Whitney AUC) sous H0.
   pValue?: number;
-  // p-value ajustée Benjamini-Hochberg (FDR) sur la famille des canaux testés.
+  // p-value ajustée Westfall-Young step-down max-T (permutations corrélées sur la famille de canaux).
   qValue?: number;
+  // p-value ajustée Benjamini-Hochberg unilatérale (FDR) complémentaire.
+  bhQValue?: number;
+  // AUC moyenne des rangs sur les 90 scores (0.5 sous H0).
+  aucMean?: number;
+  // Statistique de rang normalisée (z-score de Mann-Whitney avec correction hypergéométrique finie et ex-æquo).
+  rankZScore?: number;
+  // Facteur de rétrécissement Empirical-Bayes de James-Stein [0, 1] entre canaux.
+  ebShrinkageFactor?: number;
 }
 
 const algoEmpiricalProofCache = new Map<string, Record<AlgoKey, AlgoProofMetric>>();
 
 /**
- * Effectif minimal attendu pour la validité de l'approximation normale d'une binomiale
- * (règle de Cochran, 1954 : np ≥ 5). Constante statistique PUBLIÉE — même statut que le facteur
- * de consistance MAD 1.4826 ou l'approximation logistique 1.702 déjà utilisés dans le moteur —
- * et non un seuil de décision arbitraire réglable. Sert uniquement à atténuer continûment les
- * canaux dont l'échantillon est trop mince pour que le z-score soit fiable.
+ * Effectif minimal attendu pour la validité de l'approximation normale
+ * (règle de Cochran, 1954 : np ≥ 5). Constante statistique publiée.
  */
 const COCHRAN_MIN_EXPECTED_COUNT = 5.0;
 
 /**
- * Fonction de survie normale standard P(Z > z) = ½·(1 − erf(z/√2)).
- * erf approché par Abramowitz & Stegun 7.1.26 (précision ~1.5e-7). Les coefficients sont des
- * constantes mathématiques publiées (même statut que le facteur de consistance MAD 1.4826),
- * aucun réglage arbitraire. 100 % déterministe.
+ * Fonction de survie normale standard P(Z > z) = ½·(1 − erf(z/√2)) (Abramowitz & Stegun 7.1.26).
  */
 const normalUpperTail = (z: number): number => {
   const x = z / Math.SQRT2;
@@ -207,11 +211,69 @@ const normalUpperTail = (z: number): number => {
 };
 
 /**
+ * Calcule l'AUC exacte de Mann-Whitney / Wilcoxon sur les 90 numéros avec rangs moyens pour ex-æquo
+ * et la variance hypergéométrique finie exacte (Lehmann, 1975) sous H0.
+ */
+const computeMannWhitneyStepStats = (
+  scoresByNum: Float64Array,
+  winnersSet: Set<number>,
+  numIndices: number[]
+): { auc: number; varAuc: number } => {
+  const N = 90;
+  const n1 = winnersSet.size;
+  const n0 = N - n1;
+  if (n1 <= 0 || n0 <= 0) {
+    return { auc: 0.5, varAuc: 0 };
+  }
+
+  const ordered = [...numIndices].sort((a, b) => {
+    const diff = scoresByNum[a] - scoresByNum[b];
+    return Math.abs(diff) > 1e-12 ? diff : a - b;
+  });
+
+  let rankSumWinners = 0;
+  let tieCorrection = 0;
+  let i = 0;
+  while (i < N) {
+    let j = i + 1;
+    const baseScore = scoresByNum[ordered[i]];
+    while (j < N && Math.abs(scoresByNum[ordered[j]] - baseScore) <= 1e-12) {
+      j++;
+    }
+    const tieCount = j - i;
+    if (tieCount > 1) {
+      tieCorrection += tieCount * (tieCount * tieCount - 1);
+    }
+    const avgRank = (i + 1 + j) * 0.5;
+    for (let m = i; m < j; m++) {
+      if (winnersSet.has(ordered[m])) {
+        rankSumWinners += avgRank;
+      }
+    }
+    i = j;
+  }
+
+  const uStat = rankSumWinners - (n1 * (n1 + 1)) * 0.5;
+  const denomPairs = n1 * n0;
+  const auc = uStat / denomPairs;
+
+  // Variance hypergéométrique finie exacte de la somme des rangs avec correction des ex-æquo :
+  // Var(W) = (n1 * n0 / 12) * [ N + 1 - Σ t_g(t_g^2 - 1) / (N*(N - 1)) ]
+  const popTerm = Math.max(0, N + 1 - tieCorrection / (N * (N - 1)));
+  const varRankSum = (denomPairs / 12.0) * popTerm;
+  const varAuc = varRankSum / (denomPairs * denomPairs);
+
+  return { auc, varAuc };
+};
+
+/**
  * ÉVALUATION EMPIRIQUE DE LA VALEUR PRÉDICTIVE D'UN ALGORITHME
- * 
+ *
  * Règle d'or : "Qu'aucun algorithme ne soit prioritaire s'il n'a pas fait ses preuves."
- * Évalue rétrospectivement sur l'historique isolé du tirage si les signaux RÉELS de chaque
- * algorithme ont effectivement permis d'extraire les numéros gagnants par rapport au hasard.
+ * Évalue rétrospectivement sur l'historique isolé du tirage via la statistique de rang
+ * Mann-Whitney (AUC sur 90 numéros avec variance hypergéométrique finie exacte), p-values
+ * unilatérales (queue supérieure), correction Westfall-Young step-down max-T corrélée et
+ * rétrécissement Empirical-Bayes de James-Stein.
  */
 export const evaluateAlgoEmpiricalProof = (
   drawName: string,
@@ -230,7 +292,13 @@ export const evaluateAlgoEmpiricalProof = (
         proofScore: 0,
         empiricalHitRate: baselineRate,
         baselineRate,
-        confidence: 0
+        confidence: 0,
+        pValue: 1,
+        qValue: 1,
+        bhQValue: 1,
+        aucMean: 0.5,
+        rankZScore: 0,
+        ebShrinkageFactor: 0,
       };
     });
     return result;
@@ -243,7 +311,7 @@ export const evaluateAlgoEmpiricalProof = (
   if (cached) return cached;
   const T = sample.length;
   // Profondeur d'évaluation empirique alignée sur l'espérance mathématique (90/5 = 18)
-  const expectedMeanGap = 90.0 / 5.0; 
+  const expectedMeanGap = 90.0 / 5.0;
   const evalDepth = Math.min(Math.ceil(expectedMeanGap * 1.5), T - 1);
   // Fonction de confiance temporelle basée sur le cycle théorique
   const confidence = Math.tanh(T / expectedMeanGap);
@@ -255,19 +323,31 @@ export const evaluateAlgoEmpiricalProof = (
   let sumWeights = 0;
   let sumWeightsSq = 0;
 
-  // Comptabilisation des succès empiriques pondérés dans le temps par canal algorithmique
   const hits: Record<AlgoKey, number> = {} as any;
   const trials: Record<AlgoKey, number> = {} as any;
-  validKeys.forEach(k => { hits[k] = 0; trials[k] = 0; });
+  const aucWeightedDiffSum: Record<AlgoKey, number> = {} as any;
+  const aucWeightSum: Record<AlgoKey, number> = {} as any;
+  const aucVarSum: Record<AlgoKey, number> = {} as any;
+  const stepAucDiffs: Record<AlgoKey, number[]> = {} as any;
+  validKeys.forEach(k => {
+    hits[k] = 0;
+    trials[k] = 0;
+    aucWeightedDiffSum[k] = 0;
+    aucWeightSum[k] = 0;
+    aucVarSum[k] = 0;
+    stepAucDiffs[k] = [];
+  });
 
   const numIndices = Array.from({ length: 90 }, (_, i) => i + 1);
+  let evaluatedStepsCount = 0;
 
   for (let t = 0; t < evalDepth; t++) {
-    const actualDraw = sample[t].gagnants;
+    const actualDraw = sample[t].gagnants || [];
+    const winnersSet = new Set(actualDraw.filter(n => n >= 1 && n <= 90));
     const subHistory = sample.slice(t + 1);
-    if (subHistory.length < 3) continue;
+    if (subHistory.length < 3 || winnersSet.size === 0 || winnersSet.size >= 90) continue;
 
-    // Poids d'atténuation temporelle exponentielle continue w_t = exp(-lambda * t)
+    evaluatedStepsCount++;
     const tWeight = Math.exp(-temporalDecayRate * t);
     sumWeights += tWeight;
     sumWeightsSq += tWeight * tWeight;
@@ -275,7 +355,6 @@ export const evaluateAlgoEmpiricalProof = (
     const lastWinners = subHistory[0]?.gagnants || [];
     const subT = subHistory.length;
 
-    // Features fondamentales isolées à l'instant t-1 (zéro fuite temporelle)
     const subFreq = new Float32Array(91);
     subHistory.forEach(d => d.gagnants?.forEach(n => { if (n >= 1 && n <= 90) subFreq[n]++; }));
 
@@ -365,7 +444,6 @@ export const evaluateAlgoEmpiricalProof = (
       });
     }
 
-    // Composante spectrale Fourier continue
     const spectralEnergies: Array<{ number: number; energy: number }> = [];
     const harmonicOmega = (2 * Math.PI) / Math.max(4, Math.floor(subT / 3));
     for (let n = 1; n <= 90; n++) {
@@ -409,7 +487,6 @@ export const evaluateAlgoEmpiricalProof = (
       pluginCache: {},
     };
 
-    // Évaluation rigoureuse des vrais algorithmes enregistrés dans algorithmRegistry
     const evaluatedKeys = new Set<AlgoKey>();
 
     for (const plugin of algorithmRegistry) {
@@ -428,86 +505,169 @@ export const evaluateAlgoEmpiricalProof = (
             : 0;
         }
         const topAlgo = [...numIndices].sort((a, b) => pluginScores[b] - pluginScores[a]).slice(0, 10);
-        hits[plugin.key] += topAlgo.filter(n => actualDraw.includes(n)).length * tWeight;
+        hits[plugin.key] += topAlgo.filter(n => winnersSet.has(n)).length * tWeight;
         trials[plugin.key] += 10 * tWeight;
+
+        const { auc, varAuc } = computeMannWhitneyStepStats(pluginScores, winnersSet, numIndices);
+        const wDiff = tWeight * (auc - 0.5);
+        aucWeightedDiffSum[plugin.key] += wDiff;
+        aucWeightSum[plugin.key] += tWeight;
+        aucVarSum[plugin.key] += tWeight * tWeight * varAuc;
+        stepAucDiffs[plugin.key].push(wDiff);
       } catch {
         trials[plugin.key] += 10 * tWeight;
+        stepAucDiffs[plugin.key].push(0);
       }
     }
 
-    // Sécurité pour tout canal non couvert
     validKeys.forEach(k => {
       if (!evaluatedKeys.has(k)) {
         trials[k] += 10 * tWeight;
+        stepAucDiffs[k].push(0);
       }
     });
   }
 
   // Taille d'échantillon effective de Kish pour séries pondérées exponentiellement
   const nEff = sumWeightsSq > 0 ? (sumWeights * sumWeights) / sumWeightsSq : 1;
-
-  // Vérification stricte de la présence de numéros machine sur le tirage
   const hasMachine = drawHasMachineNumbers(drawName, sample);
 
-  // --- PASSE 1 : statistiques brutes par canal (z-score, p-value bilatérale, profondeur) ---
-  // Sous H0 (aucun pouvoir prédictif réel), les canaux produisent des z-scores ~N(0,1) : la moitié
-  // dépassent 0 par pur bruit. L'ancien test `proofScore > 0` les "boostait" donc à tort (fléau des
-  // comparaisons multiples). On calcule d'abord les statistiques individuelles, puis on corrige.
-  interface ChannelStat { z: number; rate: number; pTwo: number; depth: number; tested: boolean; }
+  // --- PASSE 1 : Statistique de rang Mann-Whitney (AUC) & p-value UNILATÉRALE (queue supérieure) ---
+  interface ChannelStat {
+    z: number;
+    rate: number;
+    aucMean: number;
+    pOne: number;
+    depth: number;
+    tested: boolean;
+    stepZ: number[];
+  }
   const stats: Record<string, ChannelStat> = {};
   validKeys.forEach(k => {
-    // Sécurité si aucune donnée machine sur ce tirage : essais forcés pour certifier zScore négatif / nul
     if (k === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
       hits[k] = 0;
       trials[k] = Math.max(10, sample.length * 10);
+      stats[k] = {
+        z: 0,
+        rate: 0,
+        aucMean: 0.5,
+        pOne: 1,
+        depth: 0,
+        tested: false,
+        stepZ: new Array(evaluatedStepsCount).fill(0),
+      };
+      return;
     }
+
     const t = trials[k] || 0;
-    const tested = t > 0;
     const h = hits[k] || 0;
-    const rate = tested ? h / t : 0;
-    const effectiveTrials = Math.max(1, (t / (sumWeights || 1)) * nEff);
-    const stdErr = Math.sqrt((baselineRate * (1.0 - baselineRate)) / effectiveTrials) || Number.EPSILON;
-    const z = (rate - baselineRate) / stdErr;
-    // p-value bilatérale exacte (loi normale) : probabilité d'un |z| au moins aussi extrême sous H0.
-    const pTwo = Math.min(1, 2 * normalUpperTail(Math.abs(z)));
-    // Adéquation de profondeur (règle de Cochran, effectif attendu ≥ 5 succès sous H0) : facteur
-    // continu saturant, nul sur échantillon trop mince pour que l'approximation normale soit valide.
-    const expectedSuccesses = effectiveTrials * baselineRate;
+    const rate = t > 0 ? h / t : baselineRate;
+    const varTotal = aucVarSum[k];
+    const tested = t > 0 && varTotal > 1e-14 && aucWeightSum[k] > 0;
+    const stdErrAuc = tested ? Math.sqrt(varTotal) : 1.0;
+    const aucMean = tested ? 0.5 + aucWeightedDiffSum[k] / aucWeightSum[k] : 0.5;
+    const z = tested ? aucWeightedDiffSum[k] / stdErrAuc : 0;
+    const pOne = tested ? normalUpperTail(z) : 1.0;
+
+    // Adéquation de profondeur (règle de Cochran sur tirages effectifs * 5 numéros gagnants)
+    const effectiveDraws = Math.max(1, evaluatedStepsCount > 0 ? nEff : 1);
+    const expectedSuccesses = effectiveDraws * 5.0 * baselineRate * (90.0 / 5.0);
     const depth = 1.0 - Math.exp(-expectedSuccesses / COCHRAN_MIN_EXPECTED_COUNT);
-    stats[k] = { z, rate, pTwo, depth, tested };
+
+    const stepZ = stepAucDiffs[k].map(d => (tested ? d / stdErrAuc : 0));
+    stats[k] = { z, rate, aucMean, pOne, depth, tested, stepZ };
   });
 
-  // --- PASSE 2 : correction Benjamini-Hochberg (FDR) sur la famille des canaux testés ---
+  // --- PASSE 2A : Westfall-Young step-down max-T par permutation sign-flip corrélée ---
   const testedKeys = validKeys.filter(k => stats[k].tested);
   const m = testedKeys.length;
-  const qValues: Record<string, number> = {};
-  if (m > 0) {
-    const ascending = [...testedKeys].sort((a, b) => stats[a].pTwo - stats[b].pTwo);
-    let runningMin = 1.0;
-    // q-value step-up : q_(i) = min(q_(i+1), (m/i)·p_(i)), borné à [0,1] et monotone.
+  const wyQValues: Record<string, number> = {};
+  const bhQValues: Record<string, number> = {};
+  validKeys.forEach(k => {
+    wyQValues[k] = 1.0;
+    bhQValues[k] = 1.0;
+  });
+
+  if (m > 0 && evaluatedStepsCount > 0) {
+    // Ordre décroissant sur Z_k (unilatéral queue supérieure)
+    const descByZ = [...testedKeys].sort((a, b) => stats[b].z - stats[a].z);
+    const stepMatrix = descByZ.map(k => stats[k].stepZ);
+    const obsZ = descByZ.map(k => stats[k].z);
+    const exceedCounts = new Int32Array(m);
+
+    const isExact = evaluatedStepsCount <= 8;
+    const numPerms = isExact ? (1 << evaluatedStepsCount) : 399;
+    const prng = new LCG(deriveSeedFromHistory(sample) ^ 0x9e3779b9);
+
+    for (let b = 0; b < numPerms; b++) {
+      const signs = new Int8Array(evaluatedStepsCount);
+      if (isExact) {
+        for (let s = 0; s < evaluatedStepsCount; s++) {
+          signs[s] = ((b >> s) & 1) === 1 ? 1 : -1;
+        }
+      } else {
+        for (let s = 0; s < evaluatedStepsCount; s++) {
+          signs[s] = prng.next() < 0.5 ? -1 : 1;
+        }
+      }
+
+      // Calcul conjoint préservant exactement les corrélations inter-canaux (famille GAP_*, etc.)
+      let runningMax = -Infinity;
+      for (let j = m - 1; j >= 0; j--) {
+        const zArr = stepMatrix[j];
+        let permZ = 0;
+        for (let s = 0; s < evaluatedStepsCount; s++) {
+          permZ += signs[s] * zArr[s];
+        }
+        if (permZ > runningMax) runningMax = permZ;
+        if (runningMax >= obsZ[j] - 1e-12) {
+          exceedCounts[j]++;
+        }
+      }
+    }
+
+    let runningWy = 0;
+    for (let j = 0; j < m; j++) {
+      const rawWy = isExact
+        ? exceedCounts[j] / numPerms
+        : (1 + exceedCounts[j]) / (numPerms + 1);
+      runningWy = Math.max(runningWy, Math.min(1.0, rawWy));
+      wyQValues[descByZ[j]] = runningWy;
+    }
+
+    // --- PASSE 2B : Correction BH unilatérale complémentaire ---
+    const ascendingP = [...testedKeys].sort((a, b) => stats[a].pOne - stats[b].pOne);
+    let runningMinBh = 1.0;
     for (let i = m - 1; i >= 0; i--) {
       const rank = i + 1;
-      const adj = Math.min(1.0, (m / rank) * stats[ascending[i]].pTwo);
-      runningMin = Math.min(runningMin, adj);
-      qValues[ascending[i]] = runningMin;
+      const adj = Math.min(1.0, (m / rank) * stats[ascendingP[i]].pOne);
+      runningMinBh = Math.min(runningMinBh, adj);
+      bhQValues[ascendingP[i]] = runningMinBh;
     }
-  } else {
-    validKeys.forEach(k => { qValues[k] = 1.0; });
   }
 
-  // Tolérance FDR dérivée de la structure du jeu (aucun seuil de décision arbitraire type 0.05) :
-  // la proportion neutre de numéros gagnants (5/90) sert d'échelle de risque intrinsèque.
+  // --- PASSE 2C : Facteur de rétrécissement Empirical-Bayes de James-Stein sur la famille testée ---
+  let ebShrinkageFactor = 0;
+  if (m >= 3) {
+    let sumZSq = 0;
+    for (const k of testedKeys) {
+      sumZSq += stats[k].z * stats[k].z;
+    }
+    const meanZSq = sumZSq / m;
+    // B_JS = max(0, 1 - (m - 2) / Σ Z_k^2) : tend vers 0 sous H0 (E[Z^2] = 1)
+    ebShrinkageFactor = Math.max(0, Math.min(1, 1.0 - (m - 2) / Math.max(m, m * meanZSq)));
+  }
+
+  // Tolérance FWER/FDR dérivée de la structure du jeu (5/90 ≈ 0.0556)
   const fdrTolerance = baselineRate;
 
-  // --- PASSE 3 : assemblage honnête. Sous H0, q→1 donc proofScore→0 : poids uniformes par défaut. ---
+  // --- PASSE 3 : Assemblage final sans seuils arbitraires ---
   validKeys.forEach(k => {
     const s = stats[k];
-    const q = qValues[k] ?? 1.0;
-    // Atténuation continue par (1 − q) : conserve le SIGNE (boost si meilleur, dampening si pire)
-    // mais réduit l'amplitude vers 0 quand la preuve n'est pas distinguable du bruit.
-    const proofScore = s.z * confidence * s.depth * (1.0 - q);
-    // Preuve (boost) = rejet de H0 par BH (q ≤ tolérance), dans le sens supérieur, garde machine.
-    const hasProof = s.tested && q <= fdrTolerance && s.z > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
+    const wyQ = wyQValues[k] ?? 1.0;
+    const bhQ = bhQValues[k] ?? 1.0;
+    const proofScore = s.z * confidence * s.depth * (1.0 - wyQ);
+    const hasProof = s.tested && wyQ <= fdrTolerance && s.z > 0.0 && (k !== AlgoKey.MACHINE_TRANSFER || hasMachine);
 
     result[k] = {
       hasProof,
@@ -515,12 +675,15 @@ export const evaluateAlgoEmpiricalProof = (
       empiricalHitRate: parseFloat(s.rate.toFixed(4)),
       baselineRate: parseFloat(baselineRate.toFixed(4)),
       confidence: parseFloat(confidence.toFixed(4)),
-      pValue: parseFloat(s.pTwo.toFixed(6)),
-      qValue: parseFloat(q.toFixed(6))
+      pValue: parseFloat(s.pOne.toFixed(6)),
+      qValue: parseFloat(wyQ.toFixed(6)),
+      bhQValue: parseFloat(bhQ.toFixed(6)),
+      aucMean: parseFloat(s.aucMean.toFixed(5)),
+      rankZScore: parseFloat(s.z.toFixed(4)),
+      ebShrinkageFactor: parseFloat(ebShrinkageFactor.toFixed(4)),
     };
   });
 
-  // Limite augmentée à 500 : le SGD avec K=15 génère jusqu'à 15 clés par tirage actif
   if (algoEmpiricalProofCache.size >= 500) {
     const keysToDelete = Array.from(algoEmpiricalProofCache.keys()).slice(0, 50);
     keysToDelete.forEach(k => algoEmpiricalProofCache.delete(k));

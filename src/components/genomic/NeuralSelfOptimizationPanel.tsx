@@ -515,19 +515,19 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
                         <td className="py-2 px-3 text-center">
                           {item.hasEmpiricalProof ? (
                             <span className="px-2 py-0.5 rounded-lg bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
-                              +{item.proofScore.toFixed(1)}σ
+                              +{item.proofScore.toFixed(1)}σ{item.qValue !== undefined ? ` (q=${item.qValue.toFixed(2)})` : ""}
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 rounded-lg bg-slate-950 text-slate-400 border border-white/10 text-[9px] font-bold">
-                              0 preuve
+                              {item.ebCredibility !== undefined ? `EB ${(item.ebCredibility * 100).toFixed(0)}%` : "0 preuve"}
                             </span>
                           )}
                         </td>
 
                         <td className="py-2 px-3 text-center">
-                          {item.gatingAction === "PROOF_LOCKED" && (
+                          {(item.gatingAction === "EB_SHRUNK" || item.gatingAction === "PROOF_LOCKED") && (
                             <span className="px-2 py-0.5 rounded-lg bg-amber-950/80 text-amber-300 border border-amber-500/40 text-[9px] font-bold flex items-center justify-center gap-1">
-                              <Lock size={10} /> Verrouillé
+                              <Lock size={10} /> Rétréci EB
                             </span>
                           )}
                           {item.gatingAction === "BOOSTED" && (

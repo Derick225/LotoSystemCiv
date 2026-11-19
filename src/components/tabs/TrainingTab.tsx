@@ -12,9 +12,12 @@ import {
 import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
 import {
   evaluateDnaGeneSequencerWalkForward,
+  evaluateNetworkWalkForward,
   type DnaGeneWalkForwardResult,
+  type NetworkWalkForwardResult,
 } from "../../services/prediction/dnaGeneSequenceService";
-import { LOTTERY_CONSTANTS } from "../../services/lotteryService";
+import { getDrawNetworkId, INTER_DRAW_NETWORKS } from "../../constants";
+import { fetchResults, LOTTERY_CONSTANTS } from "../../services/lotteryService";
 import { useNexusStore } from "../../store/useNexusStore";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
@@ -46,7 +49,7 @@ import {
 } from "lucide-react";
 import { NeuralFeedbackPanel } from "../NeuralFeedbackPanel";
 import { TrainingEvolutionDrawer } from "../TrainingEvolutionDrawer";
-import type { AlgoWeights, TrainingReport } from "../../types";
+import type { AlgoWeights, DrawResult, TrainingReport } from "../../types";
 import { ExportService } from "../../services/exportService";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { LABELS_MAP } from "../../hooks/useAlgorithmSync";
@@ -125,6 +128,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   } | null>(null);
   const [conformalWfResult, setConformalWfResult] = useState<DnaGeneWalkForwardResult | null>(null);
   const [isRunningConformalWf, setIsRunningConformalWf] = useState(false);
+  const [networkWfResult, setNetworkWfResult] = useState<NetworkWalkForwardResult | null>(null);
+  const [isRunningNetworkWf, setIsRunningNetworkWf] = useState(false);
 
   // Dedicated Draw-Specific History State
   const [localHistory, setLocalHistory] = useState<any[]>([]);
@@ -183,6 +188,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   useEffect(() => {
     setConformalWfResult(null);
+    setNetworkWfResult(null);
     let isMounted = true;
     const loadWeights = async () => {
       const weights = await getAlgoWeights(drawName);
@@ -566,6 +572,46 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       }
     } finally {
       setIsRunningConformalWf(false);
+    }
+  };
+
+  const handleRunNetworkWalkForward = async () => {
+    setIsRunningNetworkWf(true);
+    audioEngine.play("scan");
+    try {
+      const networkId = getDrawNetworkId(drawName) ?? "hebdomadaire";
+      const drawNames = INTER_DRAW_NETWORKS[networkId].drawNames;
+      const entries = await Promise.all(
+        drawNames.map(async (name): Promise<[string, DrawResult[]]> => {
+          try {
+            const res = await fetchResults(name);
+            if (res.data && res.data.length > 0) return [name, res.data];
+          } catch {
+            // fallback sur cleanHistory si correspondant
+          }
+          return [name, name.toLowerCase() === drawName.toLowerCase() ? cleanHistory : []];
+        })
+      );
+      const historyByDraw = Object.fromEntries(entries);
+      const { getLocalForensicReports } = await import("../../services/postPredictionAnalysisService");
+      const allReports = await getLocalForensicReports().catch(() => []);
+      const netRes = await evaluateNetworkWalkForward({
+        networkId,
+        history: cleanHistory,
+        historyByDraw,
+        forensicReports: allReports,
+      });
+      setNetworkWfResult(netRes);
+      audioEngine.play("success");
+      showToast(
+        `Walk-Forward réseau ${networkId} : N=${netRes.totalOosDrawsCount} pas OOS (${netRes.drawsEvaluated.length} tirage(s)), p=${netRes.permutationTest.pValueTwoSided.toFixed(3)}.`,
+        netRes.totalOosDrawsCount > 0 ? "success" : "info"
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Erreur d'évaluation réseau";
+      showToast(msg, "error");
+    } finally {
+      setIsRunningNetworkWf(false);
     }
   };
 
@@ -1204,24 +1250,59 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       Couverture distribution-free 1 − 1/√(n+1) sur résidus hors-échantillon · calibration monotone PAVA + Hermite LOO
                     </p>
                   </div>
-                  <button
-                    onClick={() => void handleRunConformalCalibration()}
-                    disabled={isRunningConformalWf || cleanHistory.length < 11}
-                    className="px-3.5 py-1.5 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RefreshCw size={12} className={isRunningConformalWf ? "animate-spin" : ""} />
-                    {isRunningConformalWf
-                      ? "Évaluation..."
-                      : conformalWfResult
-                      ? "Actualiser"
-                      : "Évaluer calibration conforme"}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => void handleRunConformalCalibration()}
+                      disabled={isRunningConformalWf || isRunningNetworkWf || cleanHistory.length < 11}
+                      className="px-3.5 py-1.5 rounded-xl bg-cyan-600/90 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RefreshCw size={12} className={isRunningConformalWf ? "animate-spin" : ""} />
+                      {isRunningConformalWf
+                        ? "Évaluation..."
+                        : conformalWfResult
+                        ? "Actualiser"
+                        : "Évaluer calibration conforme"}
+                    </button>
+
+                    <button
+                      onClick={() => void handleRunNetworkWalkForward()}
+                      disabled={isRunningNetworkWf || isRunningConformalWf}
+                      className="px-3.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 disabled:opacity-40 text-cyan-300 border border-cyan-500/40 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Activity size={12} className={isRunningNetworkWf ? "animate-spin" : ""} />
+                      {isRunningNetworkWf
+                        ? "Réseau..."
+                        : `Walk-Forward Réseau (${getDrawNetworkId(drawName) === "quotidien" ? "22" : "6"})`}
+                    </button>
+                  </div>
                 </div>
 
                 {conformalWfResult && conformalWfResult.status === "COMPLETED" ? (
                   <div className="space-y-4">
+                    {/* Verdict statistique permutation & comparaison Hedge */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 py-2 px-3 bg-slate-950/60 border border-slate-800/70 rounded-xl text-xs font-mono tabular-nums">
+                      <span className="text-slate-300">
+                        Permutation (N={conformalWfResult.permutationTest.sampleSize}) : p={conformalWfResult.permutationTest.pValueTwoSided.toFixed(3)} · p₁={conformalWfResult.permutationTest.pValueOneSidedPositive.toFixed(3)} · IC95% [{conformalWfResult.permutationTest.ciLower95 >= 0 ? "+" : ""}{conformalWfResult.permutationTest.ciLower95.toFixed(3)} ; {conformalWfResult.permutationTest.ciUpper95 >= 0 ? "+" : ""}{conformalWfResult.permutationTest.ciUpper95.toFixed(3)}] ({conformalWfResult.permutationTest.exactEnumeration ? "Exact 2^N" : "MC seedé"})
+                      </span>
+                      <span
+                        className={
+                          conformalWfResult.verdict === "OUTPERFORMS_BASELINE"
+                            ? "text-emerald-400 font-semibold"
+                            : conformalWfResult.verdict === "UNDERPERFORMS_BASELINE"
+                            ? "text-amber-400 font-semibold"
+                            : "text-slate-400"
+                        }
+                      >
+                        {conformalWfResult.verdict === "OUTPERFORMS_BASELINE"
+                          ? "Gain vérifié vs Baseline"
+                          : conformalWfResult.verdict === "UNDERPERFORMS_BASELINE"
+                          ? "Sous la Baseline"
+                          : "Parité statistique"}
+                      </span>
+                    </div>
+
                     {/* Métriques globales sans surcharge de pilules */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 py-2 border-b border-slate-800/60 tabular-nums">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 py-2 border-b border-slate-800/60 tabular-nums">
                       <div>
                         <div className="text-[11px] text-slate-400">Intervalle Conforme Top-5</div>
                         <div className="text-base font-bold text-white font-mono mt-0.5">
@@ -1253,7 +1334,17 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       </div>
 
                       <div>
-                        <div className="text-[11px] text-slate-400">Brier Skill Score vs Baseline</div>
+                        <div className="text-[11px] text-slate-400">Log-Loss &amp; AUC (5/90)</div>
+                        <div className="text-base font-bold text-white font-mono mt-0.5">
+                          {conformalWfResult.meanLogLossEpigenome.toFixed(4)} · {conformalWfResult.meanAucEpigenome.toFixed(3)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Base LL {conformalWfResult.meanLogLossBaseline.toFixed(4)} · τ={conformalWfResult.calibratedTauSummary.finalTauEpi.toFixed(2)}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-[11px] text-slate-400">BSS vs Base / Hedge</div>
                         <div
                           className={`text-base font-bold font-mono mt-0.5 ${
                             conformalWfResult.brierSkillScoreVsBaseline >= 0
@@ -1265,8 +1356,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                           {(conformalWfResult.brierSkillScoreVsBaseline * 100).toFixed(2)}%
                         </div>
                         <div className="text-[10px] text-slate-500 font-mono">
-                          BSS vs H0 : {conformalWfResult.brierSkillScoreVsH0 >= 0 ? "+" : ""}
-                          {(conformalWfResult.brierSkillScoreVsH0 * 100).toFixed(2)}%
+                          Hedge {conformalWfResult.hedgeComparison.meanHitsTop5Hedge.toFixed(2)} hits · BSS {(conformalWfResult.hedgeComparison.brierSkillScoreVsBaseline * 100).toFixed(2)}%
                         </div>
                       </div>
                     </div>
@@ -1332,6 +1422,54 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       : conformalWfResult?.status === "INSUFFICIENT_DATA"
                       ? conformalWfResult.summaryText
                       : "Cliquez sur « Évaluer calibration conforme » ou lancez une évolution pour calculer les intervalles de prédiction et le Brier hors-échantillon par régime."}
+                  </div>
+                )}
+
+                {networkWfResult && (
+                  <div className="pt-3 border-t border-slate-800/70 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                      <span className="text-slate-300">
+                        Agrégation Réseau <span className="text-cyan-400 uppercase font-semibold">{networkWfResult.networkId}</span>{" "}
+                        (évaluation seule · {networkWfResult.drawsEvaluated.length} tirage(s), N={networkWfResult.totalOosDrawsCount} pas OOS)
+                      </span>
+                      <span
+                        className={
+                          networkWfResult.verdict === "OUTPERFORMS_BASELINE"
+                            ? "text-emerald-400 font-semibold"
+                            : networkWfResult.verdict === "UNDERPERFORMS_BASELINE"
+                            ? "text-amber-400 font-semibold"
+                            : "text-slate-400"
+                        }
+                      >
+                        {networkWfResult.verdict === "OUTPERFORMS_BASELINE"
+                          ? "Gain réseau vérifié"
+                          : networkWfResult.verdict === "UNDERPERFORMS_BASELINE"
+                          ? "Sous la Baseline"
+                          : networkWfResult.verdict === "PARITY_WITH_BASELINE"
+                          ? "Parité statistique"
+                          : "Données réseau insuffisantes"}
+                      </span>
+                    </div>
+                    {networkWfResult.totalOosDrawsCount > 0 && (
+                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 py-2 px-3 bg-slate-950/50 border border-slate-800/70 rounded-xl text-[11px] font-mono tabular-nums text-slate-300">
+                        <div>
+                          <span className="text-slate-500 block">Permutation N={networkWfResult.permutationTest.sampleSize}</span>
+                          p={networkWfResult.permutationTest.pValueTwoSided.toFixed(3)} · p₁={networkWfResult.permutationTest.pValueOneSidedPositive.toFixed(3)}
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">IC95% ΔHits ({networkWfResult.permutationTest.exactEnumeration ? "Exact 2^N" : "MC seedé"})</span>
+                          [{networkWfResult.permutationTest.ciLower95 >= 0 ? "+" : ""}{networkWfResult.permutationTest.ciLower95.toFixed(3)} ; {networkWfResult.permutationTest.ciUpper95 >= 0 ? "+" : ""}{networkWfResult.permutationTest.ciUpper95.toFixed(3)}]
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">Hits Top-5 / BSS</span>
+                          {networkWfResult.meanHitsTop5Epigenome.toFixed(3)} vs {networkWfResult.meanHitsTop5Baseline.toFixed(3)} ({networkWfResult.brierSkillScoreVsBaseline >= 0 ? "+" : ""}{(networkWfResult.brierSkillScoreVsBaseline * 100).toFixed(2)}%)
+                        </div>
+                        <div>
+                          <span className="text-slate-500 block">LogLoss / AUC Réseau</span>
+                          {networkWfResult.meanLogLossEpigenome.toFixed(4)} · AUC {networkWfResult.meanAucEpigenome.toFixed(3)}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

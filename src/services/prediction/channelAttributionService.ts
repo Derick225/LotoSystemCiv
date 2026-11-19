@@ -361,3 +361,84 @@ export const computeChannelAttribution = (
 
   return impacts;
 };
+
+export interface JointChannelEpistasisMatrix {
+  channelKeys: string[];
+  interactionFlat: Float64Array;
+  singleDelta: Float64Array;
+}
+
+/**
+ * Épistasie causale conjointe hors-échantillon par double ablation :
+ * I(i, j) = Δ(i, j) - Δ(i) - Δ(j)
+ * où Δ(·) est la dégradation de Log-Loss induite par le retrait causal.
+ * I(i, j) > 0 : synergie complémentaire réelle ; I(i, j) < 0 : redondance substituable.
+ * Zéro aléa, 100 % déterministe.
+ */
+export const computeJointChannelAblationMatrix = (input: {
+  channelKeys: string[];
+  algoScores: Record<string, Float32Array | Float64Array>;
+  weights: Record<string, number>;
+  actualWinners: number[];
+}): JointChannelEpistasisMatrix => {
+  const { channelKeys, algoScores, weights, actualWinners } = input;
+  const K = channelKeys.length;
+  const interactionFlat = new Float64Array(K * K);
+  const singleDelta = new Float64Array(K);
+  if (K === 0 || actualWinners.length === 0) {
+    return { channelKeys, interactionFlat, singleDelta };
+  }
+
+  const winners = new Set(actualWinners);
+  const channelWeight = (key: string): number =>
+    Number.isFinite(weights[key]) ? Math.max(0, weights[key]) : 0;
+
+  const accumulatePairAblated = (skipA?: string, skipB?: string): Float64Array => {
+    const acc = new Float64Array(TOTAL_NUMBERS + 1);
+    for (const key of channelKeys) {
+      if (key === skipA || key === skipB) continue;
+      const w = channelWeight(key);
+      const scores = algoScores[key];
+      if (!scores || w <= 0) continue;
+      for (let n = 1; n <= TOTAL_NUMBERS; n++) {
+        const s = scores[n];
+        if (Number.isFinite(s)) acc[n] += w * s;
+      }
+    }
+    return acc;
+  };
+
+  const fullOutcome = evaluateEnsemble(accumulatePairAblated(), winners);
+
+  for (let i = 0; i < K; i++) {
+    const wi = channelWeight(channelKeys[i]);
+    if (wi <= 0) {
+      singleDelta[i] = 0;
+      continue;
+    }
+    const outI = evaluateEnsemble(accumulatePairAblated(channelKeys[i]), winners);
+    singleDelta[i] = outI.logLoss - fullOutcome.logLoss;
+  }
+
+  for (let i = 0; i < K; i++) {
+    const wi = channelWeight(channelKeys[i]);
+    if (wi <= 0) continue;
+    for (let j = i + 1; j < K; j++) {
+      const wj = channelWeight(channelKeys[j]);
+      if (wj <= 0) continue;
+      const outIJ = evaluateEnsemble(
+        accumulatePairAblated(channelKeys[i], channelKeys[j]),
+        winners
+      );
+      const deltaIJ = outIJ.logLoss - fullOutcome.logLoss;
+      const interactionRaw = deltaIJ - singleDelta[i] - singleDelta[j];
+      const scaled = Math.tanh((interactionRaw / UNIFORM_LOG_LOSS_BASELINE) * K);
+      const val = Number.isFinite(scaled) ? scaled : 0;
+      interactionFlat[i * K + j] = val;
+      interactionFlat[j * K + i] = val;
+    }
+  }
+
+  return { channelKeys, interactionFlat, singleDelta };
+};
+

@@ -2,16 +2,18 @@
 //!
 //! Porte vers Rust natif WebAssembly les calculs matriciels et combinatoires intensifs
 //! d'EpiGenome-SQ (`dnaGeneSequenceService.ts`) conformément à AGENTS.md :
-//! - Matrice épistasique rétrécie K×K et covariance longitudinale de lignée ADN
-//! - Stabilité inter-générationnelle des poids, synergie épistasique et pas Exponentiated Gradient
+//! - Matrice épistasique rétrécie K×K sans circularité de lignée ni biais de clôture
+//! - Stabilité longitudinale des poids, pondération par dispersion observée et pas Hedge / EG
 //! - Distances d'ordre de séquence Kendall-Tau & Spearman Footrule sur identifiants entiers O(K²)
-//! - Évaluation Walk-Forward double ensemble (EpiGenome vs Baseline) et score de Brier en une passe
+//! - Calibration Softmax à température τ avec projection exacte Σ q_n = 5, Log-Loss & AUC
+//! - Évaluation Walk-Forward double ensemble (EpiGenome vs Baseline) et Hedge + Fixed-Share
 
 use std::cmp::Ordering;
 use wasm_bindgen::prelude::*;
 
 const TOTAL_NUMBERS: usize = 90;
 const TICKET_SIZE: usize = 5;
+const PROB_EPSILON: f64 = 1e-6;
 
 #[wasm_bindgen]
 pub struct EpigenomeMatrixWasmResult {
@@ -60,11 +62,16 @@ pub struct EpigenomeWalkForwardWasmResult {
     pub hits_top10_base: u32,
     pub brier_epi: f64,
     pub brier_base: f64,
+    pub log_loss_epi: f64,
+    pub log_loss_base: f64,
+    pub auc_epi: f64,
+    pub auc_base: f64,
     pub expected_hits_top5_epi: f64,
     pub expected_hits_top5_base: f64,
     top5_epi: Vec<u8>,
     top5_base: Vec<u8>,
     epi_inc_probs: Vec<f64>,
+    base_inc_probs: Vec<f64>,
 }
 
 #[wasm_bindgen]
@@ -81,10 +88,151 @@ impl EpigenomeWalkForwardWasmResult {
     pub fn epi_inc_probs(&self) -> Vec<f64> {
         self.epi_inc_probs.clone()
     }
+    #[wasm_bindgen(getter)]
+    pub fn base_inc_probs(&self) -> Vec<f64> {
+        self.base_inc_probs.clone()
+    }
 }
 
-/// Noyau pur Rust (testable hors WASM) : covariance de lignée ADN, matrice épistasique K×K,
-/// synergie épistasique et vecteur cible pré-projection Exponentiated Gradient.
+/// Projection par water-filling exact (48 itérations de bissection) garantissant
+/// ∀n q_n ∈ [1e-6, 1-1e-6] et Σ_{n=1}^{90} q_n = target_sum (= 5 pour 5/90).
+pub fn project_simplex_to_coherent_marginals(raw_probs: &[f64], target_sum: f64) -> Vec<f64> {
+    let n = raw_probs.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let clamped_target = target_sum.clamp(n as f64 * PROB_EPSILON, n as f64 * (1.0 - PROB_EPSILON));
+    let safe_sum: f64 = raw_probs
+        .iter()
+        .map(|&v| if v.is_finite() && v > 0.0 { v } else { 0.0 })
+        .sum();
+    let uniform = 1.0 / (n as f64);
+
+    let mut base = vec![0.0f64; n];
+    for i in 0..n {
+        let p = if safe_sum > 0.0 && raw_probs[i].is_finite() && raw_probs[i] > 0.0 {
+            raw_probs[i] / safe_sum
+        } else {
+            uniform
+        };
+        base[i] = p;
+    }
+
+    let min_b = base.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_b = base.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut lo = PROB_EPSILON - clamped_target * max_b - 1.0;
+    let mut hi = (1.0 - PROB_EPSILON) - clamped_target * min_b + 1.0;
+
+    for _ in 0..48 {
+        let mid = 0.5 * (lo + hi);
+        let s: f64 = base
+            .iter()
+            .map(|&b| (clamped_target * b + mid).clamp(PROB_EPSILON, 1.0 - PROB_EPSILON))
+            .sum();
+        if s < clamped_target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    let shift = 0.5 * (lo + hi);
+    base.iter()
+        .map(|&b| (clamped_target * b + shift).clamp(PROB_EPSILON, 1.0 - PROB_EPSILON))
+        .collect()
+}
+
+/// Calibration Softmax à température τ suivie de projection exacte sur le simplexe Σ q_n = 5.
+/// Lorsque τ → +∞ ou les scores sont constants, q_n = 5/90 exactement.
+pub fn calibrate_scores_softmax_marginals(scores: &[f64], tau: f64) -> Vec<f64> {
+    let n = scores.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let safe_tau = if tau.is_finite() && tau > 1e-4 { tau } else { 1.0 };
+    let valid: Vec<f64> = scores
+        .iter()
+        .map(|&v| if v.is_finite() { v } else { 0.0 })
+        .collect();
+    let mean = valid.iter().sum::<f64>() / (n as f64);
+    let var = valid.iter().map(|&v| (v - mean) * (v - mean)).sum::<f64>() / (n as f64);
+    let std = var.sqrt();
+    if std <= 1e-12 {
+        return vec![(TICKET_SIZE as f64) / (n as f64); n];
+    }
+
+    let max_z = valid
+        .iter()
+        .map(|&v| ((v - mean) / std) / safe_tau)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let mut exps = vec![0.0f64; n];
+    let mut sum_exp = 0.0;
+    for i in 0..n {
+        let z = ((valid[i] - mean) / std) / safe_tau;
+        let e = (z - max_z).clamp(-60.0, 0.0).exp();
+        exps[i] = e;
+        sum_exp += e;
+    }
+    if sum_exp > 0.0 {
+        for v in &mut exps {
+            *v /= sum_exp;
+        }
+    }
+    project_simplex_to_coherent_marginals(&exps, TICKET_SIZE as f64)
+}
+
+/// AUC Mann-Whitney exacte sur 90 numéros avec gestion exacte des ex-aequo (rangs moyens).
+pub fn compute_rank_auc(scores: &[f64], winner_mask: &[bool]) -> f64 {
+    let n = scores.len();
+    if n < 2 || winner_mask.len() < n {
+        return 0.5;
+    }
+    let n_pos = (0..n).filter(|&i| winner_mask[i]).count();
+    let n_neg = n - n_pos;
+    if n_pos == 0 || n_neg == 0 {
+        return 0.5;
+    }
+
+    let mut idx_scores: Vec<(usize, f64)> = scores
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| (i, if s.is_finite() { s } else { 0.0 }))
+        .collect();
+    idx_scores.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal).then_with(|| a.0.cmp(&b.0)));
+
+    let mut ranks = vec![0.0f64; n];
+    let mut i = 0;
+    while i < n {
+        let mut j = i + 1;
+        while j < n && (idx_scores[j].1 - idx_scores[i].1).abs() <= 1e-12 {
+            j += 1;
+        }
+        let avg_rank = 0.5 * ((i + 1 + j) as f64);
+        for k in i..j {
+            ranks[idx_scores[k].0] = avg_rank;
+        }
+        i = j;
+    }
+
+    let sum_pos_ranks: f64 = (0..n).filter(|&idx| winner_mask[idx]).map(|idx| ranks[idx]).sum();
+    let u = sum_pos_ranks - ((n_pos * (n_pos + 1)) as f64) * 0.5;
+    (u / ((n_pos * n_neg) as f64)).clamp(0.0, 1.0)
+}
+
+fn population_std(vals: &[f64]) -> f64 {
+    if vals.is_empty() {
+        return 0.0;
+    }
+    let m = vals.iter().sum::<f64>() / (vals.len() as f64);
+    let v = vals.iter().map(|&x| (x - m) * (x - m)).sum::<f64>() / (vals.len() as f64);
+    v.sqrt()
+}
+
+/// Noyau pur Rust (testable hors WASM) :
+/// - Stabilité longitudinale des poids (SANS réinjecter la covariance circulaire des poids d'optimiseur
+///   dans la matrice épistasique).
+/// - Synergie épistasique pondérée par la fiabilité neutre des partenaires (sans biais auto-entretenu par initial_weights).
+/// - Fusion des 3 signaux (base, proof, épistasie) par dispersion inverse observée (zéro constantes arbitraires).
 #[allow(clippy::too_many_arguments)]
 pub fn compute_epigenome_matrix_core(
     raw_epistasis_flat: &[f64],
@@ -123,15 +271,8 @@ pub fn compute_epigenome_matrix_core(
 
     let uniform_share = 1.0 / (k as f64);
 
-    // 1. Stabilité longitudinale & covariance de lignée ADN
-    let effective_lineage = if k > 0 {
-        num_lineage.min(lineage_weights_flat.len() / k)
-    } else {
-        0
-    };
-
-    let mut means = vec![0.0f64; k];
-    let mut stds = vec![0.0f64; k];
+    // 1. Stabilité longitudinale de lignée ADN uniquement (zéro corrélation circulaire sur les poids)
+    let effective_lineage = num_lineage.min(lineage_weights_flat.len() / k);
     let mut gene_stability = vec![1.0f64; k];
 
     if effective_lineage >= 2 {
@@ -142,44 +283,17 @@ pub fn compute_epigenome_matrix_core(
                 sum += lineage_weights_flat[t * k + g];
             }
             let mean = sum / l_f;
-            means[g] = mean;
             let mut var = 0.0;
             for t in 0..effective_lineage {
                 let d = lineage_weights_flat[t * k + g] - mean;
                 var += d * d;
             }
             let std = (var / l_f).sqrt();
-            stds[g] = std;
             gene_stability[g] = (-std / uniform_share).exp();
         }
     }
 
-    if effective_lineage >= 3 {
-        let l_f = effective_lineage as f64;
-        let w_lin = l_f.sqrt() / (l_f.sqrt() + (k as f64).sqrt());
-        for i in 0..k {
-            if stds[i] <= 1e-7 {
-                continue;
-            }
-            for j in (i + 1)..k {
-                if stds[j] <= 1e-7 {
-                    continue;
-                }
-                let mut cov = 0.0;
-                for t in 0..effective_lineage {
-                    cov += (lineage_weights_flat[t * k + i] - means[i])
-                        * (lineage_weights_flat[t * k + j] - means[j]);
-                }
-                let corr = (cov / l_f) / (stds[i] * stds[j]);
-                raw_ep[i * k + j] += corr * w_lin;
-                raw_ep[j * k + i] += corr * w_lin;
-                samp_ep[i * k + j] += w_lin;
-                samp_ep[j * k + i] += w_lin;
-            }
-        }
-    }
-
-    // 2. Shrinkage continu vers l'indépendance 0
+    // 2. Shrinkage continu vers l'indépendance 0 avec prior dimensionnel √K
     let shrinkage_prior = (k as f64).sqrt();
     let mut epistatic_matrix = vec![0.0f64; k * k];
     for i in 0..k {
@@ -194,7 +308,6 @@ pub fn compute_epigenome_matrix_core(
         }
     }
 
-    // 3. Synergie épistasique, signal post-mortem unifié & pas Exponentiated Gradient
     let sqrt_k = (k as f64).sqrt();
     let k_f = k as f64;
     let persistence_bias = (2.5 * (hurst - 0.5)).tanh();
@@ -205,9 +318,62 @@ pub fn compute_epigenome_matrix_core(
         1.0 / k_f
     };
 
+    // 3. Synergie épistasique pondérée par la preuve neutre du partenaire (pas par initial_weights!)
     let mut epistatic_synergy = vec![0.0f64; k];
+    let mut active_base = Vec::with_capacity(k);
+    let mut active_proof = Vec::with_capacity(k);
+    let mut active_ep = Vec::with_capacity(k);
+
+    let mut proof_drive_vec = vec![0.0f64; k];
+    let mut base_vec = vec![0.0f64; k];
+
+    for i in 0..k {
+        let forced_zero = forced_zero_flags.get(i).copied().unwrap_or(0) != 0;
+        if forced_zero {
+            continue;
+        }
+        let mut ep_sum = 0.0;
+        let row_off = i * k;
+        for j in 0..k {
+            if j == i || forced_zero_flags.get(j).copied().unwrap_or(0) != 0 {
+                continue;
+            }
+            let partner_p = proof_scores.get(j).copied().unwrap_or(0.0);
+            let partner_sig = base_analysis_signals.get(j).copied().unwrap_or(0.0);
+            let partner_reliability = 0.5 * partner_p.tanh() + 0.5 * partner_sig.tanh();
+            ep_sum += epistatic_matrix[row_off + j] * partner_reliability;
+        }
+        let ep_syn = (ep_sum / sqrt_k).tanh();
+        epistatic_synergy[i] = ep_syn;
+
+        let p_score = proof_scores.get(i).copied().unwrap_or(0.0);
+        let p_drive = (p_score / 2.0).tanh();
+        let has_proof = proof_flags.get(i).copied().unwrap_or(0) != 0;
+        let p_signed = if has_proof { p_drive } else { p_drive.min(0.0) };
+        let b_sig = base_analysis_signals.get(i).copied().unwrap_or(0.0);
+
+        proof_drive_vec[i] = p_signed;
+        base_vec[i] = b_sig;
+
+        active_base.push(b_sig);
+        active_proof.push(p_signed);
+        active_ep.push(ep_syn);
+    }
+
+    // Pondération objective par dispersion observée (Zéro constantes arbitraires 0.65 / 0.20 / 0.15)
+    let sd_b = population_std(&active_base);
+    let sd_p = population_std(&active_proof);
+    let sd_e = population_std(&active_ep);
+    let sd_sum = sd_b + sd_p + sd_e;
+    let (wb, wp, we) = if sd_sum > 1e-12 {
+        (sd_b / sd_sum, sd_p / sd_sum, sd_e / sd_sum)
+    } else {
+        (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
+    };
+
     let mut post_mortem_signal = vec![0.0f64; k];
     let mut raw_target_weights = vec![0.0f64; k];
+    let stab_floor = 1.0 / sqrt_k;
 
     for i in 0..k {
         let forced_zero = forced_zero_flags.get(i).copied().unwrap_or(0) != 0;
@@ -218,45 +384,27 @@ pub fn compute_epigenome_matrix_core(
             continue;
         }
 
-        let mut ep_sum = 0.0;
-        let row_off = i * k;
-        for j in 0..k {
-            if j == i {
-                continue;
-            }
-            let partner_w = initial_weights.get(j).copied().unwrap_or(uniform_share);
-            let partner_excess = (partner_w - uniform_share) * k_f;
-            ep_sum += epistatic_matrix[row_off + j] * partner_excess.tanh();
-        }
-        let ep_syn = (ep_sum / sqrt_k).tanh();
-        epistatic_synergy[i] = ep_syn;
+        let composite = (wb * base_vec[i] + wp * proof_drive_vec[i] + we * epistatic_synergy[i]).clamp(-1.0, 1.0);
+        post_mortem_signal[i] = composite;
 
         let has_proof = proof_flags.get(i).copied().unwrap_or(0) != 0;
         let p_score = proof_scores.get(i).copied().unwrap_or(0.0);
-        let proof_drive = (p_score / 2.0).tanh();
-        let base_sig = base_analysis_signals.get(i).copied().unwrap_or(0.0);
-
-        let composite = (0.65 * base_sig
-            + 0.20 * if has_proof { proof_drive } else { proof_drive.min(0.0) }
-            + 0.15 * ep_syn)
-            .clamp(-1.0, 1.0);
-        post_mortem_signal[i] = composite;
-
         let regime_mod = if !has_proof {
             0.0
         } else {
             let p_str = p_score.tanh();
+            let arm_scale = 1.0 / sqrt_k;
             match arm_ids.get(i).copied().unwrap_or(0) {
-                1 => -0.5 * persistence_bias * p_str,
-                2 => 0.5 * complexity_bias * p_str,
-                0 => 0.35 * (1.0 - persistence_bias.abs()) * p_str,
-                _ => 0.4 * persistence_bias * p_str,
+                1 => -arm_scale * persistence_bias * p_str,
+                2 => arm_scale * complexity_bias * p_str,
+                0 => arm_scale * (1.0 - persistence_bias.abs()) * p_str,
+                _ => arm_scale * persistence_bias * p_str,
             }
         };
 
         let init_w = initial_weights.get(i).copied().unwrap_or(uniform_share);
         let base_w = if init_w > 0.0 { init_w } else { uniform_share };
-        let stab_weight = 0.5 + 0.5 * gene_stability[i];
+        let stab_weight = stab_floor + (1.0 - stab_floor) * gene_stability[i];
         let exponent = (eta * (composite + regime_mod) * stab_weight * sqrt_k).clamp(-2.5, 2.5);
         raw_target_weights[i] = base_w * exponent.exp();
     }
@@ -362,20 +510,23 @@ pub fn compute_sequence_order_metrics_wasm(seq_a: &[u32], seq_b: &[u32]) -> Vec<
     compute_sequence_order_metrics_core(seq_a, seq_b)
 }
 
-/// Évalue simultanément sur les 90 numéros les ensembles EpiGenome-SQ et Baseline
-/// pour un pas hors-échantillon Walk-Forward.
-pub fn score_epigenome_walk_forward_step_core(
+/// Évaluation calibrée Softmax (température τ), Brier, Log-Loss, AUC et Top-5/10.
+pub fn score_epigenome_walk_forward_step_calibrated_core(
     plugin_scores_flat: &[f64],
     epi_weights: &[f64],
     base_weights: &[f64],
     num_genes: usize,
     actual_winners: &[u8],
+    tau_epi: f64,
+    tau_base: f64,
 ) -> EpigenomeWalkForwardWasmResult {
     let mut winner_mask = [false; TOTAL_NUMBERS + 1];
+    let mut winner_mask_zero_idx = [false; TOTAL_NUMBERS];
     for &w in actual_winners {
         let idx = w as usize;
         if (1..=TOTAL_NUMBERS).contains(&idx) {
             winner_mask[idx] = true;
+            winner_mask_zero_idx[idx - 1] = true;
         }
     }
 
@@ -398,23 +549,18 @@ pub fn score_epigenome_walk_forward_step_core(
         }
     }
 
-    let evaluate_ensemble = |scores: &[f64; TOTAL_NUMBERS]| {
-        let sum: f64 = scores.iter().sum();
+    let evaluate_ensemble = |scores: &[f64; TOTAL_NUMBERS], tau: f64| {
+        let inc_probs = calibrate_scores_softmax_marginals(scores, tau);
         let mut brier = 0.0f64;
-        let mut inc_probs = vec![0.0f64; TOTAL_NUMBERS];
+        let mut log_loss = 0.0f64;
         let mut ranked: Vec<(u8, f64)> = Vec::with_capacity(TOTAL_NUMBERS);
 
         for n in 0..TOTAL_NUMBERS {
-            let prob = if sum > 0.0 {
-                scores[n] / sum
-            } else {
-                1.0 / (TOTAL_NUMBERS as f64)
-            };
-            let p_inc = ((TICKET_SIZE as f64) * prob).clamp(0.0, 1.0);
-            inc_probs[n] = p_inc;
+            let p_inc = inc_probs[n].clamp(PROB_EPSILON, 1.0 - PROB_EPSILON);
             let y = if winner_mask[n + 1] { 1.0 } else { 0.0 };
             let diff = p_inc - y;
             brier += diff * diff;
+            log_loss -= y * p_inc.ln() + (1.0 - y) * (1.0 - p_inc).ln();
             ranked.push(((n + 1) as u8, scores[n]));
         }
 
@@ -432,14 +578,24 @@ pub fn score_epigenome_walk_forward_step_core(
             .filter(|r| winner_mask[r.0 as usize])
             .count() as u32;
         let exp_hits5: f64 = top5.iter().map(|&n| inc_probs[(n as usize) - 1]).sum();
+        let auc = compute_rank_auc(scores, &winner_mask_zero_idx);
 
-        (hits5, hits10, brier / (TOTAL_NUMBERS as f64), exp_hits5, top5, inc_probs)
+        (
+            hits5,
+            hits10,
+            brier / (TOTAL_NUMBERS as f64),
+            log_loss / (TOTAL_NUMBERS as f64),
+            auc,
+            exp_hits5,
+            top5,
+            inc_probs,
+        )
     };
 
-    let (hits5_epi, hits10_epi, brier_epi, exp5_epi, top5_epi, epi_inc_probs) =
-        evaluate_ensemble(&epi_scores);
-    let (hits5_base, hits10_base, brier_base, exp5_base, top5_base, _) =
-        evaluate_ensemble(&base_scores);
+    let (hits5_epi, hits10_epi, brier_epi, ll_epi, auc_epi, exp5_epi, top5_epi, epi_inc_probs) =
+        evaluate_ensemble(&epi_scores, tau_epi);
+    let (hits5_base, hits10_base, brier_base, ll_base, auc_base, exp5_base, top5_base, base_inc_probs) =
+        evaluate_ensemble(&base_scores, tau_base);
 
     EpigenomeWalkForwardWasmResult {
         hits_top5_epi: hits5_epi,
@@ -448,12 +604,35 @@ pub fn score_epigenome_walk_forward_step_core(
         hits_top10_base: hits10_base,
         brier_epi,
         brier_base,
+        log_loss_epi: ll_epi,
+        log_loss_base: ll_base,
+        auc_epi,
+        auc_base,
         expected_hits_top5_epi: exp5_epi,
         expected_hits_top5_base: exp5_base,
         top5_epi,
         top5_base,
         epi_inc_probs,
+        base_inc_probs,
     }
+}
+
+pub fn score_epigenome_walk_forward_step_core(
+    plugin_scores_flat: &[f64],
+    epi_weights: &[f64],
+    base_weights: &[f64],
+    num_genes: usize,
+    actual_winners: &[u8],
+) -> EpigenomeWalkForwardWasmResult {
+    score_epigenome_walk_forward_step_calibrated_core(
+        plugin_scores_flat,
+        epi_weights,
+        base_weights,
+        num_genes,
+        actual_winners,
+        1.0,
+        1.0,
+    )
 }
 
 #[wasm_bindgen]
@@ -470,6 +649,137 @@ pub fn score_epigenome_walk_forward_step_wasm(
         base_weights,
         num_genes,
         actual_winners,
+    )
+}
+
+#[wasm_bindgen]
+pub fn score_epigenome_walk_forward_step_calibrated_wasm(
+    plugin_scores_flat: &[f64],
+    epi_weights: &[f64],
+    base_weights: &[f64],
+    num_genes: usize,
+    actual_winners: &[u8],
+    tau_epi: f64,
+    tau_base: f64,
+) -> EpigenomeWalkForwardWasmResult {
+    score_epigenome_walk_forward_step_calibrated_core(
+        plugin_scores_flat,
+        epi_weights,
+        base_weights,
+        num_genes,
+        actual_winners,
+        tau_epi,
+        tau_base,
+    )
+}
+
+/// Pas Hedge + Fixed-Share de Herbster & Warmuth (1998) pour régimes non stationnaires :
+/// - η = sqrt(8 * ln(K) / T), α = 1 / max(2, T)
+/// - Mise à jour exponentielle sur pertes normalisées dans [0, 1]
+/// - Mélange Fixed-Share vers un prior (ex. a priori forensique rétréci) + masquage forced_zero
+pub fn compute_hedge_fixed_share_step_core(
+    current_weights: &[f64],
+    channel_losses: &[f64],
+    prior_weights: &[f64],
+    forced_zero_flags: &[u8],
+    horizon_t: f64,
+) -> Vec<f64> {
+    let k = current_weights.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let active_count = (0..k)
+        .filter(|&i| forced_zero_flags.get(i).copied().unwrap_or(0) == 0)
+        .count()
+        .max(1);
+    let safe_t = horizon_t.max(2.0);
+    let eta = (8.0 * (active_count as f64).max(2.0).ln() / safe_t).sqrt();
+    let alpha = 1.0 / safe_t;
+
+    let mut post = vec![0.0f64; k];
+    let mut sum_post = 0.0;
+    for i in 0..k {
+        if forced_zero_flags.get(i).copied().unwrap_or(0) != 0 {
+            post[i] = 0.0;
+            continue;
+        }
+        let w = if current_weights[i].is_finite() && current_weights[i] > 0.0 {
+            current_weights[i]
+        } else {
+            1.0 / (active_count as f64)
+        };
+        let loss = channel_losses.get(i).copied().unwrap_or(0.5).clamp(0.0, 1.0);
+        let val = w * (-eta * loss).exp();
+        post[i] = val;
+        sum_post += val;
+    }
+
+    if sum_post > 0.0 {
+        for v in &mut post {
+            *v /= sum_post;
+        }
+    } else {
+        let u = 1.0 / (active_count as f64);
+        for i in 0..k {
+            post[i] = if forced_zero_flags.get(i).copied().unwrap_or(0) != 0 { 0.0 } else { u };
+        }
+    }
+
+    let mut prior_clean = vec![0.0f64; k];
+    let mut sum_prior = 0.0;
+    for i in 0..k {
+        if forced_zero_flags.get(i).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+        let pw = prior_weights.get(i).copied().unwrap_or(1.0 / (active_count as f64));
+        if pw.is_finite() && pw > 0.0 {
+            prior_clean[i] = pw;
+            sum_prior += pw;
+        }
+    }
+    if sum_prior > 0.0 {
+        for v in &mut prior_clean {
+            *v /= sum_prior;
+        }
+    } else {
+        let u = 1.0 / (active_count as f64);
+        for i in 0..k {
+            prior_clean[i] = if forced_zero_flags.get(i).copied().unwrap_or(0) != 0 { 0.0 } else { u };
+        }
+    }
+
+    let mut out = vec![0.0f64; k];
+    let mut sum_out = 0.0;
+    for i in 0..k {
+        if forced_zero_flags.get(i).copied().unwrap_or(0) != 0 {
+            out[i] = 0.0;
+        } else {
+            out[i] = (1.0 - alpha) * post[i] + alpha * prior_clean[i];
+            sum_out += out[i];
+        }
+    }
+    if sum_out > 0.0 {
+        for v in &mut out {
+            *v /= sum_out;
+        }
+    }
+    out
+}
+
+#[wasm_bindgen]
+pub fn compute_hedge_fixed_share_step_wasm(
+    current_weights: &[f64],
+    channel_losses: &[f64],
+    prior_weights: &[f64],
+    forced_zero_flags: &[u8],
+    horizon_t: f64,
+) -> Vec<f64> {
+    compute_hedge_fixed_share_step_core(
+        current_weights,
+        channel_losses,
+        prior_weights,
+        forced_zero_flags,
+        horizon_t,
     )
 }
 
@@ -490,6 +800,22 @@ mod tests {
     }
 
     #[test]
+    fn softmax_marginals_exact_sum_and_auc() {
+        let scores: Vec<f64> = (1..=90).map(|i| (i as f64) / 90.0).collect();
+        let m = calibrate_scores_softmax_marginals(&scores, 0.8);
+        let sum: f64 = m.iter().sum();
+        assert!((sum - 5.0).abs() < 1e-5);
+        assert!(m.iter().all(|&p| (PROB_EPSILON..=1.0 - PROB_EPSILON).contains(&p)));
+
+        let mut mask = vec![false; 90];
+        for n in [86usize, 87, 88, 89, 90] {
+            mask[n - 1] = true;
+        }
+        let auc = compute_rank_auc(&scores, &mask);
+        assert!((auc - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn walk_forward_step_brier_in_unit_interval() {
         let k = 2;
         let mut flat = vec![0.5f64; k * 90];
@@ -503,7 +829,24 @@ mod tests {
             &[5, 10, 15, 20, 25],
         );
         assert!(res.brier_epi >= 0.0 && res.brier_epi <= 1.0);
+        assert!(res.log_loss_epi > 0.0);
+        assert!(res.auc_epi >= 0.5);
         assert_eq!(res.top5_epi[0], 5);
         assert!(res.hits_top5_epi >= 1);
+    }
+
+    #[test]
+    fn hedge_fixed_share_maintains_simplex_and_zeros() {
+        let next = compute_hedge_fixed_share_step_core(
+            &[0.25, 0.25, 0.25, 0.25],
+            &[0.1, 0.5, 0.6, 0.0],
+            &[0.25, 0.25, 0.25, 0.25],
+            &[0, 0, 0, 1],
+            12.0,
+        );
+        assert_eq!(next[3], 0.0);
+        assert!(next[0] > next[1]);
+        let sum: f64 = next.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-10);
     }
 }

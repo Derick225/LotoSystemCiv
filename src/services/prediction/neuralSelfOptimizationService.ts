@@ -6,7 +6,10 @@ import {
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { normalizeWeights, evaluateAlgoEmpiricalProof } from './weightsManager';
-import { projectWeightsWithProofGuard } from './closedLoopAutopsyService';
+import {
+  computeEmpiricalBayesProofCredibility,
+  projectWeightsWithContinuousProofShrinkage,
+} from './closedLoopAutopsyService';
 import { LABELS_MAP, ALGO_CATEGORIES } from '../../hooks/useAlgorithmSync';
 
 export interface NeuralEpochLog {
@@ -31,7 +34,9 @@ export interface AlgoNeuralGradientInfo {
   momentum: number;
   hasEmpiricalProof: boolean;
   proofScore: number;
-  gatingAction: 'BOOSTED' | 'MAINTAINED' | 'DAMPENED' | 'PROOF_LOCKED';
+  ebCredibility?: number;
+  qValue?: number;
+  gatingAction: 'BOOSTED' | 'MAINTAINED' | 'DAMPENED' | 'EB_SHRUNK' | 'PROOF_LOCKED';
 }
 
 export interface NeuralOptimizationResult {
@@ -799,17 +804,13 @@ export const runNeuralSelfOptimization = (
     proofHistory.length >= 3 ? proofHistory : pureHistory
   );
 
-  const lockedMaxKeys = new Set<AlgoKey>();
+  const credibilityByKey: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
   const forcedZeroKeys = new Set<AlgoKey>();
   if (!hasMachine) {
     forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
   }
   validKeys.forEach((k) => {
-    const proof = proofMap[k];
-    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-    if (!hasProof) {
-      lockedMaxKeys.add(k);
-    }
+    credibilityByKey[k] = computeEmpiricalBayesProofCredibility(proofMap[k]);
   });
 
   // 2. Initialisation des vecteurs de poids (respect strict des poids nuls)
@@ -918,17 +919,18 @@ export const runNeuralSelfOptimization = (
         (1.0 - hyperparams.momentum) * gradients[k];
 
       let step = dynamicLR * momentumV[k];
-      if (lockedMaxKeys.has(k) && step < 0) {
-        step = 0;
+      // Régulation continue C^∞ Empirical-Bayes sur les impulsions haussières (step < 0)
+      if (step < 0) {
+        step *= credibilityByKey[k] ?? 0;
       }
       // Mise à jour multiplicative (Exponentiated Gradient sur le simplexe) évitant l'extinction à 0.0001
       candidateStep[k] = currentW[k] * Math.exp(-step * 2.5);
     });
 
-    const projectedW = projectWeightsWithProofGuard(
+    const projectedW = projectWeightsWithContinuousProofShrinkage(
       candidateStep,
       normalizedInit,
-      lockedMaxKeys,
+      proofMap,
       forcedZeroKeys
     );
     validKeys.forEach((k) => {
@@ -958,10 +960,10 @@ export const runNeuralSelfOptimization = (
 
   const finalTrainEval = evaluateSampleSet(trainTensors, currentW, validKeys);
   const finalValEval = evaluateSampleSet(valTensors, currentW, validKeys);
-  const optimizedWeights = projectWeightsWithProofGuard(
+  const optimizedWeights = projectWeightsWithContinuousProofShrinkage(
     currentW,
     normalizedInit,
-    lockedMaxKeys,
+    proofMap,
     forcedZeroKeys
   );
   const duration = Date.now() - startTime;
@@ -982,12 +984,14 @@ export const runNeuralSelfOptimization = (
       const proof = proofMap[algoKey];
       const proofScore = proof?.proofScore || 0;
       const hasEmpiricalProof = Boolean(proof?.hasProof && proofScore > 0);
+      const ebCredibility = credibilityByKey[algoKey] ?? 0;
+      const qValue = proof?.qValue;
       const grad = lastGradients[algoKey] || 0;
       const mom = momentumV[algoKey] || 0;
 
       let gatingAction: AlgoNeuralGradientInfo['gatingAction'] = 'MAINTAINED';
-      if (!hasEmpiricalProof && grad < 0) {
-        gatingAction = 'PROOF_LOCKED';
+      if (ebCredibility < 0.25 && grad < 0) {
+        gatingAction = 'EB_SHRUNK';
       } else if (delta > 0.002) {
         gatingAction = 'BOOSTED';
       } else if (delta < -0.002) {
@@ -1006,6 +1010,8 @@ export const runNeuralSelfOptimization = (
         momentum: parseFloat(mom.toFixed(6)),
         hasEmpiricalProof,
         proofScore: parseFloat(proofScore.toFixed(2)),
+        ebCredibility: parseFloat(ebCredibility.toFixed(4)),
+        qValue: qValue !== undefined ? parseFloat(qValue.toFixed(4)) : undefined,
         gatingAction,
       };
     })

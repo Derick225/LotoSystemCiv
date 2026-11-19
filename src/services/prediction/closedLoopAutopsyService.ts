@@ -10,7 +10,12 @@ import {
   detectGameRegime,
   TemporalDriftLearningRateResult,
 } from '../mathService';
-import { normalizeWeights, evaluateAlgoEmpiricalProof, getDefaultWeights } from './weightsManager';
+import {
+  normalizeWeights,
+  evaluateAlgoEmpiricalProof,
+  getDefaultWeights,
+  type AlgoProofMetric,
+} from './weightsManager';
 import {
   ModelDnaRecord,
   computeModelDnaFingerprint,
@@ -263,6 +268,180 @@ export const projectWeightsWithProofGuard = (
           !RETIRED_ALGO_WEIGHT_KEYS.has(k) &&
           !forcedZeroKeys.has(k) &&
           (residual < 0 || !lockedMaxKeys.has(k))
+      )
+      .sort((a, b) => w[b] - w[a]);
+    if (adjustCandidates.length > 0) {
+      const targetKey = adjustCandidates[0];
+      w[targetKey] = parseFloat(Math.max(0, w[targetKey] + residual).toFixed(6));
+    }
+  }
+
+  return w as AlgoWeights;
+};
+
+/**
+ * Crédibilité Empirical-Bayes continue C^∞ ∈ [0, 1] dérivée de la statistique de rang
+ * (rankZScore / proofScore), de la sévérité ajustée (qValue), de la confiance d'échantillon
+ * et du facteur de rétrécissement de James-Stein (ebShrinkageFactor).
+ * Zéro seuil binaire brutal : transition lisse sur toute l'échelle [0, 1].
+ */
+export const computeEmpiricalBayesProofCredibility = (
+  proof?: AlgoProofMetric
+): number => {
+  if (!proof) return 0;
+  const zRaw = Number.isFinite(proof.rankZScore)
+    ? (proof.rankZScore as number)
+    : Number.isFinite(proof.proofScore)
+      ? proof.proofScore
+      : 0;
+  if (zRaw <= 0) return 0;
+
+  const qRaw = Number.isFinite(proof.qValue)
+    ? Math.max(0, Math.min(1, proof.qValue as number))
+    : proof.hasProof
+      ? 0.0
+      : 1.0;
+  const conf = Number.isFinite(proof.confidence)
+    ? Math.max(0, Math.min(1, proof.confidence))
+    : 0;
+  if (conf <= 0) return 0;
+
+  // Puissance naturelle 90/5 = 18 : décroissance lisse sans constante magique
+  const baselineOddsScale = 90.0 / 5.0;
+  const qEvidence = Math.pow(Math.max(0, 1.0 - qRaw), baselineOddsScale);
+  const zEvidence = Math.tanh(zRaw * Math.SQRT1_2);
+  const jsFactor =
+    proof.ebShrinkageFactor !== undefined && Number.isFinite(proof.ebShrinkageFactor)
+      ? 0.5 + 0.5 * Math.max(0, Math.min(1, proof.ebShrinkageFactor))
+      : 1.0;
+
+  return Math.max(0, Math.min(1, zEvidence * qEvidence * conf * jsFactor));
+};
+
+/**
+ * Projection continue sur le simplexe avec rétrécissement Empirical-Bayes (sans verrou binaire
+ * discontinu). Chaque augmentation candidate au-dessus du poids de base est pondérée continûment
+ * par `computeEmpiricalBayesProofCredibility(proof)` avant projection itérative sur le simplexe.
+ */
+export const projectWeightsWithContinuousProofShrinkage = (
+  candidateWeights: Record<string, number>,
+  baselineWeights: AlgoWeights,
+  proofMap: Partial<Record<AlgoKey, AlgoProofMetric>>,
+  forcedZeroKeys: Set<AlgoKey> = new Set<AlgoKey>()
+): AlgoWeights => {
+  const validKeys = Object.values(AlgoKey);
+
+  // Normalisation défensive de la baseline (canaux retirés / forcés à zéro exclus)
+  const baseSanitized: Record<string, number> = {};
+  validKeys.forEach((k) => {
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+      baseSanitized[k] = 0;
+    } else {
+      const raw = Number(baselineWeights[k]);
+      baseSanitized[k] = Number.isFinite(raw) && raw >= 0 ? raw : 0;
+    }
+  });
+  const baselineNormalized = normalizeWeights(baseSanitized as AlgoWeights);
+
+  const credibilityByKey: Record<string, number> = {};
+  const upperCaps: Record<string, number> = {};
+  const blendedInput: Record<string, number> = {};
+
+  validKeys.forEach((k) => {
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+      credibilityByKey[k] = 0;
+      upperCaps[k] = 0;
+      blendedInput[k] = 0;
+      return;
+    }
+    const baseW = Number.isFinite(baselineNormalized[k]) ? baselineNormalized[k] : 0;
+    const candRaw = Number(candidateWeights[k]);
+    const candW = Number.isFinite(candRaw) && candRaw >= 0 ? candRaw : baseW;
+    const proof = proofMap[k];
+    const cred = computeEmpiricalBayesProofCredibility(proof);
+    credibilityByKey[k] = cred;
+
+    if (candW > baseW) {
+      const shrunk = baseW + cred * (candW - baseW);
+      blendedInput[k] = shrunk;
+      upperCaps[k] = Math.max(baseW, shrunk);
+    } else {
+      const negScore = proof && proof.proofScore < 0 ? Math.abs(proof.proofScore) : 0;
+      const dampener = 1.0 - 0.5 * Math.tanh(negScore);
+      blendedInput[k] = Math.max(0, baseW - (baseW - candW) * dampener);
+      upperCaps[k] = Math.max(baseW, blendedInput[k]);
+    }
+  });
+
+  const normalized = normalizeWeights(blendedInput as AlgoWeights);
+  const w: Record<string, number> = { ...normalized };
+
+  for (let iter = 0; iter < 16; iter++) {
+    let excess = 0;
+    validKeys.forEach((k) => {
+      if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
+        excess += w[k] || 0;
+        w[k] = 0;
+        return;
+      }
+      const baseW = baselineNormalized[k] || 0;
+      const cred = credibilityByKey[k] || 0;
+      // Plafond lisse : un canal à crédibilité nulle reste borné par baseW après renormalisation
+      const cap = baseW + cred * Math.max(0, (upperCaps[k] || baseW) - baseW) + cred * 0.5;
+      if ((w[k] || 0) > cap) {
+        excess += (w[k] || 0) - cap;
+        w[k] = cap;
+      }
+    });
+
+    if (excess <= 1e-7) break;
+
+    const capacityKeys = validKeys.filter(
+      (k) =>
+        !RETIRED_ALGO_WEIGHT_KEYS.has(k) &&
+        !forcedZeroKeys.has(k) &&
+        (credibilityByKey[k] || 0) > 1e-6 &&
+        (w[k] || 0) > 0
+    );
+
+    if (capacityKeys.length === 0) {
+      validKeys.forEach((k) => {
+        w[k] = RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)
+          ? 0
+          : (baselineNormalized[k] || 0);
+      });
+      break;
+    }
+
+    const totalScore = capacityKeys.reduce(
+      (acc, k) => acc + (w[k] || 0) * (credibilityByKey[k] || 0),
+      0
+    );
+    if (totalScore > 0) {
+      capacityKeys.forEach((k) => {
+        const share = ((w[k] || 0) * (credibilityByKey[k] || 0)) / totalScore;
+        w[k] = (w[k] || 0) + excess * share;
+      });
+    } else {
+      break;
+    }
+  }
+
+  let total = 0;
+  validKeys.forEach((k) => {
+    w[k] = w[k] > 0 ? parseFloat(w[k].toFixed(6)) : 0;
+    total += w[k];
+  });
+
+  if (total > 0 && Math.abs(total - 1.0) > 1e-5) {
+    const residual = 1.0 - total;
+    const adjustCandidates = validKeys
+      .filter(
+        (k) =>
+          w[k] > 0 &&
+          !RETIRED_ALGO_WEIGHT_KEYS.has(k) &&
+          !forcedZeroKeys.has(k) &&
+          (residual < 0 || (credibilityByKey[k] || 0) > 1e-6)
       )
       .sort((a, b) => w[b] - w[a]);
     if (adjustCandidates.length > 0) {
@@ -853,8 +1032,6 @@ export const executeClosedLoopAutoAdjustment = async (
   }
   const initialNormalized = normalizeWeights(initialWeightsClean);
   const candidateWeights = { ...autopsyReport.correctedWeights };
-  const finalWeights: Record<string, number> = {};
-  const lockedMaxKeys = new Set<AlgoKey>();
   const forcedZeroKeys = new Set<AlgoKey>();
 
   if (!hasMachineData) {
@@ -884,39 +1061,11 @@ export const executeClosedLoopAutoAdjustment = async (
     );
   }
 
-  Object.values(AlgoKey).forEach((k) => {
-    if (RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZeroKeys.has(k)) {
-      finalWeights[k] = 0;
-      return;
-    }
-    const oldW = Number.isFinite(initialNormalized[k]) ? initialNormalized[k] : 0;
-    let newW = Number.isFinite(candidateWeights[k]) ? candidateWeights[k] : oldW;
-    const proof = proofMap[k];
-    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-
-    if (!hasProof) {
-      lockedMaxKeys.add(k);
-      if (newW > oldW) {
-        newW = oldW;
-      } else if (proof && proof.proofScore < 0) {
-        // Amortissement continu C^inf : D(s) = 1.0 - 0.5 * tanh(|proofScore|)
-        // Lorsque proofScore -> 0^-, D(s) -> 1.0 (zéro saut discontinu à 0.5)
-        const penalty = Math.tanh(Math.abs(proof.proofScore));
-        const dampener = 1.0 - 0.5 * penalty;
-        newW = oldW - (oldW - newW) * dampener;
-      }
-    } else if (newW > oldW) {
-      const boostFactor = Math.tanh(Math.max(0, proof.proofScore));
-      newW = oldW + (newW - oldW) * boostFactor;
-    }
-    finalWeights[k] = newW;
-  });
-
-  // Projection sur le simplexe garantissant qu'aucun canal sans preuve ne remonte au-dessus de oldW après renormalisation
-  const optimizedNormalized = projectWeightsWithProofGuard(
-    finalWeights,
+  // Projection continue sur le simplexe avec rétrécissement Empirical-Bayes (sans verrou binaire)
+  const optimizedNormalized = projectWeightsWithContinuousProofShrinkage(
+    candidateWeights,
     initialNormalized,
-    lockedMaxKeys,
+    proofMap,
     forcedZeroKeys
   );
 
@@ -1022,10 +1171,10 @@ export const executeClosedLoopAutoAdjustment = async (
       const tgt = optimizedNormalized[k] ?? 0;
       dampedRecord[k] = cur + dampingFactor * (tgt - cur);
     });
-    previewWeights = projectWeightsWithProofGuard(
+    previewWeights = projectWeightsWithContinuousProofShrinkage(
       dampedRecord,
       initialNormalized,
-      lockedMaxKeys,
+      proofMap,
       forcedZeroKeys
     );
   }
@@ -1215,17 +1364,11 @@ export const executeBatchClosedLoopAutopsy = async (
   }
   const currentNormalized = normalizeWeights(baseWeightsClean);
 
-  const lockedMaxKeys = new Set<AlgoKey>();
   const forcedZeroKeys = new Set<AlgoKey>();
   RETIRED_ALGO_WEIGHT_KEYS.forEach((k) => forcedZeroKeys.add(k));
   if (!hasMachineData) {
     forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
   }
-  validKeys.forEach((key) => {
-    const proof = proofMap[key];
-    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-    if (!hasProof) lockedMaxKeys.add(key);
-  });
 
   const drawAttributionsWindow: GeneCounterfactualAttribution[][] = reports.map((rep) => {
     const byKey = new Map((rep.channelAttribution || []).map((c) => [c.key, c]));
@@ -1271,14 +1414,13 @@ export const executeBatchClosedLoopAutopsy = async (
     entropyNormalized: normEntropy,
     hurstExponent: priorRegime.hurst,
     forcedZeroKeys: new Set(Array.from(forcedZeroKeys)),
-    lockedMaxKeys: new Set(Array.from(lockedMaxKeys)),
     modelVersion: FORENSIC_MODEL_VERSION,
   });
 
-  const recommendedWeights = projectWeightsWithProofGuard(
+  const recommendedWeights = projectWeightsWithContinuousProofShrinkage(
     batchUpdate.updatedWeights,
     currentNormalized,
-    lockedMaxKeys,
+    proofMap,
     forcedZeroKeys
   );
 

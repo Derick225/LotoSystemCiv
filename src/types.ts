@@ -419,6 +419,8 @@ export interface ForensicReport {
   winningXAP?: import('./services/training/DNAOptimizer').XAPExplanation[];
   // Forensic exact calculations
   timestamp?: string;
+  computedAt?: string;
+  dataCutoff?: string;
   combo?: number[];
   forensicScore?: number;
   metrics?: ForensicMetrics;
