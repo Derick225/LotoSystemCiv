@@ -588,6 +588,1014 @@ export class CyclicCandidateHpc {
 }
 if (Symbol.dispose) CyclicCandidateHpc.prototype[Symbol.dispose] = CyclicCandidateHpc.prototype.free;
 
+export class EpigenomeMatrixWasmResult {
+    static __wrap(ptr) {
+        const obj = Object.create(EpigenomeMatrixWasmResult.prototype);
+        obj.__wbg_ptr = ptr;
+        EpigenomeMatrixWasmResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EpigenomeMatrixWasmResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_epigenomematrixwasmresult_free(ptr, 0);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get epistatic_matrix_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomematrixwasmresult_epistatic_matrix_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get epistatic_synergy() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomematrixwasmresult_epistatic_synergy(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get evidence_samples_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomematrixwasmresult_evidence_samples_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get gene_stability() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomematrixwasmresult_gene_stability(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get post_mortem_signal() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomematrixwasmresult_post_mortem_signal(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get raw_target_weights() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomematrixwasmresult_raw_target_weights(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    get num_genes() {
+        const ret = wasm.__wbg_get_epigenomematrixwasmresult_num_genes(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set num_genes(arg0) {
+        wasm.__wbg_set_epigenomematrixwasmresult_num_genes(this.__wbg_ptr, arg0);
+    }
+}
+if (Symbol.dispose) EpigenomeMatrixWasmResult.prototype[Symbol.dispose] = EpigenomeMatrixWasmResult.prototype.free;
+
+export class EpigenomeWalkForwardWasmResult {
+    static __wrap(ptr) {
+        const obj = Object.create(EpigenomeWalkForwardWasmResult.prototype);
+        obj.__wbg_ptr = ptr;
+        EpigenomeWalkForwardWasmResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        EpigenomeWalkForwardWasmResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_epigenomewalkforwardwasmresult_free(ptr, 0);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get base_inc_probs() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomewalkforwardwasmresult_base_inc_probs(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get epi_inc_probs() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomewalkforwardwasmresult_epi_inc_probs(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get top5_base() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomewalkforwardwasmresult_top5_base(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get top5_epi() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.epigenomewalkforwardwasmresult_top5_epi(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    get auc_base() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_auc_base(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get auc_epi() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_auc_epi(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get brier_base() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_brier_base(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get brier_epi() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_brier_epi(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get expected_hits_top5_base() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_expected_hits_top5_base(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get expected_hits_top5_epi() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_expected_hits_top5_epi(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get hits_top10_base() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_hits_top10_base(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get hits_top10_epi() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_hits_top10_epi(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get hits_top5_base() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_hits_top5_base(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get hits_top5_epi() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_hits_top5_epi(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get log_loss_base() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_log_loss_base(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get log_loss_epi() {
+        const ret = wasm.__wbg_get_epigenomewalkforwardwasmresult_log_loss_epi(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set auc_base(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_auc_base(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set auc_epi(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_auc_epi(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set brier_base(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_brier_base(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set brier_epi(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_brier_epi(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set expected_hits_top5_base(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_expected_hits_top5_base(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set expected_hits_top5_epi(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_expected_hits_top5_epi(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set hits_top10_base(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_hits_top10_base(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set hits_top10_epi(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_hits_top10_epi(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set hits_top5_base(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_hits_top5_base(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set hits_top5_epi(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_hits_top5_epi(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set log_loss_base(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_log_loss_base(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set log_loss_epi(arg0) {
+        wasm.__wbg_set_epigenomewalkforwardwasmresult_log_loss_epi(this.__wbg_ptr, arg0);
+    }
+}
+if (Symbol.dispose) EpigenomeWalkForwardWasmResult.prototype[Symbol.dispose] = EpigenomeWalkForwardWasmResult.prototype.free;
+
+export class GapRangeAnalysisWasmResult {
+    static __wrap(ptr) {
+        const obj = Object.create(GapRangeAnalysisWasmResult.prototype);
+        obj.__wbg_ptr = ptr;
+        GapRangeAnalysisWasmResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        GapRangeAnalysisWasmResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_gaprangeanalysiswasmresult_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get ball_active_channels() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_ball_active_channels(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get ball_channel_z_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_ball_channel_z_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Int32Array}
+     */
+    get ball_current_gaps() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_ball_current_gaps(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayI32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get ball_stouffer_p() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_ball_stouffer_p(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get ball_stouffer_z() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_ball_stouffer_z(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get bin_z_scores() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_bin_z_scores(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get blended_probs() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_blended_probs(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Int32Array}
+     */
+    get drought_draws() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_drought_draws(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayI32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get drought_pressure() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_drought_pressure(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get drought_z_scores() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_drought_z_scores(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get model_weights() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_model_weights(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get optimal_five() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_optimal_five(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get pool_baseline_probs() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_pool_baseline_probs(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get reserve_two() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_reserve_two(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get top_predicted_bins() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_top_predicted_bins(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get tranche_quotas() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_tranche_quotas(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get transition_matrix_order1() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangeanalysiswasmresult_transition_matrix_order1(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    get expected_next_mean() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_expected_next_mean(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get kl_m1() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_kl_m1(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get kl_m2() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_kl_m2(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get selection_confidence() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_selection_confidence(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get ticket_stouffer_z() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_ticket_stouffer_z(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get total_analyzed_draws() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_total_analyzed_draws(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get wasserstein_bandwidth() {
+        const ret = wasm.__wbg_get_gaprangeanalysiswasmresult_wasserstein_bandwidth(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set expected_next_mean(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_expected_next_mean(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set kl_m1(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_kl_m1(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set kl_m2(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_kl_m2(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set selection_confidence(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_selection_confidence(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set ticket_stouffer_z(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_ticket_stouffer_z(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set total_analyzed_draws(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_total_analyzed_draws(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set wasserstein_bandwidth(arg0) {
+        wasm.__wbg_set_gaprangeanalysiswasmresult_wasserstein_bandwidth(this.__wbg_ptr, arg0);
+    }
+}
+if (Symbol.dispose) GapRangeAnalysisWasmResult.prototype[Symbol.dispose] = GapRangeAnalysisWasmResult.prototype.free;
+
+export class GapRangeWalkForwardWasmResult {
+    static __wrap(ptr) {
+        const obj = Object.create(GapRangeWalkForwardWasmResult.prototype);
+        obj.__wbg_ptr = ptr;
+        GapRangeWalkForwardWasmResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        GapRangeWalkForwardWasmResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_gaprangewalkforwardwasmresult_free(ptr, 0);
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get step_actual_counts() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangewalkforwardwasmresult_step_actual_counts(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get step_brier_scores() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangewalkforwardwasmresult_step_brier_scores(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Int32Array}
+     */
+    get step_draw_indices() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangewalkforwardwasmresult_step_draw_indices(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayI32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get step_optimal_five_hits() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangewalkforwardwasmresult_step_optimal_five_hits(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get step_predicted_top3() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gaprangewalkforwardwasmresult_step_predicted_top3(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {number}
+     */
+    get avg_balls_covered_per_draw() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_avg_balls_covered_per_draw(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get avg_selection_hits_per_draw() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_avg_selection_hits_per_draw(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get brier_skill_score() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_brier_skill_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get eval_count() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_eval_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get h0_brier_score() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_h0_brier_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get mean_brier_score() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_mean_brier_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get min_train_draws() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_min_train_draws(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get selection_at_least_one_hit_rate() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_selection_at_least_one_hit_rate(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get top1_h0_chance_rate() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_top1_h0_chance_rate(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get top1_success_rate() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_top1_success_rate(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get top3_ball_coverage_rate() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_top3_ball_coverage_rate(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get top3_h0_chance_rate() {
+        const ret = wasm.__wbg_get_gaprangewalkforwardwasmresult_top3_h0_chance_rate(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set avg_balls_covered_per_draw(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_avg_balls_covered_per_draw(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set avg_selection_hits_per_draw(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_avg_selection_hits_per_draw(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set brier_skill_score(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_brier_skill_score(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set eval_count(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_eval_count(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set h0_brier_score(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_h0_brier_score(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set mean_brier_score(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_mean_brier_score(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set min_train_draws(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_min_train_draws(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set selection_at_least_one_hit_rate(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_selection_at_least_one_hit_rate(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set top1_h0_chance_rate(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_top1_h0_chance_rate(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set top1_success_rate(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_top1_success_rate(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set top3_ball_coverage_rate(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_top3_ball_coverage_rate(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set top3_h0_chance_rate(arg0) {
+        wasm.__wbg_set_gaprangewalkforwardwasmresult_top3_h0_chance_rate(this.__wbg_ptr, arg0);
+    }
+}
+if (Symbol.dispose) GapRangeWalkForwardWasmResult.prototype[Symbol.dispose] = GapRangeWalkForwardWasmResult.prototype.free;
+
 export class HawkesOutputHpc {
     static __wrap(ptr) {
         const obj = Object.create(HawkesOutputHpc.prototype);
@@ -808,6 +1816,32 @@ export class InMemoryDrawStore {
         const ptr0 = passStringToWasm0(draw_name, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
         const len0 = WASM_VECTOR_LEN;
         wasm.inmemorydrawstore_clear_draw(this.__wbg_ptr, ptr0, len0);
+    }
+    /**
+     * Analyse bivariée des dyades croisées et matrice de transition entre tirage source et cible
+     * @param {string} source_draw
+     * @param {string} target_draw
+     * @param {number} min_z_score
+     * @returns {WasmBivariateReport}
+     */
+    compute_bivariate_dyads_wasm(source_draw, target_draw, min_z_score) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(source_draw, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(target_draw, wasm.__wbindgen_export2, wasm.__wbindgen_export3);
+            const len1 = WASM_VECTOR_LEN;
+            wasm.inmemorydrawstore_compute_bivariate_dyads_wasm(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, min_z_score);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return WasmBivariateReport.__wrap(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * Calcule le couplage continu d'interconnexion entre deux tirages du store
@@ -1268,6 +2302,328 @@ export class NativePredictionResult {
     }
 }
 if (Symbol.dispose) NativePredictionResult.prototype[Symbol.dispose] = NativePredictionResult.prototype.free;
+
+export class PatternMiningWasmResult {
+    static __wrap(ptr) {
+        const obj = Object.create(PatternMiningWasmResult.prototype);
+        obj.__wbg_ptr = ptr;
+        PatternMiningWasmResultFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        PatternMiningWasmResultFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_patternminingwasmresult_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    get active_cycle_draws_count() {
+        const ret = wasm.__wbg_get_patternminingwasmresult_active_cycle_draws_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get active_cycle_index() {
+        const ret = wasm.__wbg_get_patternminingwasmresult_active_cycle_index(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get completed_cycles_count() {
+        const ret = wasm.__wbg_get_patternminingwasmresult_completed_cycles_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get min_pair_cycles_threshold() {
+        const ret = wasm.__wbg_get_patternminingwasmresult_min_pair_cycles_threshold(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get overall_cycle_entropy() {
+        const ret = wasm.__wbg_get_patternminingwasmresult_overall_cycle_entropy(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get total_cycles() {
+        const ret = wasm.__wbg_get_patternminingwasmresult_total_cycles(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {Uint8Array}
+     */
+    get active_cycle_numbers() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_active_cycle_numbers(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 1, 1);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get ball_cycle_counts() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_ball_cycle_counts(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get pair_cycle_indices_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_pair_cycle_indices_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get pair_cycle_offsets() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_pair_cycle_offsets(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get pair_cycle_supports() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_pair_cycle_supports(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get pair_tuples() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_pair_tuples(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get same_draw_pair_counts() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_same_draw_pair_counts(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get source_ball_counts() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_source_ball_counts(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get transition_cycle_indices_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_transition_cycle_indices_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get transition_cycle_offsets() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_transition_cycle_offsets(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get transition_tuples() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_transition_tuples(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get triplet_cycle_indices_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_triplet_cycle_indices_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get triplet_cycle_offsets() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_triplet_cycle_offsets(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Uint32Array}
+     */
+    get triplet_tuples() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.patternminingwasmresult_triplet_tuples(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @param {number} arg0
+     */
+    set active_cycle_draws_count(arg0) {
+        wasm.__wbg_set_patternminingwasmresult_active_cycle_draws_count(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set active_cycle_index(arg0) {
+        wasm.__wbg_set_patternminingwasmresult_active_cycle_index(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set completed_cycles_count(arg0) {
+        wasm.__wbg_set_patternminingwasmresult_completed_cycles_count(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set min_pair_cycles_threshold(arg0) {
+        wasm.__wbg_set_patternminingwasmresult_min_pair_cycles_threshold(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set overall_cycle_entropy(arg0) {
+        wasm.__wbg_set_patternminingwasmresult_overall_cycle_entropy(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set total_cycles(arg0) {
+        wasm.__wbg_set_patternminingwasmresult_total_cycles(this.__wbg_ptr, arg0);
+    }
+}
+if (Symbol.dispose) PatternMiningWasmResult.prototype[Symbol.dispose] = PatternMiningWasmResult.prototype.free;
 
 /**
  * Rapport d'analyse préalable de l'historique complet en RAM
@@ -1982,6 +3338,86 @@ export class WalkForwardReport {
 }
 if (Symbol.dispose) WalkForwardReport.prototype[Symbol.dispose] = WalkForwardReport.prototype.free;
 
+/**
+ * Rapport complet d'analyse bivariée des dyades croisées
+ */
+export class WasmBivariateReport {
+    static __wrap(ptr) {
+        const obj = Object.create(WasmBivariateReport.prototype);
+        obj.__wbg_ptr = ptr;
+        WasmBivariateReportFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmBivariateReportFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmbivariatereport_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    get mean_coupling_z() {
+        const ret = wasm.__wbg_get_wasmbivariatereport_mean_coupling_z(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get total_paired_draws() {
+        const ret = wasm.__wbg_get_wasmbivariatereport_total_paired_draws(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set mean_coupling_z(arg0) {
+        wasm.__wbg_set_wasmbivariatereport_mean_coupling_z(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set total_paired_draws(arg0) {
+        wasm.__wbg_set_wasmbivariatereport_total_paired_draws(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @returns {number}
+     */
+    get dyads_count() {
+        const ret = wasm.wasmbivariatereport_dyads_count(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @param {number} index
+     * @returns {WasmCrossDyad | undefined}
+     */
+    get_dyad(index) {
+        const ret = wasm.wasmbivariatereport_get_dyad(this.__wbg_ptr, index);
+        return ret === 0 ? undefined : WasmCrossDyad.__wrap(ret);
+    }
+    /**
+     * @returns {Float64Array}
+     */
+    get transition_matrix_flat() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.wasmbivariatereport_transition_matrix_flat(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF64FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export(r0, r1 * 8, 8);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+}
+if (Symbol.dispose) WasmBivariateReport.prototype[Symbol.dispose] = WasmBivariateReport.prototype.free;
+
 export class WasmButterflyResult {
     static __wrap(ptr) {
         const obj = Object.create(WasmButterflyResult.prototype);
@@ -2157,6 +3593,120 @@ export class WasmChainReactionResult {
     }
 }
 if (Symbol.dispose) WasmChainReactionResult.prototype[Symbol.dispose] = WasmChainReactionResult.prototype.free;
+
+/**
+ * Représentation typée d'une dyade croisée statistiquement significative
+ */
+export class WasmCrossDyad {
+    static __wrap(ptr) {
+        const obj = Object.create(WasmCrossDyad.prototype);
+        obj.__wbg_ptr = ptr;
+        WasmCrossDyadFinalization.register(obj, obj.__wbg_ptr, obj);
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        WasmCrossDyadFinalization.unregister(this);
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_wasmcrossdyad_free(ptr, 0);
+    }
+    /**
+     * @returns {number}
+     */
+    get expected_occurrences() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_expected_occurrences(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get lift() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_lift(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get occurrences() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_occurrences(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * @returns {number}
+     */
+    get significance_score() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_significance_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get source_number() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_source_number(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get target_number() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_target_number(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @returns {number}
+     */
+    get z_score() {
+        const ret = wasm.__wbg_get_wasmcrossdyad_z_score(this.__wbg_ptr);
+        return ret;
+    }
+    /**
+     * @param {number} arg0
+     */
+    set expected_occurrences(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_expected_occurrences(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set lift(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_lift(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set occurrences(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_occurrences(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set significance_score(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_significance_score(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set source_number(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_source_number(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set target_number(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_target_number(this.__wbg_ptr, arg0);
+    }
+    /**
+     * @param {number} arg0
+     */
+    set z_score(arg0) {
+        wasm.__wbg_set_wasmcrossdyad_z_score(this.__wbg_ptr, arg0);
+    }
+}
+if (Symbol.dispose) WasmCrossDyad.prototype[Symbol.dispose] = WasmCrossDyad.prototype.free;
 
 export class WasmDominoResult {
     static __wrap(ptr) {
@@ -2675,6 +4225,46 @@ export function compute_domino_advection_wasm(history_flat, draws_count, damping
 }
 
 /**
+ * @param {Float64Array} raw_epistasis_flat
+ * @param {Float64Array} epistasis_samples_flat
+ * @param {Float64Array} lineage_weights_flat
+ * @param {number} num_lineage
+ * @param {Float64Array} initial_weights
+ * @param {Uint8Array} arm_ids
+ * @param {Uint8Array} proof_flags
+ * @param {Float64Array} proof_scores
+ * @param {Float64Array} base_analysis_signals
+ * @param {Uint8Array} forced_zero_flags
+ * @param {number} num_genes
+ * @param {number} hurst
+ * @param {number} entropy_norm
+ * @param {number} total_evidence_units
+ * @returns {EpigenomeMatrixWasmResult}
+ */
+export function compute_epigenome_matrix_wasm(raw_epistasis_flat, epistasis_samples_flat, lineage_weights_flat, num_lineage, initial_weights, arm_ids, proof_flags, proof_scores, base_analysis_signals, forced_zero_flags, num_genes, hurst, entropy_norm, total_evidence_units) {
+    const ptr0 = passArrayF64ToWasm0(raw_epistasis_flat, wasm.__wbindgen_export2);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF64ToWasm0(epistasis_samples_flat, wasm.__wbindgen_export2);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(lineage_weights_flat, wasm.__wbindgen_export2);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArrayF64ToWasm0(initial_weights, wasm.__wbindgen_export2);
+    const len3 = WASM_VECTOR_LEN;
+    const ptr4 = passArray8ToWasm0(arm_ids, wasm.__wbindgen_export2);
+    const len4 = WASM_VECTOR_LEN;
+    const ptr5 = passArray8ToWasm0(proof_flags, wasm.__wbindgen_export2);
+    const len5 = WASM_VECTOR_LEN;
+    const ptr6 = passArrayF64ToWasm0(proof_scores, wasm.__wbindgen_export2);
+    const len6 = WASM_VECTOR_LEN;
+    const ptr7 = passArrayF64ToWasm0(base_analysis_signals, wasm.__wbindgen_export2);
+    const len7 = WASM_VECTOR_LEN;
+    const ptr8 = passArray8ToWasm0(forced_zero_flags, wasm.__wbindgen_export2);
+    const len8 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_epigenome_matrix_wasm(ptr0, len0, ptr1, len1, ptr2, len2, num_lineage, ptr3, len3, ptr4, len4, ptr5, len5, ptr6, len6, ptr7, len7, ptr8, len8, num_genes, hurst, entropy_norm, total_evidence_units);
+    return EpigenomeMatrixWasmResult.__wrap(ret);
+}
+
+/**
  * Calcule la Transformée de Fourier Rapide (FFT) via `rustfft` sur une tranche de signal `&[f64]`.
  * Applique un fenêtrage de Hann continu C^∞ pour éliminer les discontinuités spectrales de bord.
  * @param {Float64Array} signal
@@ -2721,6 +4311,36 @@ export function compute_frequency_counts_wasm(flat_draws, num_draws, win_cols) {
 }
 
 /**
+ * @param {Int32Array} chrono_draws_flat
+ * @param {number} num_draws
+ * @param {number} win_cols
+ * @returns {GapRangeAnalysisWasmResult}
+ */
+export function compute_gap_range_analysis_wasm(chrono_draws_flat, num_draws, win_cols) {
+    const ptr0 = passArray32ToWasm0(chrono_draws_flat, wasm.__wbindgen_export2);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_gap_range_analysis_wasm(ptr0, len0, num_draws, win_cols);
+    return GapRangeAnalysisWasmResult.__wrap(ret);
+}
+
+/**
+ * Évaluation Walk-Forward strictement hors-échantillon (zéro fuite future) :
+ * à chaque tirage `t` dans `[total_draws - eval_count, total_draws - 1]`,
+ * le modèle est entraîné uniquement sur le préfixe `0..t` puis scoré sur `t`.
+ * @param {Int32Array} chrono_draws_flat
+ * @param {number} num_draws
+ * @param {number} win_cols
+ * @param {number} window_size
+ * @returns {GapRangeWalkForwardWasmResult}
+ */
+export function compute_gap_range_walk_forward_wasm(chrono_draws_flat, num_draws, win_cols, window_size) {
+    const ptr0 = passArray32ToWasm0(chrono_draws_flat, wasm.__wbindgen_export2);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.compute_gap_range_walk_forward_wasm(ptr0, len0, num_draws, win_cols, window_size);
+    return GapRangeWalkForwardWasmResult.__wrap(ret);
+}
+
+/**
  * 1. Effet de Cascade : Noyau de Chaleur de Graphe (Graph Heat Kernel exp(-tL))
  * Résout K_t = exp(-t * L) où L = I - D^{-1/2} W D^{-1/2} est le Laplacien normalisé symétrique.
  * Utilise une approximation polynomiale de Taylor avec normalisation stochastique continue.
@@ -2750,6 +4370,36 @@ export function compute_hawkes_intensity_hpc(flat_history, num_draws, avg_gaps) 
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.compute_hawkes_intensity_hpc(ptr0, len0, num_draws, ptr1, len1);
     return HawkesOutputHpc.__wrap(ret);
+}
+
+/**
+ * @param {Float64Array} current_weights
+ * @param {Float64Array} channel_losses
+ * @param {Float64Array} prior_weights
+ * @param {Uint8Array} forced_zero_flags
+ * @param {number} horizon_t
+ * @returns {Float64Array}
+ */
+export function compute_hedge_fixed_share_step_wasm(current_weights, channel_losses, prior_weights, forced_zero_flags, horizon_t) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArrayF64ToWasm0(current_weights, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArrayF64ToWasm0(channel_losses, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passArrayF64ToWasm0(prior_weights, wasm.__wbindgen_export2);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passArray8ToWasm0(forced_zero_flags, wasm.__wbindgen_export2);
+        const len3 = WASM_VECTOR_LEN;
+        wasm.compute_hedge_fixed_share_step_wasm(retptr, ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, horizon_t);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v5 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 8, 8);
+        return v5;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
 }
 
 /**
@@ -2867,6 +4517,29 @@ export function compute_robust_hurst_wasm(signal) {
 }
 
 /**
+ * @param {Uint32Array} seq_a
+ * @param {Uint32Array} seq_b
+ * @returns {Float64Array}
+ */
+export function compute_sequence_order_metrics_wasm(seq_a, seq_b) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray32ToWasm0(seq_a, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passArray32ToWasm0(seq_b, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.compute_sequence_order_metrics_wasm(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v3 = getArrayF64FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export(r0, r1 * 8, 8);
+        return v3;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
  * Calcule le champ spatial complet (densité, puits de gravité, barycentre, seuil Probit)
  * @param {Int32Array} flat_draws
  * @param {number} num_draws
@@ -2943,6 +4616,22 @@ export function engine_version() {
  */
 export function init_engine() {
     wasm.init_engine();
+}
+
+/**
+ * @param {Int32Array} chrono_draws_flat
+ * @param {number} num_draws
+ * @param {number} win_cols
+ * @param {number} cycle_length
+ * @param {number} min_support_override
+ * @param {boolean} include_transitions
+ * @returns {PatternMiningWasmResult}
+ */
+export function mine_cycle_patterns_wasm(chrono_draws_flat, num_draws, win_cols, cycle_length, min_support_override, include_transitions) {
+    const ptr0 = passArray32ToWasm0(chrono_draws_flat, wasm.__wbindgen_export2);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.mine_cycle_patterns_wasm(ptr0, len0, num_draws, win_cols, cycle_length, min_support_override, include_transitions);
+    return PatternMiningWasmResult.__wrap(ret);
 }
 
 /**
@@ -3050,6 +4739,50 @@ export function run_simulation_hpc(hits_history, confidences, multipliers, strat
     const len2 = WASM_VECTOR_LEN;
     const ret = wasm.run_simulation_hpc(ptr0, len0, ptr1, len1, ptr2, len2, strategy_code, initial_bankroll, unit_bet);
     return SimulationResultHpc.__wrap(ret);
+}
+
+/**
+ * @param {Float64Array} plugin_scores_flat
+ * @param {Float64Array} epi_weights
+ * @param {Float64Array} base_weights
+ * @param {number} num_genes
+ * @param {Uint8Array} actual_winners
+ * @param {number} tau_epi
+ * @param {number} tau_base
+ * @returns {EpigenomeWalkForwardWasmResult}
+ */
+export function score_epigenome_walk_forward_step_calibrated_wasm(plugin_scores_flat, epi_weights, base_weights, num_genes, actual_winners, tau_epi, tau_base) {
+    const ptr0 = passArrayF64ToWasm0(plugin_scores_flat, wasm.__wbindgen_export2);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF64ToWasm0(epi_weights, wasm.__wbindgen_export2);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(base_weights, wasm.__wbindgen_export2);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(actual_winners, wasm.__wbindgen_export2);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.score_epigenome_walk_forward_step_calibrated_wasm(ptr0, len0, ptr1, len1, ptr2, len2, num_genes, ptr3, len3, tau_epi, tau_base);
+    return EpigenomeWalkForwardWasmResult.__wrap(ret);
+}
+
+/**
+ * @param {Float64Array} plugin_scores_flat
+ * @param {Float64Array} epi_weights
+ * @param {Float64Array} base_weights
+ * @param {number} num_genes
+ * @param {Uint8Array} actual_winners
+ * @returns {EpigenomeWalkForwardWasmResult}
+ */
+export function score_epigenome_walk_forward_step_wasm(plugin_scores_flat, epi_weights, base_weights, num_genes, actual_winners) {
+    const ptr0 = passArrayF64ToWasm0(plugin_scores_flat, wasm.__wbindgen_export2);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF64ToWasm0(epi_weights, wasm.__wbindgen_export2);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArrayF64ToWasm0(base_weights, wasm.__wbindgen_export2);
+    const len2 = WASM_VECTOR_LEN;
+    const ptr3 = passArray8ToWasm0(actual_winners, wasm.__wbindgen_export2);
+    const len3 = WASM_VECTOR_LEN;
+    const ret = wasm.score_epigenome_walk_forward_step_wasm(ptr0, len0, ptr1, len1, ptr2, len2, num_genes, ptr3, len3);
+    return EpigenomeWalkForwardWasmResult.__wrap(ret);
 }
 
 /**
@@ -3202,6 +4935,18 @@ const CyclicBatchReportHpcFinalization = (typeof FinalizationRegistry === 'undef
 const CyclicCandidateHpcFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_cycliccandidatehpc_free(ptr, 1));
+const EpigenomeMatrixWasmResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_epigenomematrixwasmresult_free(ptr, 1));
+const EpigenomeWalkForwardWasmResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_epigenomewalkforwardwasmresult_free(ptr, 1));
+const GapRangeAnalysisWasmResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_gaprangeanalysiswasmresult_free(ptr, 1));
+const GapRangeWalkForwardWasmResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_gaprangewalkforwardwasmresult_free(ptr, 1));
 const HawkesOutputHpcFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_hawkesoutputhpc_free(ptr, 1));
@@ -3220,6 +4965,9 @@ const MonteCarloReportHpcFinalization = (typeof FinalizationRegistry === 'undefi
 const NativePredictionResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_nativepredictionresult_free(ptr, 1));
+const PatternMiningWasmResultFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_patternminingwasmresult_free(ptr, 1));
 const PriorAnalysisReportFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_prioranalysisreport_free(ptr, 1));
@@ -3238,12 +4986,18 @@ const TopologicalLyapunovResultFinalization = (typeof FinalizationRegistry === '
 const WalkForwardReportFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_walkforwardreport_free(ptr, 1));
+const WasmBivariateReportFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmbivariatereport_free(ptr, 1));
 const WasmButterflyResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmbutterflyresult_free(ptr, 1));
 const WasmChainReactionResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmchainreactionresult_free(ptr, 1));
+const WasmCrossDyadFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_wasmcrossdyad_free(ptr, 1));
 const WasmDominoResultFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmdominoresult_free(ptr, 1));

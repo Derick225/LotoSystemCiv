@@ -25,44 +25,6 @@ pub struct WasmCrossDyad {
     pub significance_score: f64, // [0, 100] continue
 }
 
-#[wasm_bindgen]
-impl WasmCrossDyad {
-    #[wasm_bindgen(getter)]
-    pub fn source_number(&self) -> u8 {
-        self.source_number
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn target_number(&self) -> u8 {
-        self.target_number
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn occurrences(&self) -> u32 {
-        self.occurrences
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn expected_occurrences(&self) -> f64 {
-        self.expected_occurrences
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn z_score(&self) -> f64 {
-        self.z_score
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn lift(&self) -> f64 {
-        self.lift
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn significance_score(&self) -> f64 {
-        self.significance_score
-    }
-}
-
 /// Rapport complet d'analyse bivariée des dyades croisées
 #[wasm_bindgen]
 #[derive(Clone, Debug, Serialize, Deserialize)]
