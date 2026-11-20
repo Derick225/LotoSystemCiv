@@ -13,6 +13,7 @@ import {
 import { computeDrawCriticalThreshold } from './dnaAuditService';
 import { updateWeightsWithKalmanFilter } from './kalmanWeightsFilter';
 import { logger } from '../../utils/logger';
+import { drawHasMachineNumbers } from '../../constants';
 
 export interface OptimizationRequest {
   drawName: string;
@@ -105,12 +106,22 @@ export async function applyOptimizedWeights(
     allowCriticalDrift = false,
   } = request;
 
-  // 1. Normalisation continue des poids cibles
-  const targetNormalized = normalizeWeights(rawTargetWeights);
+  const hasMachine = drawHasMachineNumbers(drawName, history);
+
+  // 1. Normalisation continue des poids cibles (exclusion automatique Transfert Machine si tirage sans machine)
+  const sanitizedTargetRaw: AlgoWeights = { ...rawTargetWeights };
+  if (!hasMachine) {
+    sanitizedTargetRaw[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const targetNormalized = normalizeWeights(sanitizedTargetRaw);
 
   // 2. Récupération des poids courants
   const currentWeights = await getAlgoWeights(drawName);
-  const normalizedCurrent = normalizeWeights(currentWeights);
+  const sanitizedCurrentRaw: AlgoWeights = { ...currentWeights };
+  if (!hasMachine) {
+    sanitizedCurrentRaw[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  const normalizedCurrent = normalizeWeights(sanitizedCurrentRaw);
 
   // 3. Calcul du seuil critique statistique continu (Zéro nombre magique)
   const algoCount = Object.keys(targetNormalized).length;
@@ -130,7 +141,9 @@ export async function applyOptimizedWeights(
       predictionError: performance.brierScore ?? performance.topologicalLoss,
       empiricalVariance: varianceVal,
     });
-    candidateWeights = normalizeWeights(kalmanRes.updatedWeights);
+    const kSanitized = { ...kalmanRes.updatedWeights };
+    if (!hasMachine) kSanitized[AlgoKey.MACHINE_TRANSFER] = 0;
+    candidateWeights = normalizeWeights(kSanitized);
   }
 
   // 4.b Régulation par amortissement continu si dérive critique non explicitement autorisée
@@ -149,11 +162,17 @@ export async function applyOptimizedWeights(
     const dampedRecord: Record<string, number> = {};
     const allKeys = Object.keys(candidateWeights) as AlgoKey[];
     for (const key of allKeys) {
+      if (key === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
+        dampedRecord[key] = 0;
+        continue;
+      }
       const cur = (normalizedCurrent as any)[key] ?? 0;
       const tgt = (candidateWeights as any)[key] ?? 0;
       dampedRecord[key] = cur + dampingFactor * (tgt - cur);
     }
     appliedWeights = normalizeWeights(dampedRecord as AlgoWeights);
+  } else if (!hasMachine && appliedWeights[AlgoKey.MACHINE_TRANSFER] !== 0) {
+    appliedWeights = normalizeWeights({ ...appliedWeights, [AlgoKey.MACHINE_TRANSFER]: 0 });
   }
 
   // 5. Persistance atomique (Poids + Base de connaissances ADN) avec restauration transactionnelle en cas d'erreur

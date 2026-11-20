@@ -32,6 +32,7 @@ import { audioEngine } from "../../utils/audioEngine";
 import { NumberBall } from "../NumberBall";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { LABELS_MAP } from "../../hooks/useAlgorithmSync";
+import { drawHasMachineNumbers } from "../../constants";
 import type { AlgoWeights } from "../../types";
 import {
   getAlgoWeights,
@@ -188,11 +189,27 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   // Canonical baseline weights
   const canonicalWeights = useMemo(() => getDefaultWeights(), []);
 
+  // Détection automatique de la prise en charge des numéros machine pour ce tirage
+  const hasMachineData = useMemo(
+    () => drawHasMachineNumbers(selectedDrawName, history),
+    [selectedDrawName, history]
+  );
+
+  const sanitizeWeightsForDraw = useCallback(
+    (w: AlgoWeights): AlgoWeights => {
+      if (hasMachineData) return w;
+      const cleaned = { ...w, [AlgoKey.MACHINE_TRANSFER]: 0 };
+      return normalizeWeights(cleaned);
+    },
+    [hasMachineData]
+  );
+
   // 1. Load weights, lineage, and audit specifically for selectedDrawName
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const loadedWeights = await getAlgoWeights(selectedDrawName);
+      const rawLoadedWeights = await getAlgoWeights(selectedDrawName);
+      const loadedWeights = sanitizeWeightsForDraw(rawLoadedWeights);
       const historyList = await getModelDnaHistory(selectedDrawName, 30);
       const evoLineage = await getModelEvolutionLineage(selectedDrawName);
       const audit = await runSystematicDnaAudit(
@@ -212,7 +229,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [selectedDrawName, history, showToast]);
+  }, [selectedDrawName, history, showToast, sanitizeWeightsForDraw]);
 
   useEffect(() => {
     loadData();
@@ -226,9 +243,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
       globalWeights &&
       Object.keys(globalWeights).length > 0
     ) {
-      setWeights(globalWeights);
+      setWeights(sanitizeWeightsForDraw(globalWeights));
     }
-  }, [globalWeights, selectedDrawName, activeDrawName, isDirty]);
+  }, [globalWeights, selectedDrawName, activeDrawName, isDirty, sanitizeWeightsForDraw]);
 
   // Compute live DNA fingerprint
   const currentFingerprint = useMemo(() => {
@@ -251,6 +268,17 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   // Handle Weight Slider change
   const handleWeightChange = (key: AlgoKey, newWeight: number) => {
     audioEngine.play("click");
+    if (key === AlgoKey.MACHINE_TRANSFER && !hasMachineData) {
+      setWeights((prev) => ({
+        ...prev,
+        [AlgoKey.MACHINE_TRANSFER]: 0,
+      }));
+      showToast(
+        "Transfert Machine automatiquement désactivé (0%) : ce tirage ne comporte pas de numéro machine.",
+        "info"
+      );
+      return;
+    }
     const clamped = Math.max(0, parseFloat(newWeight.toFixed(5)));
     setWeights((prev) => ({
       ...prev,
@@ -261,6 +289,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
 
   // Toggle Lock on specific algorithm
   const toggleLock = (key: AlgoKey) => {
+    if (key === AlgoKey.MACHINE_TRANSFER && !hasMachineData) return;
     audioEngine.play("click");
     setLockedKeys((prev) => {
       const next = new Set(prev);
@@ -276,7 +305,10 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     if (totalWeightSum === 0) return;
 
     // Normalisation L1 continue
-    const normalized = normalizeWeights(weights);
+    const inputWeights = hasMachineData
+      ? weights
+      : { ...weights, [AlgoKey.MACHINE_TRANSFER]: 0 };
+    const normalized = normalizeWeights(inputWeights);
     setWeights(normalized);
     setIsDirty(true);
     showToast("Tensor Flow L1 normalisé avec succès (Σ = 1.0)", "info");
@@ -285,7 +317,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
   // Reset to canonical baseline
   const handleResetToCanonical = () => {
     audioEngine.play("click");
-    setWeights({ ...canonicalWeights });
+    setWeights(sanitizeWeightsForDraw({ ...canonicalWeights }));
     setLockedKeys(new Set());
     setIsDirty(true);
     showToast("ADN restauré aux poids canoniques par défaut", "info");
@@ -318,9 +350,13 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
       }
 
       const adjusted: AlgoWeights = { ...weights };
+      if (!hasMachineData) {
+        adjusted[AlgoKey.MACHINE_TRANSFER] = 0;
+      }
       let totalDamping = 0;
       let maxCoDrift = 0;
       positiveSum.forEach((sum, key) => {
+        if (!hasMachineData && key === AlgoKey.MACHINE_TRANSFER) return;
         const pairs = pairCount.get(key) || 0;
         if (pairs === 0) return;
         const rhoPlus = sum / pairs;
@@ -526,7 +562,9 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
         showToast("Aucun patch Forensic disponible pour le moment.", "info");
         return;
       }
-      const calibrated = applyForensicCalibration(weights, suggestions, history.length);
+      const calibrated = sanitizeWeightsForDraw(
+        applyForensicCalibration(weights, suggestions, history.length, selectedDrawName)
+      );
       setWeights(calibrated);
       setIsDirty(true);
       audioEngine.play("success");
@@ -541,9 +579,10 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     audioEngine.play("success");
     setIsSaving(true);
     try {
+      const sanitized = sanitizeWeightsForDraw(weights);
       const optResult = await applyOptimizedWeights({
         drawName: selectedDrawName,
-        weights,
+        weights: sanitized,
         origin: "MANUAL_CALIBRATION",
         performance: {
           // Score = cohérence ADN réellement mesurée ; toute mesure absente
@@ -595,7 +634,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     audioEngine.play("click");
     setIsTakingSnapshot(true);
     try {
-      const normalized = normalizeWeights(weights);
+      const normalized = sanitizeWeightsForDraw(normalizeWeights(weights));
       await recordModelDnaVersion({
         drawName: selectedDrawName,
         origin: "HYPERPARAM_TUNER",
@@ -630,9 +669,10 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
     setRecordToRollback(null);
     audioEngine.play("scan");
     try {
+      const sanitizedRecordWeights = sanitizeWeightsForDraw(record.weights);
       const optResult = await applyOptimizedWeights({
         drawName: selectedDrawName,
-        weights: record.weights,
+        weights: sanitizedRecordWeights,
         origin: "MANUAL_CALIBRATION",
         performance: record.performance,
         causalAuditTrail: [
@@ -1077,15 +1117,20 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
           {/* Grid of Weights Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredAlgos.map((algo) => {
-              const weightPercent = (algo.activeW * 100).toFixed(2);
-              const canonPercent = (algo.canonW * 100).toFixed(2);
+              const isMachineDisabled = algo.key === AlgoKey.MACHINE_TRANSFER && !hasMachineData;
+              const effectiveW = isMachineDisabled ? 0 : algo.activeW;
+              const effectiveCanonW = isMachineDisabled ? 0 : algo.canonW;
+              const weightPercent = (effectiveW * 100).toFixed(2);
+              const canonPercent = (effectiveCanonW * 100).toFixed(2);
               const deltaPercent = (algo.delta * 100).toFixed(2);
 
               return (
                 <div
                   key={algo.key}
                   className={`p-5 rounded-2xl border transition-all ${
-                    algo.isLocked
+                    isMachineDisabled
+                      ? "bg-slate-900/40 border-slate-800/60 opacity-60"
+                      : algo.isLocked
                       ? "bg-slate-900/60 border-indigo-500/50"
                       : algo.isDrifted
                       ? "bg-slate-900 border-amber-500/40"
@@ -1096,7 +1141,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                     <div>
                       <h4 className="text-sm font-bold text-white flex items-center gap-2">
                         {algo.label}
-                        {algo.isLocked && (
+                        {algo.isLocked && !isMachineDisabled && (
                           <Lock size={12} className="text-indigo-400" />
                         )}
                       </h4>
@@ -1108,13 +1153,18 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                     <div className="flex items-center gap-2">
                       <button
                         onClick={() => toggleLock(algo.key)}
-                        className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
-                          algo.isLocked
-                            ? "bg-indigo-950 text-indigo-400 border border-indigo-700"
-                            : "bg-slate-800 text-slate-400 hover:text-white"
+                        disabled={isMachineDisabled}
+                        className={`p-1.5 rounded-lg text-xs transition-colors ${
+                          isMachineDisabled
+                            ? "bg-slate-900 text-slate-600 cursor-not-allowed"
+                            : algo.isLocked
+                            ? "bg-indigo-950 text-indigo-400 border border-indigo-700 cursor-pointer"
+                            : "bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
                         }`}
                         title={
-                          algo.isLocked
+                          isMachineDisabled
+                            ? "Algorithme désactivé pour ce tirage sans numéro machine"
+                            : algo.isLocked
                             ? "Déverrouiller le poids"
                             : "Verrouiller le poids pour la normalisation"
                         }
@@ -1124,12 +1174,18 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
 
                       <span
                         className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase font-mono ${
-                          algo.isDrifted
+                          isMachineDisabled
+                            ? "bg-slate-800 text-slate-400 border border-slate-700"
+                            : algo.isDrifted
                             ? "bg-amber-950 text-amber-400 border border-amber-800/60"
                             : "bg-emerald-950 text-emerald-400 border border-emerald-800/60"
                         }`}
                       >
-                        {algo.isDrifted ? `Δ +${deltaPercent}%` : "Aligné"}
+                        {isMachineDisabled
+                          ? "Désactivé (0%)"
+                          : algo.isDrifted
+                          ? `Δ +${deltaPercent}%`
+                          : "Aligné"}
                       </span>
                     </div>
                   </div>
@@ -1150,18 +1206,19 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                       min="0"
                       max="0.4"
                       step="0.001"
-                      value={algo.activeW}
+                      value={effectiveW}
+                      disabled={isMachineDisabled}
                       onChange={(e) =>
                         handleWeightChange(algo.key, parseFloat(e.target.value))
                       }
-                      className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                      className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
                     />
 
                     {/* Progress visual comparison bar */}
                     <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden flex">
                       <div
                         className="bg-indigo-500 h-full transition-all duration-200"
-                        style={{ width: `${Math.min(100, algo.activeW * 250)}%` }}
+                        style={{ width: `${Math.min(100, effectiveW * 250)}%` }}
                       />
                     </div>
 
@@ -1169,30 +1226,40 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
                     <div className="flex justify-between items-center pt-2">
                       <div className="flex gap-1">
                         <button
+                          disabled={isMachineDisabled}
                           onClick={() =>
-                            handleWeightChange(algo.key, algo.activeW - 0.01)
+                            handleWeightChange(algo.key, effectiveW - 0.01)
                           }
-                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[10px] font-mono cursor-pointer"
+                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[10px] font-mono cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           -0.01
                         </button>
                         <button
+                          disabled={isMachineDisabled}
                           onClick={() =>
-                            handleWeightChange(algo.key, algo.activeW + 0.01)
+                            handleWeightChange(algo.key, effectiveW + 0.01)
                           }
-                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[10px] font-mono cursor-pointer"
+                          className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded text-[10px] font-mono cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           +0.01
                         </button>
                       </div>
 
                       <button
-                        onClick={() => handleWeightChange(algo.key, algo.canonW)}
-                        className="text-[10px] text-slate-500 hover:text-slate-300 font-mono transition-colors cursor-pointer"
+                        disabled={isMachineDisabled}
+                        onClick={() => handleWeightChange(algo.key, effectiveCanonW)}
+                        className="text-[10px] text-slate-500 hover:text-slate-300 font-mono transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         Reset ({canonPercent}%)
                       </button>
                     </div>
+
+                    {isMachineDisabled && (
+                      <div className="mt-2 flex items-center gap-1.5 text-[10px] text-amber-400/90 font-medium">
+                        <AlertTriangle size={11} />
+                        <span>Désactivé automatiquement (aucun numéro machine sur ce tirage).</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

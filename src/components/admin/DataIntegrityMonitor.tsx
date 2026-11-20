@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   fetchResults,
-  checkAndSyncRecentResults,
+  syncDrawExternalDetailed,
+  fetchRecentSyncStatus,
   updateResult,
+  type SyncStatusRecord,
 } from "../../services/lotteryService";
 import type { DrawResult } from "../../types";
 import {
@@ -119,6 +121,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
   const [loading, setLoading] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [selectedAnomalyFilter, setSelectedAnomalyFilter] = useState<string>("all");
+  const [lastSyncLog, setLastSyncLog] = useState<SyncStatusRecord | null>(null);
 
   const deleteMutation = useDeleteDrawMutation(drawName);
 
@@ -406,8 +409,18 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
     }
   };
 
+  const refreshSyncLog = async () => {
+    try {
+      const logs = await fetchRecentSyncStatus(1);
+      setLastSyncLog(logs[0] || null);
+    } catch {
+      // Silencieux si RPC absente ou mode hors-ligne
+    }
+  };
+
   useEffect(() => {
     analyzeAll();
+    refreshSyncLog();
     if (typeof window === "undefined") return;
     const handleExceptionsUpdated = () => {
       analyzeAll();
@@ -658,7 +671,15 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                     audioEngine.play("click");
                     setFixing(true);
                     try {
-                      await checkAndSyncRecentResults();
+                      const res = await syncDrawExternalDetailed();
+                      const count = Math.max(res.addedCount, res.upsertedCount);
+                      showToast(
+                        count > 0
+                          ? `${count} tirage(s) synchronisé(s) (${res.fetchedCount} vérifiés).`
+                          : `Registre déjà à jour (${res.fetchedCount} tirages vérifiés).`,
+                        "success",
+                      );
+                      await refreshSyncLog();
                     } catch (e: any) {
                       if (e?.code === "SYNC_REQUIRES_BACKEND") {
                         showToast(
@@ -677,6 +698,13 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
                 >
                   {fixing ? "Synchronisation..." : "Forcer Sync API"}
                 </button>
+                {lastSyncLog && (
+                  <p className="text-[10px] font-bold text-indigo-100/90 leading-tight">
+                    Dernière synchro ({lastSyncLog.trigger_source}) :{" "}
+                    {new Date(lastSyncLog.started_at).toLocaleString("fr-FR")} •{" "}
+                    {lastSyncLog.upserted} maj
+                  </p>
+                )}
 
                 {report.anomalies.some((a) => a.canAutoFix) && (
                   <button

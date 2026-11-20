@@ -1,64 +1,133 @@
 import { z } from "zod";
-import { corsHeaders } from "../../_shared/cors.ts"
+import { corsHeaders } from "../../_shared/cors.ts";
+import {
+  LOTOBONHEUR_API_URL,
+  formatFrenchMonthParam,
+  normalizeMonthParam,
+  parseLotobonheurResponse,
+  type ParsedOfficialDraw,
+} from "../../_shared/lotobonheur-parser.ts";
 
 const ProxyRequestSchema = z.object({
-    month: z.string().optional() // Ex: "Octobre 2023"
+  month: z.string().optional(), // Ex: "Avril 2026" ou "2026-04"
+  months: z.array(z.string()).max(6).optional(),
+  monthsBack: z.number().int().min(0).max(6).optional(),
+  drawName: z.string().optional(),
+  includeRaw: z.boolean().optional(),
 });
 
 export async function handleProxyResults(req: Request, reqBody?: any): Promise<Response> {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const body = reqBody || await req.json();
+    const body = reqBody || (await req.json().catch(() => ({})));
     const validation = ProxyRequestSchema.safeParse(body);
-    
+
     if (!validation.success) {
-        return new Response(JSON.stringify({ error: "Invalid payload" }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 400
-        });
+      return new Response(JSON.stringify({ success: false, error: "Payload invalide pour proxy-results" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 400,
+      });
     }
 
-    const { month } = validation.data;
-    
-    // Exemple d'un payload form-data attendu par le serveur distant (lotobonheur)
-    const formData = new FormData();
-    formData.append('date', month || "");
+    const { month, months, monthsBack, drawName, includeRaw } = validation.data;
+    const now = new Date();
 
-    const fetchResponse = await fetch("https://www.lonaci.net/resultats", {
-        method: "POST",
-        body: formData
-        // Note: L'URL exacte et le format dépendent du fournisseur officiel ivoirien.
-        // Ce proxy redirige la requête sans subir les contraintes CORS du navigateur internet.
-    });
-
-    if (!fetchResponse.ok) {
-         throw new Error(`Erreur réseau du fournisseur distant: ${fetchResponse.statusText}`);
+    let targetMonths: string[];
+    if (months && months.length > 0) {
+      targetMonths = [...new Set(months.map((m) => normalizeMonthParam(m, now)))];
+    } else if (month) {
+      targetMonths = [normalizeMonthParam(month, now)];
+    } else {
+      const backCount = typeof monthsBack === "number" ? monthsBack : 0;
+      targetMonths = [];
+      for (let i = 0; i <= backCount; i++) {
+        targetMonths.push(formatFrenchMonthParam(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+      }
     }
-    
-    // Si la réponse est en JSON :
-    // const remoteData = await fetchResponse.json();
-    
-    // Si la réponse de LOTOBONHEUR est en texte/HTML qu'il faut parser, il faudrait
-    // extraire les résultats via Regex ou Deno DOM ici avant de renvoyer le JSON au frontend.
-    // Pour cet exemple, on simule une réponse JSON structurée si l'API est construite ainsi :
-    const remoteData = await fetchResponse.json().catch(() => ({ 
-        success: false, 
-        message: "L'API source n'a pas renvoyé de JSON valide. Scraping HTML requis." 
-    }));
 
-    return new Response(JSON.stringify(remoteData), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200
-    });
+    const allDraws: ParsedOfficialDraw[] = [];
+    const allDays = new Set<string>();
+    const allUnknown = new Set<string>();
+    const httpErrors: Array<{ month: string; status: number | string }> = [];
+    const rawByMonth: Record<string, unknown> = {};
+    let skippedInvalidCount = 0;
 
+    for (const monthParam of targetMonths) {
+      const targetUrl = `${LOTOBONHEUR_API_URL}?month=${encodeURIComponent(monthParam)}`;
+      const fetchResponse = await fetch(targetUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (NexusEngine/12.0)",
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(20000),
+      });
+
+      if (!fetchResponse.ok) {
+        httpErrors.push({ month: monthParam, status: fetchResponse.status });
+        continue;
+      }
+
+      const remoteData = await fetchResponse.json().catch(() => null);
+      if (!remoteData) {
+        httpErrors.push({ month: monthParam, status: "INVALID_JSON" });
+        continue;
+      }
+
+      if (includeRaw) {
+        rawByMonth[monthParam] = remoteData;
+      }
+
+      const parsed = parseLotobonheurResponse(remoteData, {
+        targetDrawName: drawName,
+        fallbackYear: now.getFullYear(),
+      });
+
+      allDraws.push(...parsed.rows);
+      parsed.dayBlocks.forEach((d) => allDays.add(d));
+      parsed.unknown.forEach((u) => allUnknown.add(u));
+      skippedInvalidCount += parsed.skippedInvalidCount;
+    }
+
+    allDraws.sort((a, b) => b.date.localeCompare(a.date));
+
+    return new Response(
+      JSON.stringify({
+        success: allDraws.length > 0 || httpErrors.length === 0,
+        source: "lotobonheur-api",
+        months: targetMonths,
+        count: allDraws.length,
+        draws: allDraws.map((d) => ({
+          drawName: d.draw_name,
+          date: d.date,
+          gagnants: d.gagnants,
+          machine: d.machine || [],
+          version: d.version,
+        })),
+        dayBlocks: Array.from(allDays).sort(),
+        unknownDrawNames: Array.from(allUnknown),
+        skippedInvalidCount,
+        httpErrors,
+        ...(includeRaw ? { raw: rawByMonth } : {}),
+      }),
+      {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: allDraws.length === 0 && httpErrors.length > 0 ? 502 : 200,
+      }
+    );
   } catch (error: any) {
-    console.error("Proxy Results Error:", error)
-    return new Response(JSON.stringify({ success: false, error: error?.message || "Unknown error" }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error("Proxy Results Error:", error);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error?.message || "Erreur inconnue proxy-results",
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 }

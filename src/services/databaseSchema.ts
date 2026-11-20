@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS public.draw_results (
   
   -- Validation des données via la fonction optimisée
   CONSTRAINT valid_gagnants CHECK (is_valid_loto_numbers(gagnants)),
-  CONSTRAINT valid_machine CHECK (machine IS NULL OR is_valid_loto_numbers(machine))
+  CONSTRAINT valid_machine CHECK (machine IS NULL OR cardinality(machine) = 0 OR is_valid_loto_numbers(machine))
 );
 
 -- B. ANALYTIQUES HPC (Données Calculées / Cache)
@@ -203,6 +203,8 @@ CREATE TABLE IF NOT EXISTS public.learning_sessions (
 -- Index Composite B-Tree pour les requêtes chronologiques filtrées par jeu (Très fréquent)
 -- Permet des "ORDER BY date DESC" instantanés
 CREATE INDEX IF NOT EXISTS idx_results_lookup ON public.draw_results(draw_name, date DESC);
+CREATE INDEX IF NOT EXISTS idx_draw_results_date_desc ON public.draw_results(date DESC, draw_name);
+CREATE INDEX IF NOT EXISTS idx_draw_results_updated_at ON public.draw_results(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date DESC);
 
 -- Index GIN (Generalized Inverted Index) pour la recherche de numéros dans les tableaux

@@ -1,7 +1,7 @@
-import { AlgoWeights, AlgoKey } from '../../shared/prediction.types';
+import { AlgoWeights, AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 import { LCG } from '../../utils/mathUtils';
 import { unpackHistory, computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
-import { getMirrorNumber, getComplement90 } from '../../config/networks';
+import { getMirrorNumber, getComplement90, drawHasMachineNumbers } from '../../config/networks';
 
 export {};
 
@@ -19,31 +19,48 @@ interface BayesianWorkerConfig {
     historyDepth: number;
 }
 
-// Norme L1 stricte avec bornes dynamiques
-const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
+// Norme L1 stricte avec bornes dynamiques et préservation des canaux désactivés
+const normalizeWeights = (
+  w: AlgoWeights,
+  forcedZeroKeys: ReadonlySet<string> = new Set()
+): AlgoWeights => {
   const keys = Object.keys(w) as AlgoKey[];
-  const numKeys = keys.length || 1;
-  const total = keys.reduce((acc, k) => acc + Math.abs(w[k] ?? 0), 0);
+  const activeKeys = keys.filter((k) => !forcedZeroKeys.has(k));
   const normalized = { ...w };
-  
+
+  keys.forEach((k) => {
+    if (forcedZeroKeys.has(k)) {
+      normalized[k] = 0;
+    }
+  });
+
+  if (activeKeys.length === 0) {
+    return normalized;
+  }
+
+  const numKeys = activeKeys.length;
+  const total = activeKeys.reduce((acc, k) => acc + Math.abs(w[k] ?? 0), 0);
+
   if (total <= 0) {
-    keys.forEach(k => { normalized[k] = 1.0 / numKeys; });
+    activeKeys.forEach((k) => {
+      normalized[k] = 1.0 / numKeys;
+    });
     return normalized;
   }
 
   const FLOOR = 1.0 / (2.0 * numKeys);
   const CEILING = 2.0 / Math.sqrt(numKeys);
 
-  keys.forEach((k) => {
+  activeKeys.forEach((k) => {
     let val = Math.abs(normalized[k]!) / total;
     val = Math.max(FLOOR, Math.min(CEILING, val));
     normalized[k] = parseFloat(val.toFixed(6));
   });
 
-  const currentSum = keys.reduce((acc, k) => acc + normalized[k]!, 0);
+  const currentSum = activeKeys.reduce((acc, k) => acc + normalized[k]!, 0);
   if (Math.abs(currentSum - 1.0) > 1e-6) {
     const diff = 1.0 - currentSum;
-    normalized[keys[0]] = parseFloat((normalized[keys[0]]! + diff).toFixed(6));
+    normalized[activeKeys[0]] = parseFloat((normalized[activeKeys[0]]! + diff).toFixed(6));
   }
   return normalized;
 };
@@ -306,7 +323,8 @@ ctx.onmessage = async (e) => {
         const { type, payload } = e.data;
         
         if (type === 'start') {
-            const { tensors, history, historyBuffer, drawCount, winningCount, totalCols, currentWeights, config, memoryObservations, timeSignature } = payload as {
+            const { drawName, tensors, history, historyBuffer, drawCount, winningCount, totalCols, currentWeights, config, memoryObservations, timeSignature } = payload as {
+                drawName?: string;
                 tensors?: TensorContext[];
                 history?: any[];
                 historyBuffer?: ArrayBuffer;
@@ -319,18 +337,28 @@ ctx.onmessage = async (e) => {
                 timeSignature: string;
             };
             const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : (history ? unpackHistory(history) : []);
+            const hasMachine = drawName
+                ? drawHasMachineNumbers(drawName, hist)
+                : hist.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+            const forcedZeroKeys = new Set<string>(RETIRED_ALGO_WEIGHT_KEYS);
+            if (!hasMachine) {
+                forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
+            }
+            const sanitizedCurrentWeights = normalizeWeights(currentWeights, forcedZeroKeys);
             
             const activeTensors = tensors || [];
             
             const prng = new LCG(`bayesian_${timeSignature}_${config.initialSamples}`);
             const typedConfig = config as BayesianWorkerConfig;
-            const keys = Object.values(AlgoKey).filter(k => currentWeights[k as AlgoKey] !== undefined);
+            const keys = Object.values(AlgoKey).filter(
+                (k) => currentWeights[k as AlgoKey] !== undefined && !forcedZeroKeys.has(k)
+            );
             
             let progressCount = 0;
             const totalSteps = typedConfig.initialSamples + typedConfig.bayesianIterations;
             
             // Calcul du score de base déterministe via la méthode d'évaluation tensorielle rapide
-            const baselineScore = evaluateTensor(currentWeights, activeTensors);
+            const baselineScore = evaluateTensor(sanitizedCurrentWeights, activeTensors);
             
             const updateProgress = (best: number) => {
                 progressCount++;
@@ -339,24 +367,30 @@ ctx.onmessage = async (e) => {
 
             // Normalisation à chaud des observations mémoire par rapport aux tenseurs actuels
             const observations: { weights: AlgoWeights; score: number }[] = memoryObservations 
-                ? memoryObservations.map(o => ({
-                    weights: o.weights,
-                    score: evaluateTensor(o.weights, activeTensors)
-                }))
+                ? memoryObservations.map(o => {
+                    const sanitizedMemWeights = normalizeWeights(o.weights, forcedZeroKeys);
+                    return {
+                        weights: sanitizedMemWeights,
+                        score: evaluateTensor(sanitizedMemWeights, activeTensors)
+                    };
+                })
                 : [];
             
             const remainingInitialSamples = Math.max(0, typedConfig.initialSamples - observations.length);
             for (let i = 0; i < remainingInitialSamples; i++) {
                 const randomWeights: AlgoWeights = {} as AlgoWeights;
+                forcedZeroKeys.forEach((zk) => {
+                    randomWeights[zk as AlgoKey] = 0;
+                });
                 for (const key of keys) {
-                    const weight = currentWeights[key as AlgoKey] || 0;
+                    const weight = sanitizedCurrentWeights[key as AlgoKey] || 0;
                     const replaceFactor = prng.next();
                     const scaleFactor = Math.cos(prng.next() * Math.PI / 2.0);
                     
                     randomWeights[key as AlgoKey] = (weight * scaleFactor) * (1 - replaceFactor) + prng.next() * replaceFactor;
                 }
                 
-                const normWeights = normalizeWeights(randomWeights);
+                const normWeights = normalizeWeights(randomWeights, forcedZeroKeys);
                 const score = evaluateTensor(normWeights, activeTensors);
                 observations.push({ weights: normWeights, score });
                 
@@ -393,7 +427,10 @@ ctx.onmessage = async (e) => {
                 }
 
                 if (bestCandidate) {
-                    const normCandidate = normalizeWeights(bestCandidate);
+                    forcedZeroKeys.forEach((zk) => {
+                        bestCandidate![zk as AlgoKey] = 0;
+                    });
+                    const normCandidate = normalizeWeights(bestCandidate, forcedZeroKeys);
                     const score = evaluateTensor(normCandidate, activeTensors);
                     observations.push({ weights: normCandidate, score });
                 }
@@ -409,7 +446,7 @@ ctx.onmessage = async (e) => {
             ctx.postMessage({
                 type: 'result',
                 data: {
-                    bestWeights: improvement > 0 ? bestObs.weights : currentWeights,
+                    bestWeights: improvement > 0 ? bestObs.weights : sanitizedCurrentWeights,
                     improvement,
                     finalScore: Math.max(bestObs.score, baselineScore),
                     iterations: totalSteps,

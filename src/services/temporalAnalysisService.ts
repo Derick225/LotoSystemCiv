@@ -474,10 +474,11 @@ export const calculateDnaSieveWeights = (
         momentum[n] = shortCount - longCount;
     }
 
-    // 5. Transfert Machine -> Gagnants (Stochastique)
+    // 5. Transfert Machine -> Gagnants (Stochastique, désactivé si tirage sans numéros machine)
+    const hasMachineDataInHistory = drawHasMachineNumbers(drawName, history);
     const machineTransfer = new Float32Array(91);
     const lastMachines = Array.isArray(history[0]?.machine) ? history[0].machine : [];
-    if (lastMachines.length > 0) {
+    if (hasMachineDataInHistory && lastMachines.length > 0) {
         history.forEach((d, idx) => {
             if (idx < history.length - 1 && Array.isArray(d.machine)) {
                 const hadMachine = d.machine.some(m => lastMachines.includes(m));
@@ -540,7 +541,6 @@ export const calculateDnaSieveWeights = (
 
     // 9. Extraction et Normalisation continue des poids d'ADN
     const geneKeys = Object.values(AlgoKey);
-    const hasMachineDataInHistory = drawHasMachineNumbers(drawName, history);
     let totalWeight = 0;
     const activeWeightsMap: Record<string, number> = {};
 

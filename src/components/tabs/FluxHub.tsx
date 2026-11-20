@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { DrawResult } from "../../types";
 import { NumberBall } from "../NumberBall";
-import { formatDate, syncDrawExternal } from "../../services/lotteryService";
+import { formatDate, syncDrawExternalDetailed } from "../../services/lotteryService";
 import { useNexusStore } from "../../store/useNexusStore";
 import {
   RefreshCw,
@@ -294,9 +294,20 @@ export const FluxHub: React.FC<{ history: DrawResult[] }> = ({ history }) => {
     showToast("Synchronisation API...", "info");
     audioEngine.play("scan");
     try {
-      await syncDrawExternal(currentDrawName);
+      const res = await syncDrawExternalDetailed(currentDrawName);
       await refreshData(currentDrawName, true);
-      showToast("Flux mis à jour avec succès", "success");
+      const count = Math.max(res.addedCount, res.upsertedCount);
+      if (count > 0) {
+        showToast(
+          `${count} tirage(s) synchronisé(s) (${res.fetchedCount} vérifiés).`,
+          "success"
+        );
+      } else {
+        showToast(
+          `Flux à jour (${res.fetchedCount} tirages vérifiés).`,
+          "success"
+        );
+      }
       audioEngine.play("success");
     } catch (e: any) {
       if (e?.code === "SYNC_REQUIRES_BACKEND") {

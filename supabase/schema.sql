@@ -17,11 +17,11 @@ BEGIN
   IF nums IS NULL OR array_length(nums, 1) IS NULL THEN RETURN FALSE; END IF;
   RETURN (
     array_length(nums, 1) = 5
-    AND array_length(nums, 1) = array_length(ARRAY(SELECT DISTINCT UNNEST(nums)), 1)
+    AND array_length(nums, 1) = (SELECT count(DISTINCT x)::INTEGER FROM unnest(nums) AS t(x))
     AND nums <@ ARRAY(SELECT generate_series(1, 90)::INTEGER)
   );
 END;
-$$ LANGUAGE plpgsql IMMUTABLE;
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
 
 -- 3. TABLES
 
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS public.draw_results (
   draw_name TEXT NOT NULL,
   date DATE NOT NULL,
   gagnants INTEGER[] NOT NULL CHECK (is_valid_loto_numbers(gagnants)),
-  machine INTEGER[] CHECK (machine IS NULL OR is_valid_loto_numbers(machine)),
+  machine INTEGER[] CHECK (machine IS NULL OR cardinality(machine) = 0 OR is_valid_loto_numbers(machine)),
   version INTEGER DEFAULT 1,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now(),
@@ -234,6 +234,8 @@ CREATE TABLE IF NOT EXISTS public.model_weights_config (
 
 -- 4. INDEXES
 CREATE INDEX IF NOT EXISTS idx_results_lookup ON public.draw_results(draw_name, date DESC);
+CREATE INDEX IF NOT EXISTS idx_draw_results_date_desc ON public.draw_results(date DESC, draw_name);
+CREATE INDEX IF NOT EXISTS idx_draw_results_updated_at ON public.draw_results(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_results_gagnants ON public.draw_results USING GIN(gagnants);
 CREATE INDEX IF NOT EXISTS idx_analytics_lookup ON public.draw_analytics(draw_name, date DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_user ON public.transactions(user_id);

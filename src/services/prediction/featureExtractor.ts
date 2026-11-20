@@ -3,6 +3,7 @@ import { globalCache, CACHE_TTL } from '../cache/CacheService';
 import { calculateFractalIndex, calculateShannonEntropy } from '../mathService';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { calculateInterDrawVector } from '../interDrawService';
+import { drawHasMachineNumbers } from '../../constants';
 
 export interface ExtractedFeatures {
   freqMap: Float32Array;
@@ -186,17 +187,22 @@ export const extractFeatures = async (
       // ============================================================================
       // 2. MODULE DE SYMBIOSE EXPLICITE (Machine <-> Gagnants) & PARCOURS TEMPOREL
       // ============================================================================
+      const hasMachine = drawHasMachineNumbers(drawName, filteredHistory);
       // Matrice de transfert croisé Machine -> Gagnants (t+1 -> t)
-      const machineToWinnersMatrix: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
+      const machineToWinnersMatrix: Float32Array[] = hasMachine
+        ? Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1))
+        : [];
       
-      for (let i = 0; i < recentHistory.length - 1; i++) {
-        const { machine: prevMachine } = extractDrawNumbers(recentHistory[i + 1]);
-        const { winners: currWinners } = extractDrawNumbers(recentHistory[i]);
-        if (prevMachine.length > 0 && currWinners.length > 0) {
-          const decay = Math.pow(TIME_DECAY, i);
-          for (const m of prevMachine) {
-            for (const w of currWinners) {
-              machineToWinnersMatrix[m][w] += decay;
+      if (hasMachine) {
+        for (let i = 0; i < recentHistory.length - 1; i++) {
+          const { machine: prevMachine } = extractDrawNumbers(recentHistory[i + 1]);
+          const { winners: currWinners } = extractDrawNumbers(recentHistory[i]);
+          if (prevMachine.length > 0 && currWinners.length > 0) {
+            const decay = Math.pow(TIME_DECAY, i);
+            for (const m of prevMachine) {
+              for (const w of currWinners) {
+                machineToWinnersMatrix[m][w] += decay;
+              }
             }
           }
         }
@@ -214,16 +220,18 @@ export const extractFeatures = async (
         }
 
         // Injection continue d'énergie stochastique issue de la Symbiose Machine
-        for (const m of machine) {
-          let crossEnergy = 0;
-          const row = machineToWinnersMatrix[m];
-          if (row) {
-            for (let w = DOMAIN_MIN; w <= DOMAIN_MAX; w++) {
-              crossEnergy += row[w];
+        if (hasMachine) {
+          for (const m of machine) {
+            let crossEnergy = 0;
+            const row = machineToWinnersMatrix[m];
+            if (row) {
+              for (let w = DOMAIN_MIN; w <= DOMAIN_MAX; w++) {
+                crossEnergy += row[w];
+              }
             }
+            const transferRatio = crossEnergy / (winners.length || 5);
+            machineTransferMap[m] += decayWeight * (1.0 + Math.tanh(transferRatio));
           }
-          const transferRatio = crossEnergy / (winners.length || 5);
-          machineTransferMap[m] += decayWeight * (1.0 + Math.tanh(transferRatio));
         }
       }
 
@@ -264,8 +272,8 @@ export const extractFeatures = async (
           }
         }
 
-        // Couche Machine
-        if (currentMachine.length > 0) {
+        // Couche Machine (strictement ignorée si le tirage n'a pas de numéros machine)
+        if (hasMachine && currentMachine.length > 0) {
           const pMachineList = prevMachine.length > 0 ? prevMachine : prevWinners;
           for (const p of pMachineList) {
             for (const c of currentMachine) {
@@ -286,8 +294,12 @@ export const extractFeatures = async (
       const markovTransitionMap: Float32Array[] = Array.from({ length: DOMAIN_MAX + 1 }, () => new Float32Array(DOMAIN_MAX + 1));
       for (let p = DOMAIN_MIN; p <= DOMAIN_MAX; p++) {
         for (let c = DOMAIN_MIN; c <= DOMAIN_MAX; c++) {
-          markovTransitionMap[p][c] = markovWinnersMap[p][c] + alphaCross * markovMachineMap[p][c];
-          affinityMap[p][c] = affinityWinnersMap[p][c] + alphaCross * affinityMachineMap[p][c];
+          markovTransitionMap[p][c] = hasMachine
+            ? markovWinnersMap[p][c] + alphaCross * markovMachineMap[p][c]
+            : markovWinnersMap[p][c];
+          affinityMap[p][c] = hasMachine
+            ? affinityWinnersMap[p][c] + alphaCross * affinityMachineMap[p][c]
+            : affinityWinnersMap[p][c];
         }
       }
 

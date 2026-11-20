@@ -1,12 +1,15 @@
 import { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { useNexusStore } from '../store/useNexusStore';
 import { useSession } from './useAuth';
 import { useToast } from '../components/ui/Toast';
 import { audioEngine } from '../utils/audioEngine';
 import { logger } from '../utils/logger';
+import { lotteryKeys } from './useLottery';
 
 export const useRealtimeSync = () => {
+    const queryClient = useQueryClient();
     const { session } = useSession();
     const { showToast } = useToast();
     const refreshData = useNexusStore((state) => state.refreshData);
@@ -75,17 +78,21 @@ export const useRealtimeSync = () => {
                 { event: '*', schema: 'public', table: 'draw_results' }, 
                 (payload) => {
                     const eventType = payload.eventType;
-                    const newRecord = payload.new as Record<string, unknown>;
+                    const newRecord = (payload.new || {}) as Record<string, unknown>;
+                    const oldRecord = (payload.old || {}) as Record<string, unknown>;
+                    const changedDraw = String(newRecord.draw_name || oldRecord.draw_name || '');
                     
                     if (eventType === 'INSERT') {
                         audioEngine.play('success');
-                        showToast(`Nouveau tirage détecté : ${newRecord.draw_name} (${newRecord.date})`, "success");
+                        showToast(`Nouveau tirage détecté : ${changedDraw} (${newRecord.date || ''})`, "success");
                     } else if (eventType === 'UPDATE') {
-                        showToast(`Tirage ${newRecord.draw_name} mis à jour dans le cloud.`, "info");
+                        showToast(`Tirage ${changedDraw} mis à jour dans le cloud.`, "info");
                     }
+
+                    queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
                     
                     // Si le tirage actuel ouvert est affecté ou modifié, on rafraîchit automatiquement l'interface
-                    if (drawName && newRecord && newRecord.draw_name === drawName) {
+                    if (drawName && changedDraw === drawName) {
                         refreshData(drawName, true);
                     }
                 }
@@ -96,13 +103,15 @@ export const useRealtimeSync = () => {
                 }
             });
 
-        // 1.2 Événements locaux (Mode Hors-ligne, Backtesting, Simulations locaux)
+        // 1.2 Événements locaux (Mode Hors-ligne, Backtesting, Synchronisation API/Delta)
         const handleLocalUpdated = (e: Event) => {
             const customEvent = e as CustomEvent;
             const targetDraw = customEvent.detail?.drawName || drawName;
-            if (targetDraw && targetDraw === drawName) {
+            const source = customEvent.detail?.source;
+            queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
+            if (targetDraw && (targetDraw === drawName || targetDraw === 'ALL') && source !== 'background-delta') {
                 logger.debug({ targetDraw }, `[Local Sync Event] Rafraîchissement des données`);
-                refreshData(targetDraw, true);
+                refreshData(drawName || targetDraw, true);
             }
         };
 
@@ -112,7 +121,7 @@ export const useRealtimeSync = () => {
             supabase.removeChannel(drawChannel);
             window.removeEventListener('DRAW_RESULTS_UPDATED', handleLocalUpdated);
         };
-    }, [drawName, refreshData, showToast]);
+    }, [drawName, refreshData, showToast, queryClient]);
 
     useEffect(() => {
         if (!isSupabaseConfigured() || !session?.user) return;

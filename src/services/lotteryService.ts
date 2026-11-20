@@ -12,6 +12,7 @@ import {
   getWeekdayReferenceDateIso,
   findNextActiveScheduledSlot,
   toCanonicalIsoDate,
+  syncDrawCancellationsFromDb,
   type DrawException,
   type SkippedDrawSlot,
 } from './drawScheduleExceptionService';
@@ -123,6 +124,42 @@ export function getDrawTimestamp(dateStr: string, drawName?: string, explicitTim
 const inFlightHistoryFetches = new Map<string, Promise<DrawResult[]>>();
 const lastDeltaSyncByDraw = new Map<string, number>();
 const DELTA_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes de cooldown entre synchronisations différentielles par tirage
+const SUPABASE_PAGE_SIZE = 1000;
+const DELTA_OVERLAP_DAYS = 7;
+
+const shiftIsoDateDays = (isoDate: string, deltaDays: number): string => {
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return isoDate;
+  const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + deltaDays));
+  return dt.toISOString().slice(0, 10);
+};
+
+const mapDbRowToDrawResult = (row: any): DrawResult => {
+  const dName = normalizeDrawName(String(row.draw_name || row.drawName || ''));
+  const withoutMachine = isDrawWithoutMachine(dName);
+  const rawMachine = Array.isArray(row.machine) ? row.machine : [];
+  return {
+    id: String(row.id || `draw_${dName.replace(/\s+/g, '_')}_${normalizeDate(String(row.date || ''))}`),
+    drawName: dName,
+    date: formatDate(String(row.date || '')),
+    gagnants: Array.isArray(row.gagnants) ? row.gagnants : [],
+    machine: withoutMachine || rawMachine.length !== 5 ? [] : rawMachine,
+    version: row.version || 1,
+  };
+};
+
+const sanitizeMachineForDb = (drawName: string, machine?: number[] | null): number[] | null => {
+  if (isDrawWithoutMachine(drawName)) return null;
+  if (!Array.isArray(machine) || machine.length !== 5) return null;
+  return machine;
+};
+
+const invalidateDailySummariesCache = async (): Promise<void> => {
+  const days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+  await Promise.all(
+    days.map((d) => globalCache.delete(globalCache.generateKey('daily_summary', d)).catch(() => {}))
+  );
+};
 
 const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): DrawResult[] => {
   const byKey = new Map<string, DrawResult>();
@@ -143,6 +180,76 @@ const mergeDeltaResults = (deltaRows: DrawResult[], existing: DrawResult[]): Dra
   return Array.from(byKey.values())
     .sort((a, b) => getDrawTimestamp(b.date, b.drawName) - getDrawTimestamp(a.date, a.drawName))
     .slice(0, LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+};
+
+interface PaginatedSupabaseFetchOptions {
+  drawName?: string;
+  sinceDate?: string;
+  untilDate?: string;
+  maxRows?: number;
+  timeoutMs?: number;
+}
+
+const fetchFromSupabasePaginated = async (
+  opts: PaginatedSupabaseFetchOptions
+): Promise<DrawResult[]> => {
+  const maxRows = Math.max(1, opts.maxRows ?? LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
+  const timeoutMs = opts.timeoutMs ?? 6000;
+  const collected: DrawResult[] = [];
+  let offset = 0;
+
+  while (collected.length < maxRows) {
+    const remaining = maxRows - collected.length;
+    const batchSize = Math.min(SUPABASE_PAGE_SIZE, remaining);
+    let query = supabase
+      .from('draw_results')
+      .select('id,draw_name,date,gagnants,machine,version')
+      .order('date', { ascending: false })
+      .range(offset, offset + batchSize - 1);
+
+    if (opts.drawName && opts.drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
+      query = query.eq('draw_name', normalizeDrawName(opts.drawName));
+    }
+    if (opts.sinceDate) {
+      query = query.gte('date', normalizeDate(opts.sinceDate));
+    }
+    if (opts.untilDate) {
+      query = query.lte('date', normalizeDate(opts.untilDate));
+    }
+
+    let queryTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      queryTimer = setTimeout(() => {
+        reject(new AppError(`Supabase request timeout after ${timeoutMs}ms`, 'NETWORK_TIMEOUT', 'low', { drawName: opts.drawName }));
+      }, timeoutMs);
+    });
+
+    let res: { data: any[] | null; error: any };
+    try {
+      res = (await Promise.race([query, timeoutPromise])) as { data: any[] | null; error: any };
+    } finally {
+      if (queryTimer) clearTimeout(queryTimer);
+    }
+
+    if (res.error) {
+      throw new AppError(getErrorMessage(res.error), 'SUPABASE_FETCH_ERROR', 'medium', {
+        drawName: opts.drawName,
+        error: res.error,
+      });
+    }
+
+    const rows = res.data || [];
+    for (const row of rows) {
+      collected.push(mapDbRowToDrawResult(row));
+    }
+
+    if (rows.length < batchSize) {
+      break;
+    }
+    offset += batchSize;
+  }
+
+  return collected.sort((a, b) => getDrawTimestamp(b.date, b.drawName) - getDrawTimestamp(a.date, a.drawName));
 };
 
 const lastSyncedFingerprintByDraw = new Map<string, string>();
@@ -241,6 +348,22 @@ export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: str
   }
 };
 
+export interface SyncStatusRecord {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  trigger_source: string;
+  status: string;
+  months: string[];
+  fetched_draws: number;
+  upserted: number;
+  cancelled_inferred: number;
+  autopsies_caught_up: number;
+  snapshots_cancelled: number;
+  error: string | null;
+  duration_ms: number | null;
+}
+
 export const lotteryService = {
   async fetchHistory(drawName: string, force?: boolean): Promise<DrawResult[]> {
     const cacheKey = globalCache.generateKey('history', drawName);
@@ -262,45 +385,34 @@ export const lotteryService = {
         if (isSupabaseConfigured() && navigator.onLine && (now - lastSync > DELTA_SYNC_COOLDOWN_MS)) {
           lastDeltaSyncByDraw.set(drawName, now);
           (async () => {
-            let bgTimer: ReturnType<typeof setTimeout> | undefined;
             try {
               const latestIsoDate = normalizeDate(realCached[0].date);
-              let query = supabase
-                .from('draw_results')
-                .select('*')
-                .gte('date', latestIsoDate)
-                .order('date', { ascending: false });
-
-              if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
-                query = query.eq('draw_name', normalizeDrawName(drawName));
-              }
-              query = query.limit(100);
-
-              const bgTimeoutPromise = new Promise<never>((_, reject) => {
-                bgTimer = setTimeout(() => reject(new AppError('Background delta refresh timeout', 'NETWORK_TIMEOUT', 'low')), 4000);
+              const overlapSince = shiftIsoDateDays(latestIsoDate, -DELTA_OVERLAP_DAYS);
+              const delta = await fetchFromSupabasePaginated({
+                drawName,
+                sinceDate: overlapSince,
+                maxRows: 300,
+                timeoutMs: 4500,
               });
-
-              const res = (await Promise.race([query, bgTimeoutPromise])) as { data: any[] | null; error: any };
-              const { data } = res || {};
-              if (data && data.length > 0) {
-                const delta = data.map(row => ({
-                  id: row.id,
-                  drawName: row.draw_name,
-                  date: formatDate(row.date),
-                  gagnants: row.gagnants,
-                  machine: row.machine || [],
-                  version: row.version || 1
-                }));
+              if (delta.length > 0) {
+                const prevHash = hashDrawsDigest(realCached, drawName);
                 const merged = mergeDeltaResults(delta, realCached);
-                if (merged.length > realCached.length) {
-                  await globalCache.registerNewDraw(drawName, merged.length);
+                const nextHash = hashDrawsDigest(merged, drawName);
+                if (nextHash !== prevHash) {
+                  if (merged.length > realCached.length) {
+                    await globalCache.registerNewDraw(drawName, merged.length);
+                  }
+                  await globalCache.set(cacheKey, merged, CACHE_TTL.HISTORY, drawName);
+                  await invalidateDailySummariesCache();
+                  syncHistoryToRustStore(merged, drawName);
+                  if (typeof window !== 'undefined') {
+                    window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName, source: 'background-delta' } }));
+                  }
                 }
-                await globalCache.set(cacheKey, merged, CACHE_TTL.HISTORY, drawName);
               }
+              syncDrawCancellationsFromDb(false).catch(() => {});
             } catch {
               // Silently ignore background delta revalidation failures
-            } finally {
-              if (bgTimer) clearTimeout(bgTimer);
             }
           })();
         }
@@ -316,101 +428,54 @@ export const lotteryService = {
 
     const fetchPromise = (async (): Promise<DrawResult[]> => {
       const existingCached = await globalCache.get<DrawResult[]>(cacheKey, drawName);
-      const hasRealCache = existingCached && existingCached.length > 0 && !existingCached[0]?.id?.startsWith('deterministic-');
+      const realExisting = existingCached ? existingCached.filter(d => !d.id?.startsWith('deterministic-')) : [];
+      const hasRealCache = realExisting.length > 0;
 
       if (isSupabaseConfigured() && navigator.onLine) {
-        let queryTimer: ReturnType<typeof setTimeout> | undefined;
         try {
-            let query = supabase
-              .from('draw_results')
-              .select('*')
-              .order('date', { ascending: false });
+          // DELTA-SYNC avec recouvrement de 7 jours pour capter aussi les corrections/retards récents
+          const sinceDate = hasRealCache
+            ? shiftIsoDateDays(normalizeDate(realExisting[0].date), -DELTA_OVERLAP_DAYS)
+            : undefined;
+          const fetchedRows = await fetchFromSupabasePaginated({
+            drawName,
+            sinceDate,
+            maxRows: hasRealCache ? 400 : LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT,
+            timeoutMs: hasRealCache ? 4500 : 8000,
+          });
 
-            if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
-                query = query.eq('draw_name', normalizeDrawName(drawName));
-            }
-            
-            // DELTA-SYNC : Si une base locale réelle existe déjà, on ne télécharge que les tirages >= à la dernière date connue
-            if (hasRealCache) {
-                const latestIsoDate = normalizeDate(existingCached[0].date);
-                query = query.gte('date', latestIsoDate).limit(200);
-            } else {
-                query = query.limit(LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT);
-            }
-            
-            // Timeout de protection réseau à 3500ms avec nettoyage garanti du timer
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              queryTimer = setTimeout(() => {
-                reject(new AppError('Supabase request timeout after 3500ms', 'NETWORK_TIMEOUT', 'low', { drawName }));
-              }, 3500);
-            });
+          lastDeltaSyncByDraw.set(drawName, Date.now());
+          const finalData = hasRealCache
+            ? mergeDeltaResults(fetchedRows, realExisting)
+            : fetchedRows;
 
-            let res: { data: any[] | null; error: any };
-            try {
-              res = (await Promise.race([query, timeoutPromise])) as {
-                data: any[] | null;
-                error: any;
-              };
-            } finally {
-              if (queryTimer) clearTimeout(queryTimer);
-            }
-
-            const { data, error } = res;
-            
-            if (error) {
-                throw new AppError(getErrorMessage(error), 'SUPABASE_FETCH_ERROR', 'medium', { drawName, error });
-            }
-            
-            if (data) {
-                lastDeltaSyncByDraw.set(drawName, Date.now());
-                const fetchedRows: DrawResult[] = data.map(row => ({
-                  id: row.id,
-                  drawName: row.draw_name,
-                  date: formatDate(row.date),
-                  gagnants: row.gagnants,
-                  machine: row.machine || [],
-                  version: row.version || 1
-                }));
-
-                const finalData = hasRealCache
-                  ? mergeDeltaResults(fetchedRows, existingCached)
-                  : fetchedRows;
-
-                if (finalData.length > 0) {
-                  syncHistoryToRustStore(finalData, drawName);
-                  await globalCache.registerNewDraw(drawName, finalData.length);
-                  await globalCache.set(cacheKey, finalData, CACHE_TTL.HISTORY, drawName);
-                  return finalData;
-                }
-            }
+          if (finalData.length > 0) {
+            syncHistoryToRustStore(finalData, drawName);
+            await globalCache.registerNewDraw(drawName, finalData.length);
+            await globalCache.set(cacheKey, finalData, CACHE_TTL.HISTORY, drawName);
+            return finalData;
+          }
         } catch (e) {
-            const isTimeoutOrNetwork =
-              (e instanceof AppError && (e.code === 'NETWORK_TIMEOUT' || e.severity === 'low')) ||
-              (e instanceof Error && (e.message.toLowerCase().includes('timeout') || e.message.toLowerCase().includes('fetch')));
-            if (isTimeoutOrNetwork) {
-              console.warn(`[LotteryService] Requête distante Supabase non aboutie (${getErrorMessage(e)}). Bascule locale fluide.`);
-            } else {
-              logError(e, { source: 'lotteryService.fetchHistory' });
-            }
-        } finally {
-            if (queryTimer) clearTimeout(queryTimer);
+          const isTimeoutOrNetwork =
+            (e instanceof AppError && (e.code === 'NETWORK_TIMEOUT' || e.severity === 'low')) ||
+            (e instanceof Error && (e.message.toLowerCase().includes('timeout') || e.message.toLowerCase().includes('fetch')));
+          if (isTimeoutOrNetwork) {
+            console.warn(`[LotteryService] Requête distante Supabase non aboutie (${getErrorMessage(e)}). Bascule locale fluide.`);
+          } else {
+            logError(e, { source: 'lotteryService.fetchHistory' });
+          }
         }
-    }
-
-    // Fallback to real cache if network fails or offline
-    if (existingCached && existingCached.length > 0) {
-      const realCached = existingCached.filter(d => !d.id?.startsWith('deterministic-'));
-      if (realCached.length > 0) {
-        syncHistoryToRustStore(realCached, drawName);
-        return realCached;
       }
-    }
 
-    // ÉRADICATION TOTALE DES DONNÉES SIMULÉES : ZÉRO FAUX TIRAGE GÉNÉRÉ
-    // Si la synchronisation réseau échoue et qu'aucun tirage réel n'est en cache,
-    // on renvoie un tableau vide pour afficher l'état d'attente de synchronisation.
-    console.warn(`[LotteryService] Aucun tirage réel disponible pour '${drawName}' (mode hors-ligne ou base non synchronisée). Aucune donnée simulée n'est générée.`);
-    return [];
+      // Fallback to real cache if network fails or offline
+      if (realExisting.length > 0) {
+        syncHistoryToRustStore(realExisting, drawName);
+        return realExisting;
+      }
+
+      // ÉRADICATION TOTALE DES DONNÉES SIMULÉES : ZÉRO FAUX TIRAGE GÉNÉRÉ
+      console.warn(`[LotteryService] Aucun tirage réel disponible pour '${drawName}' (mode hors-ligne ou base non synchronisée). Aucune donnée simulée n'est générée.`);
+      return [];
     })();
 
     inFlightHistoryFetches.set(inFlightKey, fetchPromise);
@@ -419,6 +484,241 @@ export const lotteryService = {
     } finally {
       inFlightHistoryFetches.delete(inFlightKey);
     }
+  },
+
+  /**
+   * Récupère les résultats d'un tirage (ou de tous les tirages 'ALL') sur une plage de dates ISO/FR inclusive.
+   */
+  async fetchResultsByDateRange(drawName: string, startDate: string, endDate: string): Promise<DrawResult[]> {
+    const startIso = normalizeDate(startDate);
+    const endIso = normalizeDate(endDate);
+
+    if (isSupabaseConfigured() && navigator.onLine) {
+      try {
+        return await fetchFromSupabasePaginated({
+          drawName,
+          sinceDate: startIso,
+          untilDate: endIso,
+          maxRows: LOTTERY_CONSTANTS.MAX_HISTORY_LIMIT,
+          timeoutMs: 7000,
+        });
+      } catch (e) {
+        logError(e, { source: 'lotteryService.fetchResultsByDateRange' });
+      }
+    }
+
+    const fallback = await this.fetchHistory(drawName);
+    return fallback.filter((d) => {
+      const iso = normalizeDate(d.date);
+      return iso >= startIso && iso <= endIso;
+    });
+  },
+
+  /**
+   * Récupère une page précise de résultats depuis Supabase (avec fallback local).
+   */
+  async fetchResultsPage(
+    drawName: string,
+    page: number = 1,
+    pageSize: number = 50
+  ): Promise<{ data: DrawResult[]; total: number; page: number; pageSize: number; hasMore: boolean }> {
+    const safePage = Math.max(1, Math.floor(page));
+    const safeSize = Math.max(1, Math.min(200, Math.floor(pageSize)));
+    const from = (safePage - 1) * safeSize;
+    const to = from + safeSize - 1;
+
+    if (isSupabaseConfigured() && navigator.onLine) {
+      try {
+        let query = supabase
+          .from('draw_results')
+          .select('id,draw_name,date,gagnants,machine,version', { count: 'exact' })
+          .order('date', { ascending: false })
+          .range(from, to);
+
+        if (drawName && drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
+          query = query.eq('draw_name', normalizeDrawName(drawName));
+        }
+
+        const { data, count, error } = await query;
+        if (!error && data) {
+          const mapped = data.map(mapDbRowToDrawResult);
+          const total = typeof count === 'number' ? count : from + mapped.length;
+          return {
+            data: mapped,
+            total,
+            page: safePage,
+            pageSize: safeSize,
+            hasMore: from + mapped.length < total,
+          };
+        }
+      } catch (e) {
+        logError(e, { source: 'lotteryService.fetchResultsPage' });
+      }
+    }
+
+    const all = await this.fetchHistory(drawName);
+    const slice = all.slice(from, to + 1);
+    return {
+      data: slice,
+      total: all.length,
+      page: safePage,
+      pageSize: safeSize,
+      hasMore: from + slice.length < all.length,
+    };
+  },
+
+  /**
+   * Récupère le dernier résultat connu pour chacun des tirages demandés via la RPC `get_draw_results_summary`
+   * (une seule requête indexée) avec repli automatique sur requête directe / cache local.
+   */
+  async fetchLatestResults(drawNames?: string[], lookbackDays: number = 30): Promise<Map<string, DrawResult>> {
+    const latestMap = new Map<string, DrawResult>();
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return latestMap;
+    }
+
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('get_draw_results_summary', {
+        p_draw_names: drawNames && drawNames.length > 0 ? drawNames : null,
+        p_days: lookbackDays,
+      });
+
+      if (!rpcErr && Array.isArray(rpcData)) {
+        for (const row of rpcData) {
+          const mapped = mapDbRowToDrawResult(row);
+          if (mapped.drawName && !latestMap.has(mapped.drawName)) {
+            latestMap.set(mapped.drawName, mapped);
+          }
+        }
+        return latestMap;
+      }
+    } catch {
+      // Fallback ci-dessous si la RPC n'est pas encore déployée
+    }
+
+    const recentCutoff = new Date(Date.now() - lookbackDays * 86400000).toISOString().split('T')[0];
+    let query = supabase
+      .from('draw_results')
+      .select('id,draw_name,date,gagnants,machine,version')
+      .gte('date', recentCutoff)
+      .order('date', { ascending: false })
+      .limit(Math.max(30, (drawNames?.length || 28) * 3));
+
+    if (drawNames && drawNames.length > 0) {
+      query = query.in('draw_name', drawNames);
+    }
+
+    const { data, error } = await query;
+    if (!error && Array.isArray(data)) {
+      for (const row of data) {
+        const mapped = mapDbRowToDrawResult(row);
+        if (mapped.drawName && !latestMap.has(mapped.drawName)) {
+          latestMap.set(mapped.drawName, mapped);
+        }
+      }
+    }
+
+    return latestMap;
+  },
+
+  /**
+   * Consulte les dernières exécutions de synchronisation serveur (`sync_logs`) via RPC sécurisée.
+   */
+  async fetchRecentSyncStatus(limit: number = 10): Promise<SyncStatusRecord[]> {
+    if (!isSupabaseConfigured() || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return [];
+    }
+    try {
+      const { data, error } = await supabase.rpc('get_recent_sync_status', { p_limit: limit });
+      if (error || !Array.isArray(data)) return [];
+      return data;
+    } catch {
+      return [];
+    }
+  },
+
+  /**
+   * Récupère directement les résultats officiels depuis l'API distante via le proxy Express (`/api/results`)
+   * ou via l'Edge Function `nexus-api?action=proxy-results`.
+   */
+  async fetchOfficialResultsFromApi(options: {
+    month?: string;
+    months?: string[];
+    monthsBack?: number;
+    drawName?: string;
+    refresh?: boolean;
+  } = {}): Promise<{
+    success: boolean;
+    source: 'express-api' | 'edge-proxy';
+    months: string[];
+    draws: DrawResult[];
+    unknownDrawNames: string[];
+  }> {
+    const params = new URLSearchParams();
+    if (options.months && options.months.length > 0) params.set('month', options.months.join(','));
+    else if (options.month) params.set('month', options.month);
+    if (options.monthsBack !== undefined) params.set('monthsBack', String(options.monthsBack));
+    if (options.drawName && options.drawName !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
+      params.set('drawName', options.drawName);
+    }
+    if (options.refresh) params.set('refresh', '1');
+
+    if (typeof window !== 'undefined') {
+      try {
+        const resp = await fetch(`/api/results?${params.toString()}`, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(12000),
+        });
+        const ct = resp.headers.get('content-type') || '';
+        if (resp.ok && ct.includes('application/json')) {
+          const payload = await resp.json();
+          if (payload && Array.isArray(payload.draws)) {
+            return {
+              success: Boolean(payload.success),
+              source: 'express-api',
+              months: Array.isArray(payload.months) ? payload.months : [],
+              draws: payload.draws.map(mapDbRowToDrawResult),
+              unknownDrawNames: Array.isArray(payload.unknownDrawNames) ? payload.unknownDrawNames : [],
+            };
+          }
+        }
+      } catch {
+        // Fallback sur Edge proxy ci-dessous
+      }
+    }
+
+    if (isSupabaseConfigured()) {
+      const edgeRes = await apiClient.post<{
+        success: boolean;
+        months?: string[];
+        draws?: Array<{ drawName: string; date: string; gagnants: number[]; machine?: number[]; version?: number }>;
+        unknownDrawNames?: string[];
+      }>(
+        'proxy-results',
+        {
+          month: options.month,
+          months: options.months,
+          monthsBack: options.monthsBack ?? 1,
+          drawName: options.drawName,
+        },
+        { suppressErrorLogging: true }
+      );
+
+      return {
+        success: Boolean(edgeRes?.success),
+        source: 'edge-proxy',
+        months: Array.isArray(edgeRes?.months) ? edgeRes.months : [],
+        draws: Array.isArray(edgeRes?.draws) ? edgeRes.draws.map(mapDbRowToDrawResult) : [],
+        unknownDrawNames: Array.isArray(edgeRes?.unknownDrawNames) ? edgeRes.unknownDrawNames : [],
+      };
+    }
+
+    throw new AppError(
+      'Aucune passerelle API distante accessible pour récupérer les résultats officiels.',
+      'SYNC_REQUIRES_BACKEND',
+      'low',
+      options
+    );
   },
 
   /**
@@ -581,35 +881,229 @@ export const generateDeterministicFallbackHistory = (drawName: string): DrawResu
   return results.reverse();
 };
 
-export const syncDrawExternal = async (drawName?: string): Promise<number> => {
-  if (!isSupabaseConfigured()) {
-    const err = new AppError(
-      "Synchronisation indisponible : aucun backend n'est configuré (mode démo hors-ligne). " +
-      "Aucune donnée n'est inventée ; configurez Supabase pour synchroniser de vrais résultats.",
-      'SYNC_REQUIRES_BACKEND',
-      'low',
-      { drawName }
-    );
-    logError(err, { source: 'syncDrawExternal-offline' });
-    throw err;
+export interface SyncExternalOptions {
+  monthsBack?: number;
+  months?: string[];
+  skipRemoteApi?: boolean;
+}
+
+export interface SyncExternalDetailedResult {
+  addedCount: number;
+  upsertedCount: number;
+  fetchedCount: number;
+  source: 'edge-cron-sync' | 'express-api' | 'edge-proxy' | 'supabase-db';
+  months: string[];
+}
+
+const persistFetchedDrawsToLocalCache = async (
+  draws: DrawResult[],
+  targetDraw: string
+): Promise<number> => {
+  if (!draws || draws.length === 0) return 0;
+
+  const byDraw = new Map<string, DrawResult[]>();
+  for (const d of draws) {
+    const cleanName = normalizeDrawName(d.drawName);
+    const list = byDraw.get(cleanName) || [];
+    list.push({ ...d, drawName: cleanName });
+    byDraw.set(cleanName, list);
+  }
+
+  let totalAdded = 0;
+  for (const [dName, items] of byDraw.entries()) {
+    const cacheKey = globalCache.generateKey('history', dName);
+    const prevRaw = await globalCache.get<DrawResult[]>(cacheKey, dName);
+    const prev = (prevRaw || []).filter((r) => !r.id?.startsWith('deterministic-'));
+    const merged = mergeDeltaResults(items, prev);
+    const addedForDraw = Math.max(0, merged.length - prev.length);
+    totalAdded += addedForDraw;
+
+    await globalCache.set(cacheKey, merged, CACHE_TTL.HISTORY, dName);
+    await globalCache.registerNewDraw(dName, merged.length);
+    syncHistoryToRustStore(merged, dName);
+  }
+
+  if (targetDraw === LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER) {
+    const allKey = globalCache.generateKey('history', targetDraw);
+    const prevAllRaw = await globalCache.get<DrawResult[]>(allKey, targetDraw);
+    const prevAll = (prevAllRaw || []).filter((r) => !r.id?.startsWith('deterministic-'));
+    const mergedAll = mergeDeltaResults(draws, prevAll);
+    await globalCache.set(allKey, mergedAll, CACHE_TTL.HISTORY, targetDraw);
+    await globalCache.registerNewDraw(targetDraw, mergedAll.length);
+    syncHistoryToRustStore(mergedAll, targetDraw);
+  }
+
+  await invalidateDailySummariesCache();
+  return totalAdded;
+};
+
+export const syncDrawExternalDetailed = async (
+  drawName?: string,
+  options: SyncExternalOptions = {}
+): Promise<SyncExternalDetailedResult> => {
+  const targetDraw = drawName || LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER;
+  const isOnline = typeof navigator === 'undefined' ? true : navigator.onLine;
+  const supabaseReady = isSupabaseConfigured();
+
+  if (!supabaseReady) {
+    if (!isOnline || typeof window === 'undefined') {
+      const err = new AppError(
+        "Synchronisation indisponible : aucun backend n'est configuré (mode démo hors-ligne). " +
+          "Aucune donnée n'est inventée ; configurez Supabase pour synchroniser de vrais résultats.",
+        'SYNC_REQUIRES_BACKEND',
+        'low',
+        { drawName }
+      );
+      logError(err, { source: 'syncDrawExternal-offline' });
+      throw err;
+    }
+
+    // Tente d'utiliser le proxy Express local (/api/results) si le serveur Express tourne
+    try {
+      const apiRes = await lotteryService.fetchOfficialResultsFromApi({
+        drawName: targetDraw !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER ? targetDraw : undefined,
+        months: options.months,
+        monthsBack: options.monthsBack ?? 1,
+        refresh: true,
+      });
+
+      const added = await persistFetchedDrawsToLocalCache(apiRes.draws, targetDraw);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: targetDraw, source: 'express-api' } }));
+      }
+      return {
+        addedCount: added,
+        upsertedCount: added,
+        fetchedCount: apiRes.draws.length,
+        source: apiRes.source,
+        months: apiRes.months,
+      };
+    } catch {
+      const err = new AppError(
+        "Synchronisation indisponible : aucun backend n'est configuré (mode démo hors-ligne). " +
+          "Aucune donnée n'est inventée ; configurez Supabase pour synchroniser de vrais résultats.",
+        'SYNC_REQUIRES_BACKEND',
+        'low',
+        { drawName }
+      );
+      logError(err, { source: 'syncDrawExternal-offline' });
+      throw err;
+    }
   }
 
   try {
-    // Delta-Sync local depuis la table draw_results de Supabase (Zéro appel d'Edge Function coûteux)
-    const targetDraw = drawName || LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER;
     const prevCached = await globalCache.get<DrawResult[]>(globalCache.generateKey('history', targetDraw), targetDraw);
-    const prevCount = prevCached ? prevCached.filter(d => !d.id?.startsWith('deterministic-')).length : 0;
+    const prevCount = prevCached ? prevCached.filter((d) => !d.id?.startsWith('deterministic-')).length : 0;
+
+    let remoteSource: SyncExternalDetailedResult['source'] = 'supabase-db';
+    let remoteUpserted = 0;
+    let remoteFetched = 0;
+    let syncedMonths: string[] = [];
+
+    if (!options.skipRemoteApi && isOnline) {
+      let edgeWorked = false;
+      try {
+        const edgeRes = await apiClient.post<{
+          success?: boolean;
+          count?: number;
+          upserted?: number;
+          fetched?: number;
+          months?: string[];
+        }>(
+          'cron-sync',
+          {
+            drawName: targetDraw !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER ? targetDraw : undefined,
+            manualTrigger: true,
+            monthsBack: options.monthsBack,
+            months: options.months,
+          },
+          { suppressErrorLogging: true }
+        );
+
+        if (edgeRes && edgeRes.success !== false) {
+          edgeWorked = true;
+          remoteSource = 'edge-cron-sync';
+          remoteUpserted = Number(edgeRes.upserted ?? edgeRes.count ?? 0);
+          remoteFetched = Number(edgeRes.fetched ?? 0);
+          syncedMonths = Array.isArray(edgeRes.months) ? edgeRes.months : [];
+        }
+      } catch {
+        // Fallback sur Express /api/results/sync ou proxy-results si cron-sync Edge n'est pas joignable
+      }
+
+      if (!edgeWorked && typeof window !== 'undefined') {
+        try {
+          const resp = await fetch('/api/results/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              drawName: targetDraw !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER ? targetDraw : undefined,
+              months: options.months,
+              monthsBack: options.monthsBack ?? 1,
+              persist: true,
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          const ct = resp.headers.get('content-type') || '';
+          if (resp.ok && ct.includes('application/json')) {
+            const apiPayload = await resp.json();
+            if (apiPayload && Array.isArray(apiPayload.draws)) {
+              remoteSource = 'express-api';
+              remoteFetched = apiPayload.draws.length;
+              remoteUpserted = Number(apiPayload.upserted ?? 0);
+              syncedMonths = Array.isArray(apiPayload.months) ? apiPayload.months : [];
+
+              if (!apiPayload.persisted && apiPayload.draws.length > 0) {
+                const mappedDraws = apiPayload.draws.map(mapDbRowToDrawResult);
+                await persistFetchedDrawsToLocalCache(mappedDraws, targetDraw);
+              }
+            }
+          }
+        } catch {
+          // On continue avec le rechargement direct de la table Supabase draw_results
+        }
+      }
+    }
+
+    await invalidateDailySummariesCache();
+    syncDrawCancellationsFromDb(true).catch(() => {});
+
     const updated = await lotteryService.fetchHistory(targetDraw, true);
-    const newCount = updated.filter(d => !d.id?.startsWith('deterministic-')).length;
-    return Math.max(0, newCount - prevCount);
+    const newCount = updated.filter((d) => !d.id?.startsWith('deterministic-')).length;
+    const addedCount = Math.max(0, newCount - prevCount);
+
+    if (typeof window !== 'undefined' && (addedCount > 0 || remoteUpserted > 0)) {
+      window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: targetDraw, source: remoteSource } }));
+    }
+
+    return {
+      addedCount,
+      upsertedCount: remoteUpserted,
+      fetchedCount: remoteFetched || updated.length,
+      source: remoteSource,
+      months: syncedMonths,
+    };
   } catch (e: unknown) {
-    logError(new AppError(getErrorMessage(e) || 'Sync failed', 'SYNC_ERROR', 'medium', { drawName }), { source: 'syncDrawExternal' });
+    logError(new AppError(getErrorMessage(e) || 'Sync failed', 'SYNC_ERROR', 'medium', { drawName }), {
+      source: 'syncDrawExternal',
+    });
     throw e;
   }
 };
 
-export const checkAndSyncRecentResults = async (drawName?: string): Promise<number> => {
-    return syncDrawExternal(drawName);
+export const syncDrawExternal = async (
+  drawName?: string,
+  options?: SyncExternalOptions
+): Promise<number> => {
+  const res = await syncDrawExternalDetailed(drawName, options);
+  return Math.max(res.addedCount, res.upsertedCount);
+};
+
+export const checkAndSyncRecentResults = async (
+  drawName?: string,
+  options?: SyncExternalOptions
+): Promise<number> => {
+  return syncDrawExternal(drawName, options);
 };
 
 export const computeAnalytics = async (drawName: string): Promise<boolean> => {
@@ -626,6 +1120,21 @@ export const fetchResults = async (drawName: string, force?: boolean): Promise<{
   const data = await lotteryService.fetchHistory(drawName, force);
   return { data };
 };
+
+export const fetchOfficialResultsFromApi: typeof lotteryService.fetchOfficialResultsFromApi = (options) =>
+  lotteryService.fetchOfficialResultsFromApi(options);
+
+export const fetchRecentSyncStatus: typeof lotteryService.fetchRecentSyncStatus = (limit) =>
+  lotteryService.fetchRecentSyncStatus(limit);
+
+export const fetchResultsByDateRange: typeof lotteryService.fetchResultsByDateRange = (drawName, startDate, endDate) =>
+  lotteryService.fetchResultsByDateRange(drawName, startDate, endDate);
+
+export const fetchResultsPage: typeof lotteryService.fetchResultsPage = (drawName, page, pageSize) =>
+  lotteryService.fetchResultsPage(drawName, page, pageSize);
+
+export const fetchLatestResults: typeof lotteryService.fetchLatestResults = (drawNames, lookbackDays) =>
+  lotteryService.fetchLatestResults(drawNames, lookbackDays);
 
 export interface DailySummaryItem {
   time: string;
@@ -659,45 +1168,26 @@ const enrichDailySummaryWithExceptions = (
 
 export const getDailySummary = async (day: string): Promise<DailySummaryItem[]> => {
   const draws = DRAW_SCHEDULE[day] || {};
-  const sortedTimes = Object.keys(draws).sort(); 
+  const sortedTimes = Object.keys(draws).sort();
   const drawNames = sortedTimes.map((time) => draws[time]);
   const summaryCacheKey = globalCache.generateKey('daily_summary', day);
 
   const cachedSummary = await globalCache.get<{ time: string; name: string; result: DrawResult | null }[]>(summaryCacheKey);
-  if (cachedSummary && cachedSummary.length > 0 && cachedSummary.some(s => s.result !== null)) {
+  if (cachedSummary && cachedSummary.length > 0 && cachedSummary.some((s) => s.result !== null)) {
     return enrichDailySummaryWithExceptions(day, cachedSummary);
   }
-  
+
   if (isSupabaseConfigured() && navigator.onLine) {
     try {
-      // Delta-Window de 14 jours et limite stricte pour éviter de télécharger toute la table draw_results
-      const recentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      const { data, error } = await supabase
-        .from('draw_results')
-        .select('*')
-        .in('draw_name', drawNames)
-        .gte('date', recentCutoff)
-        .order('date', { ascending: false })
-        .limit(Math.max(20, drawNames.length * 3));
+      // Hydratation discrète des annulations serveur (respecte son cooldown de 5 min)
+      syncDrawCancellationsFromDb(false).catch(() => {});
 
-      if (!error && data && data.length > 0) {
-        const latestByDraw = new Map<string, DrawResult>();
-        for (const row of data) {
-          if (!latestByDraw.has(row.draw_name)) {
-            latestByDraw.set(row.draw_name, {
-              id: row.id,
-              drawName: row.draw_name,
-              date: formatDate(row.date),
-              gagnants: row.gagnants,
-              machine: row.machine || [],
-              version: row.version || 1
-            });
-          }
-        }
-        const summaryResult = sortedTimes.map(time => ({
+      const latestByDraw = await lotteryService.fetchLatestResults(drawNames, 30);
+      if (latestByDraw.size > 0) {
+        const summaryResult = sortedTimes.map((time) => ({
           time,
           name: draws[time],
-          result: latestByDraw.get(draws[time]) || null
+          result: latestByDraw.get(draws[time]) || null,
         }));
         await globalCache.set(summaryCacheKey, summaryResult, CACHE_TTL.SHORT);
         return enrichDailySummaryWithExceptions(day, summaryResult);
@@ -709,17 +1199,17 @@ export const getDailySummary = async (day: string): Promise<DailySummaryItem[]> 
 
   // Fallback sur les caches d'historiques locaux par tirage
   const promises = sortedTimes.map(async (time) => {
-      const name = draws[time];
-      let lastDraw: DrawResult | null = null;
-      try {
-          const history = await lotteryService.fetchHistory(name);
-          if (history.length > 0) lastDraw = history[0];
-          return { time, name, result: lastDraw };
-      } catch (e) {
-          return { time, name, result: null };
-      }
+    const name = draws[time];
+    let lastDraw: DrawResult | null = null;
+    try {
+      const history = await lotteryService.fetchHistory(name);
+      if (history.length > 0) lastDraw = history[0];
+      return { time, name, result: lastDraw };
+    } catch {
+      return { time, name, result: null };
+    }
   });
-  
+
   const fallbackSummary = await Promise.all(promises);
   await globalCache.set(summaryCacheKey, fallbackSummary, CACHE_TTL.SHORT);
   return enrichDailySummaryWithExceptions(day, fallbackSummary);
@@ -939,23 +1429,24 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
 };
 
 export const bulkAddResults = async (drawName: string, results: { date: string, draw_num?: string, numbers?: string[], gagnants: number[], machine?: number[], draw_name?: string }[]) => {
-  const mapped = results.map((r, i) => {
-    const targetName = r.draw_name || normalizeDrawName(drawName);
+  const mappedLocal = results.map((r, i) => {
+    const targetName = normalizeDrawName(r.draw_name || drawName);
     const withoutMachine = isDrawWithoutMachine(targetName);
     const normDate = normalizeDate(r.date);
+    const validMac = !withoutMachine && Array.isArray(r.machine) && r.machine.length === 5 ? r.machine : [];
     return {
       id: (r as any).id || `draw_import_${targetName.replace(/\s+/g, '_')}_${normDate}_${i}`,
       draw_name: targetName,
       date: normDate,
       gagnants: r.gagnants,
-      machine: withoutMachine ? [] : (r.machine || []),
+      machine: validMac,
       version: 1
     };
   });
 
   if (!isSupabaseConfigured()) {
-    const byDraw = new Map<string, typeof mapped>();
-    for (const item of mapped) {
+    const byDraw = new Map<string, typeof mappedLocal>();
+    for (const item of mappedLocal) {
       const list = byDraw.get(item.draw_name) || [];
       list.push(item);
       byDraw.set(item.draw_name, list);
@@ -978,19 +1469,32 @@ export const bulkAddResults = async (drawName: string, results: { date: string, 
           });
         }
       }
-      const combined = [...newItems, ...existing].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const combined = [...newItems, ...existing].sort((a, b) => getDrawTimestamp(b.date, b.drawName) - getDrawTimestamp(a.date, a.drawName));
       await globalCache.set(cacheKey, combined, CACHE_TTL.HISTORY, dName);
       await globalCache.registerNewDraw(dName, combined.length);
+      await invalidateDailySummariesCache();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName: dName } }));
       }
     }
-    return mapped;
+    return mappedLocal;
   }
 
-  const { data, error } = await supabase.from('draw_results').upsert(mapped, { onConflict: 'draw_name, date' }).select();
+  const dbPayload = mappedLocal.map((item) => ({
+    draw_name: item.draw_name,
+    date: item.date,
+    gagnants: item.gagnants,
+    machine: sanitizeMachineForDb(item.draw_name, item.machine),
+    version: item.version,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { data, error } = await supabase.from('draw_results').upsert(dbPayload, { onConflict: 'draw_name,date' }).select();
   if (error) throw error;
-  
+
+  await invalidateDailySummariesCache();
+  await globalCache.delete(globalCache.generateKey('history', drawName));
+
   // Trigger automation for all inserted/updated results
   if (data && data.length > 0) {
       for (const res of data) {
@@ -1007,7 +1511,7 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
   const targetName = normalizeDrawName(drawName);
   const withoutMachine = isDrawWithoutMachine(targetName);
   const normalizedDateStr = normalizeDate(result.date);
-  const sanitizedMachine = withoutMachine ? [] : (result.machine || []);
+  const sanitizedMachine = withoutMachine || !Array.isArray(result.machine) || result.machine.length !== 5 ? [] : result.machine;
 
   if (!isSupabaseConfigured()) {
     const cacheKey = globalCache.generateKey('history', targetName);
@@ -1021,8 +1525,9 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
       version: 1,
     };
     const combined = [newEntry, ...existing.filter(e => normalizeDate(e.date) !== normalizedDateStr)];
-    combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    combined.sort((a, b) => getDrawTimestamp(b.date, b.drawName) - getDrawTimestamp(a.date, a.drawName));
     await globalCache.set(cacheKey, combined, CACHE_TTL.HISTORY, targetName);
+    await invalidateDailySummariesCache();
     lastSyncedFingerprintByDraw.delete(targetName.trim().toUpperCase());
     appendSingleDrawToStore(
       targetName,
@@ -1036,15 +1541,19 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
     return newEntry;
   }
 
-  const { data, error } = await supabase.from('draw_results').insert({
+  const { data, error } = await supabase.from('draw_results').upsert({
     draw_name: targetName,
     date: normalizedDateStr,
     gagnants: result.gagnants,
-    machine: sanitizedMachine,
-    version: 1
-  }).select().single();
+    machine: sanitizeMachineForDb(targetName, sanitizedMachine),
+    version: 1,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'draw_name,date' }).select().single();
   if (error) throw error;
-  
+
+  await invalidateDailySummariesCache();
+  await globalCache.delete(globalCache.generateKey('history', targetName));
+
   if (data) {
       lastSyncedFingerprintByDraw.delete(data.draw_name.trim().toUpperCase());
       appendSingleDrawToStore(
@@ -1062,9 +1571,10 @@ export const addResult = async (drawName: string, result: Omit<DrawResult, 'id'>
 };
 
 export const updateResult = async (drawName: string, result: DrawResult) => {
-  const withoutMachine = isDrawWithoutMachine(drawName);
+  const targetName = normalizeDrawName(drawName);
+  const withoutMachine = isDrawWithoutMachine(targetName);
   const normalizedDateStr = normalizeDate(result.date);
-  const sanitizedMachine = withoutMachine ? [] : (result.machine || []);
+  const sanitizedMachine = withoutMachine || !Array.isArray(result.machine) || result.machine.length !== 5 ? [] : result.machine;
 
   if (!isSupabaseConfigured()) {
     const cacheKey = globalCache.generateKey('history', drawName);
@@ -1078,6 +1588,7 @@ export const updateResult = async (drawName: string, result: DrawResult) => {
         version: (item.version || 1) + 1,
       } : item);
       await globalCache.set(cacheKey, updatedHistory, CACHE_TTL.HISTORY, drawName);
+      await invalidateDailySummariesCache();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
       }
@@ -1088,11 +1599,15 @@ export const updateResult = async (drawName: string, result: DrawResult) => {
   const { data, error } = await supabase.from('draw_results').update({
     date: normalizedDateStr,
     gagnants: result.gagnants,
-    machine: sanitizedMachine,
-    version: result.version || 1
+    machine: sanitizeMachineForDb(targetName, sanitizedMachine),
+    version: result.version || 1,
+    updated_at: new Date().toISOString(),
   }).eq('id', result.id).select().single();
   if (error) throw error;
-  
+
+  await invalidateDailySummariesCache();
+  await globalCache.delete(globalCache.generateKey('history', drawName));
+
   if (data) {
       await triggerAutomationForNewResults(data.draw_name, data.date, data.id);
       if (typeof window !== 'undefined') {
@@ -1109,6 +1624,7 @@ export const deleteResult = async (drawName: string, id: string) => {
       const updatedHistory = history.filter(item => item.id !== id);
       await globalCache.set(cacheKey, updatedHistory, CACHE_TTL.HISTORY, drawName);
       await globalCache.registerNewDraw(drawName, updatedHistory.length);
+      await invalidateDailySummariesCache();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
       }
@@ -1121,6 +1637,7 @@ export const deleteResult = async (drawName: string, id: string) => {
 
   const cacheKey = globalCache.generateKey('history', drawName);
   await globalCache.delete(cacheKey);
+  await invalidateDailySummariesCache();
 
   if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
@@ -1135,6 +1652,7 @@ export const bulkDeleteResults = async (drawName: string, ids: string[]) => {
       const updatedHistory = history.filter(item => !ids.includes(item.id));
       await globalCache.set(cacheKey, updatedHistory, CACHE_TTL.HISTORY, drawName);
       await globalCache.registerNewDraw(drawName, updatedHistory.length);
+      await invalidateDailySummariesCache();
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
       }
@@ -1146,6 +1664,7 @@ export const bulkDeleteResults = async (drawName: string, ids: string[]) => {
 
   const cacheKey = globalCache.generateKey('history', drawName);
   await globalCache.delete(cacheKey);
+  await invalidateDailySummariesCache();
 
   if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
@@ -1157,6 +1676,7 @@ export const purgeAllResults = async (drawName: string) => {
     const cacheKey = globalCache.generateKey('history', drawName);
     await globalCache.delete(cacheKey);
     await globalCache.registerNewDraw(drawName, 0);
+    await invalidateDailySummariesCache();
     if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));
     }
@@ -1168,6 +1688,7 @@ export const purgeAllResults = async (drawName: string) => {
   const cacheKey = globalCache.generateKey('history', drawName);
   await globalCache.delete(cacheKey);
   await globalCache.registerNewDraw(drawName, 0);
+  await invalidateDailySummariesCache();
 
   if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('DRAW_RESULTS_UPDATED', { detail: { drawName } }));

@@ -7,6 +7,7 @@ import {
   bulkAddResults,
   bulkDeleteResults,
   purgeAllResults,
+  fetchOfficialResultsFromApi,
 } from "../../services/lotteryService";
 import { ExportService } from "../../services/exportService";
 import type { DrawResult } from "../../types";
@@ -199,15 +200,84 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
     return () => window.removeEventListener(DRAW_EXCEPTIONS_UPDATED_EVENT, handler);
   }, []);
 
-  const loadData = async () => {
+  const [isFetchingApi, setIsFetchingApi] = useState(false);
+
+  const loadData = async (forceRefresh = false) => {
     setLoading(true);
     try {
-      const { data } = await fetchResults(drawName);
+      const { data } = await fetchResults(drawName, forceRefresh);
       setResults(data);
     } catch (e) {
       showToast("Erreur de chargement", "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFetchFromOfficialApi = async () => {
+    audioEngine.play("scan");
+    setIsFetchingApi(true);
+    try {
+      const apiRes = await fetchOfficialResultsFromApi({
+        drawName,
+        monthsBack: 2,
+        refresh: true,
+      });
+
+      if (!apiRes.draws || apiRes.draws.length === 0) {
+        showToast(
+          `Aucun nouveau tirage trouvé sur l'API officielle pour ${drawName}.`,
+          "info",
+        );
+        return;
+      }
+
+      const seen = new Set<string>();
+      const rows: PreviewRow[] = [];
+      for (const d of apiRes.draws) {
+        if (!d.date || seen.has(d.date)) continue;
+        seen.add(d.date);
+        const winners = Array.isArray(d.gagnants) ? d.gagnants : [];
+        const machine =
+          !isDrawWithoutMachine(drawName) && Array.isArray(d.machine)
+            ? d.machine
+            : [];
+        const isValid =
+          winners.length === 5 &&
+          new Set(winners).size === 5 &&
+          winners.every((n: number) => n >= 1 && n <= 90);
+        rows.push({
+          date: d.date,
+          gagnants: winners,
+          machine,
+          isValid,
+          error: isValid ? undefined : "Numéros gagnants invalides",
+        });
+      }
+
+      setPreviewData(rows);
+      setImportStep("preview");
+      setViewFilter("all");
+      audioEngine.play("success");
+      showToast(
+        `${rows.length} résultat(s) officiel(s) récupéré(s) pour ${drawName}.`,
+        "success",
+      );
+    } catch (e: any) {
+      audioEngine.play("error");
+      if (e?.code === "SYNC_REQUIRES_BACKEND") {
+        showToast(
+          "Aucune passerelle API accessible en mode hors-ligne.",
+          "info",
+        );
+      } else {
+        showToast(
+          `Échec récupération API : ${e instanceof Error ? e.message : String(e)}`,
+          "error",
+        );
+      }
+    } finally {
+      setIsFetchingApi(false);
     }
   };
 
@@ -1173,9 +1243,23 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
                 Registre ({results.length} tirages)
               </h4>
-              <span className="text-[10px] font-mono text-slate-400">
-                Affichage: {filteredHistory.length}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-slate-400">
+                  Affichage: {filteredHistory.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    audioEngine.play("click");
+                    loadData(true);
+                  }}
+                  disabled={loading}
+                  title="Rafraîchir depuis la base"
+                  className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-indigo-600 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+                </button>
+              </div>
             </div>
 
             {/* History Search Bar */}
@@ -1267,12 +1351,23 @@ export const DrawManagement: React.FC<DrawManagementProps> = ({ drawName }) => {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={downloadTemplate}
-                  className="text-[10px] md:text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"
-                >
-                  <Download size={14} /> Modèle CSV
-                </button>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleFetchFromOfficialApi}
+                    disabled={isFetchingApi}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] md:text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-md transition-all disabled:opacity-50"
+                  >
+                    <DownloadCloud size={14} className={isFetchingApi ? "animate-bounce" : ""} />
+                    {isFetchingApi ? "Récupération..." : "Importer API Officielle (2 mois)"}
+                  </button>
+                  <button
+                    onClick={downloadTemplate}
+                    className="text-[10px] md:text-xs font-bold text-indigo-500 flex items-center gap-2 hover:underline"
+                  >
+                    <Download size={14} /> Modèle CSV
+                  </button>
+                </div>
               </div>
 
               <div className="flex gap-2 mb-6 bg-slate-100 dark:bg-slate-900/50 p-1 rounded-xl w-full md:w-fit overflow-x-auto scrollbar-hide">

@@ -338,7 +338,8 @@ export const calculateScores = (
   const resolvedWeights = resolveWeightsWithExpertBiasDecay(
     context.drawName,
     weights,
-    history.length
+    history.length,
+    history
   );
   let effectiveWeights = { ...resolvedWeights };
 
@@ -603,6 +604,14 @@ export const applyPCADenoising = async (
 
         featureKeys.forEach((key, fIdx) => {
           const rawVal = featureMatrix[idx][fIdx];
+          if (
+            key === AlgoKey.MACHINE_TRANSFER &&
+            rawVal === 0 &&
+            (item.explainability?.effectiveWeights?.[key] ?? 1) === 0
+          ) {
+            item.breakdown[key] = 0;
+            return;
+          }
           const dval = Number(denoisedMatrix[idx]?.[fIdx]);
           const cleanDVal = isNaN(dval) ? rawVal : dval;
 

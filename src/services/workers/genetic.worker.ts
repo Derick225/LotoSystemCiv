@@ -1,6 +1,7 @@
 import { LCG } from '../../utils/mathUtils';
-import { unpackHistory, computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
-import { getMirrorNumber, getComplement90 } from '../../config/networks';
+import { unpackHistory, computeAdaptiveCoeffs } from './zeroCopy';
+import { getMirrorNumber, getComplement90, drawHasMachineNumbers } from '../../config/networks';
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 
 export {};
 
@@ -12,14 +13,31 @@ interface Individual { weights: AlgoWeights; fitness: number; }
 const ctx = self as unknown as Worker;
 
 // --- UTILS ---
-const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
+const normalizeWeights = (
+  w: AlgoWeights,
+  forcedZeroKeys: ReadonlySet<string> = new Set()
+): AlgoWeights => {
   const keys = Object.keys(w);
-  const numKeys = keys.length || 1;
-  const total = Object.values(w).reduce<number>((acc, val) => acc + Math.abs(val ?? 0), 0);
+  const activeKeys = keys.filter((k) => !forcedZeroKeys.has(k));
   const normalized: AlgoWeights = { ...w };
-  
+
+  keys.forEach((k) => {
+    if (forcedZeroKeys.has(k)) {
+      normalized[k] = 0;
+    }
+  });
+
+  if (activeKeys.length === 0) {
+    return normalized;
+  }
+
+  const numKeys = activeKeys.length;
+  const total = activeKeys.reduce<number>((acc, k) => acc + Math.abs(w[k] ?? 0), 0);
+
   if (total <= 0) {
-    keys.forEach(k => { normalized[k] = 1.0 / numKeys; });
+    activeKeys.forEach((k) => {
+      normalized[k] = 1.0 / numKeys;
+    });
     return normalized;
   }
 
@@ -27,18 +45,19 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
   const FLOOR = Math.max(1e-6, uniformWeight * 0.10);
   const CEILING = Math.min(0.90, uniformWeight * 3.0);
 
-  keys.forEach(k => {
+  activeKeys.forEach((k) => {
     const val = normalized[k];
     if (typeof val === 'number') {
       let normVal = Math.abs(val) / total;
       normVal = Math.max(FLOOR, Math.min(CEILING, normVal));
       normalized[k] = parseFloat(normVal.toFixed(6));
     }
-    const currentSum = keys.reduce((acc, key) => acc + (normalized[key] || 0), 0);
-    if (Math.abs(currentSum - 1.0) > 1e-6) {
-        normalized[keys[0]] = parseFloat(((normalized[keys[0]] || 0) + (1.0 - currentSum)).toFixed(6));
-    }
   });
+
+  const currentSum = activeKeys.reduce((acc, key) => acc + (normalized[key] || 0), 0);
+  if (Math.abs(currentSum - 1.0) > 1e-6) {
+    normalized[activeKeys[0]] = parseFloat(((normalized[activeKeys[0]] || 0) + (1.0 - currentSum)).toFixed(6));
+  }
   return normalized;
 };
 
@@ -72,23 +91,43 @@ const calculateDiversity = (population: Individual[]): number => {
 };
 
 // --- GENETIC OPERATORS ---
-const arithmeticCrossover = (prng: LCG, p1: AlgoWeights, p2: AlgoWeights): AlgoWeights => {
+const arithmeticCrossover = (
+  prng: LCG,
+  p1: AlgoWeights,
+  p2: AlgoWeights,
+  forcedZeroKeys: ReadonlySet<string> = new Set()
+): AlgoWeights => {
   const child: AlgoWeights = {} as AlgoWeights;
   const keys = Array.from(new Set([...Object.keys(p1), ...Object.keys(p2)]));
   keys.forEach(k => {
+    if (forcedZeroKeys.has(k)) {
+      child[k] = 0;
+      return;
+    }
     const alpha = prng.next();
     child[k] = (p1[k] || 0) * alpha + (p2[k] || 0) * (1 - alpha);
   });
-  return normalizeWeights(child);
+  return normalizeWeights(child, forcedZeroKeys);
 };
 
-const mutateGaussian = (prng: LCG, w: AlgoWeights, sigma: number, rate: number): AlgoWeights => {
+const mutateGaussian = (
+  prng: LCG,
+  w: AlgoWeights,
+  sigma: number,
+  rate: number,
+  forcedZeroKeys: ReadonlySet<string> = new Set()
+): AlgoWeights => {
   const mutant = { ...w };
   const keys = Object.keys(mutant);
-  const numKeys = keys.length || 1;
+  const activeKeys = keys.filter((k) => !forcedZeroKeys.has(k));
+  const numKeys = activeKeys.length || 1;
   const uniformWeight = 1.0 / numKeys;
   
   keys.forEach(k => {
+    if (forcedZeroKeys.has(k)) {
+      mutant[k] = 0;
+      return;
+    }
     if (prng.next() < rate) {
       const noise = randomGaussian(prng, 0, sigma);
       const currentVal = mutant[k] || 0;
@@ -96,7 +135,7 @@ const mutateGaussian = (prng: LCG, w: AlgoWeights, sigma: number, rate: number):
       mutant[k] = Math.max(uniformWeight * 0.1, Math.min(uniformWeight * 3.0, currentVal + noise));
     }
   });
-  return normalizeWeights(mutant);
+  return normalizeWeights(mutant, forcedZeroKeys);
 };
 
 // --- FITNESS FUNCTION (Simplifiée pour l'exemple, mais avec Zéro Constante Magique) ---
@@ -259,6 +298,14 @@ ctx.onmessage = (e) => {
   if (e.data.type === 'start') {
     const { drawName, baseWeights, baseRules, config, history, historyBuffer, drawCount, winningCount, totalCols, timeSignature } = e.data.payload;
     const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history);
+    const hasMachine = drawName
+      ? drawHasMachineNumbers(drawName, hist)
+      : hist.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+    const forcedZeroKeys = new Set<string>(RETIRED_ALGO_WEIGHT_KEYS);
+    if (!hasMachine) {
+      forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
+    }
+    const sanitizedBaseWeights = normalizeWeights(baseWeights, forcedZeroKeys);
     
     // Isolation du PRNG
     const prng = new LCG(`genetic_${timeSignature || drawName}_${config.populationSize || 40}`);
@@ -278,7 +325,7 @@ ctx.onmessage = (e) => {
 
     let population: Individual[] = Array.from({ length: POPSIZE }, (_, i) => ({
       // Dispersion initiale proportionnelle au chaos du système
-      weights: i === 0 ? baseWeights : mutateGaussian(prng, baseWeights, Entropy, Entropy + 0.1),
+      weights: i === 0 ? sanitizedBaseWeights : mutateGaussian(prng, sanitizedBaseWeights, Entropy, Entropy + 0.1, forcedZeroKeys),
       fitness: 0
     }));
 
@@ -361,8 +408,8 @@ ctx.onmessage = (e) => {
 
         const p1 = selectParent();
         const p2 = selectParent();
-        let childWeights = arithmeticCrossover(prng, p1.weights, p2.weights);
-        childWeights = mutateGaussian(prng, childWeights, currentSigma, currentMutationRate);
+        let childWeights = arithmeticCrossover(prng, p1.weights, p2.weights, forcedZeroKeys);
+        childWeights = mutateGaussian(prng, childWeights, currentSigma, currentMutationRate, forcedZeroKeys);
         nextGen.push({ weights: childWeights, fitness: 0 });
       }
       population = nextGen;

@@ -1331,7 +1331,11 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
 
   // Si on a des poids locaux, on les renvoie instantanément (SWR) et on revalide en arrière-plan
   if (localWeights) {
-    const localMergedWeights = normalizeWeights({ ...weights, ...localWeights });
+    const localMergedInput: AlgoWeights = { ...weights, ...localWeights };
+    if (!hasMachine) {
+      localMergedInput[AlgoKey.MACHINE_TRANSFER] = 0;
+    }
+    const localMergedWeights = normalizeWeights(localMergedInput);
     weightsCache.set(drawName, { weights: localMergedWeights, timestamp: now });
 
     // Revalidation asynchrone en arrière-plan pour ne pas bloquer le thread principal ni les transitions d'UI
@@ -1360,10 +1364,14 @@ export const getAlgoWeights = async (drawName: string): Promise<AlgoWeights> => 
           if (remoteWeights && remoteUpdatedAt && localUpdatedAt) {
             // Si les poids distants sont strictement plus récents (+ de 5 min d'avance), on met à jour le local
             if (remoteUpdatedAt.getTime() > localUpdatedAt.getTime() + 300000) {
-              const freshWeights = normalizeWeights({ ...getDefaultWeights(), ...remoteWeights });
+              const freshInput: AlgoWeights = { ...getDefaultWeights(), ...remoteWeights };
+              if (!hasMachine) {
+                freshInput[AlgoKey.MACHINE_TRANSFER] = 0;
+              }
+              const freshWeights = normalizeWeights(freshInput);
               // Mettre à jour IndexedDB
               await set(`nexus_config_${drawName}`, {
-                weights: remoteWeights,
+                weights: freshWeights,
                 updatedAt: remoteUpdatedAt.toISOString()
               });
               // Mettre à jour le cache mémoire
@@ -1484,9 +1492,14 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
 export const applyForensicCalibration = (
   currentWeights: AlgoWeights,
   suggestions: Array<{ algo: string, action: string, improvement: number }>,
-  historyLength: number // Ajout pour dériver le damping
+  historyLength: number, // Ajout pour dériver le damping
+  drawName?: string
 ): AlgoWeights => {
   const newWeights = { ...currentWeights };
+  const hasMachine = drawName ? drawHasMachineNumbers(drawName) : true;
+  if (!hasMachine) {
+    newWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
   const numAlgos = Object.keys(currentWeights).length || 1;
   
   // CORRECTION : Damping dérivé de l'inverse de la racine de la taille de l'historique (loi des grands nombres)
@@ -1500,10 +1513,12 @@ export const applyForensicCalibration = (
     if (s.action === 'SYNERGY') {
       const parts = s.algo.split('+').map(p => p.trim() as AlgoKey);
       parts.forEach(p => {
+        if (p === AlgoKey.MACHINE_TRANSFER && !hasMachine) return;
         if (newWeights[p] !== undefined) newWeights[p] = (newWeights[p] || 0) * (1.0 + (change / parts.length));
       });
     } else {
       const key = s.algo as AlgoKey;
+      if (key === AlgoKey.MACHINE_TRANSFER && !hasMachine) return;
       if (newWeights[key] === undefined) return;
       if (s.action === 'BOOST' || s.action === 'ISOLATE') {
         newWeights[key] = (newWeights[key] || 0) * (1.0 + change);
@@ -1512,6 +1527,9 @@ export const applyForensicCalibration = (
       }
     }
   });
+  if (!hasMachine) {
+    newWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
   return normalizeWeights(newWeights);
 };
 
@@ -1525,14 +1543,18 @@ export const applyBayesianForensicFeedback = async (
   report: ForensicReport,
   userRating: "Visionnaire" | "Standard" | "Incohérente"
 ): Promise<AlgoWeights> => {
+  const hasMachine = drawHasMachineNumbers(drawName);
   const currentWeights = await getAlgoWeights(drawName);
   const newWeights = { ...currentWeights };
+  if (!hasMachine) {
+    newWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
   
   // Facteur de feedback : 1.0 (Visionnaire), 0.0 (Standard), -1.0 (Incohérente)
   const feedbackScore = userRating === "Visionnaire" ? 1.0 : (userRating === "Incohérente" ? -1.0 : 0.0);
   
   // Si le feedback est neutre (Standard), pas de modification requise
-  if (feedbackScore === 0.0) return currentWeights;
+  if (feedbackScore === 0.0) return hasMachine ? currentWeights : normalizeWeights(newWeights);
 
   const validKeys = Object.values(AlgoKey);
   const numAlgos = validKeys.length || 1;
@@ -1542,6 +1564,7 @@ export const applyBayesianForensicFeedback = async (
   if (report.proposedAdjustments && report.proposedAdjustments.length > 0) {
     report.proposedAdjustments.forEach((adj) => {
       const key = adj.algo as AlgoKey;
+      if (key === AlgoKey.MACHINE_TRANSFER && !hasMachine) return;
       if (!validKeys.includes(key) || newWeights[key] === undefined) return;
       
       // La dérive bayésienne ajuste le poids :
@@ -1557,6 +1580,7 @@ export const applyBayesianForensicFeedback = async (
     report.counterfactuals.forEach((cf) => {
       if (cf.algo) {
         const key = cf.algo as AlgoKey;
+        if (key === AlgoKey.MACHINE_TRANSFER && !hasMachine) return;
         if (!validKeys.includes(key) || newWeights[key] === undefined) return;
         const change = (cf.rankImprovement || 1.0) / 100.0;
         const adjustment = change * feedbackScore * baseLR;
@@ -1565,6 +1589,9 @@ export const applyBayesianForensicFeedback = async (
     });
   }
 
+  if (!hasMachine) {
+    newWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
   const finalNormalized = normalizeWeights(newWeights);
   await saveAlgoWeights(drawName, finalNormalized);
   

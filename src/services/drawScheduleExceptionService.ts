@@ -1,9 +1,10 @@
 import { DRAW_SCHEDULE, normalizeDrawName } from "../config/networks";
 import type { DrawResult } from "../types";
 import { parseDateSafely } from "../utils/dateUtils";
+import { supabase, isSupabaseConfigured } from "./supabaseClient";
 
 export type DrawExceptionType = "HOLIDAY" | "CANCELLED" | "POSTPONED";
-export type DrawExceptionSource = "preset_holiday" | "manual_admin";
+export type DrawExceptionSource = "preset_holiday" | "manual_admin" | "db_auto" | "db_manual";
 
 export interface DrawException {
   id: string;
@@ -645,3 +646,138 @@ export const analyzeMissingExpectedDraws = (
     effectiveLastGapDays,
   };
 };
+
+export interface DbDrawCancellationRow {
+  draw_name: string;
+  date: string;
+  reason?: string | null;
+  source?: string | null;
+  created_at?: string | null;
+}
+
+const DB_CANCELLATIONS_COOLDOWN_MS = 5 * 60 * 1000;
+let lastDbCancellationsSyncTs = 0;
+
+/**
+ * Fusionne de manière déterministe et idempotente les annulations/fériés stockés en base (`draw_cancellations`)
+ * avec le registre local, en donnant toujours la priorité aux surcharges locales `manual_admin`.
+ */
+export const mergeDbDrawCancellations = (
+  rows: DbDrawCancellationRow[],
+  cutoffIso?: string
+): { addedOrUpdated: number; removed: number } => {
+  const existing = readStoredManualExceptions();
+
+  // Conserver toutes les surcharges locales `manual_admin` + les entrées DB antérieures à la fenêtre rafraîchie
+  const preserved: DrawException[] = [];
+  const manualKeys = new Set<string>();
+  const oldDbMap = new Map<string, DrawException>();
+
+  for (const item of existing) {
+    const isDbSynced = item.source === "db_auto" || item.source === "db_manual";
+    const normScope = item.drawName === "*" ? "*" : normalizeDrawName(item.drawName);
+    const key = `${item.date}|${normScope}`;
+
+    if (!isDbSynced) {
+      preserved.push(item);
+      manualKeys.add(key);
+    } else if (cutoffIso && item.date < cutoffIso) {
+      preserved.push(item);
+    } else {
+      oldDbMap.set(key, item);
+    }
+  }
+
+  const nextDbItems: DrawException[] = [];
+  const seenNextKeys = new Set<string>();
+  let addedOrUpdated = 0;
+
+  for (const row of rows) {
+    if (!row?.date || !row?.draw_name) continue;
+    const dateIso = toCanonicalIsoDate(row.date);
+    const cleanScope =
+      row.draw_name.trim() === "*" || row.draw_name.trim().toUpperCase() === "ALL"
+        ? "*"
+        : row.draw_name.trim();
+    const normScope = cleanScope === "*" ? "*" : normalizeDrawName(cleanScope);
+    const key = `${dateIso}|${normScope}`;
+
+    if (manualKeys.has(key) || seenNextKeys.has(key)) continue;
+    seenNextKeys.add(key);
+
+    const dbSource: DrawExceptionSource = row.source === "manual" ? "db_manual" : "db_auto";
+    const reason = (row.reason || "").trim();
+    const inferredType: DrawExceptionType = /f[eé]ri[eé]|holiday/i.test(reason) ? "HOLIDAY" : "CANCELLED";
+    const label =
+      reason ||
+      (dbSource === "db_auto"
+        ? "Tirage absent du site officiel (annulation détectée)"
+        : "Tirage annulé (Serveur)");
+
+    const createdMs = row.created_at ? Date.parse(row.created_at) : NaN;
+    const nextItem: DrawException = {
+      id: buildDeterministicExceptionId(dateIso, cleanScope),
+      date: dateIso,
+      drawName: cleanScope,
+      type: inferredType,
+      label,
+      source: dbSource,
+      suppressed: false,
+      createdAt: Number.isFinite(createdMs) ? createdMs : 0,
+    };
+
+    const prev = oldDbMap.get(key);
+    if (!prev || prev.label !== nextItem.label || prev.source !== nextItem.source || prev.type !== nextItem.type) {
+      addedOrUpdated++;
+    }
+    nextDbItems.push(nextItem);
+  }
+
+  let removed = 0;
+  for (const oldKey of oldDbMap.keys()) {
+    if (!seenNextKeys.has(oldKey)) removed++;
+  }
+
+  if (addedOrUpdated > 0 || removed > 0) {
+    writeStoredManualExceptions([...preserved, ...nextDbItems]);
+  }
+
+  return { addedOrUpdated, removed };
+};
+
+/**
+ * Synchronise le registre local des jours fériés / tirages annulés depuis la table Supabase `draw_cancellations`.
+ */
+export const syncDrawCancellationsFromDb = async (
+  force: boolean = false,
+  lookbackDays: number = 180
+): Promise<{ synced: number; removed: number }> => {
+  if (!isSupabaseConfigured()) return { synced: 0, removed: 0 };
+  if (typeof navigator !== "undefined" && !navigator.onLine) return { synced: 0, removed: 0 };
+
+  const now = Date.now();
+  if (!force && now - lastDbCancellationsSyncTs < DB_CANCELLATIONS_COOLDOWN_MS) {
+    return { synced: 0, removed: 0 };
+  }
+  lastDbCancellationsSyncTs = now;
+
+  try {
+    const cutoffIso = toCanonicalIsoDate(new Date(now - Math.max(7, lookbackDays) * 86400000));
+    const { data, error } = await supabase
+      .from("draw_cancellations")
+      .select("draw_name,date,reason,source,created_at")
+      .gte("date", cutoffIso)
+      .order("date", { ascending: false })
+      .limit(500);
+
+    if (error || !Array.isArray(data)) {
+      return { synced: 0, removed: 0 };
+    }
+
+    const res = mergeDbDrawCancellations(data as DbDrawCancellationRow[], cutoffIso);
+    return { synced: res.addedOrUpdated, removed: res.removed };
+  } catch {
+    return { synced: 0, removed: 0 };
+  }
+};
+

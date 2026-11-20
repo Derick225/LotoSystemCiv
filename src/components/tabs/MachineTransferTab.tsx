@@ -33,10 +33,10 @@ export const MachineTransferTab: React.FC<{ drawName: string }> = ({
           <Cpu size={24} />
         </div>
         <h3 className="text-lg font-black text-white uppercase tracking-tight">
-          Plateau Machine Non Détecté pour {drawName}
+          Transfert Machine Désactivé Automatiquement (0%) — {drawName}
         </h3>
         <p className="text-xs text-slate-400 max-w-lg mx-auto leading-relaxed">
-          {report.diagnosticRemark} Pour les tirages avec numéros Machine enregistrés (comme Sika ou Emergence), ce module extrait les résonances croisées, les taux de carry-over et les candidats de transition.
+          {report.diagnosticRemark} L'algorithme « Transfert Machine » est automatiquement désactivé (poids forcé à 0%) pour {drawName}. Pour les tirages avec numéros Machine enregistrés (comme Sika ou Emergence), ce module extrait les résonances croisées, les taux de carry-over et les candidats de transition.
         </p>
       </div>
     );

@@ -8,6 +8,7 @@ import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { normalizeWeights, evaluateAlgoEmpiricalProof } from './weightsManager';
 import { LABELS_MAP, ALGO_CATEGORIES } from '../../hooks/useAlgorithmSync';
+import { drawHasMachineNumbers } from '../../constants';
 
 export const getAlgoCategoryName = (algoKey: AlgoKey): string => {
   const cat = ALGO_CATEGORIES.find((c) => c.keys.includes(algoKey));
@@ -159,18 +160,23 @@ export const calculateExpertBiasDecay = (
 export const applyExpertBiasesToWeights = (
   baseWeights: AlgoWeights,
   biases: Record<AlgoKey, ExpertBiasConfig>,
-  currentHistoryLength: number
+  currentHistoryLength: number,
+  drawName?: string,
+  history?: DrawResult[]
 ): AlgoWeights => {
   const validKeys = Object.values(AlgoKey);
   const modulated: Partial<Record<AlgoKey, number>> = {};
+  const hasMachine = drawName ? drawHasMachineNumbers(drawName, history) : true;
+  const isDisabledKey = (k: AlgoKey) =>
+    RETIRED_ALGO_WEIGHT_KEYS.has(k) || (k === AlgoKey.MACHINE_TRANSFER && !hasMachine);
 
   const activeKeysCount = validKeys.filter(
-    (k) => !RETIRED_ALGO_WEIGHT_KEYS.has(k) && (Number.isFinite(baseWeights[k]) ? baseWeights[k] : 0) > 0
+    (k) => !isDisabledKey(k) && (Number.isFinite(baseWeights[k]) ? baseWeights[k] : 0) > 0
   ).length;
   const meanActiveWeight = 1.0 / Math.max(1, activeKeysCount);
 
   validKeys.forEach((key) => {
-    if (RETIRED_ALGO_WEIGHT_KEYS.has(key)) {
+    if (isDisabledKey(key)) {
       modulated[key] = 0;
       return;
     }
@@ -221,19 +227,26 @@ export const applyExpertBiasesToWeights = (
 export const resolveWeightsWithExpertBiasDecay = (
   drawName: string | undefined,
   currentWeights: AlgoWeights,
-  isolatedHistoryLength: number
+  isolatedHistoryLength: number,
+  history?: DrawResult[]
 ): AlgoWeights => {
   if (!drawName) return currentWeights;
+  const hasMachine = drawHasMachineNumbers(drawName, history);
+  const sanitizedCurrent: AlgoWeights = !hasMachine && currentWeights[AlgoKey.MACHINE_TRANSFER] !== 0
+    ? normalizeWeights({ ...currentWeights, [AlgoKey.MACHINE_TRANSFER]: 0 })
+    : currentWeights;
+
   const biases = loadExpertBiases(drawName);
   const biasEntries = Object.values(biases || {}).filter(
     (b) => b && b.isActive && (b.biasMultiplier !== 1.0 || b.biasDelta !== 0)
+      && (hasMachine || b.algoKey !== AlgoKey.MACHINE_TRANSFER)
   );
   if (biasEntries.length === 0) {
-    return currentWeights;
+    return sanitizedCurrent;
   }
 
-  const baseWeights = loadExpertBaseWeights(drawName) ?? currentWeights;
-  return applyExpertBiasesToWeights(baseWeights, biases, isolatedHistoryLength);
+  const baseWeights = loadExpertBaseWeights(drawName) ?? sanitizedCurrent;
+  return applyExpertBiasesToWeights(baseWeights, biases, isolatedHistoryLength, drawName, history);
 };
 
 /**
@@ -246,6 +259,7 @@ export const analyzeUnderperformingSubAlgos = (
   activeWeights: AlgoWeights
 ): AlgoUnderperformanceMetric[] => {
   const pureHistory = purifyHistoryForDraw<DrawResult>(drawName, history);
+  const hasMachine = drawHasMachineNumbers(drawName, pureHistory);
   const proofMap = evaluateAlgoEmpiricalProof(drawName, pureHistory);
   const validKeys = Object.values(AlgoKey).filter((k) => !RETIRED_ALGO_WEIGHT_KEYS.has(k));
   const results: AlgoUnderperformanceMetric[] = [];
@@ -253,6 +267,24 @@ export const analyzeUnderperformingSubAlgos = (
   validKeys.forEach((algoKey) => {
     const label = LABELS_MAP[algoKey] || algoKey;
     const category = getAlgoCategoryName(algoKey);
+
+    if (algoKey === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
+      results.push({
+        algoKey,
+        label,
+        category,
+        activeWeight: 0,
+        recentHitRate: 0,
+        baselineRate: 5.0 / 90.0,
+        proofScore: 0,
+        hasEmpiricalProof: false,
+        isUnderperforming: false,
+        suggestedExpertNudge: 0,
+        statusLabel: 'Désactivé (sans machine)',
+      });
+      return;
+    }
+
     const activeWeight = Number.isFinite(activeWeights[algoKey])
       ? activeWeights[algoKey]
       : DEFAULT_ALGO_WEIGHTS[algoKey] ?? 0;

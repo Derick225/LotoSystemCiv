@@ -11,6 +11,7 @@ import {
   projectWeightsWithContinuousProofShrinkage,
 } from './closedLoopAutopsyService';
 import { LABELS_MAP, ALGO_CATEGORIES } from '../../hooks/useAlgorithmSync';
+import { drawHasMachineNumbers } from '../../constants';
 
 export interface NeuralEpochLog {
   epoch: number;
@@ -126,12 +127,12 @@ const getMirrorBall = (n: number): number => {
  */
 export const computeFastHistoricalFeatures = (
   pastHistory: DrawResult[],
-  validKeys: AlgoKey[]
+  validKeys: AlgoKey[],
+  drawName?: string
 ): Record<number, Record<AlgoKey, number>> => {
   const depth = Math.min(pastHistory.length, 45);
-  const hasMachine = pastHistory.some(
-    (d) => Array.isArray(d.machine) && d.machine.length > 0
-  );
+  const resolvedDrawName = drawName ?? pastHistory[0]?.drawName;
+  const hasMachine = drawHasMachineNumbers(resolvedDrawName, pastHistory);
 
   // Tableaux bruts par canal (1..90)
   const rawFreq = new Float64Array(91);
@@ -734,9 +735,7 @@ export const runNeuralSelfOptimization = (
   const pureHistory = purifyHistoryForDraw<DrawResult>(drawName, history);
 
   const validKeys = Object.values(AlgoKey);
-  const hasMachine = pureHistory.some(
-    (d) => Array.isArray(d.machine) && d.machine.length > 0
-  );
+  const hasMachine = drawHasMachineNumbers(drawName, pureHistory);
   const initCopy: AlgoWeights = { ...initialWeights };
   if (!hasMachine) {
     initCopy[AlgoKey.MACHINE_TRANSFER] = 0;
@@ -756,7 +755,7 @@ export const runNeuralSelfOptimization = (
     const pastSubset = pureHistory.slice(t + 1);
     if (pastSubset.length < 3) continue;
 
-    const featuresByBall = computeFastHistoricalFeatures(pastSubset, validKeys);
+    const featuresByBall = computeFastHistoricalFeatures(pastSubset, validKeys, drawName);
     const targetGagnants = new Set<number>(targetDraw.gagnants || []);
     allTensors.push({
       targetGagnants,

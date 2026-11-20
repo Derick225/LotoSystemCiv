@@ -1,6 +1,7 @@
 import { DrawResult, AlgoWeights } from '../../types';
 import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
+import { drawHasMachineNumbers } from '../../constants';
 import { extractFeatures, extractDrawNumbers } from './featureExtractor';
 import { computeAdvancedMetrics } from './predictionOrchestrator';
 import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
@@ -481,9 +482,7 @@ export const executeClosedLoopAutopsy = async (
   const { winners: actualWinners, machine: actualMachine } = extractDrawNumbers(targetDraw);
   const actualWinnersSet = new Set(actualWinners);
 
-  const hasMachineData = priorHistory.some(
-    (d) => Array.isArray(d.machine) && d.machine.length > 0
-  );
+  const hasMachineData = drawHasMachineNumbers(drawName, priorHistory);
 
   // Résolution des poids en vigueur à t-1 : si targetDrawIndex > 0 et qu'une version ADN
   // antérieure ou contemporaine au tirage cible existe, on l'utilise pour éviter toute fuite temporelle.
@@ -1016,9 +1015,7 @@ export const executeClosedLoopAutoAdjustment = async (
   const targetDraw = history[targetDrawIndex] || history[0];
   const priorHistory = history.slice(targetDrawIndex + 1);
 
-  const hasMachineData = priorHistory.some(
-    (d) => Array.isArray(d.machine) && d.machine.length > 0
-  );
+  const hasMachineData = drawHasMachineNumbers(drawName, priorHistory);
 
   // 2. Évaluation des preuves empiriques strictement sur priorHistory (zéro fuite temporelle du tirage cible)
   const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistory);
@@ -1348,9 +1345,7 @@ export const executeBatchClosedLoopAutopsy = async (
   const meanBrier = sumBrier / effectiveCount;
 
   const priorHistoryForBatch = history.slice(depth);
-  const hasMachineData = priorHistoryForBatch.some(
-    (d) => Array.isArray(d.machine) && d.machine.length > 0
-  );
+  const hasMachineData = drawHasMachineNumbers(drawName, priorHistoryForBatch);
   // Strictement sur priorHistoryForBatch (zéro fuite temporelle des tirages cibles 0..depth-1)
   const proofMap = evaluateAlgoEmpiricalProof(drawName, priorHistoryForBatch);
 

@@ -1,5 +1,7 @@
 import { LCG } from '../../utils/mathUtils';
-import { unpackHistory, computeAdaptiveCoeffs, AdaptiveCoeffs } from './zeroCopy';
+import { unpackHistory, computeAdaptiveCoeffs } from './zeroCopy';
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
+import { drawHasMachineNumbers } from '../../config/networks';
 
 export {};
 
@@ -8,15 +10,32 @@ interface AlgoWeights { [key: string]: number | undefined; }
 
 const ctx = self as unknown as Worker;
 
-// Norme L1 stricte avec bornes dynamiques
-const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
+// Norme L1 stricte avec bornes dynamiques et préservation des canaux désactivés
+const normalizeWeights = (
+  w: AlgoWeights,
+  forcedZeroKeys: ReadonlySet<string> = new Set()
+): AlgoWeights => {
   const keys = Object.keys(w);
-  const numKeys = keys.length || 1;
-  const total = Object.values(w).reduce<number>((acc, val) => acc + Math.abs(val ?? 0), 0);
+  const activeKeys = keys.filter((k) => !forcedZeroKeys.has(k));
   const normalized: AlgoWeights = { ...w };
-  
+
+  keys.forEach((k) => {
+    if (forcedZeroKeys.has(k)) {
+      normalized[k] = 0;
+    }
+  });
+
+  if (activeKeys.length === 0) {
+    return normalized;
+  }
+
+  const numKeys = activeKeys.length;
+  const total = activeKeys.reduce<number>((acc, k) => acc + Math.abs(w[k] ?? 0), 0);
+
   if (total <= 0) {
-    keys.forEach(k => { normalized[k] = 1.0 / numKeys; });
+    activeKeys.forEach((k) => {
+      normalized[k] = 1.0 / numKeys;
+    });
     return normalized;
   }
 
@@ -24,7 +43,7 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
   const FLOOR = Math.max(1e-6, uniformWeight * 0.10);
   const CEILING = Math.min(0.90, uniformWeight * 3.0);
 
-  keys.forEach(k => {
+  activeKeys.forEach((k) => {
     const val = normalized[k];
     if (typeof val === 'number') {
       let normVal = Math.abs(val) / total;
@@ -33,9 +52,9 @@ const normalizeWeights = (w: AlgoWeights): AlgoWeights => {
     }
   });
 
-  const currentSum = keys.reduce((acc, key) => acc + (normalized[key] || 0), 0);
+  const currentSum = activeKeys.reduce((acc, key) => acc + (normalized[key] || 0), 0);
   if (Math.abs(currentSum - 1.0) > 1e-6) {
-      normalized[keys[0]] = parseFloat(((normalized[keys[0]] || 0) + (1.0 - currentSum)).toFixed(6));
+    normalized[activeKeys[0]] = parseFloat(((normalized[activeKeys[0]] || 0) + (1.0 - currentSum)).toFixed(6));
   }
   return normalized;
 };
@@ -49,17 +68,27 @@ const randomGaussian = (prng: LCG, mean: number = 0, stdev: number = 1): number 
 };
 
 // Perturber les poids à l'aide d'un bruit gaussien déterministe
-const perturbWeights = (prng: LCG, w: AlgoWeights, temperatureRatio: number, stepSize: number): AlgoWeights => {
+const perturbWeights = (
+  prng: LCG,
+  w: AlgoWeights,
+  temperatureRatio: number,
+  stepSize: number,
+  forcedZeroKeys: ReadonlySet<string> = new Set()
+): AlgoWeights => {
   const perturbed = { ...w };
   const keys = Object.keys(perturbed);
   
   keys.forEach(k => {
+    if (forcedZeroKeys.has(k)) {
+      perturbed[k] = 0;
+      return;
+    }
     const noise = randomGaussian(prng, 0, stepSize * temperatureRatio);
     const currentVal = perturbed[k] || 0;
     perturbed[k] = Math.max(0, currentVal + noise);
   });
   
-  return normalizeWeights(perturbed);
+  return normalizeWeights(perturbed, forcedZeroKeys);
 };
 
 // --- EVALUATION DÉTERMINISTE MULTI-CANAUX (24 CANAUX ALGORITHMIQUES ACTIFS - SA-TUNE) ---
@@ -455,12 +484,19 @@ ctx.onmessage = (e) => {
   if (e.data.type === 'start') {
     const { drawName, baseWeights, config, history, historyBuffer, drawCount, winningCount, totalCols, timeSignature } = e.data.payload;
     const hist = historyBuffer ? unpackHistory(historyBuffer, drawCount, winningCount, totalCols) : unpackHistory(history);
+    const hasMachine = drawName
+      ? drawHasMachineNumbers(drawName, hist)
+      : hist.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
+    const forcedZeroKeys = new Set<string>(RETIRED_ALGO_WEIGHT_KEYS);
+    if (!hasMachine) {
+      forcedZeroKeys.add(AlgoKey.MACHINE_TRANSFER);
+    }
     
     // Isolation du PRNG avec un seed déterministe canonique
     const prng = new LCG(`sa_${timeSignature || drawName}_${config.maxIterations || 150}`);
 
-    const numWeights = Object.keys(baseWeights).length;
-    const MAX_ITERATIONS = config.maxIterations || Math.max(50, Math.ceil(numWeights * Math.sqrt(hist.length) * 0.8));
+    const activeKeyCount = Math.max(1, Object.keys(baseWeights).filter((k) => !forcedZeroKeys.has(k)).length);
+    const MAX_ITERATIONS = config.maxIterations || Math.max(50, Math.ceil(activeKeyCount * Math.sqrt(hist.length) * 0.8));
     const historyDepth = config.historyDepth || Math.max(20, Math.floor(hist.length * 0.5));
     
     // Régime Thermo-Statistique
@@ -468,7 +504,7 @@ ctx.onmessage = (e) => {
     const Entropy = config.regimeMetrics?.entropy ?? 0.5;
 
     // Évaluation du point de départ
-    const baseNormalized = normalizeWeights(baseWeights);
+    const baseNormalized = normalizeWeights(baseWeights, forcedZeroKeys);
     let currentWeights = { ...baseNormalized };
     let currentScore = evaluate(currentWeights, hist, historyDepth);
     
@@ -477,10 +513,10 @@ ctx.onmessage = (e) => {
 
     // Calibration adaptative de la Température Initiale (sans nombres magiques)
     const probeScores: number[] = [];
-    const stepSize = 1.0 / numWeights;
+    const stepSize = 1.0 / activeKeyCount;
     
     for (let i = 0; i < 20; i++) {
-      const probe = perturbWeights(prng, currentWeights, 1.0, stepSize);
+      const probe = perturbWeights(prng, currentWeights, 1.0, stepSize, forcedZeroKeys);
       probeScores.push(evaluate(probe, hist, historyDepth));
     }
     
@@ -505,7 +541,7 @@ ctx.onmessage = (e) => {
     for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
       const tempRatio = T / T_max;
       
-      const candidate = perturbWeights(prng, currentWeights, tempRatio, stepSize);
+      const candidate = perturbWeights(prng, currentWeights, tempRatio, stepSize, forcedZeroKeys);
       const candidateScore = evaluate(candidate, hist, historyDepth);
       
       const deltaE = -(candidateScore - currentScore);

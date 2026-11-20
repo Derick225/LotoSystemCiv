@@ -2,7 +2,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, isSupabaseConfigured } from '../services/supabaseClient';
 import type { DrawResult } from '../types';
-import { normalizeDate, fetchResults, fetchRecentStats, getDailySummary } from '../services/lotteryService';
+import {
+  normalizeDate,
+  fetchResults,
+  fetchRecentStats,
+  getDailySummary,
+  lotteryService,
+  syncDrawExternalDetailed,
+  type SyncExternalOptions,
+} from '../services/lotteryService';
+import { globalCache } from '../services/cache/CacheService';
 import { DRAW_SCHEDULE } from '../constants';
 import { 
     calculateSpectralMetricsAsync, 
@@ -70,8 +79,9 @@ export const useDrawHistory = (drawName: string) => {
     const channel = supabase
       .channel(channelId)
       .on('postgres_changes', 
-        { event: 'INSERT', schema: 'public', table: 'draw_results', filter }, 
-        () => {
+        { event: '*', schema: 'public', table: 'draw_results', filter }, 
+        async () => {
+          await globalCache.delete(globalCache.generateKey('history', drawName)).catch(() => {});
           queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
           queryClient.invalidateQueries({ queryKey: lotteryKeys.all }); 
         }
@@ -183,6 +193,30 @@ export const useDeleteDrawMutation = (drawName: string) => {
       queryClient.invalidateQueries({ queryKey: lotteryKeys.globalMarket() });
       queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
     }
+  });
+};
+
+export const useSyncResultsMutation = (drawName?: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (options?: SyncExternalOptions) => {
+      return syncDrawExternalDetailed(drawName, options);
+    },
+    onSuccess: () => {
+      if (drawName) {
+        queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
+      }
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
+    },
+  });
+};
+
+export const useRecentSyncStatus = (limit: number = 8, enabled: boolean = true) => {
+  return useQuery({
+    queryKey: [...lotteryKeys.all, 'sync-status', limit] as const,
+    queryFn: () => lotteryService.fetchRecentSyncStatus(limit),
+    enabled: enabled && isSupabaseConfigured(),
+    staleTime: 1000 * 60 * 2,
   });
 };
 

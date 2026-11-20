@@ -18,6 +18,7 @@ import { calculateGapEfficiency } from "../../services/mathService";
 import { GapEfficiencyMeter } from "../GapEfficiencyMeter";
 import type { GapEfficiency } from "../../types";
 import { audioEngine } from "../../utils/audioEngine";
+import { drawHasMachineNumbers } from "../../constants";
 
 const ChaosAttractor = lazy(() =>
   import("../ChaosAttractor").then((m) => ({ default: m.ChaosAttractor })),
@@ -62,6 +63,7 @@ export const SignalHub: React.FC = () => {
   const currentDrawName = useNexusStore((state) => state.currentDrawName);
   const activeSubTab = useNexusStore((state) => state.activeSubTab);
   const activeDraw = drawName || currentDrawName;
+  const hasMachineData = drawHasMachineNumbers(activeDraw, history);
 
   const [pillar, setPillar] = useState<SignalPillar>("stats_patterns");
   const [statsSubView, setStatsSubView] = useState<"stats" | "patterns" | "gaps">("stats");
@@ -353,11 +355,18 @@ export const SignalHub: React.FC = () => {
                         className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                           dynamicsSubView === "machine"
                             ? "bg-blue-600 text-white shadow-sm"
+                            : !hasMachineData
+                            ? "text-slate-500 hover:text-slate-300 opacity-75"
                             : "text-slate-400 hover:text-white"
                         }`}
                       >
                         <Cpu size={13} />
-                        Transfert Machine & Entropie
+                        <span>Transfert Machine & Entropie</span>
+                        {!hasMachineData && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] font-mono uppercase text-amber-400 border border-slate-700">
+                            Désactivé
+                          </span>
+                        )}
                       </button>
                     </div>
 

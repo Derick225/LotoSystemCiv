@@ -4,6 +4,7 @@ import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
 import { evaluateAlgoEmpiricalProof, computeChronologicalAlgoReinforcement, normalizeWeights } from "../../services/prediction/weightsManager";
 import { exportService } from "../../services/exportService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
+import { drawHasMachineNumbers } from "../../constants";
 import { useToast } from "../ui/Toast";
 import { audioEngine } from "../../utils/audioEngine";
 import {
@@ -317,24 +318,6 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
     return initial;
   });
 
-  // Synchronisation continue dès que les poids globaux du tirage changent dans l'application
-  useEffect(() => {
-    if (globalWeights && Object.keys(globalWeights).length > 0) {
-      const next: Record<string, number> = {};
-      ALGO_REGISTRY.forEach((meta) => {
-        next[meta.key] = typeof (globalWeights as any)[meta.key] === "number"
-          ? (globalWeights as any)[meta.key]
-          : 1.0;
-      });
-      setLocalWeights(next);
-    }
-  }, [globalWeights]);
-
-  // Locked weights state (pinned while normalizing others)
-  const [lockedKeys, setLockedKeys] = useState<Record<string, boolean>>({});
-  const [activeCategory, setActiveCategory] = useState<string>("all");
-  const [isExportingPDF, setIsExportingPDF] = useState(false);
-
   // Check if active history contains machine draws
   // ISOLATION TIRAGE : seul l'historique isolé du tirage actif est consulté. Sans
   // repli sur l'historique complet (qui mélangerait des tirages étrangers), comme
@@ -344,8 +327,30 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
   }, [history, drawName]);
 
   const hasMachineDataInHistory = useMemo(() => {
-    return isolatedHistory.some((d) => Array.isArray(d.machine) && d.machine.length > 0);
-  }, [isolatedHistory]);
+    return drawHasMachineNumbers(drawName, isolatedHistory);
+  }, [drawName, isolatedHistory]);
+
+  // Synchronisation continue dès que les poids globaux du tirage changent dans l'application
+  useEffect(() => {
+    if (globalWeights && Object.keys(globalWeights).length > 0) {
+      const next: Record<string, number> = {};
+      ALGO_REGISTRY.forEach((meta) => {
+        if (meta.key === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+          next[meta.key] = 0.0;
+        } else {
+          next[meta.key] = typeof (globalWeights as any)[meta.key] === "number"
+            ? (globalWeights as any)[meta.key]
+            : 1.0;
+        }
+      });
+      setLocalWeights(next);
+    }
+  }, [globalWeights, hasMachineDataInHistory]);
+
+  // Locked weights state (pinned while normalizing others)
+  const [lockedKeys, setLockedKeys] = useState<Record<string, boolean>>({});
+  const [activeCategory, setActiveCategory] = useState<string>("all");
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
 
   // Empirical Proofs & Standard Deviations evaluation on active draw history
   const empiricalProofs = useMemo(() => {
@@ -438,7 +443,9 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
       const optimized = computeChronologicalAlgoReinforcement(drawName, isolatedHistory, localWeights as any);
       const newWeights: Record<string, number> = {};
       ALGO_REGISTRY.forEach((meta) => {
-        if (lockedKeys[meta.key]) {
+        if (meta.key === AlgoKey.MACHINE_TRANSFER && !hasMachineDataInHistory) {
+          newWeights[meta.key] = 0.0;
+        } else if (lockedKeys[meta.key]) {
           newWeights[meta.key] = localWeights[meta.key];
         } else {
           // Canal absent du génome optimisé : on conserve le poids courant plutôt que d'inventer 1.0.
@@ -473,9 +480,13 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
   const handleApplyToEngine = async () => {
     audioEngine.play("click");
     try {
+      const safeLocalWeights: Record<string, number> = { ...localWeights };
+      if (!hasMachineDataInHistory) {
+        safeLocalWeights[AlgoKey.MACHINE_TRANSFER] = 0.0;
+      }
       // Normalise L1 according to AGENTS.md
-      const normalized = normalizeWeights(localWeights as any);
-      
+      const normalized = normalizeWeights(safeLocalWeights as any);
+
       // Strict constraint: nullify machine_transfer if no data
       if (!hasMachineDataInHistory) {
         (normalized as any)[AlgoKey.MACHINE_TRANSFER] = 0.0;

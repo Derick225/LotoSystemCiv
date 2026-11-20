@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { createClient } from 'supabase';
 import { corsHeaders } from "../../_shared/cors.ts";
+import { isOfficialDrawWithoutMachine } from "../../_shared/lotobonheur-parser.ts";
 
 // --- STRUCTURES & SCHÉMAS STRICTS DE SÉCURITÉ ---
 const DrawResultSchema = z.object({
@@ -304,7 +305,7 @@ const getPerformanceMemoryByRegime = async (supabase: any, drawName: string) => 
 
 // --- SENSING ENGINE (SÉPARATION SIGNAL / HEURISTIQUE) ---
 
-const extractSignals = (history: any[], adaptiveHalfLife: number, lookBack: number, timeDecay: number): Record<number, FeatureVector> => {
+const extractSignals = (history: any[], adaptiveHalfLife: number, lookBack: number, timeDecay: number, hasMachine: boolean = true): Record<number, FeatureVector> => {
   const rawFeatures: Record<number, FeatureVector> = {};
   const totalDraws = history.length;
   
@@ -409,12 +410,14 @@ const extractSignals = (history: any[], adaptiveHalfLife: number, lookBack: numb
       }
     }
 
-    // 2. machineTransfer
+    // 2. machineTransfer (automatiquement désactivé pour les tirages sans numéro machine)
     let machineRaw = 0;
-    for (let t = 0; t < lookBack; t++) {
-      const mach = parseMachineWinners(history[t].machine);
-      if (mach.includes(num)) {
-        machineRaw += Math.pow(timeDecay, t);
+    if (hasMachine) {
+      for (let t = 0; t < lookBack; t++) {
+        const mach = parseMachineWinners(history[t].machine);
+        if (mach.includes(num)) {
+          machineRaw += Math.pow(timeDecay, t);
+        }
       }
     }
 
@@ -587,9 +590,10 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
     const timeDecay = Math.pow(0.5, 1.0 / adaptiveHalfLife);
     const lookBack = Math.min(Math.floor(adaptiveHalfLife), cleanedHistory.length);
 
-    // Évaluation de la couverture machine
+    // Évaluation de la couverture machine & détection automatique des tirages sans machine
     const drawsWithMachine = cleanedHistory.filter(d => parseMachineWinners(d.machine).length > 0).length;
-    const machineCoverage = drawsWithMachine / cleanedHistory.length;
+    const hasMachine = !isOfficialDrawWithoutMachine(drawName) && drawsWithMachine > 0;
+    const machineCoverage = hasMachine ? (drawsWithMachine / cleanedHistory.length) : 0;
 
     // --- BASE DE DONNÉES / FEEDBACK COGNITIF ---
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -605,13 +609,18 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
     }
 
     // --- ÉTAPE 3 : SCORING ENGINE ---
-    const rawSignals = extractSignals(cleanedHistory, adaptiveHalfLife, lookBack, timeDecay);
+    const rawSignals = extractSignals(cleanedHistory, adaptiveHalfLife, lookBack, timeDecay, hasMachine);
     const normalizedSignals = normalizeSignals(rawSignals);
+    if (!hasMachine) {
+      for (let num = 1; num <= 90; num++) {
+        normalizedSignals[num].machineTransfer = 0;
+      }
+    }
 
     // Pondérations initiales adaptées
     const baseW = 1.0;
     const rawW_repeat = baseW * (1.0 + (weights?.temporal || 0.0));
-    const rawW_machine = baseW * (machineCoverage > 0.5 ? 1.2 : 0.8);
+    const rawW_machine = hasMachine ? baseW * (machineCoverage > 0.5 ? 1.2 : 0.8) : 0.0;
     const rawW_neighbor = baseW;
     const rawW_mirror = baseW;
     const rawW_markov = baseW + (weights?.markov || 0.0);
@@ -625,7 +634,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
     const chaoticMod = thermoState.chaotic;
 
     let modW_repeat = rawW_repeat * (1.0 + 0.5 * cryoMod - 0.5 * volatileMod);
-    let modW_machine = rawW_machine * (1.0 - 0.4 * cryoMod);
+    let modW_machine = hasMachine ? rawW_machine * (1.0 - 0.4 * cryoMod) : 0.0;
     let modW_neighbor = rawW_neighbor * (1.0 - 0.4 * cryoMod + 0.5 * volatileMod);
     let modW_mirror = rawW_mirror * (1.0 + 0.4 * volatileMod);
     let modW_markov = rawW_markov * (1.0 + 0.4 * cryoMod);
@@ -635,9 +644,12 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
 
     // Harmonisation en cas de chaos
     if (chaoticMod > 0.01) {
-      const avgW = (modW_repeat + modW_machine + modW_neighbor + modW_mirror + modW_markov + modW_trend + modW_seasonal + modW_structuralCoherence) / 8.0;
+      const denom = hasMachine ? 8.0 : 7.0;
+      const avgW = (modW_repeat + (hasMachine ? modW_machine : 0.0) + modW_neighbor + modW_mirror + modW_markov + modW_trend + modW_seasonal + modW_structuralCoherence) / denom;
       modW_repeat = modW_repeat * (1.0 - chaoticMod) + avgW * chaoticMod;
-      modW_machine = modW_machine * (1.0 - chaoticMod) + avgW * chaoticMod;
+      if (hasMachine) {
+        modW_machine = modW_machine * (1.0 - chaoticMod) + avgW * chaoticMod;
+      }
       modW_neighbor = modW_neighbor * (1.0 - chaoticMod) + avgW * chaoticMod;
       modW_mirror = modW_mirror * (1.0 - chaoticMod) + avgW * chaoticMod;
       modW_markov = modW_markov * (1.0 - chaoticMod) + avgW * chaoticMod;
@@ -669,7 +681,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
 
     const w = {
       repeatShort: modW_repeat / sumW,
-      machineTransfer: modW_machine / sumW,
+      machineTransfer: hasMachine && sumW > 0 ? modW_machine / sumW : 0.0,
       neighbor: modW_neighbor / sumW,
       mirror: modW_mirror / sumW,
       markov: modW_markov / sumW,
@@ -688,7 +700,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
       
       const act_inertia = (f.repeatShort + f.trend) / 2.0;
       const act_structure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
-      const act_transition = (f.markov + f.machineTransfer) / 2.0;
+      const act_transition = hasMachine ? (f.markov + f.machineTransfer) / 2.0 : f.markov;
       const act_seasonal = f.seasonal;
 
       const families = [act_inertia, act_structure, act_transition, act_seasonal];
@@ -698,7 +710,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
       const hasStructureRedundancy = Math.max(0, Math.min(f.mirror, f.neighbor) - 0.4) + 
                                      Math.max(0, Math.min(f.neighbor, f.structuralCoherence) - 0.4) +
                                      Math.max(0, Math.min(f.mirror, f.structuralCoherence) - 0.4);
-      const hasTransitionRedundancy = Math.max(0, Math.min(f.markov, f.machineTransfer) - 0.4);
+      const hasTransitionRedundancy = hasMachine ? Math.max(0, Math.min(f.markov, f.machineTransfer) - 0.4) : 0;
 
       const correlatedSignalsCount = (hasInertiaRedundancy ? 1 : 0) + 
                                      (hasStructureRedundancy > 0.2 ? 1 : 0) + 
@@ -770,9 +782,11 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
     let totalTop5FeatureVariance = 0;
     top5NumsForContradiction.forEach(num => {
       const f = normalizedSignals[num];
-      const fVals = [f.repeatShort, f.machineTransfer, f.neighbor, f.mirror, f.markov, f.trend, f.seasonal, f.structuralCoherence];
-      const fMean = fVals.reduce((a, b) => a + b, 0) / 8;
-      const fVar = fVals.reduce((sum, val) => sum + Math.pow(val - fMean, 2), 0) / 8;
+      const fVals = hasMachine
+        ? [f.repeatShort, f.machineTransfer, f.neighbor, f.mirror, f.markov, f.trend, f.seasonal, f.structuralCoherence]
+        : [f.repeatShort, f.neighbor, f.mirror, f.markov, f.trend, f.seasonal, f.structuralCoherence];
+      const fMean = fVals.reduce((a, b) => a + b, 0) / fVals.length;
+      const fVar = fVals.reduce((sum, val) => sum + Math.pow(val - fMean, 2), 0) / fVals.length;
       totalTop5FeatureVariance += fVar;
     });
     const contradictionPenalty = (totalTop5FeatureVariance / 5.0) * 1.5;
@@ -786,9 +800,11 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
 
     for (let num = 1; num <= 90; num++) {
       const f = normalizedSignals[num];
-      const fVals = [f.repeatShort, f.machineTransfer, f.neighbor, f.mirror, f.markov, f.trend, f.seasonal, f.structuralCoherence];
-      const numMean = fVals.reduce((a, b) => a + b, 0) / 8;
-      const numVariance = fVals.reduce((sum, val) => sum + Math.pow(val - numMean, 2), 0) / 8;
+      const fVals = hasMachine
+        ? [f.repeatShort, f.machineTransfer, f.neighbor, f.mirror, f.markov, f.trend, f.seasonal, f.structuralCoherence]
+        : [f.repeatShort, f.neighbor, f.mirror, f.markov, f.trend, f.seasonal, f.structuralCoherence];
+      const numMean = fVals.reduce((a, b) => a + b, 0) / fVals.length;
+      const numVariance = fVals.reduce((sum, val) => sum + Math.pow(val - numMean, 2), 0) / fVals.length;
 
       const signalVarianceMultiplier = Math.exp(-alpha * numVariance);
       const weightedScore = weightedScores[num];
@@ -824,7 +840,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
         const f = normalizedSignals[num];
         const famInertia = (f.repeatShort + f.trend) / 2.0;
         const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
-        const famTransition = (f.markov + f.machineTransfer) / 2.0;
+        const famTransition = hasMachine ? (f.markov + f.machineTransfer) / 2.0 : f.markov;
         const famSeasonal = f.seasonal;
 
         const famVals = [famInertia, famStructure, famTransition, famSeasonal];
@@ -888,7 +904,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
       const f = normalizedSignals[bestNum];
       const famInertia = (f.repeatShort + f.trend) / 2.0;
       const famStructure = (f.mirror + f.neighbor + f.structuralCoherence) / 3.0;
-      const famTransition = (f.markov + f.machineTransfer) / 2.0;
+      const famTransition = hasMachine ? (f.markov + f.machineTransfer) / 2.0 : f.markov;
       const famSeasonal = f.seasonal;
       const famVals = [famInertia, famStructure, famTransition, famSeasonal];
       const maxIdx = famVals.indexOf(Math.max(...famVals));
@@ -949,7 +965,7 @@ export async function handlePredictElite(req: Request, reqBody?: any): Promise<R
       const f = normalizedSignals[num];
       finalBreakdown[num] = {
         repeatShort: Math.round(f.repeatShort * 100),
-        machineTransfer: Math.round(f.machineTransfer * 100),
+        machineTransfer: hasMachine ? Math.round(f.machineTransfer * 100) : 0,
         neighbor: Math.round(f.neighbor * 100),
         mirror: Math.round(f.mirror * 100),
         markov: Math.round(f.markov * 100),

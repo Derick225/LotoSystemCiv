@@ -1,7 +1,8 @@
 import { AlgoWeights, DrawResult } from '../../types';
-import { AlgoKey } from '../../shared/prediction.types';
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 import { normalizeWeights, getDefaultWeights } from './weightsManager';
 import { calculateShannonEntropy, calculateVariance } from './deterministicCore';
+import { drawHasMachineNumbers } from '../../constants';
 
 export interface KalmanFilterState {
   drawName: string;
@@ -271,12 +272,18 @@ export function updateWeightsWithKalmanFilter(params: {
   }
 
   // 6. Mise à jour couplée de l'état : x_t = x_{t|t-1} + K_t \nu_t
+  const hasMachine = drawHasMachineNumbers(drawName, params.history);
   const newWeightsMap: Record<string, number> = {};
   const kalmanGains: Record<string, number> = {};
   const minFloor = 1.0 / (K * 90.0);
 
   for (let i = 0; i < K; i++) {
     const key = keys[i];
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(key) || (key === AlgoKey.MACHINE_TRANSFER && !hasMachine)) {
+      kalmanGains[key] = 0;
+      newWeightsMap[key] = 0;
+      continue;
+    }
     const priorState = state.stateVector[key] ?? (1.0 / K);
     let deltaI = 0;
     for (let j = 0; j < K; j++) {
