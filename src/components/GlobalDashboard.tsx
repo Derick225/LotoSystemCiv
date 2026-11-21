@@ -76,7 +76,6 @@ const MetaLearningIndicator = React.memo(() => {
   const setForensicOptimized = useNexusStore(
     (state) => state.setForensicOptimized,
   );
-  const navigateToModule = useNexusStore((state) => state.navigateToModule);
   const { showToast } = useToast();
 
   const [isOnline, setIsOnline] = useState(
@@ -138,7 +137,24 @@ const MetaLearningIndicator = React.memo(() => {
       <div className="flex flex-col md:flex-row items-center justify-between gap-4 md:gap-6 relative z-10">
         <button
           type="button"
-          onClick={() => navigateToModule("Prediction")}
+          onClick={() => {
+            audioEngine.play("click");
+            const targetDraw =
+              getNextScheduledDraw()?.name ||
+              useNexusStore.getState().drawName ||
+              DRAW_SCHEDULE[0]?.name ||
+              "National";
+            window.dispatchEvent(
+              new CustomEvent("CROSS_MODULE_NAVIGATE", {
+                detail: {
+                  view: "home",
+                  drawName: targetDraw,
+                  mainTab: "Oracle",
+                  subTab: "prediction",
+                },
+              }),
+            );
+          }}
           className="flex items-center gap-3 md:gap-4 w-full md:w-auto text-left hover:opacity-90 transition-opacity cursor-pointer group"
           title="Cliquer pour basculer vers le moteur de prédiction autonome"
         >
@@ -601,6 +617,13 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
     const globalWeights = useNexusStore((state) => state.globalWeights);
     const drawName = useNexusStore((state) => state.drawName);
     const temporalDepth = useNexusStore((state) => state.temporalDepth);
+    const isForensicOptimized = useNexusStore(
+      (state) => state.isForensicOptimized,
+    );
+    const useSpatioTemporalHawkes = useNexusStore(
+      (state) => state.useSpatioTemporalHawkes,
+    );
+    const useCloudEngine = useNexusStore((state) => state.useCloudEngine);
     const navigateToModule = useNexusStore((state) => state.navigateToModule);
     const isAutonomousAgentActive = useNexusStore(
       (state) => state.isAutonomousAgentActive,
@@ -765,7 +788,11 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
 
     const handleExportReport = useCallback(async () => {
       try {
-        const currentDrawName = history[0]?.drawName || "Global";
+        const currentDrawName =
+          history[0]?.drawName ||
+          drawName ||
+          getNextScheduledDraw()?.name ||
+          "National";
         const { generateMasterPrediction } =
           await import("../services/prediction/predictionFacade");
         const prediction = await generateMasterPrediction(
@@ -773,6 +800,16 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
           history,
           temporalDepth,
           globalWeights,
+          undefined,
+          undefined,
+          false,
+          false,
+          undefined,
+          isForensicOptimized,
+          undefined,
+          undefined,
+          useSpatioTemporalHawkes,
+          useCloudEngine,
         );
 
         await generateTacticalReport({
@@ -785,7 +822,16 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
         console.error(e);
         showToast("Erreur lors de la génération du rapport.", "error");
       }
-    }, [history, globalWeights, showToast]);
+    }, [
+      history,
+      drawName,
+      temporalDepth,
+      globalWeights,
+      isForensicOptimized,
+      useSpatioTemporalHawkes,
+      useCloudEngine,
+      showToast,
+    ]);
 
     const nextDrawInfo = getNextScheduledDraw();
 
@@ -1049,18 +1095,12 @@ export const GlobalDashboard: React.FC<GlobalDashboardProps> = React.memo(
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       audioEngine.play("click");
+                                      navigateToModule("Forensic", "prediction");
                                       onSelectDraw({
                                         day: selectedDay,
                                         time: item.time,
                                         name: item.name,
                                       });
-                                      // We let the view transition, and trigger the navigation event after a short delay
-                                      setTimeout(() => {
-                                        navigateToModule(
-                                          "Forensic",
-                                          "prediction",
-                                        );
-                                      }, 300);
                                     }}
                                   >
                                     <div className="flex items-center gap-2 text-[8px] md:text-[9px] font-black text-indigo-400 uppercase group-hover:text-indigo-300">

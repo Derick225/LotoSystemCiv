@@ -9,6 +9,7 @@ import { EnhancedMetrics } from './prediction/metrics.types';
 import { getDeterministicUUID } from '../utils/mathUtils';
 import { offlineQueueService } from './offlineQueueService';
 import { parseDateSafely, formatDateSafely } from '../utils/dateUtils';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { logActivePredictionDna } from './prediction/dnaAuditLogService';
 import {
   getDrawException,
@@ -489,7 +490,13 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
     });
 };
 
-export const savePredictionToHistory = async (drawName: string, prediction: Prediction, drawResultId?: string, metrics?: EnhancedMetrics): Promise<PredictionHistoryItem> => {
+export const savePredictionToHistory = async (
+  drawName: string,
+  prediction: Prediction,
+  drawResultId?: string,
+  metrics?: EnhancedMetrics,
+  historyContext?: DrawResult[]
+): Promise<PredictionHistoryItem> => {
   const seed = `${drawName}_${Date.now()}_${prediction.suggestedNumbers.join(',')}`;
   let hashVal = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -535,12 +542,27 @@ export const savePredictionToHistory = async (drawName: string, prediction: Pred
   savePredictionSnapshot(newItem.id, drawName, prediction, metrics).catch(e => console.error("Snapshot save failed", e));
 
   // Enregistrement systématique de l'ADN actif de la prédiction pour l'audit post-tirage
-  getAlgoWeights(drawName)
-    .then(weights => logActivePredictionDna(drawName, newItem.id, prediction.suggestedNumbers, weights, [], {
-      entropy: metrics?.statisticalBounds?.shannonEntropy,
-      hurst: metrics?.statisticalBounds?.hurstExponent,
-      confidence: prediction.confidence
-    }))
+  Promise.resolve()
+    .then(async () => {
+      let resolvedHistory = historyContext && historyContext.length > 0
+        ? purifyHistoryForDraw(drawName, historyContext)
+        : [];
+      if (resolvedHistory.length === 0) {
+        try {
+          const { lotteryService } = await import('./lotteryService');
+          const fetched = await lotteryService.fetchHistory(drawName);
+          resolvedHistory = purifyHistoryForDraw(drawName, fetched || []);
+        } catch {
+          resolvedHistory = [];
+        }
+      }
+      const weights = await getAlgoWeights(drawName);
+      await logActivePredictionDna(drawName, newItem.id, prediction.suggestedNumbers, weights, resolvedHistory, {
+        entropy: metrics?.statisticalBounds?.shannonEntropy,
+        hurst: metrics?.statisticalBounds?.hurstExponent,
+        confidence: prediction.confidence
+      });
+    })
     .catch(e => console.warn("[DnaAudit] Échec de l'enregistrement automatique de l'ADN actif:", e));
   
   // Purge automatique en tâche de fond des logs de plus de 90 jours

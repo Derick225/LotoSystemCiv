@@ -16,6 +16,7 @@ import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { useToast } from '../components/ui/Toast';
 import { syncForensicReports, deleteForensicReportCloud, deleteMultipleForensicReportsCloud } from '../services/syncService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
+import { reconcileDnaLogsWithDrawResult } from '../services/prediction/dnaAuditLogService';
 import { parseDateSafely } from '../utils/dateUtils';
 
 const normalizeDrawStr = (s?: string): string => {
@@ -56,15 +57,16 @@ export const useForensicData = (drawName: string) => {
                             .order('created_at', { ascending: false });
 
                         if (cloudReports && cloudReports.length > 0) {
-                            cloudReports.forEach((cr: any) => {
+                            for (const cr of cloudReports as any[]) {
                                 const existingIdx = currentReports.findIndex((r) => r.id === cr.id || r.predictionId === cr.prediction_id);
-                                const mappedReport = { ...cr.report_data, id: cr.id, date: cr.draw_date };
+                                const mappedReport: ForensicReport = { ...cr.report_data, id: cr.id, date: cr.draw_date };
                                 if (existingIdx >= 0) {
                                     currentReports[existingIdx] = { ...currentReports[existingIdx], ...mappedReport };
                                 } else {
                                     currentReports.push(mappedReport);
+                                    await saveForensicReport(mappedReport);
                                 }
-                            });
+                            }
                         }
                     }
                 } catch (e) {
@@ -114,10 +116,11 @@ export const useForensicData = (drawName: string) => {
                             true, // Skip LLM for bulk syncs
                             cleanHistory
                         ).then(async (rep) => {
-                            saveForensicReport(rep);
+                            await saveForensicReport(rep);
                             if (!pred.drawResultId) {
                                 await linkPredictionToResult(pred.id, actual.id);
                             }
+                            await reconcileDnaLogsWithDrawResult(drawName, actual, cleanHistory);
                             return rep;
                         }).catch((e) => {
                             console.error("Failed to perform forensic analysis for", pred.id, e);

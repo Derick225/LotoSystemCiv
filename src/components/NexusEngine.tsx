@@ -4,12 +4,13 @@ import { useDrawHistory, useNexusAnalytics } from "../hooks/useLottery";
 import {
   getAlgoWeights,
   generateMasterPrediction,
+  hashWeights,
 } from "../services/prediction/predictionFacade";
 import { generateEmpiricalCalibration } from "../services/prediction/ticketAnalysisService";
 import { generateSmartInsights } from "../services/insightService";
 import {
   getPredictionHistoryAsync,
-  calculateHistoricalPerformance,
+  calculateExtendedHistoricalPerformance,
   linkPredictionToResult,
   findMatchingResultForPrediction,
 } from "../services/predictionHistoryService";
@@ -19,6 +20,14 @@ import {
   syncForensicReportsWithCloud,
   getLocalForensicReports,
 } from "../services/postPredictionAnalysisService";
+import { reconcileDnaLogsWithDrawResult } from "../services/prediction/dnaAuditLogService";
+import {
+  DRAW_DOMAIN_SIZE,
+  DRAW_PICK_SIZE,
+  UNIFORM_BRIER_REFERENCE,
+  UNIFORM_SINGLE_NUMBER_PROBABILITY,
+} from "../shared/drawTheory";
+import type { CalibrationData } from "../types";
 import { AppError, logError } from "../utils/AppError";
 import { logger } from "../utils/logger";
 import { useAutonomousAgent } from "../hooks/useAutonomousAgent";
@@ -29,7 +38,11 @@ export const NexusEngine: React.FC = () => {
   const drawName = useNexusStore((s) => s.drawName);
   const temporalDepth = useNexusStore((s) => s.temporalDepth);
   const globalWeights = useNexusStore((s) => s.globalWeights);
-  const setGlobalWeights = useNexusStore((s) => s.setGlobalWeights);
+  const isForensicOptimized = useNexusStore((s) => s.isForensicOptimized);
+  const useSpatioTemporalHawkes = useNexusStore(
+    (s) => s.useSpatioTemporalHawkes,
+  );
+  const useCloudEngine = useNexusStore((s) => s.useCloudEngine);
   const setHistoryData = useNexusStore((s) => s.setHistoryData);
   const setAnalyticsData = useNexusStore((s) => s.setAnalyticsData);
   const setLoading = useNexusStore((s) => s.setLoading);
@@ -80,18 +93,23 @@ export const NexusEngine: React.FC = () => {
       window.removeEventListener("NEXUS_STORE_REHYDRATED", handleRehydrated);
   }, [refetchHistory]);
 
-  // 1. Initialisation Configuration (Weights & RL)
+  // 1. Initialisation Configuration (Hydratation sans ré-écriture superflue)
   useEffect(() => {
     let mounted = true;
     const initConfig = async () => {
       const weights = await getAlgoWeights(drawName);
-      if (mounted) setGlobalWeights(weights);
+      if (mounted && useNexusStore.getState().drawName === drawName) {
+        const current = useNexusStore.getState().globalWeights;
+        if (JSON.stringify(current) !== JSON.stringify(weights)) {
+          useNexusStore.setState({ globalWeights: weights });
+        }
+      }
     };
     initConfig();
     return () => {
       mounted = false;
     };
-  }, [drawName, setGlobalWeights]);
+  }, [drawName]);
 
   // 2. Calcul des Stats basiques (Rapide, synchrone)
   useEffect(() => {
@@ -170,11 +188,11 @@ export const NexusEngine: React.FC = () => {
         );
         if (mounted) setSmartInsights(insights);
 
-        // Clé de version du jeu de données actif (drawName + nombre de tirages + date du dernier tirage)
-        const currentDataKey = `${drawName}_${history.length}_${history[0]?.date || ""}`;
+        // Clé de version complète (tirage + historique + poids + profondeur + options moteur)
+        const currentDataKey = `${drawName}_${history.length}_${history[0]?.date || ""}_${hashWeights(globalWeights)}_${temporalDepth}_${isForensicOptimized ? 1 : 0}_${useSpatioTemporalHawkes ? 1 : 0}_${useCloudEngine ? 1 : 0}`;
         const currentPred = useNexusStore.getState().lastPrediction;
 
-        // Génération automatique uniquement si aucune prédiction n'existe pour ce tirage ou si le jeu de données a changé
+        // Génération automatique si aucune prédiction active ou si la configuration/données ont évolué
         if (!currentPred || currentPred.drawName !== drawName || lastComputedDrawKeyRef.current !== currentDataKey) {
           lastComputedDrawKeyRef.current = currentDataKey;
           const prediction = await generateMasterPrediction(
@@ -188,6 +206,14 @@ export const NexusEngine: React.FC = () => {
               regularity: analytics.regularity,
             },
             analytics.symbioticContext || undefined,
+            false,
+            false,
+            undefined,
+            isForensicOptimized,
+            undefined,
+            undefined,
+            useSpatioTemporalHawkes,
+            useCloudEngine,
           );
           if (mounted) setLastPrediction(prediction);
         }
@@ -215,6 +241,9 @@ export const NexusEngine: React.FC = () => {
     analytics,
     globalWeights,
     temporalDepth,
+    isForensicOptimized,
+    useSpatioTemporalHawkes,
+    useCloudEngine,
     setLastPrediction,
     setSmartInsights,
   ]);
@@ -232,9 +261,10 @@ export const NexusEngine: React.FC = () => {
           // Preload all local forensic reports to prevent O(N * M) IndexedDB lookups/parsing inside the loop
           const allLocalReports = await getLocalForensicReports();
 
-          // --- AUTO-LINKER & FORENSIC AUTOMATOR ---
+          // --- AUTO-LINKER, DNA RECONCILER & FORENSIC AUTOMATOR ---
           let historyChanged = false;
           let forensicGenerated = false;
+          const reconciledResultIds = new Set<string>();
 
           // Seules les 10 dernières prédictions (les plus récentes) ont besoin d'être vérifiées et analysées en arrière-plan.
           // Cela évite de recalculer l'analyse forensique pour des centaines de vieux tirages à chaque changement de jeu.
@@ -256,8 +286,17 @@ export const NexusEngine: React.FC = () => {
               }
             }
 
-            // Automate Forensic Analysis if linked and no report exists
+            // Automate Forensic Analysis & DNA reconciliation if matched
             if (match) {
+              if (!reconciledResultIds.has(match.id)) {
+                reconciledResultIds.add(match.id);
+                try {
+                  await reconcileDnaLogsWithDrawResult(drawName, match, history);
+                } catch (e) {
+                  console.warn("Auto-DNA reconciliation failed for", match.id, e);
+                }
+              }
+
               const existingReport = allLocalReports.find(
                 (r) => r.predictionId === item.id,
               );
@@ -274,7 +313,7 @@ export const NexusEngine: React.FC = () => {
                     true, // skipLLM for automated background analysis
                     history,
                   );
-                  saveForensicReport(report);
+                  await saveForensicReport(report);
                   forensicGenerated = true;
                 } catch (e) {
                   console.warn("Auto-Forensic failed for", item.id, e);
@@ -294,22 +333,101 @@ export const NexusEngine: React.FC = () => {
             );
           }
 
-          // Recalculate performance with updated preds if needed
+          // Recalculate empirical calibration strictly from matched draws & 5/90 H0 baseline (zero magic numbers)
           const updatedPreds = historyChanged
             ? await getPredictionHistoryAsync(drawName)
             : preds;
-          const perf = calculateHistoricalPerformance(updatedPreds, history);
+          const perf = calculateExtendedHistoricalPerformance(updatedPreds, history);
+
+          const matchedPairs = updatedPreds
+            .map((pred) => {
+              const res =
+                (pred.drawResultId
+                  ? history.find((r) => r.id === pred.drawResultId)
+                  : null) || findMatchingResultForPrediction(pred, history);
+              if (!res || !Array.isArray(res.gagnants)) return null;
+              const suggested = pred.prediction?.suggestedNumbers || [];
+              const hits = suggested.filter((n) => res.gagnants.includes(n)).length;
+              const observedRate = suggested.length > 0 ? hits / suggested.length : 0;
+              const rawConf = pred.prediction?.confidence;
+              const predictedProb =
+                typeof rawConf === "number" && Number.isFinite(rawConf)
+                  ? Math.min(1, Math.max(0, rawConf / 100))
+                  : UNIFORM_SINGLE_NUMBER_PROBABILITY;
+              return { timestamp: pred.timestamp, observedRate, predictedProb };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null)
+            .sort((a, b) => a.timestamp - b.timestamp);
+
+          const sampleCount = matchedPairs.length;
+          const baseline = UNIFORM_BRIER_REFERENCE;
+          const overallScore =
+            sampleCount > 0 ? perf.meanBrierScore : Number(baseline.toFixed(4));
+          const meanObservedRate =
+            sampleCount > 0
+              ? matchedPairs.reduce((acc, p) => acc + p.observedRate, 0) / sampleCount
+              : UNIFORM_SINGLE_NUMBER_PROBABILITY;
+          const variance =
+            sampleCount > 1
+              ? matchedPairs.reduce(
+                  (acc, p) => acc + Math.pow(p.observedRate - meanObservedRate, 2),
+                  0,
+                ) /
+                (sampleCount - 1)
+              : UNIFORM_BRIER_REFERENCE / DRAW_PICK_SIZE;
+          const meanPredictedProb =
+            sampleCount > 0
+              ? matchedPairs.reduce((acc, p) => acc + p.predictedProb, 0) / sampleCount
+              : UNIFORM_SINGLE_NUMBER_PROBABILITY;
+          const h0Std = Math.sqrt(UNIFORM_BRIER_REFERENCE / DRAW_PICK_SIZE);
+          const biasDelta = meanPredictedProb - meanObservedRate;
+          const bias: CalibrationData["bias"] =
+            sampleCount === 0 || Math.abs(biasDelta) <= h0Std
+              ? "NEUTRAL"
+              : biasDelta > 0
+                ? "OPTIMIST"
+                : "PESSIMIST";
+
+          let trend = 0;
+          if (sampleCount >= 2) {
+            const meanIdx = (sampleCount - 1) / 2;
+            let num = 0;
+            let den = 0;
+            for (let idx = 0; idx < sampleCount; idx++) {
+              const dx = idx - meanIdx;
+              num += dx * (matchedPairs[idx].observedRate - meanObservedRate);
+              den += dx * dx;
+            }
+            trend = den > 0 ? Number((num / den).toFixed(4)) : 0;
+          }
+
+          const cycleReference = DRAW_DOMAIN_SIZE / DRAW_PICK_SIZE;
+          const confidence = Number(
+            (sampleCount / (sampleCount + cycleReference)).toFixed(4),
+          );
+          const brierSkillVsUniform =
+            baseline > 0 ? 1 - overallScore / baseline : 0;
+          const reliability =
+            sampleCount > 0
+              ? Math.max(
+                  0,
+                  Math.min(
+                    100,
+                    Math.round((0.5 + 0.5 * Math.tanh(brierSkillVsUniform)) * 100),
+                  ),
+                )
+              : 0;
 
           if (mounted) {
             setCalibration({
-              overallScore: 0.25,
-              reliability: Math.min(100, Math.round(perf.accuracy * 5.0)),
-              bias: "NEUTRAL",
-              sampleSize: perf.analyzedDrawsCount,
-              baseline: 0.2,
-              variance: 0.05,
-              trend: 0,
-              confidence: 0.8,
+              overallScore,
+              reliability,
+              bias,
+              sampleSize: sampleCount,
+              baseline: Number(baseline.toFixed(4)),
+              variance: Number(variance.toFixed(5)),
+              trend,
+              confidence,
             });
           }
         }
@@ -325,7 +443,7 @@ export const NexusEngine: React.FC = () => {
       mounted = false;
       clearTimeout(t);
     };
-  }, [drawName, history, setCalibration, setGlobalWeights]);
+  }, [drawName, history, setCalibration]);
 
   // Override refresh in store to use React Query refetch
   useEffect(() => {

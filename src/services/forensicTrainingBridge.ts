@@ -1,10 +1,11 @@
 import { ForensicReport, DrawResult, LearningSession, AlgoWeights, NeuralFeedbackLog } from '../types';
-import { AlgoKey } from '../shared/prediction.types';
-import { getAlgoWeights, saveAlgoWeights, normalizeWeights } from './prediction/weightsManager';
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../shared/prediction.types';
+import { getAlgoWeights, normalizeWeights } from './prediction/weightsManager';
 import { getAdaptiveRules, saveAdaptiveRules } from './prediction/ticketAnalysisService';
 import { detectGameRegime, calculateTemporalDriftLearningRate } from './mathService';
 import { LCG } from '../utils/mathUtils';
-import { recordModelDnaVersion } from './prediction/modelDnaKnowledgeBase';
+import { drawHasMachineNumbers } from '../constants';
+import { purifyHistoryForDraw } from '../utils/arrayUtils';
 import { applyOptimizedWeights } from './prediction/optimizationController';
 import {
   synthesizeDnaGeneSequenceAndWeights,
@@ -58,9 +59,23 @@ export const generateLearningSession = async (
     });
   }
 
+  const hasMachine = drawHasMachineNumbers(drawName, history);
   const keysAll = Object.keys(currentWeights);
   keysAll.forEach((algo) => {
-    const oldWeight = currentWeights[algo as AlgoKey] ?? 0.1;
+    const algoKey = algo as AlgoKey;
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(algoKey) || (algoKey === AlgoKey.MACHINE_TRANSFER && !hasMachine)) {
+      adjustments.push({
+        algo,
+        oldWeight: 0,
+        newWeight: 0,
+        reason: algoKey === AlgoKey.MACHINE_TRANSFER && !hasMachine
+          ? 'Tirage sans numéros machine : canal verrouillé à 0.00%'
+          : 'Canal retiré du noyau prédictif : verrouillé à 0.00%',
+      });
+      return;
+    }
+
+    const oldWeight = currentWeights[algoKey] ?? 0.1;
     let proposedDelta = proposedMap.get(algo) ?? 0.0;
 
     // Continuous adjustments for Black Swan or chaotic regimes using continuous intensity (Math.tanh)
@@ -71,14 +86,14 @@ export const generateLearningSession = async (
       AlgoKey.FRACTAL,
       AlgoKey.SPATIAL,
       AlgoKey.BAYES
-    ].includes(algo as AlgoKey);
+    ].includes(algoKey);
     
     const blackSwanBoost = 0.3 * (isResilientAlgo ? 1.0 : -0.6) * blackSwanIntensity;
     proposedDelta = proposedDelta * (1.0 - 0.5 * blackSwanIntensity) + blackSwanBoost;
 
     const delta = proposedDelta * learningRate;
     const rawNewWeight = oldWeight + delta;
-    const newWeight = Math.max(0.01, rawNewWeight);
+    const newWeight = Math.max(0.001, rawNewWeight);
 
     adjustments.push({
       algo,
@@ -116,9 +131,12 @@ export const applyForensicAdjustments = async (
   learningSession: LearningSession,
   baseWeights?: AlgoWeights,
   dryRun: boolean = false,
-  onFeedbackLogs?: (logs: NeuralFeedbackLog[]) => void
+  onFeedbackLogs?: (logs: NeuralFeedbackLog[]) => void,
+  history?: DrawResult[]
 ): Promise<AlgoWeights> => {
   const drawName = learningSession.drawName;
+  const cleanHistory = history ? purifyHistoryForDraw(drawName, history) : [];
+  const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
   const currentWeights = baseWeights || await getAlgoWeights(drawName);
   const updatedWeights = { ...currentWeights };
 
@@ -133,12 +151,23 @@ export const applyForensicAdjustments = async (
 
   learningSession.adjustments.forEach((adj) => {
     const algo = adj.algo as AlgoKey;
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(algo) || (algo === AlgoKey.MACHINE_TRANSFER && !hasMachine)) {
+      updatedWeights[algo] = 0;
+      return;
+    }
     if (updatedWeights[algo] !== undefined) {
       const oldVal = updatedWeights[algo];
       const newVal = adj.newWeight;
       // Mélange sigmoïdal continu
       updatedWeights[algo] = oldVal * (1.0 - alpha) + newVal * alpha;
     }
+  });
+
+  if (!hasMachine) {
+    updatedWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  RETIRED_ALGO_WEIGHT_KEYS.forEach((rk) => {
+    updatedWeights[rk] = 0;
   });
 
   const finalNormalized = normalizeWeights(updatedWeights);
@@ -152,6 +181,7 @@ export const applyForensicAdjustments = async (
       drawName,
       weights: finalNormalized,
       origin: 'FORENSIC_AUTOPSY',
+      history: cleanHistory,
       // Aucune performance prédictive n'est mesurée lors de l'application d'une session :
       // le mélange proportionnel (α) est consigné dans l'audit causal, jamais archivé comme score.
       causalAuditTrail: [

@@ -304,8 +304,14 @@ export const useNexusStore = create<NexusState>()(
           if (lower === "stats" && !targetSub) targetSub = "stats";
         } else if (lower === "topologie" || lower === "topology" || lower === "geometry") {
           targetMain = "Topologie";
-        } else if (lower === "oracle" || lower === "predictive" || lower === "prediction" || lower === "inference") {
+        } else if (lower === "combinations" || lower === "covering" || lower === "kernel") {
+          targetMain = "Topologie";
+          if (!targetSub) targetSub = lower === "kernel" ? "python" : "combinations";
+        } else if (lower === "oracle" || lower === "predictive" || lower === "prediction" || lower === "predictions" || lower === "inference") {
           targetMain = "Oracle";
+          if ((lower === "prediction" || lower === "predictions" || lower === "inference") && !targetSub) {
+            targetSub = "prediction";
+          }
         } else if (lower === "simulation" || lower === "backtest" || lower === "replay") {
           targetMain = "Simulation";
           if (lower === "replay" && !targetSub) targetSub = "replay";

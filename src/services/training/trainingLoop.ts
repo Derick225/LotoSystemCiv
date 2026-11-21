@@ -1,9 +1,10 @@
 import { AlgoWeights, DrawResult } from "../../types";
-import { AlgoKey } from "../../shared/prediction.types";
+import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from "../../shared/prediction.types";
 import { logger } from "../../utils/logger";
 import { normalizeWeights, evaluateAlgoEmpiricalProof } from "../prediction/weightsManager";
+import { computeEmpiricalBayesProofCredibility } from "../prediction/closedLoopAutopsyService";
+import { drawHasMachineNumbers } from "../../constants";
 import { runForensicWorker } from "./trainingWorkers";
-import { calculateTemporalDriftLearningRate } from "../mathService";
 import { computeAdaptiveContinuousLearningRate } from "../prediction/adaptiveLearningRate";
 import { updateWeightsWithKalmanFilter } from "../prediction/kalmanWeightsFilter";
 
@@ -86,13 +87,22 @@ export const applyOnlineLearningCore = async (
   const newWeights: Record<string, number> = { ...currentWeights } as any;
   const algoKeys = Object.keys(currentWeights) as AlgoKey[];
 
+  // Évaluation empirique pré-calculée une seule fois hors boucle (AGENTS.md : zéro boost arbitraire sans preuve)
+  const empiricalProofMap = evaluateAlgoEmpiricalProof(drawName, purifiedHistory);
+  const hasMachine = drawHasMachineNumbers(drawName, purifiedHistory);
+
   algoKeys.forEach((algo) => {
+    if (RETIRED_ALGO_WEIGHT_KEYS.has(algo) || (algo === AlgoKey.MACHINE_TRANSFER && !hasMachine)) {
+      newWeights[algo] = 0;
+      return;
+    }
+
     let algoScoreForWinners = 0;
     let algoScoreForLosers = 0;
 
     Object.keys(prediction.breakdown).forEach((numStr) => {
       const num = parseInt(numStr, 10);
-      const val = Number(prediction.breakdown[num][algo]) || 0;
+      const val = Number(prediction.breakdown[num]?.[algo]) || 0;
       if (actualWinners.includes(num)) {
         algoScoreForWinners += val;
       } else {
@@ -134,20 +144,25 @@ export const applyOnlineLearningCore = async (
       falsePositiveBurden * 0.1 -
       overconfidence * 0.2;
 
-    // Évaluation empirique continue (AGENTS.md : zéro boost arbitraire sans preuve)
-    const empiricalProofMap = evaluateAlgoEmpiricalProof(drawName, purifiedHistory);
+    // Évaluation empirique continue (AGENTS.md : zéro seuil binaire, rétrécissement Empirical-Bayes continu)
     const proofMetric = empiricalProofMap[algo];
+    const proofCredibility = computeEmpiricalBayesProofCredibility(proofMetric);
 
     const rawStep = algoUpdateSignal * learningRate * Math.sign(totalSignal);
-    // Si la direction est positive (boost), elle est modulée par la preuve empirique
-    const gatedStep = rawStep > 0 && proofMetric && !proofMetric.hasProof
-      ? rawStep * Math.max(0.1, proofMetric.proofScore)
-      : rawStep;
+    // Boost positif modulé en continu par la crédibilité Empirical-Bayes
+    const gatedStep = rawStep > 0 ? rawStep * proofCredibility : rawStep;
 
     newWeights[algo] = Math.max(
-      0.01,
+      0.001,
       Math.min(1.0, (Number((currentWeights as any)[algo]) || 0.1) + gatedStep)
     );
+  });
+
+  if (!hasMachine) {
+    newWeights[AlgoKey.MACHINE_TRANSFER] = 0;
+  }
+  RETIRED_ALGO_WEIGHT_KEYS.forEach((rk) => {
+    newWeights[rk] = 0;
   });
 
   const rawNormalizedWeights = normalizeWeights(newWeights as any);
@@ -177,7 +192,9 @@ export const applyOnlineLearningCore = async (
     const finalWeights = await applyForensicAdjustments(
       learningSession,
       normalizedWeights,
-      true
+      true,
+      undefined,
+      contextHistory
     );
     return finalWeights;
   } catch (err) {
@@ -220,7 +237,9 @@ export const runForensicTrainingStepCore = async (
   const updatedWeights = await applyForensicAdjustments(
     learningSession,
     currentWeights,
-    true
+    true,
+    undefined,
+    contextHistory
   );
 
   return {
@@ -336,7 +355,9 @@ export const runLoopSimulationCore = async (
     currentWeights = await applyForensicAdjustments(
       learningSession,
       currentWeights,
-      true
+      true,
+      undefined,
+      contextHistory
     );
 
     const stepResult: LoopSimulationStepResult = {

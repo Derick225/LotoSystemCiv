@@ -1395,7 +1395,7 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
               const { generateLearningSession, applyForensicAdjustments } = await import('./forensicTrainingBridge');
               const learningSession = await generateLearningSession(report, cleanHistory);
               if (learningSession && learningSession.adjustments && learningSession.adjustments.length > 0) {
-                await applyForensicAdjustments(learningSession);
+                await applyForensicAdjustments(learningSession, undefined, false, undefined, cleanHistory);
                 logger.info({ drawName }, `[Closed-Loop Auto-Feedback] Poids algorithmiques mis à jour`);
               }
             } catch (closedLoopErr) {

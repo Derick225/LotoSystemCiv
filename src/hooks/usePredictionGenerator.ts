@@ -290,7 +290,7 @@ export const usePredictionGenerator = (drawName: string) => {
             setLastPrediction(res);
             
             try {
-                await savePredictionToHistory(drawName, res, undefined, metrics);
+                await savePredictionToHistory(drawName, res, undefined, metrics, activeHistory);
             } catch (dbErr) {
                 console.warn("[Oracle Base] Local execution success: Prediction not committed to distant repository (network isolated).", dbErr);
             }
@@ -394,7 +394,7 @@ export const usePredictionGenerator = (drawName: string) => {
             setLastPrediction(aggregatedPred);
             
             try {
-                await savePredictionToHistory(drawName, aggregatedPred, undefined, metrics);
+                await savePredictionToHistory(drawName, aggregatedPred, undefined, metrics, activeHistory);
             } catch (dbErr) {
                 console.warn("[Oracle MC] Local fallback success:", dbErr);
             }

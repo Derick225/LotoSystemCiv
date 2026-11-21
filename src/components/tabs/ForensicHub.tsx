@@ -233,7 +233,11 @@ export const ForensicHub: React.FC<{
       sub === "DNA_LINEAGE" ||
       sub === "GENEALOGIE"
     ) {
-      navigateToModule("admin", "fusion");
+      window.dispatchEvent(
+        new CustomEvent("CROSS_MODULE_NAVIGATE", {
+          detail: { view: "admin", mainTab: "admin", subTab: "fusion" },
+        }),
+      );
     } else if (sub === "SIEVE_RADAR" || sub === "RADAR") {
       setActiveTab("dna_drift");
       setDnaSubView("sieve_radar");

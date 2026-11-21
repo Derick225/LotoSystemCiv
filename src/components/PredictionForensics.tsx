@@ -81,7 +81,7 @@ export const PredictionForensics: React.FC<PredictionForensicsProps> = ({
       const targetDraw = report?.drawName || useNexusStore.getState().drawName || useNexusStore.getState().currentDrawName || "GLOBAL";
       const currentHistory = purifyHistoryForDraw(targetDraw, history);
       const session = await generateLearningSession({ ...report, drawName: targetDraw }, currentHistory);
-      await applyForensicAdjustments(session, undefined, false);
+      await applyForensicAdjustments(session, undefined, false, undefined, currentHistory);
       setAdjustmentsApplied(true);
       showToast("Ajustements forensiques appliqués aux poids du modèle.", "success");
       audioEngine.play("success");
