@@ -15,6 +15,7 @@ import {
   normalizeWeights,
   evaluateAlgoEmpiricalProof,
   getDefaultWeights,
+  computeEmpiricalBayesProofCredibility,
   type AlgoProofMetric,
 } from './weightsManager';
 import {
@@ -280,44 +281,7 @@ export const projectWeightsWithProofGuard = (
   return w as AlgoWeights;
 };
 
-/**
- * Crédibilité Empirical-Bayes continue C^∞ ∈ [0, 1] dérivée de la statistique de rang
- * (rankZScore / proofScore), de la sévérité ajustée (qValue), de la confiance d'échantillon
- * et du facteur de rétrécissement de James-Stein (ebShrinkageFactor).
- * Zéro seuil binaire brutal : transition lisse sur toute l'échelle [0, 1].
- */
-export const computeEmpiricalBayesProofCredibility = (
-  proof?: AlgoProofMetric
-): number => {
-  if (!proof) return 0;
-  const zRaw = Number.isFinite(proof.rankZScore)
-    ? (proof.rankZScore as number)
-    : Number.isFinite(proof.proofScore)
-      ? proof.proofScore
-      : 0;
-  if (zRaw <= 0) return 0;
-
-  const qRaw = Number.isFinite(proof.qValue)
-    ? Math.max(0, Math.min(1, proof.qValue as number))
-    : proof.hasProof
-      ? 0.0
-      : 1.0;
-  const conf = Number.isFinite(proof.confidence)
-    ? Math.max(0, Math.min(1, proof.confidence))
-    : 0;
-  if (conf <= 0) return 0;
-
-  // Puissance naturelle 90/5 = 18 : décroissance lisse sans constante magique
-  const baselineOddsScale = 90.0 / 5.0;
-  const qEvidence = Math.pow(Math.max(0, 1.0 - qRaw), baselineOddsScale);
-  const zEvidence = Math.tanh(zRaw * Math.SQRT1_2);
-  const jsFactor =
-    proof.ebShrinkageFactor !== undefined && Number.isFinite(proof.ebShrinkageFactor)
-      ? 0.5 + 0.5 * Math.max(0, Math.min(1, proof.ebShrinkageFactor))
-      : 1.0;
-
-  return Math.max(0, Math.min(1, zEvidence * qEvidence * conf * jsFactor));
-};
+// computeEmpiricalBayesProofCredibility est importé et ré-exporté depuis ./weightsManager
 
 /**
  * Projection continue sur le simplexe avec rétrécissement Empirical-Bayes (sans verrou binaire
@@ -1604,6 +1568,7 @@ export type {
   WalkForwardValidationReport,
 };
 export {
+  computeEmpiricalBayesProofCredibility,
   FORENSIC_MODEL_VERSION,
   UNIFORM_BRIER_BASELINE,
   UNIFORM_EXPECTED_HITS_TOP5,

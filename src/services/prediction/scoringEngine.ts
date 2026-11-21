@@ -7,7 +7,7 @@ import type { DrawResult } from "../../types";
 import { algorithmRegistry, AlgorithmContext, getAlgorithmsForContext } from "./algorithmRegistry";
 import './coreAlgorithms';
 import { EnhancedMetrics } from './metrics.types';
-import { normalizeWeights } from "./weightsManager";
+import { normalizeWeights, computeEmpiricalBayesProofCredibility } from "./weightsManager";
 import { resolveWeightsWithExpertBiasDecay } from "./expertBiasService";
 import { logger } from "../../utils/logger";
 import { calculateCyclicPhaseProfileMatrix } from "./dynamicProfileMatrix";
@@ -462,8 +462,10 @@ export const calculateScores = (
       let baseWeight = Number(effectiveWeights[key]) || 0;
       const rawWeightModifier = context.advancedMetrics?.dynamicWeightModifiers?.[num]?.[key] || 0;
       const proofMetric = (context as any).proofMap?.[key] || (context as any).proofMetrics?.[key];
-      const hasProof = proofMetric ? (proofMetric.hasProof && proofMetric.proofScore > 0) : true;
-      const weightModifier = hasProof ? rawWeightModifier : 0;
+      const credibility = proofMetric ? computeEmpiricalBayesProofCredibility(proofMetric) : 1.0;
+      const weightModifier = rawWeightModifier > 0
+        ? rawWeightModifier * credibility
+        : rawWeightModifier;
       const cyclicModifier = cyclicProfile.algoWeightModifiers[key] || 0.0;
       
       // La base prend l'Exponentielle de manière continue (modifiers + phase cyclique)

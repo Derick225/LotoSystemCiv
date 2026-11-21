@@ -2,7 +2,11 @@ import { DrawResult, AlgoWeights } from "../../types";
 import { AlgoKey } from "../../shared/prediction.types";
 import { EnhancedMetrics } from "./metrics.types";
 import { logger } from "../../utils/logger";
-import { normalizeWeights, evaluateAlgoEmpiricalProof } from "./weightsManager";
+import {
+  normalizeWeights,
+  evaluateAlgoEmpiricalProof,
+  computeEmpiricalBayesProofCredibility,
+} from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { calculateScores } from "./scoringEngine";
 import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
@@ -173,19 +177,20 @@ export const applyDeterministicMicroSgd = async (
         });
       });
 
-      // Pas de gradient + projection sur le simplexe avec garde-fou de preuve empirique
+      // Pas de gradient + projection sur le simplexe avec rétrécissement continu Empirical-Bayes
+      const numAlgos = Object.keys(adjustedWeights).length || 1;
+      const dampFloor = 1.0 / Math.sqrt(Math.max(2, numAlgos));
       algoKeys.forEach(algo => {
         const key = algo as AlgoKey;
         const oldWeight = adjustedWeights[key] || 0;
         const proof = proofMap?.[key];
-        const hasProof = proof && proof.hasProof && proof.proofScore > 0;
-        
+        const cred = computeEmpiricalBayesProofCredibility(proof);
+
         let newWeight = Math.max(0, oldWeight - eta * gradients[algo]);
-        
+
         // Variation clamp derived from information theory:
         // At max entropy (safeEntropy=1), allow wider variation (more exploration).
         // At min entropy (safeEntropy=0), restrict variation (exploit stable signal).
-        const numAlgos = Object.keys(adjustedWeights).length || 1;
         const variationBase = 1.0 / (2.0 * numAlgos);
         const variationMax = 1.0 / Math.sqrt(numAlgos);
         const variationClamp = variationBase + (variationMax - variationBase) * safeEntropy;
@@ -193,23 +198,20 @@ export const applyDeterministicMicroSgd = async (
         const maxW = oldWeight * (1.0 + variationClamp);
         newWeight = Math.max(minW, Math.min(maxW, newWeight));
 
-        // RÈGLE ABSOLUE : Qu'aucun algorithme ne voie son poids augmenté s'il ne fait pas ses preuves
-        if (!hasProof) {
-          // Si l'algo n'est pas prouvé ou sous-performe le hasard (proofScore <= 0),
-          // son poids ne peut JAMAIS augmenter : il est plafonné à oldWeight et amorti
-          newWeight = Math.min(oldWeight, newWeight);
-          if (proof && proof.proofScore < 0) {
-            const dampener = 1.0 / (1.0 + Math.exp(-2.0 * proof.proofScore));
-            newWeight = newWeight * Math.max(0.1, dampener);
-          }
-        } else {
-          // S'il a fait ses preuves, la hausse est modulée par la confiance dans sa preuve
-          if (newWeight > oldWeight) {
-            const boostFactor = Math.tanh(proof.proofScore);
-            newWeight = oldWeight + (newWeight - oldWeight) * boostFactor;
-          }
+        // Modulation continue C^∞ par crédibilité Empirical-Bayes :
+        // toute hausse au-dessus d'oldWeight est pondérée par cred ∈ [0, 1].
+        if (newWeight > oldWeight) {
+          newWeight = oldWeight + (newWeight - oldWeight) * cred;
         }
-        
+        // Amortissement continu lorsque sous-performance sous H0
+        const z = proof
+          ? (Number.isFinite(proof.rankZScore) ? (proof.rankZScore as number) : proof.proofScore)
+          : 0;
+        if (z < 0) {
+          const negDamp = Math.max(dampFloor, 1.0 / (1.0 + Math.exp(-2.0 * z)));
+          newWeight = newWeight * (negDamp + cred * (1.0 - negDamp));
+        }
+
         adjustedWeights[key] = newWeight;
       });
       adjustedWeights = normalizeWeights(adjustedWeights);

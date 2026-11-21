@@ -6,7 +6,11 @@ import {
 } from '../../shared/prediction.types';
 import { DrawResult } from '../../types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
-import { normalizeWeights, evaluateAlgoEmpiricalProof } from './weightsManager';
+import {
+  normalizeWeights,
+  evaluateAlgoEmpiricalProof,
+  computeEmpiricalBayesProofCredibility,
+} from './weightsManager';
 import { LABELS_MAP, ALGO_CATEGORIES } from '../../hooks/useAlgorithmSync';
 import { drawHasMachineNumbers } from '../../constants';
 
@@ -300,24 +304,33 @@ export const analyzeUnderperformingSubAlgos = (
     const isUnderperforming =
       (recentHitRate < baselineRate || proofScore < 0) && activeWeight > 0.01;
 
-    // Suggestion d'ajustement expert strictement alignée avec la règle de preuve :
-    // - Positive uniquement si preuve empirique confirmée (proofScore > 0)
-    // - Négative (amortissement) si sous-performance ou dérive stochastique (proofScore < 0)
-    let suggestedExpertNudge = 0;
-    let statusLabel = 'Régime Nominal';
+    // Suggestion d'ajustement expert continue C^∞ dérivée de la crédibilité Empirical-Bayes
+    // et de l'écart normalisé sous H0 (zéro seuil arbitraire ni palier discret).
+    const cred = computeEmpiricalBayesProofCredibility(proof);
+    const maxNudgeAmplitude = 1.0 / Math.sqrt(Math.max(1, validKeys.length));
+    const relativeDiff = baselineRate > 0 ? (recentHitRate - baselineRate) / baselineRate : 0;
+    const positiveRateTerm = Math.max(0, Math.tanh(Math.max(0, relativeDiff) * 2.0));
+    const positiveScoreTerm = Math.max(0, Math.tanh(Math.max(0, proofScore)));
+    const positiveDrive = cred * Math.sqrt(positiveScoreTerm * positiveRateTerm);
 
-    if (hasEmpiricalProof && proofScore > 1.5) {
+    const negScoreTerm = Math.tanh(Math.max(0, -proofScore) * 0.5);
+    const negRateTerm = Math.tanh(Math.max(0, -relativeDiff));
+    const negativeDrive = (1.0 - cred) * Math.min(1.0, 0.5 * negScoreTerm + 0.5 * negRateTerm);
+
+    const rawNudge = maxNudgeAmplitude * (positiveDrive - negativeDrive);
+    const suggestedExpertNudge = parseFloat(
+      Math.max(-maxNudgeAmplitude, Math.min(maxNudgeAmplitude, rawNudge)).toFixed(4)
+    );
+
+    let statusLabel = 'Régime Nominal';
+    if (cred >= 0.5 && suggestedExpertNudge > 0) {
       statusLabel = 'Sur-Performance Confirmée';
-      suggestedExpertNudge = 0.15;
-    } else if (hasEmpiricalProof && proofScore > 0.5) {
+    } else if (suggestedExpertNudge > 0) {
       statusLabel = 'Preuve Positive';
-      suggestedExpertNudge = 0.08;
     } else if (proofScore < -1.0) {
       statusLabel = 'Forte Dérive Stochastique';
-      suggestedExpertNudge = -0.20;
     } else if (isUnderperforming) {
       statusLabel = 'Sous-Performance Récente';
-      suggestedExpertNudge = -0.10;
     }
 
     results.push({

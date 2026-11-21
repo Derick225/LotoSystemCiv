@@ -2,7 +2,10 @@ import { DrawResult } from '../../types';
 import { AlgoKey } from '../../shared/prediction.types';
 import { calculateShannonEntropy, calculateVolatility, calculateFractalIndex } from '../mathService';
 import { calculateTopologicalLyapunov } from '../advancedMathService';
-import { evaluateAlgoEmpiricalProof } from './weightsManager';
+import {
+  evaluateAlgoEmpiricalProof,
+  computeEmpiricalBayesProofCredibility,
+} from './weightsManager';
 
 export type CyclicPhaseType = 'PERIODIC_ATTRACTOR' | 'STOCHASTIC_DISPERSION' | 'TRANSITIONAL_ORBIT';
 
@@ -160,23 +163,19 @@ export const calculateCyclicPhaseProfileMatrix = (
   const proofMap = evaluateAlgoEmpiricalProof(resolvedDrawName, history);
   const algoWeightModifiers: Partial<Record<AlgoKey, number>> = {};
   
+  const numActiveAlgos = Math.max(1, Object.values(AlgoKey).length);
   const applyProofConstrainedModifier = (key: AlgoKey, rawDelta: number) => {
     const proof = proofMap[key];
-    const hasProof = proof && proof.hasProof && proof.proofScore > 0;
+    const cred = computeEmpiricalBayesProofCredibility(proof);
     if (rawDelta > 0) {
-      // Interdiction formelle de booster un algo sans preuve empirique avérée sur ce tirage
-      if (!hasProof) {
-        algoWeightModifiers[key] = 0.0;
-      } else {
-        algoWeightModifiers[key] = rawDelta * Math.tanh(proof.proofScore);
-      }
+      // Modulation continue C^∞ par crédibilité Empirical-Bayes (0 quand aucune évidence)
+      algoWeightModifiers[key] = rawDelta * cred;
     } else {
-      // Les pénalisations ou amortissements s'appliquent librement, et sont accentuées si sous-performance
-      if (proof && proof.proofScore < 0) {
-        algoWeightModifiers[key] = rawDelta + Math.max(-0.5, proof.proofScore * 0.1);
-      } else {
-        algoWeightModifiers[key] = rawDelta;
-      }
+      const z = proof
+        ? (Number.isFinite(proof.rankZScore) ? (proof.rankZScore as number) : proof.proofScore)
+        : 0;
+      const negOffset = z < 0 ? -Math.tanh(Math.abs(z) / Math.sqrt(numActiveAlgos)) : 0;
+      algoWeightModifiers[key] = rawDelta + negOffset;
     }
   };
 

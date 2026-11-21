@@ -48,7 +48,8 @@ export interface EpigenomeMatrixHpcInput {
   numLineage: number;
   initialWeights: Float64Array;
   armIds: Uint8Array;
-  proofFlags: Uint8Array;
+  proofFlags?: Uint8Array;
+  proofCredibilities?: Float64Array;
   proofScores: Float64Array;
   baseAnalysisSignals: Float64Array;
   forcedZeroFlags: Uint8Array;
@@ -300,8 +301,70 @@ export function computeEpigenomeMatrixHpc(
     };
   }
 
+  const credArray = new Float64Array(K);
+  if (input.proofCredibilities) {
+    for (let i = 0; i < K; i++) {
+      const c = input.proofCredibilities[i] ?? 0;
+      credArray[i] = Number.isFinite(c) ? Math.max(0, Math.min(1, c)) : 0;
+    }
+  } else if (input.proofFlags) {
+    for (let i = 0; i < K; i++) {
+      credArray[i] = (input.proofFlags[i] ?? 0) !== 0 ? 1.0 : 0.0;
+    }
+  }
+
   const wasmModuleInstance = getWasmModuleInstance();
-  if (isLotoEngineWasmReady() && wasmModuleInstance?.compute_epigenome_matrix_wasm) {
+  if (isLotoEngineWasmReady() && wasmModuleInstance?.compute_epigenome_matrix_continuous_wasm) {
+    let res: EpigenomeMatrixWasmHandle | null = null;
+    try {
+      const wasmRes = wasmModuleInstance.compute_epigenome_matrix_continuous_wasm(
+        input.rawEpistasisFlat,
+        input.epistasisSamplesFlat,
+        input.lineageWeightsFlat,
+        input.numLineage,
+        input.initialWeights,
+        input.armIds,
+        credArray,
+        input.proofScores,
+        input.baseAnalysisSignals,
+        input.forcedZeroFlags,
+        K,
+        input.hurst,
+        input.entropyNorm,
+        input.totalEvidenceUnits
+      );
+      res = wasmRes;
+      if (!wasmRes) {
+        throw new Error('compute_epigenome_matrix_continuous_wasm returned null');
+      }
+      return {
+        numGenes: Number(wasmRes.num_genes ?? K),
+        epistaticMatrixFlat: new Float64Array(wasmRes.epistatic_matrix_flat),
+        evidenceSamplesFlat: new Float64Array(wasmRes.evidence_samples_flat),
+        geneStability: new Float64Array(wasmRes.gene_stability),
+        epistaticSynergy: new Float64Array(wasmRes.epistatic_synergy),
+        postMortemSignal: new Float64Array(wasmRes.post_mortem_signal),
+        rawTargetWeights: new Float64Array(wasmRes.raw_target_weights),
+        engine: 'RUST_WASM',
+      };
+    } catch (e) {
+      recordWasmFallback('compute_epigenome_matrix_continuous_wasm', e);
+      console.warn('[WASM] Fallback compute_epigenome_matrix_continuous_wasm :', e);
+    } finally {
+      if (res && typeof res.free === 'function') {
+        try {
+          res.free();
+        } catch {
+          // Ignore double-free
+        }
+      }
+    }
+  } else if (
+    isLotoEngineWasmReady() &&
+    !input.proofCredibilities &&
+    input.proofFlags &&
+    wasmModuleInstance?.compute_epigenome_matrix_wasm
+  ) {
     let res: EpigenomeMatrixWasmHandle | null = null;
     try {
       const wasmRes = wasmModuleInstance.compute_epigenome_matrix_wasm(
@@ -430,10 +493,10 @@ export function computeEpigenomeMatrixHpc(
     const epSyn = Math.tanh(epSum / sqrtK);
     epistaticSynergy[i] = epSyn;
 
-    const hasProof = (input.proofFlags[i] ?? 0) !== 0;
+    const cred = credArray[i] ?? 0;
     const pScore = input.proofScores[i] ?? 0;
     const pDrive = Math.tanh(pScore / 2.0);
-    const pSigned = hasProof ? pDrive : Math.min(0, pDrive);
+    const pSigned = pDrive > 0 ? pDrive * cred : pDrive;
     const bSig = input.baseAnalysisSignals[i] ?? 0;
 
     proofDriveVec[i] = pSigned;
@@ -466,18 +529,16 @@ export function computeEpigenomeMatrixHpc(
     );
     postMortemSignal[i] = composite;
 
-    const hasProof = (input.proofFlags[i] ?? 0) !== 0;
+    const cred = credArray[i] ?? 0;
     const pScore = input.proofScores[i] ?? 0;
+    const pStr = Math.tanh(pScore) * cred;
+    const armScale = 1.0 / sqrtK;
+    const armId = input.armIds[i] ?? 0;
     let regimeMod = 0;
-    if (hasProof) {
-      const pStr = Math.tanh(pScore);
-      const armScale = 1.0 / sqrtK;
-      const armId = input.armIds[i] ?? 0;
-      if (armId === 1) regimeMod = -armScale * persistenceBias * pStr;
-      else if (armId === 2) regimeMod = armScale * complexityBias * pStr;
-      else if (armId === 0) regimeMod = armScale * (1 - Math.abs(persistenceBias)) * pStr;
-      else regimeMod = armScale * persistenceBias * pStr;
-    }
+    if (armId === 1) regimeMod = -armScale * persistenceBias * pStr;
+    else if (armId === 2) regimeMod = armScale * complexityBias * pStr;
+    else if (armId === 0) regimeMod = armScale * (1 - Math.abs(persistenceBias)) * pStr;
+    else regimeMod = armScale * persistenceBias * pStr;
 
     const initW = input.initialWeights[i] ?? uniformShare;
     const baseW = initW > 0 ? initW : uniformShare;

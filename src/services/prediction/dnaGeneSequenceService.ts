@@ -26,6 +26,7 @@ import {
   normalizeWeights,
   getDefaultWeights,
   evaluateAlgoEmpiricalProof,
+  computeEmpiricalBayesProofCredibility,
   type AlgoProofMetric,
 } from './weightsManager';
 import {
@@ -906,7 +907,7 @@ export function synthesizeDnaGeneSequenceAndWeights(
 
   const initialWeightsFlat = new Float64Array(K);
   const armIds = new Uint8Array(K);
-  const proofFlags = new Uint8Array(K);
+  const proofCredibilities = new Float64Array(K);
   const proofScores = new Float64Array(K);
   const baseAnalysisSignals = new Float64Array(K);
   const forcedZeroFlags = new Uint8Array(K);
@@ -922,8 +923,7 @@ export function synthesizeDnaGeneSequenceAndWeights(
     initialWeightsFlat[i] = initialWeights[k] ?? 0;
     armIds[i] = ARM_TO_ID[getChromosomalArm(k)] ?? 0;
     const proof = proofMap[k];
-    const hasProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
-    proofFlags[i] = hasProof ? 1 : 0;
+    proofCredibilities[i] = computeEmpiricalBayesProofCredibility(proof);
     proofScores[i] = proof ? proof.proofScore : 0;
 
     if (forcedZeroKeys.has(k)) {
@@ -963,7 +963,7 @@ export function synthesizeDnaGeneSequenceAndWeights(
     numLineage: L,
     initialWeights: initialWeightsFlat,
     armIds,
-    proofFlags,
+    proofCredibilities,
     proofScores,
     baseAnalysisSignals,
     forcedZeroFlags,
@@ -1090,13 +1090,13 @@ export function synthesizeDnaGeneSequenceAndWeights(
     if (forcedZeroKeys.has(k)) return -1e6;
     const optW = optimizedWeights[k] || 0;
     const proof = proofMap[k];
-    const hasProof = proof && proof.hasProof && proof.proofScore > 0 ? 1 : 0;
+    const cred = computeEmpiricalBayesProofCredibility(proof);
     const pmScale = 1.0 / Math.sqrt(activeCount);
     return (
       optW * activeCount +
       pmScale * postMortemSignalByGene[k] +
       (pmScale / 2.0) * epistaticSynergyByGene[k] +
-      pmScale * hasProof
+      pmScale * cred
     );
   };
 

@@ -228,20 +228,22 @@ fn population_std(vals: &[f64]) -> f64 {
     v.sqrt()
 }
 
-/// Noyau pur Rust (testable hors WASM) :
+/// Noyau pur Rust (testable hors WASM) avec crédibilité Empirical-Bayes continue `cred ∈ [0.0, 1.0]` :
 /// - Stabilité longitudinale des poids (SANS réinjecter la covariance circulaire des poids d'optimiseur
 ///   dans la matrice épistasique).
 /// - Synergie épistasique pondérée par la fiabilité neutre des partenaires (sans biais auto-entretenu par initial_weights).
+/// - Modulation continue C^∞ de l'évidence positive et du régime chromosomique par `proof_credibilities`
+///   (aucun seuil binaire discontinu).
 /// - Fusion des 3 signaux (base, proof, épistasie) par dispersion inverse observée (zéro constantes arbitraires).
 #[allow(clippy::too_many_arguments)]
-pub fn compute_epigenome_matrix_core(
+pub fn compute_epigenome_matrix_continuous_core(
     raw_epistasis_flat: &[f64],
     epistasis_samples_flat: &[f64],
     lineage_weights_flat: &[f64],
     num_lineage: usize,
     initial_weights: &[f64],
     arm_ids: &[u8],
-    proof_flags: &[u8],
+    proof_credibilities: &[f64],
     proof_scores: &[f64],
     base_analysis_signals: &[f64],
     forced_zero_flags: &[u8],
@@ -348,8 +350,10 @@ pub fn compute_epigenome_matrix_core(
 
         let p_score = proof_scores.get(i).copied().unwrap_or(0.0);
         let p_drive = (p_score / 2.0).tanh();
-        let has_proof = proof_flags.get(i).copied().unwrap_or(0) != 0;
-        let p_signed = if has_proof { p_drive } else { p_drive.min(0.0) };
+        let raw_cred = proof_credibilities.get(i).copied().unwrap_or(0.0);
+        let cred = if raw_cred.is_finite() { raw_cred.clamp(0.0, 1.0) } else { 0.0 };
+        // Pénalités libres sous H0 ; composante positive modulée continûment par cred ∈ [0, 1]
+        let p_signed = if p_drive > 0.0 { p_drive * cred } else { p_drive };
         let b_sig = base_analysis_signals.get(i).copied().unwrap_or(0.0);
 
         proof_drive_vec[i] = p_signed;
@@ -387,19 +391,16 @@ pub fn compute_epigenome_matrix_core(
         let composite = (wb * base_vec[i] + wp * proof_drive_vec[i] + we * epistatic_synergy[i]).clamp(-1.0, 1.0);
         post_mortem_signal[i] = composite;
 
-        let has_proof = proof_flags.get(i).copied().unwrap_or(0) != 0;
+        let raw_cred = proof_credibilities.get(i).copied().unwrap_or(0.0);
+        let cred = if raw_cred.is_finite() { raw_cred.clamp(0.0, 1.0) } else { 0.0 };
         let p_score = proof_scores.get(i).copied().unwrap_or(0.0);
-        let regime_mod = if !has_proof {
-            0.0
-        } else {
-            let p_str = p_score.tanh();
-            let arm_scale = 1.0 / sqrt_k;
-            match arm_ids.get(i).copied().unwrap_or(0) {
-                1 => -arm_scale * persistence_bias * p_str,
-                2 => arm_scale * complexity_bias * p_str,
-                0 => arm_scale * (1.0 - persistence_bias.abs()) * p_str,
-                _ => arm_scale * persistence_bias * p_str,
-            }
+        let p_str = p_score.tanh() * cred;
+        let arm_scale = 1.0 / sqrt_k;
+        let regime_mod = match arm_ids.get(i).copied().unwrap_or(0) {
+            1 => -arm_scale * persistence_bias * p_str,
+            2 => arm_scale * complexity_bias * p_str,
+            0 => arm_scale * (1.0 - persistence_bias.abs()) * p_str,
+            _ => arm_scale * persistence_bias * p_str,
         };
 
         let init_w = initial_weights.get(i).copied().unwrap_or(uniform_share);
@@ -418,6 +419,87 @@ pub fn compute_epigenome_matrix_core(
         post_mortem_signal,
         raw_target_weights,
     }
+}
+
+/// Délégation rétro-compatible pour les appelants passant des indicateurs binaires `proof_flags`.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_epigenome_matrix_core(
+    raw_epistasis_flat: &[f64],
+    epistasis_samples_flat: &[f64],
+    lineage_weights_flat: &[f64],
+    num_lineage: usize,
+    initial_weights: &[f64],
+    arm_ids: &[u8],
+    proof_flags: &[u8],
+    proof_scores: &[f64],
+    base_analysis_signals: &[f64],
+    forced_zero_flags: &[u8],
+    num_genes: usize,
+    hurst: f64,
+    entropy_norm: f64,
+    total_evidence_units: f64,
+) -> EpigenomeMatrixWasmResult {
+    let cred_vec: Vec<f64> = (0..num_genes)
+        .map(|i| {
+            if proof_flags.get(i).copied().unwrap_or(0) != 0 {
+                1.0
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    compute_epigenome_matrix_continuous_core(
+        raw_epistasis_flat,
+        epistasis_samples_flat,
+        lineage_weights_flat,
+        num_lineage,
+        initial_weights,
+        arm_ids,
+        &cred_vec,
+        proof_scores,
+        base_analysis_signals,
+        forced_zero_flags,
+        num_genes,
+        hurst,
+        entropy_norm,
+        total_evidence_units,
+    )
+}
+
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn compute_epigenome_matrix_continuous_wasm(
+    raw_epistasis_flat: &[f64],
+    epistasis_samples_flat: &[f64],
+    lineage_weights_flat: &[f64],
+    num_lineage: usize,
+    initial_weights: &[f64],
+    arm_ids: &[u8],
+    proof_credibilities: &[f64],
+    proof_scores: &[f64],
+    base_analysis_signals: &[f64],
+    forced_zero_flags: &[u8],
+    num_genes: usize,
+    hurst: f64,
+    entropy_norm: f64,
+    total_evidence_units: f64,
+) -> EpigenomeMatrixWasmResult {
+    compute_epigenome_matrix_continuous_core(
+        raw_epistasis_flat,
+        epistasis_samples_flat,
+        lineage_weights_flat,
+        num_lineage,
+        initial_weights,
+        arm_ids,
+        proof_credibilities,
+        proof_scores,
+        base_analysis_signals,
+        forced_zero_flags,
+        num_genes,
+        hurst,
+        entropy_norm,
+        total_evidence_units,
+    )
 }
 
 #[wasm_bindgen]
@@ -848,5 +930,72 @@ mod tests {
         assert!(next[0] > next[1]);
         let sum: f64 = next.iter().sum();
         assert!((sum - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn epigenome_continuous_credibility_is_monotonic_and_respects_zeros() {
+        let k = 3;
+        let raw_ep = vec![0.0; k * k];
+        let samp_ep = vec![0.0; k * k];
+        let lineage = vec![1.0 / 3.0; k * 2];
+        let init_w = vec![0.33, 0.33, 0.34];
+        let arm_ids = vec![0u8, 1, 2];
+        let proof_scores = vec![2.5, 0.8, 0.0];
+        let base_sigs = vec![0.2, 0.2, 0.0];
+        let forced_zero = vec![0u8, 0, 1];
+
+        let low = compute_epigenome_matrix_continuous_core(
+            &raw_ep,
+            &samp_ep,
+            &lineage,
+            2,
+            &init_w,
+            &arm_ids,
+            &[0.1, 0.1, 0.0],
+            &proof_scores,
+            &base_sigs,
+            &forced_zero,
+            k,
+            0.55,
+            0.9,
+            10.0,
+        );
+        let mid = compute_epigenome_matrix_continuous_core(
+            &raw_ep,
+            &samp_ep,
+            &lineage,
+            2,
+            &init_w,
+            &arm_ids,
+            &[0.5, 0.1, 0.0],
+            &proof_scores,
+            &base_sigs,
+            &forced_zero,
+            k,
+            0.55,
+            0.9,
+            10.0,
+        );
+        let high = compute_epigenome_matrix_continuous_core(
+            &raw_ep,
+            &samp_ep,
+            &lineage,
+            2,
+            &init_w,
+            &arm_ids,
+            &[0.95, 0.1, 0.0],
+            &proof_scores,
+            &base_sigs,
+            &forced_zero,
+            k,
+            0.55,
+            0.9,
+            10.0,
+        );
+
+        assert_eq!(low.raw_target_weights[2], 0.0);
+        assert_eq!(high.raw_target_weights[2], 0.0);
+        assert!(low.raw_target_weights[0] < mid.raw_target_weights[0]);
+        assert!(mid.raw_target_weights[0] < high.raw_target_weights[0]);
     }
 }

@@ -130,6 +130,7 @@ pub fn abi_hash() -> String {
         "compute_cross_hawkes_kernel",
         "compute_cyclic_candidates_hpc",
         "compute_domino_advection_wasm",
+        "compute_epigenome_matrix_continuous_wasm",
         "compute_epigenome_matrix_wasm",
         "compute_fft_power_spectrum",
         "compute_frequency_counts_wasm",

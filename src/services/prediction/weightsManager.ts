@@ -189,6 +189,45 @@ export interface AlgoProofMetric {
   ebShrinkageFactor?: number;
 }
 
+/**
+ * Crédibilité Empirical-Bayes continue C^∞ ∈ [0, 1] dérivée de la statistique de rang
+ * (rankZScore / proofScore), de la sévérité ajustée (qValue), de la confiance d'échantillon
+ * et du facteur de rétrécissement de James-Stein (ebShrinkageFactor).
+ * Zéro seuil binaire brutal : transition lisse sur toute l'échelle [0, 1].
+ */
+export const computeEmpiricalBayesProofCredibility = (
+  proof?: AlgoProofMetric
+): number => {
+  if (!proof) return 0;
+  const zRaw = Number.isFinite(proof.rankZScore)
+    ? (proof.rankZScore as number)
+    : Number.isFinite(proof.proofScore)
+      ? proof.proofScore
+      : 0;
+  if (zRaw <= 0) return 0;
+
+  const qRaw = Number.isFinite(proof.qValue)
+    ? Math.max(0, Math.min(1, proof.qValue as number))
+    : proof.hasProof
+      ? 0.0
+      : 1.0;
+  const conf = Number.isFinite(proof.confidence)
+    ? Math.max(0, Math.min(1, proof.confidence))
+    : 0;
+  if (conf <= 0) return 0;
+
+  // Puissance naturelle 90/5 = 18 : décroissance lisse sans constante magique
+  const baselineOddsScale = 90.0 / 5.0;
+  const qEvidence = Math.pow(Math.max(0, 1.0 - qRaw), baselineOddsScale);
+  const zEvidence = Math.tanh(zRaw * Math.SQRT1_2);
+  const jsFactor =
+    proof.ebShrinkageFactor !== undefined && Number.isFinite(proof.ebShrinkageFactor)
+      ? 0.5 + 0.5 * Math.max(0, Math.min(1, proof.ebShrinkageFactor))
+      : 1.0;
+
+  return Math.max(0, Math.min(1, zEvidence * qEvidence * conf * jsFactor));
+};
+
 const algoEmpiricalProofCache = new Map<string, Record<AlgoKey, AlgoProofMetric>>();
 
 /**
@@ -942,17 +981,15 @@ export const enforceStrictWeightsProof = (
 
     const currentVal = typeof baseW[k] === 'number' && !isNaN(baseW[k]) ? baseW[k] : baselineWeight;
     const proof = proofMap[k];
-
-    if (proof && proof.hasProof && proof.proofScore > 0) {
-      // Prouvé : amplifié de façon continue et différentiable selon le Z-score
-      const boost = 1.0 + Math.tanh(proof.proofScore);
-      adjusted[k] = Math.max(baselineWeight, currentVal * boost);
-    } else {
-      // Non prouvé : strictement contraint sous le seuil neutre par sigmoïde continue
-      const z = proof ? proof.proofScore : -1.0;
-      const dampener = 1.0 / (1.0 + Math.exp(-2.5 * z)); // <= 0.5 quand z <= 0
-      adjusted[k] = Math.min(baselineWeight, currentVal) * dampener;
-    }
+    const cred = computeEmpiricalBayesProofCredibility(proof);
+    const z = proof
+      ? (Number.isFinite(proof.rankZScore) ? (proof.rankZScore as number) : proof.proofScore)
+      : -1.0;
+    const dampener = 1.0 / (1.0 + Math.exp(-2.5 * z)); // <= 0.5 quand z <= 0
+    const unprovenTarget = Math.min(baselineWeight, currentVal) * dampener;
+    const boost = 1.0 + Math.tanh(Math.max(0, z));
+    const provenTarget = Math.max(baselineWeight, currentVal * boost);
+    adjusted[k] = unprovenTarget + cred * (provenTarget - unprovenTarget);
   });
 
   return normalizeWeights(adjusted as AlgoWeights);
@@ -995,19 +1032,16 @@ export const computeChronologicalAlgoReinforcement = (
 
     const baseW = baseWeights[k] !== undefined ? Number(baseWeights[k]) : 1.0;
     const proof = proofResults[k];
-
-    if (!proof || !proof.hasProof || proof.proofScore <= 0) {
-      // AUCUNE PREUVE : L'algorithme ne peut JAMAIS être prioritaire
-      // Amortissement différentiable continu selon l'écart au hasard : Sigmoïde logistique raide
-      const z = proof ? proof.proofScore : -1.0;
-      const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-2.5 * z)); // Multiplicateur <= 0.5 quand z <= 0, tombant vers 0.05 quand z < -1
-      reinforced[k] = Math.max(0.001, baseW * unprovenMultiplier);
-    } else {
-      // PREUVE EMPIRIQUE VALORISÉE : L'algorithme a démontré sa supériorité sur le tirage actif
-      const earnedBoost = Math.tanh(proof.proofScore) * sampleConfidence;
-      const provenMultiplier = 1.0 + earnedBoost;
-      reinforced[k] = Math.max(0.001, baseW * provenMultiplier);
-    }
+    const cred = computeEmpiricalBayesProofCredibility(proof);
+    const z = proof
+      ? (Number.isFinite(proof.rankZScore) ? (proof.rankZScore as number) : proof.proofScore)
+      : -1.0;
+    // Transition différentiable C^∞ : sans preuve (cred → 0), amortissement continu <= 0.5 ;
+    // avec crédibilité croissante, élévation progressive proportionnelle à sampleConfidence.
+    const unprovenMultiplier = 1.0 / (1.0 + Math.exp(-2.5 * z));
+    const provenMultiplier = 1.0 + Math.tanh(Math.max(0, z)) * sampleConfidence;
+    const multiplier = unprovenMultiplier + cred * (provenMultiplier - unprovenMultiplier);
+    reinforced[k] = Math.max(1e-4, baseW * multiplier);
   });
 
   return normalizeWeights(reinforced as AlgoWeights);
@@ -1208,21 +1242,27 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
         });
       });
 
-      // Injection des ratios Kalman stabilisés dans les poids physiques du moteur
+      // Injection des ratios Kalman stabilisés dans les poids physiques du moteur (crédibilité EB continue)
       const proofMap = evaluateAlgoEmpiricalProof(drawName || 'default', history);
+      const minDampFloor = 1.0 / Math.sqrt(Math.max(2, numAlgos));
       algosList.forEach(algo => {
         const proof = proofMap[algo];
-        const hasProof = proof && proof.hasProof && proof.proofScore > 0;
+        const cred = computeEmpiricalBayesProofCredibility(proof);
+        const z = proof
+          ? (Number.isFinite(proof.rankZScore) ? (proof.rankZScore as number) : proof.proofScore)
+          : 0;
         let factor = kalmanStates[algo].x;
-        
-        // RÈGLE ABSOLUE : Qu'aucun algorithme ne voie son poids augmenté s'il ne fait pas ses preuves
-        if (!hasProof && factor > 1.0) {
-          factor = 1.0;
+
+        // L'amplification au-dessus de 1.0 est modulée continûment par la crédibilité Empirical-Bayes
+        if (factor > 1.0) {
+          factor = 1.0 + (factor - 1.0) * cred;
         }
-        if (!hasProof && proof && proof.proofScore < 0) {
-          factor *= Math.max(0.2, 1.0 / (1.0 + Math.exp(-2.0 * proof.proofScore)));
+        // Amortissement continu lorsque sous-performance sous H0 (atténué si crédibilité non nulle)
+        if (z < 0) {
+          const dampener = Math.max(minDampFloor, 1.0 / (1.0 + Math.exp(-2.0 * z)));
+          factor *= dampener + cred * (1.0 - dampener);
         }
-        
+
         dynamicWeights[algo] *= factor;
       });
 
