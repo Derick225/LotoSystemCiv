@@ -13,6 +13,9 @@ use wasm_bindgen::prelude::*;
 
 const TOTAL_NUMBERS: usize = 90;
 const BALLS_PER_DRAW: usize = 5;
+const CYCLE_PHASES: usize = 3; // Début / Milieu / Fin de cycle
+const MIN_CYCLE_DRAWS: usize = CYCLE_PHASES;
+const MAX_CYCLE_DRAWS: usize = TOTAL_NUMBERS / CYCLE_PHASES;
 const TOTAL_PAIRS: usize = (TOTAL_NUMBERS * (TOTAL_NUMBERS - 1)) / 2; // 4005
 const TOTAL_TRIPLETS: usize = (TOTAL_NUMBERS * (TOTAL_NUMBERS - 1) * (TOTAL_NUMBERS - 2)) / 6; // 117_480
 
@@ -171,7 +174,7 @@ pub fn mine_cycle_patterns_core(
 ) -> PatternMiningWasmResult {
     let cols = win_cols.max(1);
     let total_draws = num_draws.min(chrono_draws_flat.len() / cols);
-    let cycle_length = cycle_length_raw.clamp(3, 30);
+    let cycle_length = cycle_length_raw.clamp(MIN_CYCLE_DRAWS, MAX_CYCLE_DRAWS);
 
     if total_draws < cycle_length {
         return PatternMiningWasmResult {
@@ -366,8 +369,12 @@ pub fn mine_cycle_patterns_core(
     // 4. Élagage Apriori & Extraction des Triplets (zéro chaînes de caractères)
     let exp_single_prob = exact_cycle_union_prob(1, cycle_length);
     let exp_pair_prob = exact_cycle_union_prob(2, cycle_length);
+    let same_draw_pair_prob = exact_cycle_union_prob(2, 1);
     let num_stats_f = (completed_cycles_count as f64).max(1.0);
-    let min_pair_for_triplet = 2usize.max((num_stats_f * exp_pair_prob * 1.15).ceil() as usize);
+    let expected_pair_cycles = num_stats_f * exp_pair_prob;
+    let std_pair_cycles = (expected_pair_cycles * (1.0 - exp_pair_prob)).sqrt();
+    let min_pair_for_triplet = 2usize.max((expected_pair_cycles + std_pair_cycles).ceil() as usize);
+    let expected_same_draw_pairs = (num_stats_f * (cycle_length as f64) * same_draw_pair_prob).max(1e-6);
 
     let mut apriori_cands: Vec<(usize, f64)> = Vec::new();
     for p_idx in 0..TOTAL_PAIRS {
@@ -380,14 +387,16 @@ pub fn mine_cycle_patterns_core(
                 .max(1.0);
             let dice = (2.0 * (sup as f64)) / denom;
             let emp_lift = ((sup as f64) / num_stats_f) / exp_pair_prob;
-            let score = emp_lift * dice + (same_cnt as f64) * 3.0;
+            let same_draw_lift = (same_cnt as f64) / expected_same_draw_pairs;
+            let score = emp_lift * dice + same_draw_lift;
             apriori_cands.push((p_idx, score));
         }
     }
     apriori_cands.sort_by(|x, y| y.1.total_cmp(&x.1).then_with(|| x.0.cmp(&y.0)));
 
+    let apriori_budget = ((TOTAL_PAIRS as f64).sqrt() * (BALLS_PER_DRAW as f64)).round() as usize;
     let mut frequent_pair_flags = vec![false; TOTAL_PAIRS];
-    for &(p_idx, _) in apriori_cands.iter().take(320) {
+    for &(p_idx, _) in apriori_cands.iter().take(apriori_budget) {
         frequent_pair_flags[p_idx] = true;
     }
 
@@ -436,11 +445,12 @@ pub fn mine_cycle_patterns_core(
         }
     }
 
-    // Sérialisation CSR des paires qualifiantes
+    // Sérialisation CSR des paires qualifiantes (facteur de rétrécissement fini √M / (√M + 1))
+    let finite_sample_shrinkage = num_stats_f.sqrt() / (num_stats_f.sqrt() + 1.0);
     let min_pair_cycles_threshold = if min_support_override > 0 {
         min_support_override
     } else {
-        2usize.max((num_stats_f * exp_pair_prob * 0.85).floor() as usize)
+        2usize.max((expected_pair_cycles * finite_sample_shrinkage).floor() as usize)
     };
 
     let mut pair_tuples: Vec<u32> = Vec::new();
@@ -552,8 +562,12 @@ pub fn mine_cycle_patterns_core(
                 } else {
                     1.0
                 };
-                let min_trans = 2usize.max((src_total * target_marg * 1.15).floor() as usize);
-                if transitions >= min_trans && lift > 1.08 {
+                let exp_trans = src_total * target_marg;
+                let std_trans = (exp_trans * (1.0 - target_marg)).sqrt();
+                let trans_log_scale = num_stats_f.ln().max(1.0);
+                let min_trans = 2usize.max((exp_trans + std_trans / trans_log_scale).floor() as usize);
+                let lift_threshold = 1.0 + 1.0 / (src_total + num_stats_f).sqrt();
+                if transitions >= min_trans && lift > lift_threshold {
                     transition_tuples.push(src as u32);
                     transition_tuples.push(tgt as u32);
                     transition_tuples.push(trans_early[e_idx]);

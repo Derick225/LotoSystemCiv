@@ -5,6 +5,9 @@ import {
   isValidLotoNumbers,
   buildRecentFrenchMonths,
   normalizeMonthParam,
+  toLotobonheurMonthYearQuery,
+  buildLotobonheurApiUrl,
+  fetchLotobonheurMonthDraws,
 } from '../src/shared/lotobonheurParser';
 import {
   resetDrawExceptionsStoreForTests,
@@ -109,11 +112,178 @@ describe('Parseur Officiel Loto Bonheur (src/shared/lotobonheurParser.ts)', () =
     });
   });
 
-  it('construit les mois français récents et normalise YYYY-MM', () => {
+  it('construit les mois français récents, normalise YYYY-MM et force monthYear en minuscules', () => {
     const ref = new Date(2026, 0, 15); // Janvier 2026
     expect(buildRecentFrenchMonths(1, ref)).toEqual(['Janvier 2026', 'Décembre 2025']);
     expect(normalizeMonthParam('2026-04')).toBe('Avril 2026');
     expect(normalizeMonthParam('Mars 2026')).toBe('Mars 2026');
+    expect(toLotobonheurMonthYearQuery('Novembre 2026')).toBe('novembre 2026');
+    expect(toLotobonheurMonthYearQuery('2026-11')).toBe('novembre 2026');
+    expect(buildLotobonheurApiUrl('Novembre 2026')).toBe(
+      'https://lotobonheur.ci/api/results?monthYear=novembre%202026&drawType=Tous%20les%20tirages'
+    );
+    expect(buildLotobonheurApiUrl('Novembre 2026', 'National')).toBe(
+      'https://lotobonheur.ci/api/results?monthYear=novembre%202026&drawType=National'
+    );
+  });
+
+  it('supporte les formats nightDraws, tableau plat drawResults et placeholders ". - . - . - . - ." sans machine', () => {
+    const payload = {
+      drawsResultsWeekly: [
+        {
+          startDate: '16/11/2026',
+          drawResultsDaily: [
+            {
+              date: 'Lun 16/11',
+              drawResults: {
+                standardDraws: [
+                  {
+                    drawName: 'Monday Special',
+                    winningNumbers: '04 - 18 - 27 - 44 - 81',
+                    machineNumbers: '. - . - . - . - .',
+                  },
+                ],
+                nightDraws: [
+                  {
+                    drawName: 'Espoir',
+                    winningNumbers: '02 - 19 - 35 - 61 - 74',
+                    machineNumbers: '09 - 14 - 28 - 52 - 66',
+                  },
+                ],
+              },
+            },
+            {
+              date: 'Sam 21/11',
+              drawResults: [
+                {
+                  drawName: 'National',
+                  winningNumbers: '07 - 22 - 39 - 68 - 84',
+                  machineNumbers: '. - . - . - . - .',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const parsed = parseLotobonheurResponse(payload, { fallbackYear: 2026 });
+    expect(parsed.draws).toHaveLength(3);
+    expect(parsed.draws.find((d) => d.drawName === 'Monday Special')).toEqual({
+      drawName: 'Monday Special',
+      date: '2026-11-16',
+      gagnants: [4, 18, 27, 44, 81],
+      machine: null,
+      version: 1,
+    });
+    expect(parsed.draws.find((d) => d.drawName === 'Espoir')?.machine).toEqual([9, 14, 28, 52, 66]);
+    expect(parsed.draws.find((d) => d.drawName === 'National')).toEqual({
+      drawName: 'National',
+      date: '2026-11-21',
+      gagnants: [7, 22, 39, 68, 84],
+      machine: null,
+      version: 1,
+    });
+  });
+
+  it('cible uniquement drawType lors d un appel ciblé et complète les tirages 19h55 omis par Tous les tirages', async () => {
+    const requestedUrls: string[] = [];
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requestedUrls.push(url);
+      const parsedUrl = new URL(url);
+      const drawType = parsedUrl.searchParams.get('drawType');
+
+      if (drawType === 'Tous les tirages') {
+        return new Response(
+          JSON.stringify({
+            drawsResultsWeekly: [
+              {
+                startDate: '16/11/2026',
+                drawResultsDaily: [
+                  {
+                    date: 'Jeu 19/11',
+                    drawResults: {
+                      standardDraws: [
+                        {
+                          drawName: 'Kado',
+                          winningNumbers: '01 - 12 - 23 - 34 - 45',
+                          machineNumbers: '05 - 15 - 25 - 35 - 45',
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+
+      if (drawType === 'Fortune Thursday') {
+        return new Response(
+          JSON.stringify({
+            drawsResultsWeekly: [
+              {
+                startDate: '16/11/2026',
+                drawResultsDaily: [
+                  {
+                    date: 'Jeu 19/11',
+                    drawResults: {
+                      standardDraws: [
+                        {
+                          drawName: 'Fortune Thursday',
+                          winningNumbers: '08 - 17 - 31 - 54 - 79',
+                          machineNumbers: '. - . - . - . - .',
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        );
+      }
+
+      if (drawType === 'Monni') {
+        return new Response('Upstream error', { status: 503 });
+      }
+
+      return new Response(JSON.stringify({ drawsResultsWeekly: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const targeted = await fetchLotobonheurMonthDraws({
+      monthLabel: 'Novembre 2026',
+      targetDrawName: 'Fortune Thursday',
+      fallbackYear: 2026,
+      fetchImpl: mockFetch,
+    });
+
+    expect(requestedUrls).toEqual([
+      'https://lotobonheur.ci/api/results?monthYear=novembre%202026&drawType=Fortune%20Thursday',
+    ]);
+    expect(targeted.draws).toHaveLength(1);
+    expect(targeted.draws[0].machine).toBeNull();
+
+    requestedUrls.length = 0;
+    const globalRes = await fetchLotobonheurMonthDraws({
+      monthLabel: 'Novembre 2026',
+      fallbackYear: 2026,
+      fetchImpl: mockFetch,
+    });
+
+    expect(requestedUrls[0]).toBe(
+      'https://lotobonheur.ci/api/results?monthYear=novembre%202026&drawType=Tous%20les%20tirages'
+    );
+    expect(globalRes.draws.map((d) => d.drawName)).toContain('Kado');
+    expect(globalRes.draws.map((d) => d.drawName)).toContain('Fortune Thursday');
+    expect(globalRes.failedDrawTypes).toEqual(['Monni']);
   });
 });
 
@@ -391,6 +561,84 @@ describe('Récupération paginée & Sync API (lotteryService)', () => {
       expect(result.source).toBe('express-api');
       expect(result.fetchedCount).toBe(1);
       expect(result.upsertedCount).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('ne masque pas une erreur DB partielle de cron-sync (upserted:0 + errors) et bascule sur fallback', async () => {
+    const invokeMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          status: 'partial',
+          fetched: 4,
+          upserted: 0,
+          errors: ['upsert Novembre 2026: new row violates check constraint "valid_machine"'],
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          success: true,
+          months: ['Novembre 2026'],
+          draws: [
+            {
+              drawName: 'National',
+              date: '2026-11-21',
+              gagnants: [7, 22, 39, 68, 84],
+              machine: null,
+              version: 1,
+            },
+          ],
+        },
+        error: null,
+      });
+
+    const createQueryBuilder = () => {
+      const b: any = {
+        select: () => b,
+        order: () => b,
+        eq: () => b,
+        gte: () => b,
+        lte: () => b,
+        limit: () => b,
+        range: () => b,
+        then: (resolve: any, reject?: any) =>
+          Promise.resolve({ data: [], error: null }).then(resolve, reject),
+      };
+      return b;
+    };
+
+    vi.doMock('../src/services/supabaseClient', () => ({
+      isSupabaseConfigured: () => true,
+      supabase: {
+        functions: { invoke: invokeMock },
+        from: () => createQueryBuilder(),
+        rpc: vi.fn(),
+      },
+    }));
+
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: new Headers({ 'content-type': 'text/html' }),
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubGlobal('window', {
+      dispatchEvent: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    try {
+      const { syncDrawExternalDetailed } = await import('../src/services/lotteryService');
+      const result = await syncDrawExternalDetailed('National', { monthsBack: 0 });
+
+      expect(invokeMock).toHaveBeenCalledTimes(2);
+      expect(result.source).toBe('edge-proxy');
+      expect(result.fetchedCount).toBe(1);
     } finally {
       vi.unstubAllGlobals();
     }

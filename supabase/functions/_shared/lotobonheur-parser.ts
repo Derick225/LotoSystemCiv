@@ -97,6 +97,27 @@ export const normalizeMonthParam = (input?: string | null, fallbackDate: Date = 
   return raw;
 };
 
+export const ALL_OFFICIAL_DRAW_NAMES: readonly string[] = Object.values(DRAW_NAMES_MAP);
+
+export const toLotobonheurMonthYearQuery = (
+  input?: string | null,
+  fallbackDate: Date = new Date()
+): string => {
+  return normalizeMonthParam(input, fallbackDate).toLowerCase();
+};
+
+export const buildLotobonheurApiUrl = (
+  monthInput?: string | null,
+  drawType?: string | null,
+  fallbackDate: Date = new Date()
+): string => {
+  const monthYear = toLotobonheurMonthYearQuery(monthInput, fallbackDate);
+  const canonicalType = drawType && drawType !== 'ALL'
+    ? resolveCanonicalDrawName(drawType) || drawType
+    : 'Tous les tirages';
+  return `${LOTOBONHEUR_API_URL}?monthYear=${encodeURIComponent(monthYear)}&drawType=${encodeURIComponent(canonicalType)}`;
+};
+
 export const normalizeOfficialDrawKey = (rawName: string): string => {
   return String(rawName || '')
     .trim()
@@ -161,6 +182,21 @@ const isValidCalendarIso = (year: number, month: number, day: number): boolean =
   );
 };
 
+const extractApiDrawsFromDaily = (daily: any): any[] => {
+  const drawResults = daily?.drawResults;
+  if (!drawResults) return [];
+  if (Array.isArray(drawResults)) return drawResults;
+  if (typeof drawResults !== 'object') return [];
+
+  const collected: any[] = [];
+  for (const bucket of Object.values(drawResults)) {
+    if (Array.isArray(bucket)) {
+      collected.push(...bucket);
+    }
+  }
+  return collected;
+};
+
 export const parseLotobonheurResponse = (
   payload: unknown,
   options: { targetDrawName?: string; fallbackYear?: number } = {}
@@ -208,10 +244,7 @@ export const parseLotobonheurResponse = (
       const dbDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       dayBlocks.add(dbDate);
 
-      const apiDraws = [
-        ...(Array.isArray(daily?.drawResults?.standardDraws) ? daily.drawResults.standardDraws : []),
-        ...(Array.isArray(daily?.drawResults?.turboDraws) ? daily.drawResults.turboDraws : []),
-      ];
+      const apiDraws = extractApiDrawsFromDaily(daily);
 
       for (const draw of apiDraws) {
         const rawLabel = String(draw?.drawName || '').trim();
@@ -228,7 +261,7 @@ export const parseLotobonheurResponse = (
         }
 
         const winRaw = String(draw?.winningNumbers || '');
-        if (!winRaw || winRaw.includes('..')) continue;
+        if (!winRaw || winRaw.includes('..') || !/\d/.test(winRaw)) continue;
 
         const win = (winRaw.match(/\d+/g) || []).map(Number).slice(0, 5);
         if (!isValidLotoNumbers(win)) {
@@ -237,8 +270,8 @@ export const parseLotobonheurResponse = (
         }
 
         const withoutMachine = isOfficialDrawWithoutMachine(canonicalName);
-        const macRaw = withoutMachine ? '' : String(draw?.machineNumbers || '');
-        const mac = macRaw && !macRaw.includes('..')
+        const macRaw = withoutMachine ? '' : String(draw?.machineNumbers ?? '');
+        const mac = macRaw && !macRaw.includes('..') && /\d/.test(macRaw)
           ? (macRaw.match(/\d+/g) || []).map(Number).slice(0, 5)
           : [];
         const validMachine = !withoutMachine && isValidLotoNumbers(mac) ? mac : null;
@@ -256,4 +289,122 @@ export const parseLotobonheurResponse = (
   }
 
   return { rows, dayBlocks, foundKeys, unknown, skippedInvalidCount };
+};
+
+export interface FetchLotobonheurMonthResult extends ParsedLotobonheurMonthResult {
+  httpErrors: Array<{ month: string; drawType?: string; status: number | string }>;
+  failedDrawTypes: Set<string>;
+  rawPayloads?: Array<{ drawType: string; data: unknown }>;
+}
+
+export const fetchLotobonheurMonthDraws = async (options: {
+  monthLabel: string;
+  targetDrawName?: string;
+  fallbackYear?: number;
+  timeoutMs?: number;
+  concurrency?: number;
+  captureRaw?: boolean;
+}): Promise<FetchLotobonheurMonthResult> => {
+  const timeoutMs = options.timeoutMs ?? 15000;
+  const fallbackYear = options.fallbackYear ?? new Date().getFullYear();
+  const concurrency = Math.max(1, Math.min(8, options.concurrency ?? 4));
+  const hasSpecificTarget = Boolean(
+    options.targetDrawName && options.targetDrawName !== 'ALL'
+  );
+  const canonicalTarget = hasSpecificTarget
+    ? resolveCanonicalDrawName(options.targetDrawName!) || options.targetDrawName!
+    : undefined;
+
+  const rowsByKey = new Map<string, ParsedOfficialDraw>();
+  const dayBlocks = new Set<string>();
+  const foundKeys = new Set<string>();
+  const unknown = new Set<string>();
+  const httpErrors: Array<{ month: string; drawType?: string; status: number | string }> = [];
+  const failedDrawTypes = new Set<string>();
+  const rawPayloads: Array<{ drawType: string; data: unknown }> = [];
+  let skippedInvalidCount = 0;
+
+  const fetchSingleType = async (drawType: string, filterTarget?: string) => {
+    const url = buildLotobonheurApiUrl(options.monthLabel, drawType);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (NexusEngine/12.0)',
+          Accept: 'application/json',
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) {
+        httpErrors.push({ month: options.monthLabel, drawType, status: response.status });
+        if (drawType !== 'Tous les tirages') failedDrawTypes.add(drawType);
+        return null;
+      }
+      const remoteData = await response.json().catch(() => null);
+      if (!remoteData) {
+        httpErrors.push({ month: options.monthLabel, drawType, status: 'INVALID_JSON' });
+        if (drawType !== 'Tous les tirages') failedDrawTypes.add(drawType);
+        return null;
+      }
+      if (options.captureRaw) {
+        rawPayloads.push({ drawType, data: remoteData });
+      }
+      const parsed = parseLotobonheurResponse(remoteData, {
+        targetDrawName: filterTarget,
+        fallbackYear,
+      });
+      for (const r of parsed.rows) {
+        const key = `${r.draw_name}|${r.date}`;
+        const prev = rowsByKey.get(key);
+        if (!prev || (!prev.machine && r.machine)) {
+          rowsByKey.set(key, r);
+        }
+      }
+      parsed.dayBlocks.forEach((d) => dayBlocks.add(d));
+      parsed.foundKeys.forEach((k) => foundKeys.add(k));
+      parsed.unknown.forEach((u) => unknown.add(u));
+      skippedInvalidCount += parsed.skippedInvalidCount;
+      return parsed;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      httpErrors.push({ month: options.monthLabel, drawType, status: msg });
+      if (drawType !== 'Tous les tirages') failedDrawTypes.add(drawType);
+      return null;
+    }
+  };
+
+  if (canonicalTarget) {
+    await fetchSingleType(canonicalTarget, canonicalTarget);
+  } else {
+    const globalParsed = await fetchSingleType('Tous les tirages', undefined);
+    const foundNames = new Set(Array.from(rowsByKey.values()).map((r) => r.draw_name));
+
+    const missingDrawSet = new Set<string>();
+    const activeDays = globalParsed ? Array.from(globalParsed.dayBlocks) : [];
+    for (const dayIso of activeDays) {
+      const utcDay = new Date(`${dayIso}T00:00:00Z`).getUTCDay();
+      const expected = DRAW_SCHEDULE_UTC_DAY[utcDay] || [];
+      for (const name of expected) {
+        if (!foundNames.has(name)) {
+          missingDrawSet.add(name);
+        }
+      }
+    }
+
+    const missingDraws = Array.from(missingDrawSet);
+    for (let i = 0; i < missingDraws.length; i += concurrency) {
+      const batch = missingDraws.slice(i, i + concurrency);
+      await Promise.all(batch.map((name) => fetchSingleType(name, name)));
+    }
+  }
+
+  return {
+    rows: Array.from(rowsByKey.values()),
+    dayBlocks,
+    foundKeys,
+    unknown,
+    skippedInvalidCount,
+    httpErrors,
+    failedDrawTypes,
+    ...(options.captureRaw ? { rawPayloads } : {}),
+  };
 };

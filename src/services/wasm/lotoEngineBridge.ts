@@ -1300,23 +1300,34 @@ export function computeHybridRegimeWeightsHpc(params: {
 
   const k = baseArr.length;
   if (k === 0) {
+    const neutral = 100.0 * 0.5;
     return {
       optimizedWeights: new Float64Array(0),
-      confidence: 50.0,
-      stabilityIndex: 50.0,
+      confidence: neutral,
+      stabilityIndex: neutral,
     };
   }
 
-  const h = Math.max(0.05, Math.min(0.95, params.hurst));
-  const s = Math.max(0.05, Math.min(0.99, params.entropyNorm));
-  const v = Math.max(0.01, Math.min(1.0, params.volatilityNorm));
+  const DOMAIN_SIZE = 90;
+  const DRAW_SIZE = 5;
+  const eps = 1.0 / DOMAIN_SIZE;
+  const h = Math.max(eps, Math.min(1.0 - eps, Number.isFinite(params.hurst) ? params.hurst : 0.5));
+  const s = Math.max(eps, Math.min(1.0 - eps, Number.isFinite(params.entropyNorm) ? params.entropyNorm : 1.0 - eps));
+  const v = Math.max(eps, Math.min(1.0, Number.isFinite(params.volatilityNorm) ? params.volatilityNorm : 0.5));
 
-  const persistenceDrive = Math.tanh(2.5 * (h - 0.5));
-  const meanReversionDrive = Math.tanh(2.5 * (0.5 - h));
-  const chaosDrive = Math.tanh(2.0 * (s - 0.5) + 1.5 * (v - 0.3));
-  const stabilityDrive = Math.tanh(1.5 * (1.0 - v));
+  const regimeGain = Math.log(DOMAIN_SIZE / DRAW_SIZE);
+  const dampGain = Math.sqrt(DRAW_SIZE);
+  const uniformStd = 1.0 / Math.sqrt(12.0);
 
-  const sampleConfidence = 1.0 - Math.exp(-Math.max(5, params.historyDepth) / 120.0);
+  const persistenceDrive = Math.tanh(regimeGain * (h - 0.5));
+  const meanReversionDrive = Math.tanh(regimeGain * (0.5 - h));
+  const chaosDrive = Math.tanh(dampGain * (s - 0.5) + dampGain * (v - uniformStd));
+  const stabilityDrive = Math.tanh(dampGain * (1.0 - v));
+
+  const effHorizon = k * Math.log(DOMAIN_SIZE);
+  const sampleConfidence = 1.0 - Math.exp(-Math.max(DRAW_SIZE, params.historyDepth) / effHorizon);
+  const driveScale = 1.0 / Math.sqrt(DRAW_SIZE);
+  const floorW = eps * eps;
   const out = new Float64Array(k);
   let sumW = 0.0;
 
@@ -1330,8 +1341,9 @@ export function computeHybridRegimeWeightsHpc(params: {
         : cType === 2
         ? chaosDrive
         : stabilityDrive;
-    const factor = Math.exp(0.35 * drive * sampleConfidence);
-    const w = Math.max(1e-5, baseArr[i]) * factor;
+    const factor = Math.exp(driveScale * drive * sampleConfidence);
+    const bw = Number.isFinite(baseArr[i]) ? baseArr[i] : 0;
+    const w = Math.max(floorW, bw) * factor;
     out[i] = w;
     sumW += w;
   }
@@ -1342,10 +1354,19 @@ export function computeHybridRegimeWeightsHpc(params: {
     }
   }
 
-  const stabilityIndex = Math.max(15.0, Math.min(98.0, (1.0 - 0.5 * v - 0.3 * Math.max(0, s - 0.5)) * 100.0));
+  const floorPct = 100.0 * (DRAW_SIZE / DOMAIN_SIZE);
+  const ceilPct = 100.0 * (1.0 - DRAW_SIZE / (DOMAIN_SIZE * DOMAIN_SIZE));
+
+  const vStability = 1.0 - v;
+  const sStability = 1.0 - Math.max(0, s - 0.5);
+  const stabilityIndex = Math.max(floorPct, Math.min(ceilPct, 100.0 * 0.5 * (vStability + sStability)));
+
+  const hurstClarity = Math.max(0, Math.min(1, 2.0 * Math.abs(h - 0.5)));
+  const entropyClarity = 1.0 - s;
+  const regimeClarity = 0.5 * (hurstClarity + entropyClarity);
   const confidence = Math.max(
-    25.0,
-    Math.min(96.0, (0.45 * sampleConfidence + 0.35 * (1.0 - s * 0.4) + 0.2 * (1.0 + Math.abs(h - 0.5))) * 100.0)
+    floorPct,
+    Math.min(ceilPct, 100.0 * sampleConfidence * (0.5 + 0.5 * regimeClarity))
   );
 
   return {

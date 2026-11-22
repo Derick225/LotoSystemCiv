@@ -188,6 +188,9 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
     let totalBallsCount = 0;
 
     const requiresNoMachine = isDrawWithoutMachine(targetDraw);
+    const hasAnyMachineInHistory = data.some(
+      (d) => Array.isArray(d?.machine) && d.machine.length > 0
+    );
 
     data.forEach((d) => {
       if (!d) return;
@@ -244,7 +247,7 @@ export const DataIntegrityMonitor: React.FC<{ drawName: string }> = ({
           fixedPayload: { machine: [] },
           original: d,
         });
-      } else if (!requiresNoMachine && mac.length === 0) {
+      } else if (!requiresNoMachine && hasAnyMachineInHistory && mac.length === 0) {
         anomalies.push({
           id: d.id,
           drawName: targetDraw,

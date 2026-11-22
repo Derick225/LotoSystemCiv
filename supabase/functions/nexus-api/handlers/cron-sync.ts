@@ -1,11 +1,10 @@
 import { createClient } from 'supabase'
 import { corsHeaders } from '../../_shared/cors.ts'
 import {
-  LOTOBONHEUR_API_URL,
   DRAW_SCHEDULE_UTC_DAY,
+  fetchLotobonheurMonthDraws,
   formatFrenchMonthParam,
   normalizeMonthParam,
-  parseLotobonheurResponse,
   type ParsedOfficialDraw,
 } from '../../_shared/lotobonheur-parser.ts'
 import { handleForensicAutopsy } from './forensic-autopsy.ts'
@@ -93,7 +92,7 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
       caught_up: 0,
       snapshots_cancelled: 0,
       skipped_invalid: 0,
-      http_errors: [] as Array<{ month: string; status: number | string }>,
+      http_errors: [] as Array<{ month: string; drawType?: string; status: number | string }>,
       errors: [] as string[],
     }
 
@@ -109,22 +108,15 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
     for (const monthParam of months) {
       log.months.push(monthParam)
       try {
-        const targetUrl = `${LOTOBONHEUR_API_URL}?month=${encodeURIComponent(monthParam)}`
-        const response = await fetch(targetUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (NexusEngine/12.0)', 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(20000),
-        })
-
-        if (!response.ok) {
-          log.http_errors.push({ month: monthParam, status: response.status })
-          continue
-        }
-
-        const data = await response.json()
-        const parsed = parseLotobonheurResponse(data, {
+        const parsed = await fetchLotobonheurMonthDraws({
+          monthLabel: monthParam,
           targetDrawName,
           fallbackYear: now.getFullYear(),
+          timeoutMs: 20000,
         })
+        if (parsed.httpErrors.length > 0) {
+          log.http_errors.push(...parsed.httpErrors)
+        }
         parsed.unknown.forEach((u) => log.unknown.add(u))
         log.skipped_invalid += parsed.skippedInvalidCount
 
@@ -183,8 +175,9 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
           }
         }
 
-        // Retirer toute annulation 'auto' si le tirage officiel est finalement paru
-        for (const key of parsed.foundKeys) {
+        // Retirer toute annulation 'auto' si le tirage officiel est finalement paru ou déjà présent en base
+        const publishedKeys = new Set<string>([...parsed.foundKeys, ...existingMap.keys()])
+        for (const key of publishedKeys) {
           if (cancelMap.get(key) === 'auto') {
             const [name, date] = key.split('|')
             await supabase.from('draw_cancellations').delete().eq('draw_name', name).eq('date', date).eq('source', 'auto')
@@ -199,6 +192,7 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
           const expected = DRAW_SCHEDULE_UTC_DAY[new Date(`${day}T00:00:00Z`).getUTCDay()] || []
           for (const name of expected) {
             if (targetDrawName && targetDrawName !== 'ALL' && name.toUpperCase() !== targetDrawName.toUpperCase()) continue
+            if (parsed.failedDrawTypes.has(name)) continue
             const key = `${name}|${day}`
             if (!activeNames.has(name) || parsed.foundKeys.has(key) || existingMap.has(key) || cancelMap.has(key)) continue
             if (day <= cutoff) {
@@ -299,6 +293,7 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
         skipped_invalid: log.skipped_invalid,
         months: log.months,
         http_errors: log.http_errors,
+        errors: log.errors,
         results: upsertedResults,
         message: `Sync OK : ${log.upserted} mis à jour sur ${log.fetched_draws} tirages lus.`,
       }),

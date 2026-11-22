@@ -123,9 +123,12 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     expect(tuneResult.causalAuditTrail.some((c) => c.includes('Déclenché depuis le rapport Forensic'))).toBe(true);
   });
 
-  it('préserve strictement les poids nuls (canaux retirés et MACHINE_TRANSFER sans machine) et garantit la garde de preuve', async () => {
+  it('préserve strictement les poids nuls (canaux retirés et MACHINE_TRANSFER sans machine) et garantit le rétrécissement Empirical-Bayes continu', async () => {
     const { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } = await import('../src/shared/prediction.types');
-    const { projectWeightsWithProofGuard } = await import('../src/services/prediction/closedLoopAutopsyService');
+    const {
+      projectWeightsWithContinuousProofShrinkage,
+      computeEmpiricalBayesProofCredibility,
+    } = await import('../src/services/prediction/closedLoopAutopsyService');
 
     const noMachineHistory: DrawResult[] = mockHistory.map((d) => ({
       ...d,
@@ -148,30 +151,88 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     }
     expect(report.correctedWeights[AlgoKey.MACHINE_TRANSFER]).toBe(0);
 
-    // Vérification directe de projectWeightsWithProofGuard : aucun poids verrouillé ne monte même si les autres baissent
-    const lockedKeys = new Set<AlgoKeyType>([AlgoKey.FREQUENCY, AlgoKey.GAPS]);
-    const forcedZero = new Set<AlgoKeyType>([AlgoKey.MACHINE_TRANSFER]);
-    const shrunkCandidates: Record<string, number> = {};
+    // Vérification directe de projectWeightsWithContinuousProofShrinkage :
+    // - Zéro boost au-dessus de la baseline pour les canaux à crédibilité EB nulle
+    // - Rétrécissement partiel continu pour un canal à crédibilité intermédiaire
+    // - Conservation des canaux retirés / forcés à zéro et projection exacte sur le simplexe
+    const proofMap: Record<string, any> = {};
     for (const k of Object.values(AlgoKey)) {
-      shrunkCandidates[k] = lockedKeys.has(k)
-        ? (DEFAULT_ALGO_WEIGHTS[k] || 0) * 1.5 // tentative de hausse sur un canal sans preuve
-        : (DEFAULT_ALGO_WEIGHTS[k] || 0) * 0.4; // baisse des autres canaux
+      proofMap[k] = {
+        hasProof: false,
+        proofScore: -0.4,
+        rankZScore: -0.4,
+        qValue: 0.85,
+        confidence: 0.9,
+        empiricalHitRate: 0.05,
+        baselineRate: 5 / 90,
+        ebShrinkageFactor: 0.6,
+      };
+    }
+    // Canal à crédibilité intermédiaire (Z > 0, q modérée)
+    proofMap[AlgoKey.MARKOV] = {
+      hasProof: false,
+      proofScore: 2.1,
+      rankZScore: 2.1,
+      qValue: 0.08,
+      confidence: 0.9,
+      empiricalHitRate: 0.075,
+      baselineRate: 5 / 90,
+      ebShrinkageFactor: 0.6,
+    };
+    // Canal fortement prouvé (Z élevé, q ≈ 0)
+    proofMap[AlgoKey.SPECTRAL] = {
+      hasProof: true,
+      proofScore: 3.6,
+      rankZScore: 3.6,
+      qValue: 0.005,
+      confidence: 0.95,
+      empiricalHitRate: 0.095,
+      baselineRate: 5 / 90,
+      ebShrinkageFactor: 0.8,
+    };
+
+    const markovCred = computeEmpiricalBayesProofCredibility(proofMap[AlgoKey.MARKOV]);
+    const spectralCred = computeEmpiricalBayesProofCredibility(proofMap[AlgoKey.SPECTRAL]);
+    expect(markovCred).toBeGreaterThan(0);
+    expect(markovCred).toBeLessThan(spectralCred);
+
+    const forcedZero = new Set<AlgoKeyType>([AlgoKey.MACHINE_TRANSFER]);
+    const baseClean: Record<string, number> = {};
+    let baseSum = 0;
+    for (const k of Object.values(AlgoKey)) {
+      const val =
+        RETIRED_ALGO_WEIGHT_KEYS.has(k) || forcedZero.has(k)
+          ? 0
+          : DEFAULT_ALGO_WEIGHTS[k] || 0;
+      baseClean[k] = val;
+      baseSum += val;
+    }
+    for (const k of Object.values(AlgoKey)) {
+      baseClean[k] = baseSum > 0 ? baseClean[k] / baseSum : 0;
     }
 
-    const projected = projectWeightsWithProofGuard(
-      shrunkCandidates,
+    const candidateWeights: Record<string, number> = {};
+    for (const k of Object.values(AlgoKey)) {
+      if (k === AlgoKey.FREQUENCY || k === AlgoKey.GAPS || k === AlgoKey.MARKOV || k === AlgoKey.SPECTRAL) {
+        candidateWeights[k] = (baseClean[k] || 0) * 1.6;
+      } else {
+        candidateWeights[k] = (baseClean[k] || 0) * 0.7;
+      }
+    }
+
+    const projected = projectWeightsWithContinuousProofShrinkage(
+      candidateWeights,
       DEFAULT_ALGO_WEIGHTS,
-      lockedKeys,
+      proofMap,
       forcedZero
     );
 
-    expect(projected[AlgoKey.FREQUENCY]).toBeLessThanOrEqual(
-      (DEFAULT_ALGO_WEIGHTS[AlgoKey.FREQUENCY] || 0) + 1e-6
-    );
-    expect(projected[AlgoKey.GAPS]).toBeLessThanOrEqual(
-      (DEFAULT_ALGO_WEIGHTS[AlgoKey.GAPS] || 0) + 1e-6
-    );
+    expect(projected[AlgoKey.FREQUENCY]).toBeLessThanOrEqual((baseClean[AlgoKey.FREQUENCY] || 0) + 1e-6);
+    expect(projected[AlgoKey.GAPS]).toBeLessThanOrEqual((baseClean[AlgoKey.GAPS] || 0) + 1e-6);
+    expect(projected[AlgoKey.SPECTRAL]).toBeGreaterThan(baseClean[AlgoKey.SPECTRAL] || 0);
     expect(projected[AlgoKey.MACHINE_TRANSFER]).toBe(0);
+    const totalProjected = Object.values(projected).reduce((a, b) => a + (b || 0), 0);
+    expect(totalProjected).toBeCloseTo(1.0, 4);
   });
 
   it('garantit que dryRun=true est sans effet de bord sur la lignée ADN et enregistre les vraies métriques Hurst/Entropie', async () => {

@@ -764,11 +764,16 @@ export interface AlgoWeightProofItem {
   key: AlgoKey;
   name: string;
   weight: number;
-  baselineWeight: number; // 1 / N (ex: 0.04167)
+  baselineWeight: number; // 1 / N
   empiricalHitRate: number;
   baselineRate: number; // 5 / 90 (0.0556)
-  proofScore: number; // Z-Score
+  proofScore: number; // Z-Score pondéré
   hasProof: boolean;
+  ebCredibility?: number; // Crédibilité Empirical-Bayes continue [0, 1]
+  qValue?: number; // q-value Westfall-Young step-down max-T
+  bhQValue?: number; // q-value Benjamini-Hochberg (FDR)
+  pValue?: number; // p-value unilatérale brute
+  aucMean?: number; // AUC moyenne Mann-Whitney sur 90 numéros
   status: "PROUVE" | "DECOTE_CONFORME" | "NEUTRE" | "SURPONDERE_NON_CONFIRME";
   isCompliant: boolean;
   relativeGain: number; // empiricalHitRate / baselineRate
@@ -785,6 +790,7 @@ export interface AlgoWeightsProofReport {
   averageHitRate: number;
   averageAlphaGain: number;
   overallZScore: number;
+  meanEbCredibility?: number; // Crédibilité Empirical-Bayes moyenne [0, 1]
   items: AlgoWeightProofItem[];
 }
 
@@ -792,7 +798,7 @@ export interface AlgoWeightsProofReport {
  * VALIDATION STRICTE DU POIDS DES ALGORITHMES PAR PREUVE DE CONFIRMATION DE RÉUSSITE
  *
  * Règle d'or absolue : "Qu'aucun algorithme ne soit surpondéré ou prioritaire sans preuve empirique de réussite."
- * Compare chaque poids actif w_k au poids d'équiprobabilité neutre w_0 = 1 / 24 (~4.17%).
+ * Compare chaque poids actif w_k au poids d'équiprobabilité neutre w_0 = 1 / N.
  * Si un algorithme n'a pas prouvé sa capacité prédictive (Z <= 0 ou hitRate <= 5/90) sur l'historique isolé du tirage,
  * son poids DOIT être inférieur ou égal au seuil neutre (amorti).
  * S'il dépasse ce seuil sans preuve empirique, il est déclaré NON CONFORME.
@@ -804,7 +810,8 @@ export const validateAlgoWeightsByProof = (
 ): AlgoWeightsProofReport => {
   const validKeys = Object.values(AlgoKey);
   const numAlgos = validKeys.length;
-  const baselineWeight = 1.0 / numAlgos; // 1 / 24 = ~0.04167
+  const baselineWeight = 1.0 / numAlgos;
+  const baselineWeightPctStr = (baselineWeight * 100).toFixed(2);
   const baselineRate = 5.0 / 90.0; // Espérance neutre 5.56%
 
   const cleanHistory = purifyHistoryForDraw(drawName, history);
@@ -818,20 +825,37 @@ export const validateAlgoWeightsByProof = (
   let unconfirmedBoostsCount = 0;
   let sumHitRate = 0;
   let sumZScore = 0;
+  let sumEbCredibility = 0;
 
   const items: AlgoWeightProofItem[] = validKeys.map(key => {
     const w = effectiveWeights[key] !== undefined ? effectiveWeights[key] : baselineWeight;
-    const proof = proofMap[key] || {
+    const proof: AlgoProofMetric = proofMap[key] || {
       hasProof: false,
       proofScore: 0,
       empiricalHitRate: baselineRate,
       baselineRate,
-      confidence: 0
+      confidence: 0,
+      pValue: 1,
+      qValue: 1,
+      bhQValue: 1,
+      aucMean: 0.5,
+      rankZScore: 0,
+      ebShrinkageFactor: 0,
     };
+
+    const ebCredibility =
+      key === AlgoKey.MACHINE_TRANSFER && !hasMachine
+        ? 0
+        : parseFloat(computeEmpiricalBayesProofCredibility(proof).toFixed(4));
+    const qValue = proof.qValue ?? (proof.hasProof ? 0 : 1);
+    const bhQValue = proof.bhQValue ?? 1;
+    const pValue = proof.pValue ?? 1;
+    const aucMean = proof.aucMean ?? 0.5;
 
     const relativeGain = proof.baselineRate > 0 ? proof.empiricalHitRate / proof.baselineRate : 1.0;
     sumHitRate += proof.empiricalHitRate;
     sumZScore += proof.proofScore;
+    sumEbCredibility += ebCredibility;
 
     // Règle spécifique Transfert Machine
     if (key === AlgoKey.MACHINE_TRANSFER && !hasMachine) {
@@ -848,6 +872,11 @@ export const validateAlgoWeightsByProof = (
           baselineRate: proof.baselineRate,
           proofScore: proof.proofScore,
           hasProof: false,
+          ebCredibility: 0,
+          qValue: 1,
+          bhQValue: 1,
+          pValue: 1,
+          aucMean: 0.5,
           status: "DECOTE_CONFORME",
           isCompliant: true,
           relativeGain,
@@ -864,6 +893,11 @@ export const validateAlgoWeightsByProof = (
           baselineRate: proof.baselineRate,
           proofScore: proof.proofScore,
           hasProof: false,
+          ebCredibility: 0,
+          qValue: 1,
+          bhQValue: 1,
+          pValue: 1,
+          aucMean: 0.5,
           status: "SURPONDERE_NON_CONFIRME",
           isCompliant: false,
           relativeGain,
@@ -885,10 +919,15 @@ export const validateAlgoWeightsByProof = (
         baselineRate: proof.baselineRate,
         proofScore: proof.proofScore,
         hasProof: true,
+        ebCredibility,
+        qValue,
+        bhQValue,
+        pValue,
+        aucMean,
         status: "PROUVE",
         isCompliant: true,
         relativeGain,
-        justification: `Confirmation empirique avérée (Z = +${proof.proofScore.toFixed(2)}, hit-rate ${(proof.empiricalHitRate * 100).toFixed(1)}% vs ${(proof.baselineRate * 100).toFixed(1)}%). Surpondération légitime.`
+        justification: `Confirmation empirique avérée (Crédibilité EB ${(ebCredibility * 100).toFixed(1)}%, q_WY=${qValue.toFixed(3)}, Z=+${proof.proofScore.toFixed(2)}, hit-rate ${(proof.empiricalHitRate * 100).toFixed(1)}% vs ${(proof.baselineRate * 100).toFixed(1)}%).`
       };
     }
 
@@ -908,12 +947,17 @@ export const validateAlgoWeightsByProof = (
         baselineRate: proof.baselineRate,
         proofScore: proof.proofScore,
         hasProof: false,
+        ebCredibility,
+        qValue,
+        bhQValue,
+        pValue,
+        aucMean,
         status: isDamped ? "DECOTE_CONFORME" : "NEUTRE",
         isCompliant: true,
         relativeGain,
         justification: isDamped
-          ? `Amorti conformément aux preuves (Z = ${proof.proofScore.toFixed(2)} <= 0, poids réduit à ${(w * 100).toFixed(2)}%).`
-          : `Poids neutre à l'espérance mathématique (4.17%), sans surpondération injustifiée.`
+          ? `Amorti conformément aux preuves (EB ${(ebCredibility * 100).toFixed(1)}%, q_WY=${qValue.toFixed(3)}, Z=${proof.proofScore.toFixed(2)}, poids réduit à ${(w * 100).toFixed(2)}%).`
+          : `Poids neutre à l'espérance mathématique (${baselineWeightPctStr}%), EB ${(ebCredibility * 100).toFixed(1)}%, q_WY=${qValue.toFixed(3)}.`
       };
     } else {
       unconfirmedBoostsCount++;
@@ -926,10 +970,15 @@ export const validateAlgoWeightsByProof = (
         baselineRate: proof.baselineRate,
         proofScore: proof.proofScore,
         hasProof: false,
+        ebCredibility,
+        qValue,
+        bhQValue,
+        pValue,
+        aucMean,
         status: "SURPONDERE_NON_CONFIRME",
         isCompliant: false,
         relativeGain,
-        justification: `Violation : Poids (${(w * 100).toFixed(2)}%) supérieur au seuil neutre (4.17%) sans confirmation empirique de succès (Z = ${proof.proofScore.toFixed(2)} <= 0).`
+        justification: `Violation : Poids (${(w * 100).toFixed(2)}%) supérieur au seuil neutre (${baselineWeightPctStr}%) sans confirmation suffisante (EB ${(ebCredibility * 100).toFixed(1)}%, q_WY=${qValue.toFixed(3)}, Z=${proof.proofScore.toFixed(2)}).`
       };
     }
   });
@@ -938,6 +987,7 @@ export const validateAlgoWeightsByProof = (
   const averageHitRate = sumHitRate / numAlgos;
   const averageAlphaGain = baselineRate > 0 ? averageHitRate / baselineRate : 1.0;
   const overallZScore = parseFloat((sumZScore / numAlgos).toFixed(3));
+  const meanEbCredibility = parseFloat((sumEbCredibility / numAlgos).toFixed(4));
 
   return {
     drawName,
@@ -949,6 +999,7 @@ export const validateAlgoWeightsByProof = (
     averageHitRate: parseFloat(averageHitRate.toFixed(4)),
     averageAlphaGain: parseFloat(averageAlphaGain.toFixed(3)),
     overallZScore,
+    meanEbCredibility,
     items
   };
 };

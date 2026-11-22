@@ -5,10 +5,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from 'dotenv';
 import {
-  LOTOBONHEUR_API_URL,
   buildRecentFrenchMonths,
+  fetchLotobonheurMonthDraws,
   normalizeMonthParam,
-  parseLotobonheurResponse,
   type ParsedOfficialDraw,
 } from "./src/shared/lotobonheurParser";
 
@@ -42,53 +41,45 @@ async function fetchOfficialLotobonheurResults(options: {
         dayBlocks: string[];
         unknownDrawNames: string[];
         skippedInvalidCount: number;
-        httpErrors: Array<{ month: string; status: number | string }>;
+        httpErrors: Array<{ month: string; drawType?: string; status: number | string }>;
         fetchedAt: string;
       };
     }
   }
 
-  const allDraws: ParsedOfficialDraw[] = [];
+  const drawsByKey = new Map<string, ParsedOfficialDraw>();
   const allDays = new Set<string>();
   const allUnknown = new Set<string>();
-  const httpErrors: Array<{ month: string; status: number | string }> = [];
+  const httpErrors: Array<{ month: string; drawType?: string; status: number | string }> = [];
   let skippedInvalidCount = 0;
   const nowYear = new Date().getFullYear();
 
   for (const monthParam of months) {
     try {
-      const targetUrl = `${LOTOBONHEUR_API_URL}?month=${encodeURIComponent(monthParam)}`;
-      const resp = await fetch(targetUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (NexusEngine/12.0)",
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!resp.ok) {
-        httpErrors.push({ month: monthParam, status: resp.status });
-        continue;
-      }
-      const rawJson = await resp.json().catch(() => null);
-      if (!rawJson) {
-        httpErrors.push({ month: monthParam, status: "INVALID_JSON" });
-        continue;
-      }
-      const parsed = parseLotobonheurResponse(rawJson, {
+      const parsed = await fetchLotobonheurMonthDraws({
+        monthLabel: monthParam,
         targetDrawName: drawName,
         fallbackYear: nowYear,
+        timeoutMs: 15000,
       });
-      allDraws.push(...parsed.draws);
+      for (const d of parsed.draws) {
+        const key = `${d.drawName}|${d.date}`;
+        const prev = drawsByKey.get(key);
+        if (!prev || (!prev.machine && d.machine)) {
+          drawsByKey.set(key, d);
+        }
+      }
       parsed.dayBlocks.forEach((d) => allDays.add(d));
       parsed.unknownDrawNames.forEach((u) => allUnknown.add(u));
       skippedInvalidCount += parsed.skippedInvalidCount;
+      httpErrors.push(...parsed.httpErrors);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       httpErrors.push({ month: monthParam, status: msg });
     }
   }
 
-  allDraws.sort((a, b) => b.date.localeCompare(a.date));
+  const allDraws = Array.from(drawsByKey.values()).sort((a, b) => b.date.localeCompare(a.date));
 
   const payload = {
     success: allDraws.length > 0 || httpErrors.length === 0,
@@ -123,7 +114,8 @@ async function persistDrawsToSupabaseRest(draws: ParsedOfficialDraw[]): Promise<
   let upserted = 0;
   const nowIso = new Date().toISOString();
   for (let i = 0; i < draws.length; i += 200) {
-    const chunk = draws.slice(i, i + 200).map((d) => ({
+    const slice = draws.slice(i, i + 200);
+    const chunk = slice.map((d) => ({
       draw_name: d.drawName,
       date: d.date,
       gagnants: d.gagnants,
@@ -150,6 +142,25 @@ async function persistDrawsToSupabaseRest(draws: ParsedOfficialDraw[]): Promise<
     }
     const inserted = (await resp.json().catch(() => [])) as unknown[];
     upserted += Array.isArray(inserted) ? inserted.length : chunk.length;
+
+    // Nettoyer d'éventuelles annulations auto erronées pour les dates effectivement publiées
+    const minDate = slice.reduce((acc, d) => (d.date < acc ? d.date : acc), slice[0].date);
+    const maxDate = slice.reduce((acc, d) => (d.date > acc ? d.date : acc), slice[0].date);
+    const uniqueNames = [...new Set(slice.map((d) => d.drawName))];
+    if (uniqueNames.length > 0) {
+      const inList = uniqueNames.map((n) => `"${n.replace(/"/g, '\\"')}"`).join(',');
+      await fetch(
+        `${supabaseUrl}/rest/v1/draw_cancellations?source=eq.auto&date=gte.${encodeURIComponent(minDate)}&date=lte.${encodeURIComponent(maxDate)}&draw_name=in.(${encodeURIComponent(inList)})`,
+        {
+          method: "DELETE",
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+          },
+          signal: AbortSignal.timeout(8000),
+        }
+      ).catch(() => {});
+    }
   }
 
   return { persisted: true, upserted };

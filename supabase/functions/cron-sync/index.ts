@@ -1,10 +1,9 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4'
 import {
-  LOTOBONHEUR_API_URL,
   DRAW_SCHEDULE_UTC_DAY,
+  fetchLotobonheurMonthDraws,
   formatFrenchMonthParam,
   normalizeMonthParam,
-  parseLotobonheurResponse,
   type ParsedOfficialDraw,
 } from '../_shared/lotobonheur-parser.ts'
 
@@ -62,7 +61,7 @@ Deno.serve(async (req) => {
     cancelled_inferred: 0,
     caught_up: 0,
     snapshots_cancelled: 0,
-    http_errors: [] as Array<{ month: string; status: number | string }>,
+    http_errors: [] as Array<{ month: string; drawType?: string; status: number | string }>,
     errors: [] as string[],
   }
 
@@ -90,17 +89,15 @@ Deno.serve(async (req) => {
     for (const monthParam of months) {
       log.months.push(monthParam)
       try {
-        const response = await fetch(`${LOTOBONHEUR_API_URL}?month=${encodeURIComponent(monthParam)}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (NexusEngine/12.0)', 'Accept': 'application/json' },
-          signal: AbortSignal.timeout(20000),
-        })
-        if (!response.ok) { log.http_errors.push({ month: monthParam, status: response.status }); continue }
-
-        const data = await response.json()
-        const parsed = parseLotobonheurResponse(data, {
+        const parsed = await fetchLotobonheurMonthDraws({
+          monthLabel: monthParam,
           targetDrawName,
           fallbackYear: now.getFullYear(),
+          timeoutMs: 20000,
         })
+        if (parsed.httpErrors.length > 0) {
+          log.http_errors.push(...parsed.httpErrors)
+        }
         parsed.unknown.forEach((u) => log.unknown.add(u))
         const rows: ParsedOfficialDraw[] = parsed.rows
         log.fetched_draws += rows.length
@@ -152,8 +149,9 @@ Deno.serve(async (req) => {
           }
         }
 
-        // Un résultat est finalement arrivé : on retire l'annulation déduite automatiquement
-        for (const key of parsed.foundKeys) {
+        // Un résultat est finalement arrivé (ou déjà présent en base) : on retire toute annulation déduite automatiquement
+        const publishedKeys = new Set<string>([...parsed.foundKeys, ...existingMap.keys()])
+        for (const key of publishedKeys) {
           if (cancelMap.get(key) === 'auto') {
             const [name, date] = key.split('|')
             await supabase.from('draw_cancellations').delete().eq('draw_name', name).eq('date', date).eq('source', 'auto')
@@ -162,11 +160,14 @@ Deno.serve(async (req) => {
         }
 
         // Tirages attendus mais absents du site alors que le jour est publié => annulation probable
+        // (sauf si la requête ciblée pour ce tirage a échoué HTTP/timeout)
         const autoCancel: Array<Record<string, unknown>> = []
         for (const day of sortedDays) {
           if (day >= today) continue
           const expected = DRAW_SCHEDULE_UTC_DAY[new Date(`${day}T00:00:00Z`).getUTCDay()] || []
           for (const name of expected) {
+            if (targetDrawName && targetDrawName !== 'ALL' && name.toUpperCase() !== targetDrawName.toUpperCase()) continue
+            if (parsed.failedDrawTypes.has(name)) continue
             const key = `${name}|${day}`
             if (!activeNames.has(name) || parsed.foundKeys.has(key) || existingMap.has(key) || cancelMap.has(key)) continue
             if (day <= cutoff) {
@@ -269,6 +270,6 @@ Deno.serve(async (req) => {
 
   return json({
     success: status !== 'error', status, fetched: log.fetched_draws, upserted: log.upserted,
-    cancelled_inferred: log.cancelled_inferred, caught_up: log.caught_up, snapshots_cancelled: log.snapshots_cancelled, missing_pending: log.missing.length, log_id: logRow?.id ?? null,
+    cancelled_inferred: log.cancelled_inferred, caught_up: log.caught_up, snapshots_cancelled: log.snapshots_cancelled, missing_pending: log.missing.length, errors: log.errors, log_id: logRow?.id ?? null,
   }, status === 'error' ? 500 : 200)
 })

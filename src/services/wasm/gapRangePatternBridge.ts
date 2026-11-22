@@ -1192,11 +1192,11 @@ export function mineCyclePatternsHpc(
     for (let i = 1; i <= k; i++) c = (c * (n - (k - i))) / i;
     return c;
   };
-  const exactUnion = (k: number): number => {
+  const exactUnion = (k: number, len: number = cycleLength): number => {
     const tot = comb(N_BALLS, 5);
     let p = 0;
     for (let j = 0; j <= k; j++) {
-      p += (j % 2 === 0 ? 1 : -1) * comb(k, j) * Math.pow(comb(N_BALLS - j, 5) / tot, cycleLength);
+      p += (j % 2 === 0 ? 1 : -1) * comb(k, j) * Math.pow(comb(N_BALLS - j, 5) / tot, len);
     }
     return Math.max(1e-7, Math.min(1 - 1e-7, p));
   };
@@ -1333,7 +1333,13 @@ export function mineCyclePatternsHpc(
 
   const expSingle = exactUnion(1);
   const expPair = exactUnion(2);
-  const minPairForTriplet = Math.max(2, Math.ceil(completedCyclesCount * expPair * 1.15));
+  const sameDrawPairProb = exactUnion(2, 1);
+  const numStatsF = Math.max(1, completedCyclesCount);
+  const expectedPairCycles = numStatsF * expPair;
+  const stdPairCycles = Math.sqrt(expectedPairCycles * (1.0 - expPair));
+  const minPairForTriplet = Math.max(2, Math.ceil(expectedPairCycles + stdPairCycles));
+  const expectedSameDrawPairs = Math.max(1e-6, numStatsF * cycleLength * sameDrawPairProb);
+
   const aprioriCands: Array<{ pid: number; score: number }> = [];
   for (let pid = 0; pid < TOTAL_PAIRS; pid++) {
     const sup = pairCycles[pid].length;
@@ -1342,13 +1348,15 @@ export function mineCyclePatternsHpc(
       const a = pairA[pid];
       const b = pairB[pid];
       const dice = (2 * sup) / Math.max(1, (ballCycleCounts[a] || 1) + (ballCycleCounts[b] || 1));
-      const lift = sup / Math.max(1, completedCyclesCount) / expPair;
-      aprioriCands.push({ pid, score: lift * dice + sc * 3.0 });
+      const lift = sup / numStatsF / expPair;
+      const sameDrawLift = sc / expectedSameDrawPairs;
+      aprioriCands.push({ pid, score: lift * dice + sameDrawLift });
     }
   }
   aprioriCands.sort((x, y) => y.score - x.score || x.pid - y.pid);
+  const aprioriBudget = Math.round(Math.sqrt(TOTAL_PAIRS) * 5);
   const freqFlags = new Uint8Array(TOTAL_PAIRS);
-  for (let i = 0; i < Math.min(320, aprioriCands.length); i++) freqFlags[aprioriCands[i].pid] = 1;
+  for (let i = 0; i < Math.min(aprioriBudget, aprioriCands.length); i++) freqFlags[aprioriCands[i].pid] = 1;
 
   const tripletAcc = new Map<
     number,
@@ -1384,10 +1392,11 @@ export function mineCyclePatternsHpc(
     }
   }
 
+  const finiteSampleShrinkage = Math.sqrt(numStatsF) / (Math.sqrt(numStatsF) + 1.0);
   const minPairCyclesThreshold =
     minSupportOverride > 0
       ? minSupportOverride
-      : Math.max(2, Math.floor(completedCyclesCount * expPair * 0.85));
+      : Math.max(2, Math.floor(expectedPairCycles * finiteSampleShrinkage));
 
   const pairTuplesArr: number[] = [];
   const pairOffsetsArr: number[] = [0];
@@ -1460,8 +1469,12 @@ export function mineCyclePatternsHpc(
         const targMarg = smoothProb[tgt];
         const smoothedTr = (transitions + bayesPrior * targMarg) / (srcTot + bayesPrior);
         const lift = targMarg > 0 ? smoothedTr / targMarg : 1.0;
-        const minTr = Math.max(2, Math.floor(srcTot * targMarg * 1.15));
-        if (transitions >= minTr && lift > 1.08) {
+        const expTr = srcTot * targMarg;
+        const stdTr = Math.sqrt(expTr * (1.0 - targMarg));
+        const transLogScale = Math.max(1.0, Math.log(numStatsF));
+        const minTr = Math.max(2, Math.floor(expTr + stdTr / transLogScale));
+        const liftThreshold = 1.0 + 1.0 / Math.sqrt(srcTot + numStatsF);
+        if (transitions >= minTr && lift > liftThreshold) {
           transTuplesArr.push(src, tgt, trE[eid], trM[eid], trL[eid]);
           for (const cIdx of transCycs[eid]) transCycsFlat.push(cIdx);
           transOffsetsArr.push(transCycsFlat.length);

@@ -1002,13 +1002,16 @@ export const syncDrawExternalDetailed = async (
 
     if (!options.skipRemoteApi && isOnline) {
       let edgeWorked = false;
+      let expressWorked = false;
       try {
         const edgeRes = await apiClient.post<{
           success?: boolean;
+          status?: 'success' | 'partial' | 'error';
           count?: number;
           upserted?: number;
           fetched?: number;
           months?: string[];
+          errors?: string[];
         }>(
           'cron-sync',
           {
@@ -1020,12 +1023,19 @@ export const syncDrawExternalDetailed = async (
           { suppressErrorLogging: true }
         );
 
-        if (edgeRes && edgeRes.success !== false) {
+        const edgeErrors = Array.isArray(edgeRes?.errors) ? edgeRes.errors : [];
+        const edgeUpserted = Number(edgeRes?.upserted ?? edgeRes?.count ?? 0);
+        const edgeFetched = Number(edgeRes?.fetched ?? 0);
+        const hasBlockingDbFailure = edgeUpserted === 0 && edgeErrors.length > 0;
+
+        if (edgeRes && edgeRes.success !== false && !hasBlockingDbFailure) {
           edgeWorked = true;
           remoteSource = 'edge-cron-sync';
-          remoteUpserted = Number(edgeRes.upserted ?? edgeRes.count ?? 0);
-          remoteFetched = Number(edgeRes.fetched ?? 0);
+          remoteUpserted = edgeUpserted;
+          remoteFetched = edgeFetched;
           syncedMonths = Array.isArray(edgeRes.months) ? edgeRes.months : [];
+        } else if (hasBlockingDbFailure) {
+          logger.warn({ edgeErrors }, '[syncDrawExternalDetailed] cron-sync a signalé des erreurs DB');
         }
       } catch {
         // Fallback sur Express /api/results/sync ou proxy-results si cron-sync Edge n'est pas joignable
@@ -1048,6 +1058,7 @@ export const syncDrawExternalDetailed = async (
           if (resp.ok && ct.includes('application/json')) {
             const apiPayload = await resp.json();
             if (apiPayload && Array.isArray(apiPayload.draws)) {
+              expressWorked = true;
               remoteSource = 'express-api';
               remoteFetched = apiPayload.draws.length;
               remoteUpserted = Number(apiPayload.upserted ?? 0);
@@ -1058,6 +1069,33 @@ export const syncDrawExternalDetailed = async (
                 await persistFetchedDrawsToLocalCache(mappedDraws, targetDraw);
               }
             }
+          }
+        } catch {
+          // Fallback sur Edge proxy-results ci-dessous si Express est absent (ex: déploiement cloud statique)
+        }
+      }
+
+      if (!edgeWorked && !expressWorked) {
+        try {
+          const proxyRes = await apiClient.post<{
+            success?: boolean;
+            months?: string[];
+            draws?: Array<{ drawName: string; date: string; gagnants: number[]; machine?: number[] | null; version?: number }>;
+          }>(
+            'proxy-results',
+            {
+              months: options.months,
+              monthsBack: options.monthsBack ?? 1,
+              drawName: targetDraw !== LOTTERY_CONSTANTS.ALL_DRAWS_IDENTIFIER ? targetDraw : undefined,
+            },
+            { suppressErrorLogging: true }
+          );
+          if (proxyRes && Array.isArray(proxyRes.draws) && proxyRes.draws.length > 0) {
+            const mappedDraws = proxyRes.draws.map(mapDbRowToDrawResult);
+            await persistFetchedDrawsToLocalCache(mappedDraws, targetDraw);
+            remoteSource = 'edge-proxy';
+            remoteFetched = mappedDraws.length;
+            syncedMonths = Array.isArray(proxyRes.months) ? proxyRes.months : [];
           }
         } catch {
           // On continue avec le rechargement direct de la table Supabase draw_results

@@ -12,7 +12,7 @@ import {
   type SyncExternalOptions,
 } from '../services/lotteryService';
 import { globalCache } from '../services/cache/CacheService';
-import { DRAW_SCHEDULE } from '../constants';
+import { DRAW_SCHEDULE, isDrawWithoutMachine } from '../constants';
 import { 
     calculateSpectralMetricsAsync, 
     calculateWaveletMetricsAsync, 
@@ -157,14 +157,22 @@ export const useDrawMutation = (drawName: string) => {
   return useMutation({
     mutationFn: async (newResult: Omit<DrawResult, 'id'>) => {
       if (!isSupabaseConfigured()) throw new Error("Mode hors-ligne : Écriture impossible.");
-      
+
+      const normalizedDrawName = drawName.trim();
+      const sanitizedMachine =
+        !isDrawWithoutMachine(normalizedDrawName) &&
+        Array.isArray(newResult.machine) &&
+        newResult.machine.length === 5
+          ? newResult.machine
+          : null;
+
       const { data, error } = await supabase
         .from('draw_results')
         .upsert({
-          draw_name: drawName,
+          draw_name: normalizedDrawName,
           date: normalizeDate(newResult.date),
           gagnants: newResult.gagnants,
-          machine: newResult.machine,
+          machine: sanitizedMachine,
           version: newResult.version || 1
         }, { onConflict: 'draw_name, date' })
         .select()
@@ -173,7 +181,8 @@ export const useDrawMutation = (drawName: string) => {
       if (error) throw error;
       return data;
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      await globalCache.delete(globalCache.generateKey('history', drawName)).catch(() => {});
       queryClient.invalidateQueries({ queryKey: lotteryKeys.draw(drawName) });
       queryClient.invalidateQueries({ queryKey: lotteryKeys.all });
     },

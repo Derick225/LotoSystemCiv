@@ -607,7 +607,7 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                     </div>
                     <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
                       Directive mathématique absolue : <strong className="text-slate-200">« Qu'aucun algorithme ne soit surpondéré ou prioritaire sans preuve empirique de confirmation de réussite »</strong>.
-                      Tout algorithme sous l'espérance neutre (Z ≤ 0 ou succès ≤ 5.56%) doit impérativement avoir un poids ≤ 4.17% (amorti continu).
+                      Le rétrécissement Empirical-Bayes continu pondère chaque déviation par sa crédibilité postérieure EB (%) et sa <span className="font-mono text-cyan-300">q-value</span> Westfall-Young autour du seuil neutre {((1 / (proofReport?.items.length || 25)) * 100).toFixed(2)}%.
                     </p>
                   </div>
 
@@ -650,17 +650,17 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                       {proofReport?.complianceRate || 100}%
                     </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">
-                      {proofReport?.items.length || 24} algorithmes audités
+                      {proofReport?.items.length || 25} algorithmes audités
                     </div>
                   </div>
 
                   <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
-                    <div className="text-[11px] font-medium text-slate-400">Algorithmes Prouvés (Z &gt; 0)</div>
-                    <div className="text-lg font-bold text-cyan-400 mt-0.5">
-                      {proofReport?.provenCount || 0} / 24
+                    <div className="text-[11px] font-medium text-slate-400">Crédibilité EB Moyenne</div>
+                    <div className="text-lg font-bold text-cyan-400 mt-0.5 font-mono">
+                      {((proofReport?.meanEbCredibility ?? 0) * 100).toFixed(1)}%
                     </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">
-                      Surpondération légitime
+                      {proofReport?.provenCount || 0} / {proofReport?.items.length || 25} significatifs WY
                     </div>
                   </div>
 
@@ -670,7 +670,7 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                       {proofReport?.unprovenDampedCount || 0}
                     </div>
                     <div className="text-[10px] text-slate-400 mt-0.5">
-                      Poids &le; seuil neutre 4.17%
+                      Poids &le; seuil neutre {((1 / (proofReport?.items.length || 25)) * 100).toFixed(2)}%
                     </div>
                   </div>
 
@@ -697,7 +697,7 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                       filterStatus === "all" ? "bg-slate-800 text-slate-200 font-semibold" : "text-slate-400 hover:text-slate-300"
                     }`}
                   >
-                    Tous ({proofReport?.items.length || 24})
+                    Tous ({proofReport?.items.length || 25})
                   </button>
                   <button
                     onClick={() => setFilterStatus("PROUVE")}
@@ -731,7 +731,7 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                 </div>
 
                 <div className="text-xs text-slate-400 flex items-center gap-2">
-                  <span>Espérance Neutre : <strong className="text-slate-300">4.17%</strong></span>
+                  <span>Espérance Neutre : <strong className="text-slate-300">{((1 / (proofReport?.items.length || 25)) * 100).toFixed(2)}%</strong></span>
                   <span>•</span>
                   <span>Hasard Pur (5/90) : <strong className="text-slate-300">5.56%</strong></span>
                 </div>
@@ -744,53 +744,62 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                   const baselineWeightPct = item.baselineWeight * 100;
                   const hitRatePct = item.empiricalHitRate * 100;
                   const baselineHitRatePct = item.baselineRate * 100;
+                  const ebCredPct = (item.ebCredibility ?? (item.hasProof ? 1 : 0)) * 100;
+                  const qWy = item.qValue ?? (item.hasProof ? 0 : 1);
 
                   return (
                     <div
                       key={item.key}
                       className={`p-4 rounded-xl border transition-all ${
-                        item.status === "PROUVE"
-                          ? "bg-slate-950/60 border-slate-800 hover:border-emerald-500/30"
-                          : item.status === "SURPONDERE_NON_CONFIRME"
+                        item.status === "SURPONDERE_NON_CONFIRME"
                           ? "bg-rose-950/20 border-rose-800/60 hover:border-rose-700"
+                          : ebCredPct >= 50
+                          ? "bg-slate-950/60 border-slate-800 hover:border-emerald-500/30"
+                          : ebCredPct > 0
+                          ? "bg-slate-950/60 border-slate-800 hover:border-cyan-500/30"
                           : "bg-slate-950/40 border-slate-800/80 hover:border-slate-700"
                       }`}
                     >
-                      {/* Top row: Name & Status */}
+                      {/* Top row: Name & Continuous EB Status */}
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <div>
                           <div className="font-semibold text-sm text-slate-200">{item.name}</div>
                           <div className="text-[11px] font-mono text-slate-400">{item.key}</div>
                         </div>
 
-                        <div>
-                          {item.status === "PROUVE" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                              <CheckCircle2 className="w-3 h-3" />
-                              Prouvé (Z = +{item.proofScore.toFixed(2)})
-                            </span>
-                          )}
-                          {item.status === "DECOTE_CONFORME" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                              <Info className="w-3 h-3" />
-                              Amorti Conforme
-                            </span>
-                          )}
-                          {item.status === "NEUTRE" && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-                              Neutre (4.17%)
-                            </span>
-                          )}
-                          {item.status === "SURPONDERE_NON_CONFIRME" && (
+                        <div className="flex flex-col items-end gap-1">
+                          {item.status === "SURPONDERE_NON_CONFIRME" ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">
                               <AlertTriangle className="w-3 h-3" />
-                              Non Confirmé
+                              Non Confirmé · EB {ebCredPct.toFixed(1)}%
+                            </span>
+                          ) : ebCredPct >= 50 || item.status === "PROUVE" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle2 className="w-3 h-3" />
+                              EB {ebCredPct.toFixed(1)}% · Z {item.proofScore >= 0 ? "+" : ""}{item.proofScore.toFixed(2)}
+                            </span>
+                          ) : ebCredPct > 0 ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                              <Activity className="w-3 h-3" />
+                              Signal EB {ebCredPct.toFixed(1)}%
+                            </span>
+                          ) : item.status === "DECOTE_CONFORME" ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              <Info className="w-3 h-3" />
+                              Amorti Conforme · EB 0.0%
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                              Neutre ({baselineWeightPct.toFixed(2)}%) · EB 0.0%
                             </span>
                           )}
+                          <span className="text-[10px] font-mono text-slate-400">
+                            q(WY) = {qWy.toFixed(3)}{typeof item.aucMean === "number" ? ` · AUC ${(item.aucMean * 100).toFixed(1)}%` : ""}
+                          </span>
                         </div>
                       </div>
 
-                      {/* Two Comparative Metrics Bars */}
+                      {/* Comparative Metrics Bars */}
                       <div className="space-y-2.5 mb-3 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60 text-xs">
                         {/* 1. Active Weight vs Neutral Baseline */}
                         <div>
@@ -803,7 +812,7 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                               className={`h-1.5 rounded-full transition-all ${
                                 item.status === "SURPONDERE_NON_CONFIRME"
                                   ? "bg-rose-500"
-                                  : item.status === "PROUVE"
+                                  : ebCredPct >= 50
                                   ? "bg-emerald-400"
                                   : "bg-cyan-500"
                               }`}
@@ -816,16 +825,32 @@ export const StrictDrawValidationModal: React.FC<StrictDrawValidationModalProps>
                         <div>
                           <div className="flex justify-between text-[11px] text-slate-400 mb-1">
                             <span>
-                              Taux de Sortie : <strong className={item.hasProof ? "text-emerald-400" : "text-slate-300"}>{hitRatePct.toFixed(1)}%</strong>
+                              Taux de Sortie : <strong className={ebCredPct >= 50 ? "text-emerald-400" : ebCredPct > 0 ? "text-cyan-300" : "text-slate-300"}>{hitRatePct.toFixed(1)}%</strong>
                             </span>
                             <span>Hasard 5/90 : {baselineHitRatePct.toFixed(1)}% ({item.relativeGain.toFixed(2)}x)</span>
                           </div>
                           <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                             <div
                               className={`h-1.5 rounded-full transition-all ${
-                                item.hasProof ? "bg-emerald-500" : "bg-slate-500"
+                                ebCredPct >= 50 ? "bg-emerald-500" : ebCredPct > 0 ? "bg-cyan-500" : "bg-slate-500"
                               }`}
                               style={{ width: `${Math.min(100, (hitRatePct / 15.0) * 100)}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* 3. Continuous Empirical-Bayes Credibility */}
+                        <div>
+                          <div className="flex justify-between text-[11px] text-slate-400 mb-1">
+                            <span>Crédibilité Empirical-Bayes : <strong className={ebCredPct >= 50 ? "text-emerald-400" : ebCredPct > 0 ? "text-cyan-300" : "text-slate-400"}>{ebCredPct.toFixed(1)}%</strong></span>
+                            <span>q(WY) : {qWy.toFixed(4)}</span>
+                          </div>
+                          <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-1.5 rounded-full transition-all ${
+                                ebCredPct >= 50 ? "bg-emerald-400" : ebCredPct > 0 ? "bg-cyan-400" : "bg-slate-600"
+                              }`}
+                              style={{ width: `${Math.min(100, ebCredPct)}%` }}
                             />
                           </div>
                         </div>

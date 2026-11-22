@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { corsHeaders } from "../../_shared/cors.ts";
 import {
-  LOTOBONHEUR_API_URL,
+  fetchLotobonheurMonthDraws,
   formatFrenchMonthParam,
   normalizeMonthParam,
-  parseLotobonheurResponse,
   type ParsedOfficialDraw,
 } from "../../_shared/lotobonheur-parser.ts";
 
@@ -48,50 +47,39 @@ export async function handleProxyResults(req: Request, reqBody?: any): Promise<R
       }
     }
 
-    const allDraws: ParsedOfficialDraw[] = [];
+    const drawsByKey = new Map<string, ParsedOfficialDraw>();
     const allDays = new Set<string>();
     const allUnknown = new Set<string>();
-    const httpErrors: Array<{ month: string; status: number | string }> = [];
+    const httpErrors: Array<{ month: string; drawType?: string; status: number | string }> = [];
     const rawByMonth: Record<string, unknown> = {};
     let skippedInvalidCount = 0;
 
     for (const monthParam of targetMonths) {
-      const targetUrl = `${LOTOBONHEUR_API_URL}?month=${encodeURIComponent(monthParam)}`;
-      const fetchResponse = await fetch(targetUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (NexusEngine/12.0)",
-          Accept: "application/json",
-        },
-        signal: AbortSignal.timeout(20000),
-      });
-
-      if (!fetchResponse.ok) {
-        httpErrors.push({ month: monthParam, status: fetchResponse.status });
-        continue;
-      }
-
-      const remoteData = await fetchResponse.json().catch(() => null);
-      if (!remoteData) {
-        httpErrors.push({ month: monthParam, status: "INVALID_JSON" });
-        continue;
-      }
-
-      if (includeRaw) {
-        rawByMonth[monthParam] = remoteData;
-      }
-
-      const parsed = parseLotobonheurResponse(remoteData, {
+      const parsed = await fetchLotobonheurMonthDraws({
+        monthLabel: monthParam,
         targetDrawName: drawName,
         fallbackYear: now.getFullYear(),
+        timeoutMs: 20000,
+        captureRaw: Boolean(includeRaw),
       });
 
-      allDraws.push(...parsed.rows);
+      for (const r of parsed.rows) {
+        const key = `${r.draw_name}|${r.date}`;
+        const prev = drawsByKey.get(key);
+        if (!prev || (!prev.machine && r.machine)) {
+          drawsByKey.set(key, r);
+        }
+      }
       parsed.dayBlocks.forEach((d) => allDays.add(d));
       parsed.unknown.forEach((u) => allUnknown.add(u));
       skippedInvalidCount += parsed.skippedInvalidCount;
+      httpErrors.push(...parsed.httpErrors);
+      if (includeRaw && parsed.rawPayloads) {
+        rawByMonth[monthParam] = parsed.rawPayloads;
+      }
     }
 
-    allDraws.sort((a, b) => b.date.localeCompare(a.date));
+    const allDraws = Array.from(drawsByKey.values()).sort((a, b) => b.date.localeCompare(a.date));
 
     return new Response(
       JSON.stringify({

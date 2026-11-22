@@ -166,4 +166,44 @@ describe('Point 1 & Point 2 : Continuité C^∞ Empirical-Bayes & Noyau Épistas
     expect(seq1.optimizedWeights).toEqual(seq2.optimizedWeights);
     expect(seq1.optimizedWeights[AlgoKey.MACHINE_TRANSFER]).toBe(0);
   });
+
+  it('expose ebCredibility, qValue et meanEbCredibility dans validateAlgoWeightsByProof et supprime projectWeightsWithProofGuard', async () => {
+    const { validateAlgoWeightsByProof } = await import('../src/services/prediction/weightsManager');
+    const closedLoopMod = await import('../src/services/prediction/closedLoopAutopsyService');
+    const { computeHybridRegimeWeightsHpc } = await import('../src/services/wasm/lotoEngineBridge');
+
+    expect((closedLoopMod as Record<string, unknown>).projectWeightsWithProofGuard).toBeUndefined();
+
+    const drawName = 'AKWABA';
+    const history = makeDeterministicDraws(drawName, 25, 8888);
+    const baseW = normalizeWeights(getDefaultWeights());
+    const report = validateAlgoWeightsByProof(drawName, history, baseW);
+
+    expect(typeof report.meanEbCredibility).toBe('number');
+    expect(report.meanEbCredibility).toBeGreaterThanOrEqual(0);
+    expect(report.meanEbCredibility).toBeLessThanOrEqual(1);
+    expect(report.items.length).toBe(Object.values(AlgoKey).length);
+    for (const item of report.items) {
+      expect(typeof item.ebCredibility).toBe('number');
+      expect(item.ebCredibility).toBeGreaterThanOrEqual(0);
+      expect(item.ebCredibility).toBeLessThanOrEqual(1);
+      expect(typeof item.qValue).toBe('number');
+      expect(item.qValue).toBeGreaterThanOrEqual(0);
+      expect(item.qValue).toBeLessThanOrEqual(1);
+    }
+
+    const regimeRes = computeHybridRegimeWeightsHpc({
+      baseWeights: [0.25, 0.25, 0.25, 0.25],
+      channelTypes: [0, 1, 2, 3],
+      hurst: 0.78,
+      entropyNorm: 0.72,
+      volatilityNorm: 0.25,
+      historyDepth: 120,
+    });
+    const sumW = regimeRes.optimizedWeights.reduce((a, b) => a + b, 0);
+    expect(sumW).toBeCloseTo(1.0, 6);
+    expect(regimeRes.optimizedWeights[0]).toBeGreaterThan(regimeRes.optimizedWeights[1]);
+    expect(regimeRes.confidence).toBeGreaterThan(0);
+    expect(regimeRes.stabilityIndex).toBeGreaterThan(0);
+  });
 });

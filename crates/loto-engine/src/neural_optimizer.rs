@@ -9,6 +9,7 @@
 use wasm_bindgen::prelude::*;
 
 const DOMAIN_SIZE: usize = 90;
+const DRAW_SIZE: usize = 5;
 
 #[wasm_bindgen]
 pub struct ClosedLoopAutopsyResultHpc {
@@ -29,16 +30,15 @@ impl ClosedLoopAutopsyResultHpc {
     }
 }
 
-/// Exécute l'autopsie forensique en boucle fermée et la mise à jour continue des poids (SGD / Huber).
-#[wasm_bindgen]
-pub fn compute_closed_loop_autopsy_wasm(
+/// Noyau pur Rust (testable hors WASM) d'autopsie forensique en boucle fermée.
+pub fn compute_closed_loop_autopsy_core(
     predicted_numbers: &[i32],
     actual_winners: &[i32],
     current_weights: &[f64],
     algo_contributions_flat: &[f64],
     num_algos: usize,
     history_depth: usize,
-) -> ClosedLoopAutopsyResultHpc {
+) -> (Vec<f64>, usize, usize, f64, f64, f64, f64) {
     let k_algos = num_algos.min(current_weights.len()).max(1);
     let mut exact_hits = 0usize;
     let mut near_misses = 0usize;
@@ -48,7 +48,6 @@ pub fn compute_closed_loop_autopsy_wasm(
             exact_hits += 1;
         } else {
             // Distance métrique stricte sur la variété spatiale : voisin physique direct (|act - pred| == 1)
-            // Élimination des artefacts numérologiques non fondés (miroir, complément 91) selon AGENTS.md
             let is_near = actual_winners
                 .iter()
                 .any(|&act| (act - pred).abs() == 1);
@@ -76,35 +75,42 @@ pub fn compute_closed_loop_autopsy_wasm(
     let rmse = (sum_sq / (pair_len as f64)).sqrt();
 
     let pred_count = predicted_numbers.len().max(1) as f64;
-    let effective_accuracy = ((exact_hits as f64) + 0.5 * (near_misses as f64)) / pred_count;
+    // Noyau gaussien de proximité à distance Δ = 1 (σ = 1) : exp(-0.5)
+    let near_miss_kernel = (-0.5f64).exp();
+    let effective_accuracy = ((exact_hits as f64) + near_miss_kernel * (near_misses as f64)) / pred_count;
     let divergence_metric = ((1.0 - effective_accuracy) * 100.0).clamp(0.0, 100.0);
     let brier_score = (1.0 - effective_accuracy).powi(2);
 
-    // Damping continu dérivé de la loi des grands nombres : 1 / sqrt(history_depth)
-    let depth_f = (history_depth.max(10)) as f64;
+    // Damping continu dérivé de la loi des grands nombres : 1 / sqrt(max(2 * DRAW_SIZE, T))
+    let cochran_floor = 2 * DRAW_SIZE;
+    let depth_f = (history_depth.max(cochran_floor)) as f64;
     let damping_min = 1.0 / (k_algos as f64);
     let damping_max = 1.0 / (k_algos as f64).sqrt();
     let learning_rate = (1.0 / depth_f.sqrt()).clamp(damping_min, damping_max);
 
+    let domain_eps = 1.0 / ((DOMAIN_SIZE as f64) * (DOMAIN_SIZE as f64));
+    let expected_hit_ratio = (DRAW_SIZE as f64) / (DOMAIN_SIZE as f64);
     let mut updated = vec![0.0f64; k_algos];
     let mut sum_w = 0.0f64;
 
-    // Si la matrice de contributions (90 x k_algos) ou (k_algos) est fournie
     for a in 0..k_algos {
-        let base_w = current_weights[a].max(1e-6);
+        let raw_w = if current_weights[a].is_finite() { current_weights[a] } else { 0.0 };
+        let base_w = raw_w.max(domain_eps);
         let grad_signal = if algo_contributions_flat.len() >= DOMAIN_SIZE * k_algos {
             let mut hit_score = 0.0f64;
             let mut total_score = 0.0f64;
             for n in 1..=DOMAIN_SIZE {
                 let c_val = algo_contributions_flat[(n - 1) * k_algos + a];
-                total_score += c_val;
-                if actual_winners.contains(&(n as i32)) {
-                    hit_score += c_val;
+                if c_val.is_finite() {
+                    total_score += c_val;
+                    if actual_winners.contains(&(n as i32)) {
+                        hit_score += c_val;
+                    }
                 }
             }
-            let expected = total_score * (5.0 / (DOMAIN_SIZE as f64));
-            ((hit_score - expected) / (total_score.abs() + 1e-6)).tanh()
-        } else if a < algo_contributions_flat.len() {
+            let expected = total_score * expected_hit_ratio;
+            ((hit_score - expected) / (total_score.abs() + domain_eps)).tanh()
+        } else if a < algo_contributions_flat.len() && algo_contributions_flat[a].is_finite() {
             algo_contributions_flat[a].tanh()
         } else {
             0.0
@@ -113,7 +119,7 @@ pub fn compute_closed_loop_autopsy_wasm(
         // Régularisation continue de Cauchy pour éviter le Catastrophic Forgetting
         let cauchy_gate = 1.0 / (1.0 + grad_signal * grad_signal);
         let multiplier = (learning_rate * grad_signal * cauchy_gate).exp();
-        let new_w = (base_w * multiplier).max(1e-5);
+        let new_w = (base_w * multiplier).max(domain_eps);
         updated[a] = new_w;
         sum_w += new_w;
     }
@@ -124,8 +130,46 @@ pub fn compute_closed_loop_autopsy_wasm(
         }
     }
 
+    (
+        updated,
+        exact_hits,
+        near_misses,
+        wasserstein_distance,
+        rmse,
+        brier_score,
+        divergence_metric,
+    )
+}
+
+/// Exécute l'autopsie forensique en boucle fermée et la mise à jour continue des poids (SGD / Huber).
+#[wasm_bindgen]
+pub fn compute_closed_loop_autopsy_wasm(
+    predicted_numbers: &[i32],
+    actual_winners: &[i32],
+    current_weights: &[f64],
+    algo_contributions_flat: &[f64],
+    num_algos: usize,
+    history_depth: usize,
+) -> ClosedLoopAutopsyResultHpc {
+    let (
+        updated_weights,
+        exact_hits,
+        near_misses,
+        wasserstein_distance,
+        rmse,
+        brier_score,
+        divergence_metric,
+    ) = compute_closed_loop_autopsy_core(
+        predicted_numbers,
+        actual_winners,
+        current_weights,
+        algo_contributions_flat,
+        num_algos,
+        history_depth,
+    );
+
     ClosedLoopAutopsyResultHpc {
-        updated_weights: updated,
+        updated_weights,
         exact_hits,
         near_misses,
         wasserstein_distance,
@@ -150,43 +194,43 @@ impl HybridRegimeOptimizationHpc {
     }
 }
 
-/// Calcule l'allocation optimale des poids selon le régime fractal/entropique (remplace `hybrid-prediction` Cloud).
-#[wasm_bindgen]
-pub fn compute_hybrid_regime_weights_wasm(
+/// Noyau pur Rust (testable hors WASM) d'allocation continue des poids selon le régime fractal/entropique.
+pub fn compute_hybrid_regime_weights_core(
     base_weights: &[f64],
     channel_types: &[i32],
     hurst: f64,
     entropy_norm: f64,
     volatility_norm: f64,
     history_depth: usize,
-) -> HybridRegimeOptimizationHpc {
+) -> (Vec<f64>, f64, f64) {
     let k = base_weights.len();
     if k == 0 {
-        return HybridRegimeOptimizationHpc {
-            optimized_weights: vec![],
-            confidence: 50.0,
-            stability_index: 50.0,
-        };
+        let neutral = 100.0 * 0.5;
+        return (vec![], neutral, neutral);
     }
 
-    let h = hurst.clamp(0.05, 0.95);
-    let s = entropy_norm.clamp(0.05, 0.99);
-    let v = volatility_norm.clamp(0.01, 1.0);
+    let eps = 1.0 / (DOMAIN_SIZE as f64);
+    let h = if hurst.is_finite() { hurst } else { 0.5 }.clamp(eps, 1.0 - eps);
+    let s = if entropy_norm.is_finite() { entropy_norm } else { 1.0 - eps }.clamp(eps, 1.0 - eps);
+    let v = if volatility_norm.is_finite() { volatility_norm } else { 0.5 }.clamp(eps, 1.0);
 
-    // Facteurs de modulation continus C^∞ sans seuils binaires
-    // channel_type :
-    // 0 = Fréquentiel / Persistance (favorisé quand H > 0.5)
-    // 1 = Retour à la moyenne / Écarts / Retard (favorisé quand H < 0.5)
-    // 2 = Topologique / Chaos / Hawkes / Spectral (favorisé quand Entropie et Volatilité montent)
-    // 3 = Bayésien / Markov / Régularisation (ancrage de stabilité)
-    let persistence_drive = (2.5 * (h - 0.5)).tanh();
-    let mean_reversion_drive = (2.5 * (0.5 - h)).tanh();
-    let chaos_drive = (2.0 * (s - 0.5) + 1.5 * (v - 0.3)).tanh();
-    let stability_drive = (1.5 * (1.0 - v)).tanh();
+    // Échelles continues dérivées de la combinatoire 5/90 et de la variance uniforme U[0,1] (1/√12)
+    let regime_gain = ((DOMAIN_SIZE as f64) / (DRAW_SIZE as f64)).ln();
+    let damp_gain = (DRAW_SIZE as f64).sqrt();
+    let uniform_std = 1.0 / (12.0f64).sqrt();
 
-    let sample_confidence = 1.0 - (-(history_depth.max(5) as f64) / 120.0).exp();
+    let persistence_drive = (regime_gain * (h - 0.5)).tanh();
+    let mean_reversion_drive = (regime_gain * (0.5 - h)).tanh();
+    let chaos_drive = (damp_gain * (s - 0.5) + damp_gain * (v - uniform_std)).tanh();
+    let stability_drive = (damp_gain * (1.0 - v)).tanh();
+
+    let eff_horizon = (k as f64) * (DOMAIN_SIZE as f64).ln();
+    let sample_confidence = 1.0 - (-(history_depth.max(DRAW_SIZE) as f64) / eff_horizon).exp();
+    let drive_scale = 1.0 / (DRAW_SIZE as f64).sqrt();
+
     let mut out = vec![0.0f64; k];
     let mut sum_w = 0.0f64;
+    let floor_w = eps * eps;
 
     for i in 0..k {
         let c_type = if i < channel_types.len() { channel_types[i] } else { 3 };
@@ -196,8 +240,9 @@ pub fn compute_hybrid_regime_weights_wasm(
             2 => chaos_drive,
             _ => stability_drive,
         };
-        let factor = (0.35 * drive * sample_confidence).exp();
-        let w = (base_weights[i].max(1e-5)) * factor;
+        let factor = (drive_scale * drive * sample_confidence).exp();
+        let bw = if base_weights[i].is_finite() { base_weights[i] } else { 0.0 };
+        let w = bw.max(floor_w) * factor;
         out[i] = w;
         sum_w += w;
     }
@@ -208,14 +253,84 @@ pub fn compute_hybrid_regime_weights_wasm(
         }
     }
 
-    let stability_index = ((1.0 - 0.5 * v - 0.3 * (s - 0.5).max(0.0)) * 100.0).clamp(15.0, 98.0);
-    let confidence = ((0.45 * sample_confidence + 0.35 * (1.0 - s * 0.4) + 0.20 * (1.0 + (h - 0.5).abs()))
-        * 100.0)
-        .clamp(25.0, 96.0);
+    let floor_pct = 100.0 * ((DRAW_SIZE as f64) / (DOMAIN_SIZE as f64));
+    let ceil_pct = 100.0 * (1.0 - (DRAW_SIZE as f64) / ((DOMAIN_SIZE as f64) * (DOMAIN_SIZE as f64)));
+
+    let v_stability = 1.0 - v;
+    let s_stability = 1.0 - (s - 0.5).max(0.0);
+    let stability_index = (100.0 * 0.5 * (v_stability + s_stability)).clamp(floor_pct, ceil_pct);
+
+    let hurst_clarity = (2.0 * (h - 0.5).abs()).clamp(0.0, 1.0);
+    let entropy_clarity = 1.0 - s;
+    let regime_clarity = 0.5 * (hurst_clarity + entropy_clarity);
+    let confidence = (100.0 * sample_confidence * (0.5 + 0.5 * regime_clarity)).clamp(floor_pct, ceil_pct);
+
+    (out, confidence, stability_index)
+}
+
+/// Calcule l'allocation optimale des poids selon le régime fractal/entropique (remplace `hybrid-prediction` Cloud).
+#[wasm_bindgen]
+pub fn compute_hybrid_regime_weights_wasm(
+    base_weights: &[f64],
+    channel_types: &[i32],
+    hurst: f64,
+    entropy_norm: f64,
+    volatility_norm: f64,
+    history_depth: usize,
+) -> HybridRegimeOptimizationHpc {
+    let (optimized_weights, confidence, stability_index) = compute_hybrid_regime_weights_core(
+        base_weights,
+        channel_types,
+        hurst,
+        entropy_norm,
+        volatility_norm,
+        history_depth,
+    );
 
     HybridRegimeOptimizationHpc {
-        optimized_weights: out,
+        optimized_weights,
         confidence,
         stability_index,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hybrid_regime_weights_conserve_simplex_and_respect_hurst_direction() {
+        let base = vec![0.25, 0.25, 0.25, 0.25];
+        let types = vec![0, 1, 2, 3];
+
+        let (persistent_w, conf_p, stab_p) =
+            compute_hybrid_regime_weights_core(&base, &types, 0.78, 0.70, 0.25, 120);
+        let (reversive_w, conf_r, stab_r) =
+            compute_hybrid_regime_weights_core(&base, &types, 0.22, 0.70, 0.25, 120);
+
+        let sum_p: f64 = persistent_w.iter().sum();
+        let sum_r: f64 = reversive_w.iter().sum();
+        assert!((sum_p - 1.0).abs() < 1e-9);
+        assert!((sum_r - 1.0).abs() < 1e-9);
+        assert!(conf_p.is_finite() && stab_p.is_finite() && conf_r.is_finite() && stab_r.is_finite());
+        assert!(persistent_w[0] > persistent_w[1], "H > 0.5 must favor persistence channel");
+        assert!(reversive_w[1] > reversive_w[0], "H < 0.5 must favor mean-reversion channel");
+    }
+
+    #[test]
+    fn closed_loop_autopsy_core_is_deterministic_and_normalized() {
+        let preds = [5, 12, 23, 44, 70];
+        let winners = [5, 13, 31, 44, 80];
+        let weights = [0.25, 0.25, 0.25, 0.25];
+        let contribs = [0.4, -0.2, 0.1, 0.0];
+
+        let r1 = compute_closed_loop_autopsy_core(&preds, &winners, &weights, &contribs, 4, 80);
+        let r2 = compute_closed_loop_autopsy_core(&preds, &winners, &weights, &contribs, 4, 80);
+        assert_eq!(r1.0, r2.0);
+        assert_eq!(r1.1, 2);
+        assert_eq!(r1.2, 1);
+        let sum_w: f64 = r1.0.iter().sum();
+        assert!((sum_w - 1.0).abs() < 1e-9);
+        assert!(r1.0[0] > r1.0[1]);
     }
 }

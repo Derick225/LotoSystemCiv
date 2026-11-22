@@ -8,6 +8,7 @@ import {
   normalizeWeights,
   getAlgoWeights,
   evaluateAlgoEmpiricalProof,
+  computeEmpiricalBayesProofCredibility,
 } from "../../services/prediction/predictionFacade";
 import { applyOptimizedWeights } from "../../services/prediction/optimizationController";
 import {
@@ -657,6 +658,9 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     const delta = current - original;
     const deltaPercent = original > 0 ? (delta / original) * 100 : 0;
     const proof = algoProofs[key as AlgoKey];
+    const ebCredPct = Number((computeEmpiricalBayesProofCredibility(proof) * 100).toFixed(1));
+    const qValue = proof?.qValue ?? 1;
+    const aucMean = proof?.aucMean ?? 0.5;
     return {
       key,
       label: formatLabel(key),
@@ -667,6 +671,9 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       absDelta: Math.abs(delta),
       hasProof: proof?.hasProof || false,
       proofScore: proof?.proofScore || 0,
+      ebCredPct,
+      qValue,
+      aucMean,
     };
   }).sort((a, b) => b.current - a.current);
 
@@ -1126,15 +1133,18 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                               <span className="text-xs font-bold text-slate-300 block truncate max-w-[130px]">
                                 {gene.label}
                               </span>
-                              {gene.hasProof ? (
-                                <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title={`Algorithme validé par preuve empirique sur ce tirage (Score Z: +${gene.proofScore})`}>
-                                  Prouvé
-                                </span>
-                              ) : (
-                                <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-400 border border-slate-700" title="Aucune priorité accordée : cet algorithme n'a pas encore fait ses preuves sur ce tirage.">
-                                  Neutre
-                                </span>
-                              )}
+                              <span
+                                className={`text-[8px] font-mono px-1.5 py-0.5 rounded border ${
+                                  gene.ebCredPct >= 50
+                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                    : gene.ebCredPct > 0
+                                    ? "bg-cyan-500/10 text-cyan-300 border-cyan-500/20"
+                                    : "bg-slate-800 text-slate-400 border-slate-700"
+                                }`}
+                                title={`Crédibilité Empirical-Bayes : ${gene.ebCredPct.toFixed(1)}% | q-value Westfall-Young : ${gene.qValue.toFixed(4)} | Score Z : ${gene.proofScore >= 0 ? `+${gene.proofScore}` : gene.proofScore} | AUC : ${(gene.aucMean * 100).toFixed(1)}%`}
+                              >
+                                EB {gene.ebCredPct.toFixed(1)}% · q={gene.qValue.toFixed(3)}
+                              </span>
                             </div>
                             <span className="text-[10px] font-mono text-slate-500">
                               Initial : {gene.original}% ➔ Actuel : <strong className="text-white">{gene.current}%</strong>

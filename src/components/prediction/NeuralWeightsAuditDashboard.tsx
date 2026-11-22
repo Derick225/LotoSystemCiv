@@ -1,7 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useNexusStore } from "../../store/useNexusStore";
 import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
-import { evaluateAlgoEmpiricalProof, computeChronologicalAlgoReinforcement, normalizeWeights } from "../../services/prediction/weightsManager";
+import {
+  evaluateAlgoEmpiricalProof,
+  computeChronologicalAlgoReinforcement,
+  normalizeWeights,
+  computeEmpiricalBayesProofCredibility,
+} from "../../services/prediction/weightsManager";
 import { exportService } from "../../services/exportService";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { drawHasMachineNumbers } from "../../constants";
@@ -659,13 +664,23 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
         </div>
 
         <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800">
-          <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Couches Prouvées (Z &gt; 0)</span>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-lg font-black text-emerald-400 font-mono">
-              {Object.values(empiricalProofs).filter((p: any) => p.hasProof).length}
-            </span>
-            <span className="text-[10px] text-slate-500">sur {ALGO_REGISTRY.length}</span>
-          </div>
+          <span className="text-[10px] uppercase font-bold text-slate-500 block mb-1">Crédibilité EB Moyenne</span>
+          {(() => {
+            const creds = ALGO_REGISTRY.map((m) => computeEmpiricalBayesProofCredibility(empiricalProofs[m.key]));
+            const meanPct = creds.length > 0 ? (creds.reduce((a, b) => a + b, 0) / creds.length) * 100 : 0;
+            const activeSig = creds.filter((c) => c > 0).length;
+            const wyCount = Object.values(empiricalProofs).filter((p: any) => p?.hasProof).length;
+            return (
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-lg font-black text-emerald-400 font-mono">
+                  {meanPct.toFixed(1)}%
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  ({activeSig}/{ALGO_REGISTRY.length} actives · {wyCount} WY)
+                </span>
+              </div>
+            );
+          })()}
         </div>
 
 
@@ -759,20 +774,36 @@ export const NeuralWeightsAuditDashboard: React.FC<NeuralWeightsAuditDashboardPr
 
                 {/* Empirical Proof Badge */}
                 <div className="flex items-center gap-3">
-                  <div className="text-right">
-                    <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 justify-end">
-                      <span>σ = {typeof sigma === "number" ? sigma.toFixed(4) : "n/d"}</span>
-                      <span>•</span>
-                      <span className={proof?.hasProof ? "text-emerald-400 font-bold" : "text-slate-400"}>
-                        Z = {proof ? (proof.proofScore >= 0 ? `+${proof.proofScore.toFixed(2)}` : proof.proofScore.toFixed(2)) : "n/d"}
-                      </span>
-                    </div>
-                    <div className="text-[9px] text-slate-500">
-                      {proof
-                        ? `Hits: ${(proof.empiricalHitRate * 100).toFixed(1)}% (espérance: ${(proof.baselineRate * 100).toFixed(1)}%)`
-                        : "Hits: n/d"}
-                    </div>
-                  </div>
+                  {(() => {
+                    const ebCredPct = computeEmpiricalBayesProofCredibility(proof) * 100;
+                    const qVal = proof?.qValue;
+                    const credColor =
+                      ebCredPct >= 50
+                        ? "text-emerald-400 font-bold"
+                        : ebCredPct > 0
+                        ? "text-cyan-300 font-semibold"
+                        : "text-slate-400";
+                    return (
+                      <div className="text-right">
+                        <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5 justify-end">
+                          <span>σ = {typeof sigma === "number" ? sigma.toFixed(4) : "n/d"}</span>
+                          <span>•</span>
+                          <span className={credColor}>
+                            EB {ebCredPct.toFixed(1)}%
+                          </span>
+                          <span>•</span>
+                          <span className={ebCredPct >= 50 ? "text-emerald-400 font-bold" : ebCredPct > 0 ? "text-cyan-300" : "text-slate-400"}>
+                            Z = {proof ? (proof.proofScore >= 0 ? `+${proof.proofScore.toFixed(2)}` : proof.proofScore.toFixed(2)) : "n/d"}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-slate-500">
+                          {proof
+                            ? `q(WY): ${typeof qVal === "number" ? qVal.toFixed(3) : "n/d"} • Hits: ${(proof.empiricalHitRate * 100).toFixed(1)}% (base ${(proof.baselineRate * 100).toFixed(1)}%)`
+                            : "q(WY): n/d • Hits: n/d"}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="w-16 text-right">
                     <span className="text-sm font-black font-mono text-indigo-400">
