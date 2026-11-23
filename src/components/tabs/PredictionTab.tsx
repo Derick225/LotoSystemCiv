@@ -564,7 +564,7 @@ export const PredictionTab = React.memo<{ drawName: string }>(({ drawName }) => 
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10 relative z-10">
                   <div>
                     <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
-                      <Sparkles size={12} /> Vecteur Formulé (Oracle Base)
+                      <Sparkles size={12} /> Vecteur Formulé (Oracle Base • Convergence MAP & Équilibre)
                     </h3>
                     <div className="flex items-center gap-3">
                       <span className="text-3xl sm:text-4xl font-black text-slate-900 dark:text-white tracking-tighter">

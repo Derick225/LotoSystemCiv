@@ -228,17 +228,22 @@ export const finalizePredictionPayload = async (
   // Calcul du diagnostic de dérive temporelle du taux d'apprentissage
   const driftLearning = calculateTemporalDriftLearningRate(context.history, 1.0 / Math.sqrt(Math.max(10, context.history.length)), 10);
 
+  const strategyPrefix =
+    context.predictionStrategy === 'hybrid_inference'
+      ? "Inférence Hybride (Ruptures de Phase & Régime Fractal)"
+      : "Sélection Optimale (Oracle Base — Convergence MAP)";
+
   let analysisText = "";
   if (context.adversarialMode) {
-    analysisText = `Prédiction Oracle Base filtrée par le Protocole Adversarial Anti-Consensus.`;
+    analysisText = `${strategyPrefix} filtrée par le Protocole Adversarial Anti-Consensus.`;
   } else if (calibratedParams.prudence_mode_active) {
-    analysisText = `Mode Prudence activé : Dérive de performance détectée lors de l'autopsie post-mortem. Algorithme calibré de façon ultra-prudente.`;
+    analysisText = `${strategyPrefix} en Mode Prudence : Dérive de performance détectée lors de l'autopsie post-mortem. Algorithme calibré de façon ultra-prudente.`;
   } else if (shrinkageApplied) {
-    analysisText = `Prédiction générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
+    analysisText = `${strategyPrefix} générée sous tension algorithmique élevée. Les scores étant très serrés, un shrinkage a été appliqué pour régulariser les probabilités.`;
   } else if (dnaSieveMetrics && dnaSieveMetrics.dominantAlgos.length > 0) {
-    analysisText = `Prédiction Oracle Base filtrée à travers le Tamis de l'ADN Algorithmique (${dnaSieveMetrics.dominantAlgos.slice(0, 2).join(' • ')} — Concordance: ${dnaSieveMetrics.dnaConcordanceMean}%). Phase : ${cyclicPhaseProfile.phaseLabel}.`;
+    analysisText = `${strategyPrefix} filtrée à travers le Tamis de l'ADN Algorithmique (${dnaSieveMetrics.dominantAlgos.slice(0, 2).join(' • ')} — Concordance: ${dnaSieveMetrics.dnaConcordanceMean}%). Phase : ${cyclicPhaseProfile.phaseLabel}.`;
   } else {
-    analysisText = `Prédiction Oracle Base (${cyclicPhaseProfile.phaseLabel}) générée à partir de l'ADN Algorithmique du moment.`;
+    analysisText = `${strategyPrefix} (${cyclicPhaseProfile.phaseLabel}) générée à partir de l'ADN Algorithmique du moment.`;
   }
 
   const stabilityScore = evaluatePredictionStability(selection, features, weights, enhancedMetrics, context.history.slice(0, context.validTemporalDepth), context.drawName);
@@ -447,6 +452,7 @@ export const finalizePredictionPayload = async (
   return {
     drawName: context.drawName,
     pipeline: context.pipelineMode || 'full',
+    predictionStrategy: context.predictionStrategy ?? 'optimal_selection',
     expectedLift,
     suggestedNumbers: selection,
     candidates,

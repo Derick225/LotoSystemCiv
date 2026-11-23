@@ -32,7 +32,8 @@ self.onmessage = async (e: MessageEvent) => {
     _basePrediction,
     resolvedMcIterations,
     resolvedNoiseLevel,
-    resolvedLearningRate
+    resolvedLearningRate,
+    predictionStrategy
   } = e.data;
 
   const history = historyBuffer
@@ -91,7 +92,8 @@ self.onmessage = async (e: MessageEvent) => {
         (progress: number, message: string) => {
           self.postMessage({ taskId, isProgress: true, progress, message });
         },
-        preloadedForensicReports
+        preloadedForensicReports,
+        predictionStrategy
       );
       self.postMessage({ taskId, success: true, result });
     }

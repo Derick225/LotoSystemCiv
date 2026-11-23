@@ -64,6 +64,7 @@ export interface InferencePrediction {
   aiStrategicAdvice?: string;
   isLocalFallback?: boolean;
   engineType?: "local" | "cloud";
+  predictionStrategy?: import("../../../shared/prediction.types").PredictionStrategy;
 }
 
 export interface ForensicEntry {

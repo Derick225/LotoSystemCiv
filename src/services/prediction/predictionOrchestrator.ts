@@ -1,6 +1,6 @@
 import { packHistory } from '../workers/zeroCopy';
 import { DrawResult, Prediction, AlgoWeights, SymbioticContext, ForensicReport } from "../../types";
-import { AlgoKey, DEFAULT_ALGO_WEIGHTS } from "../../shared/prediction.types";
+import { AlgoKey, DEFAULT_ALGO_WEIGHTS, PredictionStrategy, classifyAlgoChannelType } from "../../shared/prediction.types";
 import { getAlgoWeights, normalizeWeights, computeChronologicalAlgoReinforcement } from "./weightsManager";
 import { extractFeatures, ExtractedFeatures } from "./featureExtractor";
 import { calculateScores, applyPCADenoising, ScoredNumber } from "./scoringEngine";
@@ -8,7 +8,9 @@ import {
   generateCombination,
   computeAdaptiveOutsiderQuota,
   computeConformalCandidateSet,
+  type CombinationStrategyOptions,
 } from "./combinationGenerator";
+import { computeHybridRegimeWeightsHpc } from "../wasm/lotoEngineBridge";
 import { driftDetector } from "./conceptDriftDetector";
 import { generateEmpiricalCalibration } from "./ticketAnalysisService";
 import { PredictiveHyperparameters, getTunedHyperparameters } from "./hyperParameterTuner";
@@ -52,11 +54,31 @@ export interface PredictionRuntimeContext {
   isForensicOptimized: boolean;
   useSpatioTemporalHawkes: boolean;
   useCloudEngine?: boolean;
+  predictionStrategy?: PredictionStrategy;
   pipelineMode?: 'full' | 'simplified' | 'degraded';
   onProgress?: (progress: number, message: string) => void;
   preloadedForensicReports?: ForensicReport[];
   contentHash: string;
 }
+
+/**
+ * Mesure continue de l'excursion de régime thermodynamique ∈ [0, 1) à partir de
+ * l'exposant de Hurst, de l'entropie de Shannon normalisée et de la volatilité.
+ * Zéro nombre magique, 100% déterministe et différentiable.
+ */
+export const computeContinuousRegimeExcursion = (
+  boundedHistory: DrawResult[],
+  thermoInput?: { hurst: number; entropy: number; volatility: number }
+): { hurst: number; entropy: number; volatility: number; excursion: number } => {
+  const thermo = thermoInput || calculateThermodynamicRegime(boundedHistory);
+  const hurst = Number.isFinite(thermo.hurst) ? Math.max(0.05, Math.min(0.95, thermo.hurst)) : 0.5;
+  const entropy = Number.isFinite(thermo.entropy) ? Math.max(0.0, Math.min(1.0, thermo.entropy)) : 0.5;
+  const volatility = Number.isFinite(thermo.volatility) ? Math.max(0.0, thermo.volatility) : 0.0;
+  const excursion = Math.tanh(
+    Math.hypot(2.0 * (hurst - 0.5), entropy, Math.min(1.0, volatility / 100.0))
+  );
+  return { hurst, entropy, volatility, excursion };
+};
 
 /**
  * Construit le contexte d'exécution d'une prédiction
@@ -76,6 +98,7 @@ export const buildPredictionRequestContext = (
   preloadedForensicReports?: ForensicReport[],
   useSpatioTemporalHawkesOverride?: boolean,
   useCloudEngineOverride?: boolean,
+  predictionStrategy: PredictionStrategy = 'optimal_selection',
 ): PredictionRuntimeContext => {
   const history = purifyHistoryForDraw(drawName, rawHistory);
   const contentHash = hashHistoryContent(history);
@@ -100,6 +123,7 @@ export const buildPredictionRequestContext = (
     isForensicOptimized,
     useSpatioTemporalHawkes,
     useCloudEngine,
+    predictionStrategy,
     onProgress,
     preloadedForensicReports,
     contentHash,
@@ -270,6 +294,35 @@ export const resolvePredictionWeights = async (context: PredictionRuntimeContext
     );
   }
 
+  // 3bis. Stratégie Inférence Hybride : couplage continu aux poids de régime fractal/spectral HPC
+  if (context.predictionStrategy === 'hybrid_inference' && boundedHistory.length >= 5) {
+    const regimeStats = computeContinuousRegimeExcursion(boundedHistory);
+    const weightKeys = Object.keys(initialWeights) as AlgoKey[];
+    const baseArr = new Float64Array(
+      weightKeys.map((k) => Number((initialWeights as Record<string, number>)[k]) || 0)
+    );
+    const channelTypes = new Int32Array(weightKeys.map((k) => classifyAlgoChannelType(k)));
+    const hpcRes = computeHybridRegimeWeightsHpc({
+      baseWeights: baseArr,
+      channelTypes,
+      hurst: regimeStats.hurst,
+      entropyNorm: regimeStats.entropy,
+      volatilityNorm: Math.min(1.0, regimeStats.volatility / 100.0),
+      historyDepth: boundedHistory.length,
+    });
+
+    const normalizedChron = normalizeWeights(weights);
+    const blended = { ...normalizedChron } as AlgoWeights;
+    const alpha = regimeStats.excursion;
+    weightKeys.forEach((k, idx) => {
+      const chronW = Number((normalizedChron as Record<string, number>)[k]) || 0;
+      const hybridW = Number(hpcRes.optimizedWeights[idx]);
+      const safeHybridW = Number.isFinite(hybridW) ? hybridW : chronW;
+      (blended as Record<string, number>)[k] = (1.0 - alpha) * chronW + alpha * safeHybridW;
+    });
+    weights = blended;
+  }
+
   // 4. Règle d'or : Les noms de tirage qui n'ont pas de numéro machines ne doivent pas avoir l'algorithme "Transfert Machine"
   const hasMachine = drawHasMachineNumbers(context.drawName, boundedHistory);
   if (!hasMachine) {
@@ -353,12 +406,18 @@ export const rescoreWithAdjustments = (
 };
 
 export const applyPredictionDenoising = async (
-  _context: PredictionRuntimeContext,
+  context: PredictionRuntimeContext,
   rescored: ScoredNumber[],
   weights: AlgoWeights,
   enhancedMetrics: EnhancedMetrics
 ): Promise<ScoredNumber[]> => {
-  return await applyPCADenoising(rescored, weights, enhancedMetrics);
+  let regimePreservationFactor = 0.0;
+  if (context.predictionStrategy === 'hybrid_inference') {
+    const boundedHistory = context.history.slice(0, context.validTemporalDepth);
+    const { excursion } = computeContinuousRegimeExcursion(boundedHistory);
+    regimePreservationFactor = excursion / Math.SQRT2;
+  }
+  return await applyPCADenoising(rescored, weights, enhancedMetrics, 0.90, regimePreservationFactor);
 };
 
 /**
@@ -422,7 +481,12 @@ export const applyPredictionDnaSieve = (
     ? inertiaCalib.dampingRatio
     : 0.5;
   const dampingModulator = Math.max(0.2, Math.min(1.8, 2.0 * dampingRatio));
-  const effectiveInertiaWeight = Math.min(1.0, Math.max(0.0, rawInertiaWeight * dampingModulator));
+  let effectiveInertiaWeight = Math.min(1.0, Math.max(0.0, rawInertiaWeight * dampingModulator));
+  if (context.predictionStrategy === 'hybrid_inference') {
+    const boundedHistory = context.history.slice(0, context.validTemporalDepth);
+    const { excursion } = computeContinuousRegimeExcursion(boundedHistory);
+    effectiveInertiaWeight *= Math.exp(-excursion);
+  }
   const effectiveSignalWeight = 1.0 - effectiveInertiaWeight;
 
   const sievedScores = scores.map(sn => {
@@ -570,18 +634,40 @@ export const selectPredictionNumbers = async (
     thermoRegime.entropy
   );
   
-  const outsiderCount = context.forcedOutsiderCount !== undefined 
-    ? context.forcedOutsiderCount 
-    : computeAdaptiveOutsiderQuota(
-        thermoRegime.continuousOutsiderCount,
-        thermoRegime.entropy,
-        thermoRegime.hurst,
-        structuralDrift.confidence
-      );
+  const regimeStats = computeContinuousRegimeExcursion(boundedHistory, thermoRegime);
+  const baseAdaptiveOutsiders = computeAdaptiveOutsiderQuota(
+    thermoRegime.continuousOutsiderCount,
+    thermoRegime.entropy,
+    thermoRegime.hurst,
+    structuralDrift.confidence
+  );
+
+  const outsiderCount = context.forcedOutsiderCount !== undefined
+    ? context.forcedOutsiderCount
+    : context.predictionStrategy === 'hybrid_inference'
+      ? parseFloat(
+          Math.min(
+            TICKET_SIZE - 1,
+            baseAdaptiveOutsiders * (1.0 + regimeStats.excursion / Math.sqrt(TICKET_SIZE))
+          ).toFixed(4)
+        )
+      : baseAdaptiveOutsiders;
 
   const regimeStateNormalized = Math.max(0, Math.min(1,
     (thermoRegime.thermodynamicIndex + thermoRegime.entropy + thermoRegime.volatility / 100.0) / 3.0
   ));
+
+  const strategyOptions: CombinationStrategyOptions | undefined =
+    context.predictionStrategy === 'hybrid_inference'
+      ? {
+          strategy: 'hybrid_inference',
+          equilibriumGain: Math.exp(-regimeStats.excursion / Math.sqrt(TICKET_SIZE)),
+          diversityGain: 1.0 + regimeStats.excursion,
+          outsiderPenaltyGain: 1.0 + regimeStats.excursion / Math.SQRT2,
+          explorationBoost: 1.0 + regimeStats.excursion,
+          strategyTag: 'hybrid_inference',
+        }
+      : undefined;
 
   const selection = await generateCombination(
     sortedScores,
@@ -590,7 +676,8 @@ export const selectPredictionNumbers = async (
     outsiderCount,
     boundedHistory[0]?.gagnants,
     regimeStateNormalized,
-    thermoRegime.hurst
+    thermoRegime.hurst,
+    strategyOptions
   );
 
   const conformalSet = computeConformalCandidateSet(
@@ -748,7 +835,8 @@ const runLocalPredictionViaWorker = async (
           forcedOutsiderCount: context.forcedOutsiderCount,
           isForensicOptimized: context.isForensicOptimized,
           useSpatioTemporalHawkes: context.useSpatioTemporalHawkes ?? true,
-          preloadedForensicReports: resolvedReports
+          preloadedForensicReports: resolvedReports,
+          predictionStrategy: context.predictionStrategy ?? 'optimal_selection'
         };
 
         try {
@@ -789,6 +877,7 @@ export const generateMasterPrediction = async (
   preloadedForensicReports?: ForensicReport[],
   useSpatioTemporalHawkesOverride?: boolean,
   useCloudEngineOverride?: boolean,
+  predictionStrategy: PredictionStrategy = 'optimal_selection',
 ): Promise<Prediction> => {
   const context = buildPredictionRequestContext(
     drawName,
@@ -804,7 +893,8 @@ export const generateMasterPrediction = async (
     onProgress,
     preloadedForensicReports,
     useSpatioTemporalHawkesOverride,
-    useCloudEngineOverride
+    useCloudEngineOverride,
+    predictionStrategy
   );
 
   // ZÉRO DONNÉE SIMULÉE : Refus strict du calcul si aucun tirage réel n'est disponible
@@ -821,7 +911,8 @@ export const generateMasterPrediction = async (
   const family = getPrimaryInterDrawFamily(context.drawName);
   const familyId = family ? family.id : "isolated";
   const engineType = context.useCloudEngine ? "cloud" : "oracle_base";
-  const keyParams = `${engineType}_fam_${familyId}_${context.history.length}_${context.contentHash}_w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
+  const resolvedStrategy = context.predictionStrategy ?? 'optimal_selection';
+  const keyParams = `${engineType}_strat_${resolvedStrategy}_fam_${familyId}_${context.history.length}_${context.contentHash}_w_${weightsHash}_adv_${context.adversarialMode}_outsider_${context.forcedOutsiderCount ?? "none"}_depth_${context.temporalDepth}_forensic_${context.isForensicOptimized}`;
   const cacheKey = globalCache.generateKey('prediction', context.drawName, keyParams);
 
   return globalCache.getOrCompute(
@@ -888,6 +979,7 @@ export const generateMasterPredictionCore = async (
   useSpatioTemporalHawkes: boolean = true,
   onProgress?: (progress: number, message: string) => void,
   preloadedForensicReports?: ForensicReport[],
+  predictionStrategy: PredictionStrategy = 'optimal_selection',
 ): Promise<Prediction> => {
   const context = buildPredictionRequestContext(
     drawName,
@@ -901,7 +993,10 @@ export const generateMasterPredictionCore = async (
     forcedOutsiderCount,
     isForensicOptimized,
     onProgress,
-    preloadedForensicReports
+    preloadedForensicReports,
+    undefined,
+    undefined,
+    predictionStrategy
   );
   context.useSpatioTemporalHawkes = useSpatioTemporalHawkes;
 

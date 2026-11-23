@@ -1,5 +1,5 @@
 export * from "./shared/prediction.types";
-import { AlgoKey, AlgoWeights, ScoreBreakdown } from "./shared/prediction.types";
+import { AlgoKey, AlgoWeights, PredictionStrategy, ScoreBreakdown } from "./shared/prediction.types";
 
 export interface GapEfficiency {
   number: number;
@@ -83,6 +83,7 @@ export interface Prediction {
   breakdown: Record<number, ScoreBreakdown>;
   timestamp: number;
   engineType?: "local" | "cloud";
+  predictionStrategy?: PredictionStrategy;
   isSimulation?: boolean;
   isExploratory?: boolean;
   simulationCategory?: 'WHAT_IF' | 'SCENARIO' | 'EXPLORATORY' | 'BACKTEST' | 'BENCHMARK';

@@ -506,14 +506,9 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       const baseArr = new Float64Array(
         weightKeys.map((k) => Number(activeBaseWeights[k]) || 0),
       );
+      const { classifyAlgoChannelType } = await import("../../shared/prediction.types");
       const channelTypes = new Int32Array(
-        weightKeys.map((k) => {
-          const kl = k.toLowerCase();
-          if (kl.includes("hurst") || kl.includes("markov") || kl.includes("momentum") || kl.includes("frequency")) return 0;
-          if (kl.includes("gap") || kl.includes("equilibrium") || kl.includes("bayesian")) return 1;
-          if (kl.includes("spectral") || kl.includes("lyapunov") || kl.includes("hawkes") || kl.includes("aco")) return 2;
-          return 3;
-        }),
+        weightKeys.map((k) => classifyAlgoChannelType(k)),
       );
 
       const hpcRes = computeHybridRegimeWeightsHpc({
@@ -538,7 +533,6 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         volatilityVal,
         hpcWeights,
       );
-      const aiWeights: Record<string, number> = { ...hpcWeights };
       const aiRationale = localFb.rationale;
       const aiStrategicAdvice = localFb.strategicAdvice;
 
@@ -549,7 +543,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         drawName,
         cleanHistory,
         temporalDepth,
-        hpcWeights,
+        activeBaseWeights,
         undefined,
         undefined,
         skipTraining,
@@ -560,7 +554,13 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         undefined,
         useSpatioTemporalHawkes,
         false,
+        "hybrid_inference",
       );
+
+      const aiWeights: Record<string, number> =
+        predictionData.walkForwardCalibration?.channelWeights
+          ? { ...predictionData.walkForwardCalibration.channelWeights }
+          : { ...hpcWeights };
 
       setPrediction({
         suggestedNumbers: predictionData.suggestedNumbers,
@@ -570,7 +570,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           predictionData.analysis ||
           "Inférence hybride locale complétée à partir de la matrice d'alignement.",
         mathModelSummary:
-          "Inférence Locale Neuro-Vectorielle HPC (Rust / WASM)",
+          "Inférence Hybride HPC — Ruptures de Phase & Régime Fractal (Rust / WASM)",
         xapExp: predictionData.xapExp,
         realityAlignment: predictionData.realityAlignment,
         adversarialApplied: predictionData.adversarialApplied,
@@ -587,6 +587,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
         aiStrategicAdvice,
         isLocalFallback: true,
         engineType: "local",
+        predictionStrategy: predictionData.predictionStrategy ?? "hybrid_inference",
       });
       audioEngine.play("success");
       showToast("Inférence Neuro-Vectorielle HPC complétée.", "success");
@@ -637,6 +638,7 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
       adversarialSurvivalScore: pred.adversarialSurvivalScore,
       adversarialRisks: pred.adversarialRisks,
       engineType: "local",
+      predictionStrategy: pred.predictionStrategy ?? "hybrid_inference",
       mathModelSummary: pred.mathModelSummary,
       isLocalFallback: true,
       aiWeights: pred.aiWeights,
@@ -714,6 +716,8 @@ export const IAPredictionTab: React.FC<{ drawName: string }> = ({
           undefined,
           undefined,
           useSpatioTemporalHawkes,
+          false,
+          "hybrid_inference",
         );
 
         const actual = targetDraw.gagnants;

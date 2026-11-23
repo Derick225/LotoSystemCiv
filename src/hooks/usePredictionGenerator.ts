@@ -284,7 +284,8 @@ export const usePredictionGenerator = (drawName: string) => {
                 },
                 undefined,
                 useSpatioTemporalHawkes,
-                false // Pure Local Execution (Zéro Cloud) pour Oracle Base
+                false, // Pure Local Execution (Zéro Cloud) pour Oracle Base
+                'optimal_selection'
             );
             
             setLastPrediction(res);

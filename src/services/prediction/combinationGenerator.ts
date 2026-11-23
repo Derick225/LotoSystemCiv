@@ -1,12 +1,20 @@
-import { EmpiricalCalibration, FALLBACK_CALIBRATION } from "../../shared/prediction.types";
+import { EmpiricalCalibration, FALLBACK_CALIBRATION, PredictionStrategy, ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
 import { ScoredNumber } from "./scoringEngine";
 import { calculateACValue } from "../mathService";
-import { ScoreBreakdown, AlgoKey } from "../../shared/prediction.types";
 import { calculateGeneticDiversityIndex } from "./diversityService";
 import { solveCombinatorialAnnealingHpc } from "../wasm/lotoEngineBridge";
 
 const DOMAIN_SIZE = 90;
 const DRAW_SIZE = 5;
+
+export interface CombinationStrategyOptions {
+  strategy?: PredictionStrategy;
+  equilibriumGain?: number;
+  diversityGain?: number;
+  outsiderPenaltyGain?: number;
+  explorationBoost?: number;
+  strategyTag?: string;
+}
 
 export interface CombinationEnergyBreakdown {
   totalEnergy: number;
@@ -202,6 +210,7 @@ export const calculateCombinationEnergyDetailed = (
   topPool?: number[],
   targetOutsiders: number = 0,
   precomputed?: PrecomputedEnergyContext,
+  strategyOptions?: CombinationStrategyOptions,
 ): CombinationEnergyBreakdown => {
   const len = combo.length;
   let baseScoreSum = 0.0;
@@ -509,40 +518,66 @@ export const calculateCombinationEnergyDetailed = (
     outsiderQuotaPenalty = huberLoss * 4.0;
   }
 
-  const totalEnergy = 
-    baseScoreTerm + 
-    affinityTerm + 
-    repetitionPenalty + 
-    parityPenalty + 
-    decadePenalty + 
-    amplitudePenalty + 
-    consecutivePenalty + 
-    acPenalty + 
-    diversityPenalty + 
-    spatialClusteringPenalty + 
-    recentBiasPenalty + 
-    profileSimilarityPenalty + 
-    dominantFamilyPenalty + 
-    decadeConcentrationPenalty + 
-    outsiderQuotaPenalty;
+  const eqGain =
+    strategyOptions?.equilibriumGain !== undefined && Number.isFinite(strategyOptions.equilibriumGain)
+      ? Math.max(0.2, Math.min(2.0, strategyOptions.equilibriumGain))
+      : 1.0;
+  const divGain =
+    strategyOptions?.diversityGain !== undefined && Number.isFinite(strategyOptions.diversityGain)
+      ? Math.max(0.2, Math.min(3.0, strategyOptions.diversityGain))
+      : 1.0;
+  const outGain =
+    strategyOptions?.outsiderPenaltyGain !== undefined && Number.isFinite(strategyOptions.outsiderPenaltyGain)
+      ? Math.max(0.2, Math.min(3.0, strategyOptions.outsiderPenaltyGain))
+      : 1.0;
+
+  const scaledParityPenalty = parityPenalty * eqGain;
+  const scaledDecadePenalty = decadePenalty * eqGain;
+  const scaledAmplitudePenalty = amplitudePenalty * eqGain;
+  const scaledConsecutivePenalty = consecutivePenalty * eqGain;
+  const scaledAcPenalty = acPenalty * eqGain;
+  const scaledDecadeConcentrationPenalty = decadeConcentrationPenalty * eqGain;
+
+  const scaledDiversityPenalty = diversityPenalty * divGain;
+  const scaledProfileSimilarityPenalty = profileSimilarityPenalty * divGain;
+  const scaledDominantFamilyPenalty = dominantFamilyPenalty * divGain;
+
+  const scaledOutsiderQuotaPenalty = outsiderQuotaPenalty * outGain;
+
+  const totalEnergy =
+    baseScoreTerm +
+    affinityTerm +
+    repetitionPenalty +
+    scaledParityPenalty +
+    scaledDecadePenalty +
+    scaledAmplitudePenalty +
+    scaledConsecutivePenalty +
+    scaledAcPenalty +
+    scaledDiversityPenalty +
+    spatialClusteringPenalty +
+    recentBiasPenalty +
+    scaledProfileSimilarityPenalty +
+    scaledDominantFamilyPenalty +
+    scaledDecadeConcentrationPenalty +
+    scaledOutsiderQuotaPenalty;
 
   return {
     totalEnergy,
     baseScoreTerm,
     affinityTerm,
     repetitionPenalty,
-    parityPenalty,
-    decadePenalty,
-    amplitudePenalty,
-    consecutivePenalty,
-    acPenalty,
-    diversityPenalty,
+    parityPenalty: scaledParityPenalty,
+    decadePenalty: scaledDecadePenalty,
+    amplitudePenalty: scaledAmplitudePenalty,
+    consecutivePenalty: scaledConsecutivePenalty,
+    acPenalty: scaledAcPenalty,
+    diversityPenalty: scaledDiversityPenalty,
     spatialClusteringPenalty,
     recentBiasPenalty,
-    profileSimilarityPenalty,
-    dominantFamilyPenalty,
-    decadeConcentrationPenalty,
-    outsiderQuotaPenalty
+    profileSimilarityPenalty: scaledProfileSimilarityPenalty,
+    dominantFamilyPenalty: scaledDominantFamilyPenalty,
+    decadeConcentrationPenalty: scaledDecadeConcentrationPenalty,
+    outsiderQuotaPenalty: scaledOutsiderQuotaPenalty
   };
 };
 
@@ -559,6 +594,7 @@ export const calculateCombinationEnergy = (
   topPool?: number[],
   targetOutsiders: number = 0,
   precomputed?: PrecomputedEnergyContext,
+  strategyOptions?: CombinationStrategyOptions,
 ): number => {
   return calculateCombinationEnergyDetailed(
     combo,
@@ -569,7 +605,8 @@ export const calculateCombinationEnergy = (
     breakdownsMap,
     topPool,
     targetOutsiders,
-    precomputed
+    precomputed,
+    strategyOptions
   ).totalEnergy;
 };
 
@@ -585,8 +622,14 @@ export const generateCombination = async (
   outsiderCount: number,
   lastDraw: number[] | undefined,
   regimeStateNormalized: number,
-  hurst: number = 0.5
+  hurst: number = 0.5,
+  strategyOptions?: CombinationStrategyOptions
 ): Promise<number[]> => {
+  const explorationBoost =
+    strategyOptions?.explorationBoost !== undefined && Number.isFinite(strategyOptions.explorationBoost)
+      ? Math.max(1.0, Math.min(3.0, strategyOptions.explorationBoost))
+      : 1.0;
+
   const outsiderRatio = outsiderCount / DRAW_SIZE;
   const scoresMap = new Map<number, number>();
   const breakdownsMap = new Map<number, ScoreBreakdown>();
@@ -617,6 +660,11 @@ export const generateCombination = async (
     mixSeed(s.num);
     mixSeed(Math.floor(s.score * 1000));
   });
+  if (strategyOptions?.strategyTag) {
+    for (let i = 0; i < strategyOptions.strategyTag.length; i++) {
+      mixSeed(strategyOptions.strategyTag.charCodeAt(i));
+    }
+  }
 
   const lcgRandom = () => {
     lcgSeed = (lcgSeed * 1664525 + 1013904223) >>> 0;
@@ -671,7 +719,8 @@ export const generateCombination = async (
           breakdownsMap,
           topPool,
           targetOutsidersQuota,
-          precomputedContext
+          precomputedContext,
+          strategyOptions
         );
         
         if (energyVal < bestEnergyValue) {
@@ -754,8 +803,8 @@ export const generateCombination = async (
       candidatePool,
       scores91,
       affinityMatrix: flatAffinity,
-      initialTemperature: 12.0,
-      coolingRate: 0.96,
+      initialTemperature: 12.0 * explorationBoost,
+      coolingRate: Math.min(0.99, 1.0 - (1.0 - 0.96) / Math.sqrt(explorationBoost)),
       minTemperature: 0.05,
       iterationsPerTemp: 40,
       deterministicSeed: lcgSeed
@@ -777,7 +826,7 @@ export const generateCombination = async (
   let bestInitialEnergy = Infinity;
 
   for (const s of seedsList) {
-    const e = calculateCombinationEnergy(s, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders, precomputedContext);
+    const e = calculateCombinationEnergy(s, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders, precomputedContext, strategyOptions);
     if (e < bestInitialEnergy) {
       bestInitialEnergy = e;
       bestInitialCombo = s;
@@ -809,7 +858,8 @@ export const generateCombination = async (
   const hurstMod = Math.max(0.2, Math.min(0.8, hurst));
   const logSnrNorm = Math.log(Math.max(1e-4, snr));
   const rawExploitationBeta = 1.0 / (1.0 + Math.exp(-2.5 * (logSnrNorm - 0.4)));
-  const exploitationBeta = Math.max(0.05, Math.min(0.95, rawExploitationBeta * (0.6 + 0.8 * hurstMod)));
+  const baseExploitationBeta = Math.max(0.05, Math.min(0.95, rawExploitationBeta * (0.6 + 0.8 * hurstMod)));
+  const exploitationBeta = Math.max(0.05, Math.min(0.95, baseExploitationBeta / explorationBoost));
   const explorationBeta = 1.0 - exploitationBeta;
 
   // Calibration dynamique de la température basée sur l'agitation locale et le régime de variance
@@ -823,7 +873,7 @@ export const generateCombination = async (
     if (!currentCombo.includes(rNum)) {
       const propose = [...currentCombo];
       propose[idx] = rNum;
-      const proposeEnergy = calculateCombinationEnergy(propose, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders, precomputedContext);
+      const proposeEnergy = calculateCombinationEnergy(propose, scoresMap, affinityMap, calibration, lastDraw, breakdownsMap, topPool, targetOutsiders, precomputedContext, strategyOptions);
       sumDelta += Math.abs(proposeEnergy - currentEnergy);
       samplesCount++;
     }
@@ -836,7 +886,7 @@ export const generateCombination = async (
   // En régime d'exploration (faible SNR), la température initiale s'élève pour favoriser la recherche globale
   // En régime d'exploitation (fort SNR), la température se concentre pour le raffinement fin
   const tempScale = 1.2 - 0.4 * exploitationBeta;
-  let temperature = Math.max(1.0, meanDelta * tempScale) * Math.exp(regimeStateNormalized);
+  let temperature = Math.max(1.0, meanDelta * tempScale) * Math.exp(regimeStateNormalized) * explorationBoost;
   const initialTemperature = temperature;
   const minTemperature = initialTemperature * 1e-4;
   
@@ -978,7 +1028,8 @@ export const generateCombination = async (
         breakdownsMap,
         topPool,
         targetOutsiders,
-        precomputedContext
+        precomputedContext,
+        strategyOptions
       );
       
       energyVariances.push(Math.abs(proposedEnergy - currentEnergy));

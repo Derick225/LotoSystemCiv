@@ -40,6 +40,48 @@ export enum AlgoKey {
 
 export type AlgoWeights = Record<AlgoKey, number>;
 
+export type PredictionStrategy = 'optimal_selection' | 'hybrid_inference';
+
+/**
+ * Classifie un canal algorithmique vers sa famille dynamique (0: Persistance/Tendance,
+ * 1: Retour à l'équilibre/Écarts, 2: Rupture/Spectral/Chaos, 3: Structure/Topologie).
+ */
+export const classifyAlgoChannelType = (algoKey: string): number => {
+    const kl = algoKey.toLowerCase();
+    if (
+        kl.includes('hurst') ||
+        kl.includes('fractal') ||
+        kl.includes('markov') ||
+        kl.includes('momentum') ||
+        kl.includes('frequency') ||
+        kl.includes('temporal')
+    ) {
+        return 0;
+    }
+    if (
+        kl.includes('gap') ||
+        kl.includes('equilibrium') ||
+        kl.includes('bayesian') ||
+        kl.includes('bayes') ||
+        kl.includes('shadow')
+    ) {
+        return 1;
+    }
+    if (
+        kl.includes('spectral') ||
+        kl.includes('lyapunov') ||
+        kl.includes('hawkes') ||
+        kl.includes('aco') ||
+        kl.includes('echo_state') ||
+        kl.includes('isolation_anomaly') ||
+        kl.includes('inter_') ||
+        kl.includes('sequence_pattern')
+    ) {
+        return 2;
+    }
+    return 3;
+};
+
 /**
  * CANAUX D'ÉCARTS REQUALIFIÉS EN NOUVEAUX MODÈLES STOCHASTIQUES ORTHOGONAUX.
  *

@@ -555,8 +555,13 @@ export const applyPCADenoising = async (
   masterScores: ScoredNumber[],
   weights: AlgoWeights,
   enhancedMetrics?: EnhancedMetrics,
-  confidenceLevel: number = 0.90
+  confidenceLevel: number = 0.90,
+  regimePreservationFactor: number = 0.0
 ): Promise<ScoredNumber[]> => {
+  const clampedPreservation = Math.max(
+    0.0,
+    Math.min(0.95, Number.isFinite(regimePreservationFactor) ? regimePreservationFactor : 0.0)
+  );
   const featureKeys = Object.keys(weights) as Array<AlgoKey>;
   try {
     const featureMatrix = masterScores.map((item) => featureKeys.map((k) => Number(item.breakdown[k]) || 0));
@@ -623,7 +628,7 @@ export const applyPCADenoising = async (
           const zLocal = colMad > 1e-6 ? getModifiedZScore(rawVal, colMed, colMad) : 0;
           const effectiveZSq = 0.5 * (zLocal * zLocal + maxSampleZSq);
           const noiseGate = Math.exp(-effectiveZSq / (2.0 * zCrit * zCrit));
-          const effectiveBlend = pcaConfidence * noiseGate;
+          const effectiveBlend = pcaConfidence * noiseGate * (1.0 - clampedPreservation);
 
           const blended = rawVal + effectiveBlend * (cleanDVal - rawVal);
           // La reconstruction PCA (régression linéaire dans un sous-espace réduit) peut

@@ -240,10 +240,10 @@ export const IAPredictionInferencePanel: React.FC<IAPredictionInferencePanelProp
                   <div className="space-y-1">
                     <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
                       <Target size={12} className="text-indigo-400" />
-                      Sélection Directe Prédictive
+                      Sélection Directe Prédictive • Inférence Hybride
                     </h3>
                     <p className="text-[11px] text-slate-500">
-                      Combinaisons à forte convergence thermodynamique
+                      Stratégie Ruptures de Phase & Régime Fractal (Diversité orthogonale & exploration adaptative)
                     </p>
                   </div>
                   <div className="flex flex-col items-end gap-1.5">
