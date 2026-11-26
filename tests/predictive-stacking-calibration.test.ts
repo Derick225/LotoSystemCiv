@@ -183,4 +183,98 @@ describe("Stacking Dense des 18 Canaux & Simplexe Bayésien (AGENTS.md)", () => 
     // Sum p_n = 5.0 à tolérance numérique près
     expect(Math.abs(sumCalibP - 5.0)).toBeLessThan(1e-4);
   });
+
+  it("calcule 10 déciles quantiles peuplés, un holdout gelé et un block-bootstrap déterministe sur dates DD/MM/YYYY", () => {
+    const history: DrawResult[] = [];
+    let state = 133742 >>> 0;
+    const nextLcg = () => {
+      state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+      return state / 4294967296;
+    };
+
+    // 35 tirages triés du plus récent (index 0) au plus ancien (index 34) au format DD/MM/YYYY
+    for (let i = 0; i < 35; i++) {
+      const winners = new Set<number>();
+      winners.add(((35 - i) % 10) + 1);
+      while (winners.size < 5) {
+        winners.add(Math.floor(nextLcg() * 90) + 1);
+      }
+      const d = new Date(Date.UTC(2025, 0, 35 - i));
+      const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+      history.push({
+        id: `WF-${i}`,
+        drawName: "FORTUNE THURSDAY",
+        date: dateStr,
+        gagnants: Array.from(winners).sort((a, b) => a - b),
+        machine: [],
+      });
+    }
+
+    const repA = computeWalkForwardCalibrationHpc("FORTUNE THURSDAY", 15, history);
+    const repB = computeWalkForwardCalibrationHpc("FORTUNE THURSDAY", 15, history);
+
+    expect(repA).toEqual(repB);
+    expect(repA.evaluatedWindows).toBe(15);
+    expect(repA.holdoutDraws).toBeGreaterThanOrEqual(5);
+    expect(repA.holdoutBrierSkillScore).toBeGreaterThanOrEqual(-1.0);
+    expect(repA.holdoutBrierSkillScore).toBeLessThanOrEqual(1.0);
+    expect(repA.blockBootstrapBssStd).toBeGreaterThan(0);
+    expect(repA.logLoss).toBeGreaterThan(0);
+
+    // Chaque décile D1..D10 doit être réellement peuplé et ordonné de manière monotone
+    expect(repA.decileCalibration).toHaveLength(10);
+    let totalCount = 0;
+    for (let i = 0; i < 10; i++) {
+      expect(repA.decileCalibration[i].count).toBeGreaterThan(0);
+      totalCount += repA.decileCalibration[i].count;
+      if (i > 0) {
+        expect(repA.decileCalibration[i].meanPredicted).toBeGreaterThanOrEqual(
+          repA.decileCalibration[i - 1].meanPredicted
+        );
+      }
+    }
+    expect(totalCount).toBe(repA.evaluatedWindows * 90);
+  });
+
+  it("préserve strictement les poids nuls (ex: MACHINE_TRANSFER = 0) et couvre les 25 canaux dans le dashboard", async () => {
+    const {
+      CHANNELS_CATALOG,
+      buildChannelSimplexRows,
+      computeReliabilityAxisScale,
+    } = await import("../src/components/prediction/PredictiveCalibrationAnalyticsDashboard");
+    const { ACTIVE_ALGO_COUNT } = await import("../src/shared/prediction.types");
+
+    const activeKeys = Object.values(AlgoKey);
+    expect(activeKeys.length).toBe(ACTIVE_ALGO_COUNT);
+    activeKeys.forEach((k) => {
+      expect(CHANNELS_CATALOG[k]).toBeDefined();
+      expect(CHANNELS_CATALOG[k].formula.length).toBeGreaterThan(1);
+    });
+
+    const weights: Record<string, number> = {};
+    activeKeys.forEach((k) => {
+      weights[k] = k === AlgoKey.MACHINE_TRANSFER ? 0 : 1 / (activeKeys.length - 1);
+    });
+
+    const { rows, hasExplicitWeights } = buildChannelSimplexRows(weights);
+    expect(hasExplicitWeights).toBe(true);
+    expect(rows).toHaveLength(ACTIVE_ALGO_COUNT);
+
+    const machineRow = rows.find((r) => r.key === AlgoKey.MACHINE_TRANSFER)!;
+    expect(machineRow.rawWeight).toBe(0);
+    expect(machineRow.simplexWeight).toBe(0);
+    expect(machineRow.percentage).toBe("0.00");
+    expect(machineRow.isActive).toBe(false);
+
+    const sumSimplex = rows.reduce((acc, r) => acc + r.simplexWeight, 0);
+    expect(sumSimplex).toBeCloseTo(1.0, 6);
+
+    const scale = computeReliabilityAxisScale([
+      { decile: 1, meanPredicted: 0.032, meanObserved: 0.025, count: 135 },
+      { decile: 10, meanPredicted: 0.094, meanObserved: 0.112, count: 135 },
+    ]);
+    expect(scale.axisMax).toBeGreaterThanOrEqual(0.12);
+    expect(scale.ticks[0]).toBe(0);
+    expect(scale.ticks[4]).toBeCloseTo(scale.axisMax, 6);
+  });
 });

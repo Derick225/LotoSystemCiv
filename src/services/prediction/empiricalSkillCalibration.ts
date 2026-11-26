@@ -116,7 +116,12 @@ export function deriveSkillShrinkage(evidence: SkillEvidence): EmpiricalSkillEst
 
   const positiveEstimate = Math.max(0, pointEstimate);
   const measuredStd = bootstrapStd !== null && bootstrapStd > 0 ? bootstrapStd : null;
-  const uncertainty = measuredStd ?? 1 / Math.sqrt(evidenceDraws);
+  const popoviciuSe = 1 / Math.sqrt(evidenceDraws);
+  // Pour la holdout, blockBootstrapBssStd provient du bloc tuning : on conserve donc
+  // au minimum la borne d'erreur d'échantillonnage 1/sqrt(holdoutDraws).
+  const uncertainty = source === 'holdout'
+    ? Math.max(measuredStd ?? 0, popoviciuSe)
+    : (measuredStd ?? popoviciuSe);
 
   const shrinkage = positiveEstimate > 0
     ? (positiveEstimate * positiveEstimate) /

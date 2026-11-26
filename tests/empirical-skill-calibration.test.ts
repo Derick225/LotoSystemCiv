@@ -95,6 +95,19 @@ describe('deriveSkillShrinkage — empirique Bayes sans seuil binaire', () => {
     expect(estimate.pointEstimate).toBe(1);
     expect(estimate.shrinkage).toBeLessThanOrEqual(1);
   });
+
+  it('ne sous-estime jamais l’incertitude d’un petit holdout avec un sigma issu du bloc tuning', () => {
+    const estimate = deriveSkillShrinkage({
+      holdoutBrierSkillScore: 0.0021,
+      holdoutDraws: 5,
+      evaluatedWindows: 15,
+      blockBootstrapBssMean: -0.01,
+      blockBootstrapBssStd: 0.0037,
+    });
+    expect(estimate.source).toBe('holdout');
+    expect(estimate.uncertainty).toBeCloseTo(1 / Math.sqrt(5), 10);
+    expect(estimate.shrinkage).toBeLessThan(1e-4);
+  });
 });
 
 describe('shrinkProbabilityVector — shrinkage log-softmax continu', () => {

@@ -8,6 +8,7 @@
  */
 
 import { wasmMatrixEngine } from './wasmMatrixCore';
+import { parseDateSafely } from '../../utils/dateUtils';
 
 // Types d'interface pour le module WASM généré par wasm-pack
 export interface WasmSpectralResult {
@@ -2484,6 +2485,330 @@ export interface CalibrationReportHpc {
 
 const UNIFORM_BRIER_BENCHMARK = (5.0 * 85.0) / (90.0 * 90.0);
 
+function projectToMarginalSimplex(scores: Float64Array, targetSum: number = 5.0): void {
+  let sum = 0.0;
+  for (let n = 1; n <= 90; n++) sum += scores[n];
+  if (sum <= 0.0) return;
+  for (let n = 1; n <= 90; n++) {
+    scores[n] = Math.max(0.0, Math.min(1.0, (scores[n] / sum) * targetSum));
+  }
+  let clampedSum = 0.0;
+  for (let n = 1; n <= 90; n++) clampedSum += scores[n];
+  if (clampedSum > 0.0 && Math.abs(clampedSum - targetSum) > 1e-6) {
+    const renorm = targetSum / clampedSum;
+    for (let n = 1; n <= 90; n++) {
+      scores[n] = Math.max(0.0, Math.min(1.0, scores[n] * renorm));
+    }
+  }
+}
+
+function computeOofBayesianPoissonScores(training: FallbackDraw[]): Float64Array {
+  const nTrain = training.length;
+  const freqs = new Int32Array(91);
+  const gaps = new Int32Array(91);
+  const lastSeen = new Uint8Array(91);
+
+  for (let d = 0; d < nTrain; d++) {
+    const draw = training[nTrain - 1 - d];
+    for (const w of draw.winners) {
+      if (w >= 1 && w <= 90) {
+        freqs[w]++;
+        if (!lastSeen[w]) {
+          gaps[w] = d;
+          lastSeen[w] = 1;
+        }
+      }
+    }
+  }
+  for (let n = 1; n <= 90; n++) {
+    if (!lastSeen[n]) gaps[n] = nTrain;
+  }
+
+  const totalBalls = nTrain * 5.0;
+  const expectedGap = 90.0 / 5.0;
+  const scores = new Float64Array(91);
+  // Parité stricte avec crates/loto-engine/src/scoring.rs : compute_bayesian_poisson_score(..., 0.5, 0.5)
+  for (let n = 1; n <= 90; n++) {
+    const fScore = (freqs[n] + 1.0) / (totalBalls + 90.0);
+    const gRatio = gaps[n] / expectedGap;
+    const gScore = Math.tanh(Math.min(3.0, gRatio) / 3.0);
+    scores[n] = 0.5 * (fScore * 90.0) + 0.5 * gScore;
+  }
+  projectToMarginalSimplex(scores, 5.0);
+  return scores;
+}
+
+function buildBlockRanges(total: number): Array<[number, number]> {
+  const BLOCK_MIN_SIZE = 4;
+  if (total <= 0) return [];
+  if (total < 2 * BLOCK_MIN_SIZE) return [[0, total]];
+  const maxBlocks = Math.floor(total / BLOCK_MIN_SIZE);
+  const numBlocks = Math.max(2, Math.min(maxBlocks, Math.round(Math.sqrt(total))));
+  const blockSize = Math.floor(total / numBlocks);
+  const rem = total % numBlocks;
+  const ranges: Array<[number, number]> = [];
+  let start = 0;
+  for (let b = 0; b < numBlocks; b++) {
+    const extra = b < rem ? 1 : 0;
+    const end = Math.min(total, start + blockSize + extra);
+    ranges.push([start, end]);
+    start = end;
+  }
+  return ranges;
+}
+
+function evaluateHoldoutBrierSkill(
+  history: FallbackDraw[],
+  startIdx: number,
+  evalCount: number,
+  plattAlpha: number,
+  plattBeta: number
+): number | null {
+  const total = history.length;
+  if (total < startIdx + 1 || evalCount <= 0) return null;
+  const end = Math.min(total, startIdx + evalCount);
+  let totalBrier = 0.0;
+  let numSamples = 0;
+
+  for (let t = startIdx; t < end; t++) {
+    const training = history.slice(0, t);
+    const actual = history[t];
+    const probs = computeOofBayesianPoissonScores(training);
+    for (let n = 1; n <= 90; n++) {
+      probs[n] = Math.max(0.0, plattAlpha * probs[n] + plattBeta);
+    }
+    projectToMarginalSimplex(probs, 5.0);
+
+    const targetSet = new Set(actual.winners);
+    let windowBrier = 0.0;
+    for (let n = 1; n <= 90; n++) {
+      const y = targetSet.has(n) ? 1.0 : 0.0;
+      const err = probs[n] - y;
+      windowBrier += err * err;
+    }
+    totalBrier += windowBrier / 90.0;
+    numSamples++;
+  }
+
+  if (numSamples === 0) return null;
+  const meanBrier = totalBrier / numSamples;
+  return Math.max(-1.0, Math.min(1.0, 1.0 - meanBrier / UNIFORM_BRIER_BENCHMARK));
+}
+
+function evaluateWalkForwardTimeline(
+  history: FallbackDraw[],
+  wSize: number,
+  computeBootstrap: boolean
+): CalibrationReportHpc {
+  const emptyDeciles: DecileCalibrationBucket[] = Array.from({ length: 10 }, (_, i) => ({
+    decile: i + 1,
+    meanPredicted: 0,
+    meanObserved: 0,
+    count: 0,
+  }));
+
+  const totalDraws = history.length;
+  if (totalDraws < 8) {
+    return {
+      brierScore: UNIFORM_BRIER_BENCHMARK,
+      brierSkillScore: 0.0,
+      plattAlpha: 1.0,
+      plattBeta: 0.0,
+      empiricalReliabilityScore: 50.0,
+      evaluatedWindows: 0,
+      calibrationQualityLabel: 'HISTORIQUE_INSUFFISANT',
+      logLoss: 0.0,
+      ece: 0.0,
+      liftVsRandom: 1.0,
+      meanHits: 0.0,
+      holdoutBrierSkillScore: 0.0,
+      holdoutDraws: 0,
+      blockBootstrapBssMean: 0.0,
+      blockBootstrapBssStd: 0.0,
+      decileCalibration: emptyDeciles,
+    };
+  }
+
+  // Découpage Holdout final gelé (conforme loto-core/validation.rs : 10% min 5 tirages)
+  // Sur fenêtres courtes (< 20), ne pas tronquer en-dessous de la fenêtre demandée
+  const HOLDOUT_FRACTION = 0.10;
+  const HOLDOUT_MIN_DRAWS = 5;
+  const candidateHoldout = totalDraws >= 3 * HOLDOUT_MIN_DRAWS
+    ? Math.min(Math.floor(totalDraws / 3), Math.max(HOLDOUT_MIN_DRAWS, Math.round(totalDraws * HOLDOUT_FRACTION)))
+    : 0;
+  const hSize = computeBootstrap && (totalDraws >= 20 || (totalDraws - candidateHoldout - 4) >= Math.min(wSize, totalDraws - 4))
+    ? candidateHoldout
+    : 0;
+
+  const tuningEnd = totalDraws - hSize;
+  const evalWindow = Math.min(wSize, Math.max(1, tuningEnd - 4));
+  const startIdx = Math.max(1, tuningEnd - evalWindow);
+
+  let totalBrier = 0.0;
+  let totalLogLoss = 0.0;
+  let totalHits = 0;
+  let numSamples = 0;
+
+  let sumRaw = 0.0;
+  let sumTarget = 0.0;
+  let sumRawSq = 0.0;
+  let sumProd = 0.0;
+  let totalPairs = 0;
+
+  const oofPairs: Array<{ p: number; y: number; seq: number }> = [];
+
+  for (let t = startIdx; t < tuningEnd; t++) {
+    const training = history.slice(0, t);
+    const target = history[t];
+    const scores = computeOofBayesianPoissonScores(training);
+
+    let windowBrier = 0.0;
+    const targetSet = new Set(target.winners);
+
+    for (let n = 1; n <= 90; n++) {
+      const y = targetSet.has(n) ? 1.0 : 0.0;
+      const p = scores[n];
+      const err = p - y;
+      windowBrier += err * err;
+
+      const pClamp = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
+      totalLogLoss += -(y * Math.log(pClamp) + (1.0 - y) * Math.log(1.0 - pClamp));
+      oofPairs.push({ p: pClamp, y, seq: totalPairs });
+
+      sumRaw += p;
+      sumTarget += y;
+      sumRawSq += p * p;
+      sumProd += p * y;
+      totalPairs++;
+    }
+
+    const indexed: { n: number; s: number }[] = [];
+    for (let n = 1; n <= 90; n++) indexed.push({ n, s: scores[n] });
+    indexed.sort((a, b) => b.s - a.s || a.n - b.n);
+
+    for (let i = 0; i < 5; i++) {
+      if (targetSet.has(indexed[i].n)) totalHits++;
+    }
+
+    totalBrier += windowBrier / 90.0;
+    numSamples++;
+  }
+
+  const meanBrier = numSamples > 0 ? totalBrier / numSamples : UNIFORM_BRIER_BENCHMARK;
+  const brierSkillScore = Math.max(-1.0, Math.min(1.0, 1.0 - (meanBrier / UNIFORM_BRIER_BENCHMARK)));
+  const meanLogLoss = totalPairs > 0 ? totalLogLoss / totalPairs : 0.0;
+
+  // Déciles quantiles réels triés sur les probabilités OOF (chaque décile D1..D10 contient ~10% des observations)
+  let eceAcc = 0.0;
+  const decileBuckets: DecileCalibrationBucket[] = [];
+  if (oofPairs.length >= 10) {
+    oofPairs.sort((a, b) => a.p - b.p || a.seq - b.seq);
+    const nPairs = oofPairs.length;
+    for (let b = 0; b < 10; b++) {
+      const bStart = Math.floor((b * nPairs) / 10);
+      const bEnd = Math.floor(((b + 1) * nPairs) / 10);
+      const cnt = bEnd - bStart;
+      let sumP = 0.0;
+      let sumY = 0.0;
+      for (let i = bStart; i < bEnd; i++) {
+        sumP += oofPairs[i].p;
+        sumY += oofPairs[i].y;
+      }
+      const meanP = cnt > 0 ? sumP / cnt : 0.0;
+      const meanO = cnt > 0 ? sumY / cnt : 0.0;
+      if (cnt > 0) {
+        eceAcc += Math.abs(meanP - meanO) * (cnt / nPairs);
+      }
+      decileBuckets.push({
+        decile: b + 1,
+        meanPredicted: Math.round(meanP * 10000.0) / 10000.0,
+        meanObserved: Math.round(meanO * 10000.0) / 10000.0,
+        count: cnt,
+      });
+    }
+  } else {
+    decileBuckets.push(...emptyDeciles);
+  }
+
+  let plattAlpha = 1.0;
+  let plattBeta = 0.0;
+  if (totalPairs > 10) {
+    const nF = totalPairs;
+    const meanX = sumRaw / nF;
+    const meanY = sumTarget / nF;
+    const cov = sumProd - nF * meanX * meanY;
+    const varX = sumRawSq - nF * meanX * meanX;
+    plattAlpha = varX > 1e-9 ? Math.max(0.5, Math.min(3.0, cov / varX)) : 1.0;
+    plattBeta = Math.max(-2.0, Math.min(2.0, meanY - plattAlpha * meanX));
+  }
+
+  // Évaluation Holdout finale gelée (paramètres Platt figés sur tuning, sans fuite)
+  const holdoutBss = hSize > 0
+    ? evaluateHoldoutBrierSkill(history, tuningEnd, hSize, plattAlpha, plattBeta)
+    : null;
+
+  // Block bootstrap (jackknife déterministe par blocs contigus non-chevauchants sur tuningEnd)
+  let bootstrapMean = 0.0;
+  let bootstrapStd = 0.0;
+  if (computeBootstrap && tuningEnd >= 8) {
+    const ranges = buildBlockRanges(tuningEnd);
+    const bssSamples: number[] = [];
+    for (const [bStart, bEnd] of ranges) {
+      if (tuningEnd - (bEnd - bStart) < 8) continue;
+      const subHistory = history.slice(0, bStart).concat(history.slice(bEnd, tuningEnd));
+      const subRep = evaluateWalkForwardTimeline(subHistory, wSize, false);
+      if (subRep.evaluatedWindows > 0) {
+        bssSamples.push(subRep.brierSkillScore);
+      }
+    }
+    if (bssSamples.length > 0) {
+      bootstrapMean = bssSamples.reduce((acc, v) => acc + v, 0.0) / bssSamples.length;
+      if (bssSamples.length > 1) {
+        const variance =
+          bssSamples.reduce((acc, v) => acc + (v - bootstrapMean) * (v - bootstrapMean), 0.0) /
+          (bssSamples.length - 1);
+        bootstrapStd = Math.sqrt(variance);
+      }
+    }
+  }
+
+  const baseSkill = brierSkillScore * 50.0 + 50.0;
+  const avgHits = numSamples > 0 ? totalHits / numSamples : 0.0;
+  const reliability = Math.max(10.0, Math.min(98.0, baseSkill * 0.7 + avgHits * 30.0));
+  const expectedHitsUniform = 25.0 / 90.0;
+  const liftVsRandom = expectedHitsUniform > 0 ? avgHits / expectedHitsUniform : 1.0;
+
+  // Classification continue dérivée de l'erreur-type de l'échantillon (parité Rust calibration.rs)
+  const bssSe = 1.0 / Math.max(1e-4, Math.sqrt(Math.max(1, numSamples)) * Math.sqrt(90.0));
+  const pHigh = 1.0 / (1.0 + Math.exp(-10.0 * (brierSkillScore - 2.0 * bssSe)));
+  const pMid = 1.0 / (1.0 + Math.exp(-10.0 * (brierSkillScore - bssSe)));
+
+  const qualityLabel = pHigh > 0.6
+    ? 'HAUTE_CALIBRATION_EMPIRIQUE'
+    : pMid > 0.5
+    ? 'CALIBRATION_STOCHASTIQUE_STABLE'
+    : 'DIFFUSION_EQUIPROBABLE_NEUTRE';
+
+  return {
+    brierScore: Math.round(meanBrier * 10000.0) / 10000.0,
+    brierSkillScore: Math.round(brierSkillScore * 10000.0) / 10000.0,
+    plattAlpha: Math.round(plattAlpha * 1000.0) / 1000.0,
+    plattBeta: Math.round(plattBeta * 1000.0) / 1000.0,
+    empiricalReliabilityScore: Math.round(reliability * 10.0) / 10.0,
+    evaluatedWindows: numSamples,
+    calibrationQualityLabel: qualityLabel,
+    logLoss: Math.round(meanLogLoss * 10000.0) / 10000.0,
+    ece: Math.round(eceAcc * 10000.0) / 10000.0,
+    liftVsRandom: Math.round(liftVsRandom * 1000.0) / 1000.0,
+    meanHits: Math.round(avgHits * 1000.0) / 1000.0,
+    holdoutBrierSkillScore: holdoutBss !== null ? Math.round(holdoutBss * 10000.0) / 10000.0 : 0.0,
+    holdoutDraws: hSize,
+    blockBootstrapBssMean: Math.round(bootstrapMean * 10000.0) / 10000.0,
+    blockBootstrapBssStd: Math.round(bootstrapStd * 10000.0) / 10000.0,
+    decileCalibration: decileBuckets,
+  };
+}
+
 /**
  * 15. Calibration Empirique Out-Of-Fold & Validation Walk-Forward (Rust Core HPC)
  * Mesure l'erreur de Brier rétrospective sans fuite de données et calibre les probabilités.
@@ -2496,10 +2821,10 @@ export function computeWalkForwardCalibrationHpc(
   const normName = drawName.trim().toUpperCase();
   const wSize = Math.max(4, Math.min(30, windowSize));
 
-  const defaultDeciles: DecileCalibrationBucket[] = Array.from({ length: 10 }, (_, i) => ({
+  const emptyDeciles: DecileCalibrationBucket[] = Array.from({ length: 10 }, (_, i) => ({
     decile: i + 1,
-    meanPredicted: Math.round(((i + 0.5) / 10.0 * (5.0 / 90.0)) * 10000.0) / 10000.0,
-    meanObserved: 5.0 / 90.0,
+    meanPredicted: 0,
+    meanObserved: 0,
     count: 0,
   }));
 
@@ -2526,7 +2851,7 @@ export function computeWalkForwardCalibrationHpc(
             holdoutDraws: readWasmField<number>(rep, 'holdout_draws', 0),
             blockBootstrapBssMean: readWasmField<number>(rep, 'block_bootstrap_bss_mean', 0.0),
             blockBootstrapBssStd: readWasmField<number>(rep, 'block_bootstrap_bss_std', 0.0),
-            decileCalibration: defaultDeciles,
+            decileCalibration: emptyDeciles,
           };
         }
       } catch {}
@@ -2537,13 +2862,13 @@ export function computeWalkForwardCalibrationHpc(
   let history: FallbackDraw[] = [];
   if (historyOverride && historyOverride.length > 0) {
     const raw = historyOverride.map((d: any) => ({
-      timestamp: typeof d.date === 'string' ? new Date(d.date).getTime() / 1000 : (d.timestamp || 0),
+      timestamp: typeof d.date === 'string' ? parseDateSafely(d.date).getTime() / 1000 : (d.timestamp || 0),
       winners: (d.gagnants || d.winners || []).slice(0, 5),
       machine: (d.machine || []).slice(0, 5),
       mask: 0n,
     }));
     // S'assurer de l'ordre chronologique croissant (du plus ancien au plus récent)
-    // Dans context.history, index 0 est le plus récent : on inverse pour l'analyse walk-forward
+    // Dans context.history, index 0 est le plus récent : on inverse si décroissant
     history = (raw.length > 1 && raw[0].timestamp >= raw[raw.length - 1].timestamp)
       ? [...raw].reverse()
       : [...raw];
@@ -2551,194 +2876,8 @@ export function computeWalkForwardCalibrationHpc(
     const timeline = fallbackStoreTimelines.get(normName);
     history = timeline?.history || [];
   }
-  const totalDraws = history.length;
 
-  if (totalDraws < 8) {
-    return {
-      brierScore: UNIFORM_BRIER_BENCHMARK,
-      brierSkillScore: 0.0,
-      plattAlpha: 1.0,
-      plattBeta: 0.0,
-      empiricalReliabilityScore: 50.0,
-      evaluatedWindows: 0,
-      calibrationQualityLabel: 'HISTORIQUE_INSUFFISANT',
-      logLoss: 0.0,
-      ece: 0.0,
-      liftVsRandom: 1.0,
-      meanHits: 0.0,
-      holdoutBrierSkillScore: 0.0,
-      holdoutDraws: 0,
-      blockBootstrapBssMean: 0.0,
-      blockBootstrapBssStd: 0.0,
-      decileCalibration: defaultDeciles,
-    };
-  }
-
-  const evalWindow = Math.min(wSize, totalDraws - 4);
-  const startIdx = totalDraws - evalWindow;
-  let totalBrier = 0.0;
-  let totalLogLoss = 0.0;
-  let totalHits = 0;
-  let numSamples = 0;
-
-  let sumRaw = 0.0;
-  let sumTarget = 0.0;
-  let sumRawSq = 0.0;
-  let sumProd = 0.0;
-  let totalPairs = 0;
-
-  const bucketPredSum = new Float64Array(10);
-  const bucketObsSum = new Float64Array(10);
-  const bucketCounts = new Uint32Array(10);
-
-  for (let t = startIdx; t < totalDraws; t++) {
-    const training = history.slice(0, t);
-    const target = history[t];
-    const nTrain = training.length;
-
-    const freqs = new Int32Array(91);
-    const gaps = new Int32Array(91);
-    const lastSeen = new Uint8Array(91);
-
-    for (let d = 0; d < nTrain; d++) {
-      const draw = training[nTrain - 1 - d];
-      for (const w of draw.winners) {
-        if (w >= 1 && w <= 90) {
-          freqs[w]++;
-          if (!lastSeen[w]) {
-            gaps[w] = d;
-            lastSeen[w] = 1;
-          }
-        }
-      }
-    }
-    for (let n = 1; n <= 90; n++) {
-      if (!lastSeen[n]) gaps[n] = nTrain;
-    }
-
-    const totalBalls = nTrain * 5;
-    const expectedGap = 90.0 / 5.0;
-    const scores = new Float64Array(91);
-    let sumScores = 0.0;
-
-    for (let n = 1; n <= 90; n++) {
-      const fScore = (freqs[n] + 1.0) / (totalBalls + 90.0);
-      const gRatio = gaps[n] / expectedGap;
-      const gScore = Math.tanh(Math.min(3.0, gRatio) / 3.0);
-      const composite = fScore * 45.0 + gScore * 1.5;
-      scores[n] = composite;
-      sumScores += composite;
-    }
-
-    // Projection simplexe marginal Sum = 5.0
-    if (sumScores > 0) {
-      for (let n = 1; n <= 90; n++) {
-        scores[n] = Math.min(1.0, (scores[n] / sumScores) * 5.0);
-      }
-    }
-
-    let windowBrier = 0.0;
-    const targetSet = new Set(target.winners);
-
-    for (let n = 1; n <= 90; n++) {
-      const y = targetSet.has(n) ? 1.0 : 0.0;
-      const p = scores[n];
-      const err = p - y;
-      windowBrier += err * err;
-
-      const pClamp = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
-      totalLogLoss += -(y * Math.log(pClamp) + (1.0 - y) * Math.log(1.0 - pClamp));
-
-      // Bucket décile pour ECE
-      const bIdx = Math.min(9, Math.max(0, Math.floor(pClamp * 10)));
-      bucketPredSum[bIdx] += pClamp;
-      bucketObsSum[bIdx] += y;
-      bucketCounts[bIdx]++;
-
-      sumRaw += p;
-      sumTarget += y;
-      sumRawSq += p * p;
-      sumProd += p * y;
-      totalPairs++;
-    }
-
-    // Hit rate top 5
-    const indexed: { n: number; s: number }[] = [];
-    for (let n = 1; n <= 90; n++) indexed.push({ n, s: scores[n] });
-    indexed.sort((a, b) => b.s - a.s || a.n - b.n);
-
-    for (let i = 0; i < 5; i++) {
-      if (targetSet.has(indexed[i].n)) totalHits++;
-    }
-
-    totalBrier += windowBrier / 90.0;
-    numSamples++;
-  }
-
-  const meanBrier = numSamples > 0 ? totalBrier / numSamples : UNIFORM_BRIER_BENCHMARK;
-  const brierSkillScore = Math.max(-1.0, Math.min(1.0, 1.0 - (meanBrier / UNIFORM_BRIER_BENCHMARK)));
-  const meanLogLoss = totalPairs > 0 ? totalLogLoss / totalPairs : 0.0;
-
-  // Calcul ECE (Expected Calibration Error) sur les 10 déciles
-  let eceAcc = 0.0;
-  const decileBuckets: DecileCalibrationBucket[] = [];
-  for (let b = 0; b < 10; b++) {
-    const cnt = bucketCounts[b];
-    const meanP = cnt > 0 ? bucketPredSum[b] / cnt : ((b + 0.5) / 10.0) * (5.0 / 90.0);
-    const meanO = cnt > 0 ? bucketObsSum[b] / cnt : (5.0 / 90.0);
-    if (cnt > 0 && totalPairs > 0) {
-      eceAcc += Math.abs(meanP - meanO) * (cnt / totalPairs);
-    }
-    decileBuckets.push({
-      decile: b + 1,
-      meanPredicted: Math.round(meanP * 10000.0) / 10000.0,
-      meanObserved: Math.round(meanO * 10000.0) / 10000.0,
-      count: cnt,
-    });
-  }
-
-  let plattAlpha = 1.0;
-  let plattBeta = 0.0;
-  if (totalPairs > 10) {
-    const nF = totalPairs;
-    const meanX = sumRaw / nF;
-    const meanY = sumTarget / nF;
-    const cov = sumProd - nF * meanX * meanY;
-    const varX = sumRawSq - nF * meanX * meanX;
-    plattAlpha = varX > 1e-9 ? Math.max(0.5, Math.min(3.0, cov / varX)) : 1.0;
-    plattBeta = Math.max(-2.0, Math.min(2.0, meanY - plattAlpha * meanX));
-  }
-
-  const baseSkill = brierSkillScore * 50.0 + 50.0;
-  const avgHits = numSamples > 0 ? totalHits / numSamples : 0.0;
-  const reliability = Math.max(10.0, Math.min(98.0, baseSkill * 0.7 + avgHits * 30.0));
-  const expectedHitsUniform = 25.0 / 90.0;
-  const liftVsRandom = expectedHitsUniform > 0 ? avgHits / expectedHitsUniform : 1.0;
-
-  const qualityLabel = brierSkillScore > 0.08
-    ? 'HAUTE_CALIBRATION_EMPIRIQUE'
-    : brierSkillScore > 0.01
-    ? 'CALIBRATION_STOCHASTIQUE_STABLE'
-    : 'DIFFUSION_EQUIPROBABLE_NEUTRE';
-
-  return {
-    brierScore: Math.round(meanBrier * 10000.0) / 10000.0,
-    brierSkillScore: Math.round(brierSkillScore * 10000.0) / 10000.0,
-    plattAlpha: Math.round(plattAlpha * 1000.0) / 1000.0,
-    plattBeta: Math.round(plattBeta * 1000.0) / 1000.0,
-    empiricalReliabilityScore: Math.round(reliability * 10.0) / 10.0,
-    evaluatedWindows: numSamples,
-    calibrationQualityLabel: qualityLabel,
-    logLoss: Math.round(meanLogLoss * 10000.0) / 10000.0,
-    ece: Math.round(eceAcc * 10000.0) / 10000.0,
-    liftVsRandom: Math.round(liftVsRandom * 1000.0) / 1000.0,
-    meanHits: Math.round(avgHits * 1000.0) / 1000.0,
-    holdoutBrierSkillScore: 0.0,
-    holdoutDraws: 0,
-    blockBootstrapBssMean: 0.0,
-    blockBootstrapBssStd: 0.0,
-    decileCalibration: decileBuckets,
-  };
+  return evaluateWalkForwardTimeline(history, wSize, true);
 }
 
 /**

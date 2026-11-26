@@ -341,7 +341,8 @@ export const finalizePredictionPayload = async (
   const finalConfidence = Math.max(1, Math.min(99, Math.round(meanSelectedProb * 100)));
 
   // Note honnête : la preuve out-of-fold est citée avec son incertitude, jamais transformée en promesse de gain.
-  const skillEvidenceNote = skillEstimate.shrinkage === 0
+  const hasDisplayedRetention = skillEstimate.shrinkage > 0 && skillEstimate.shrinkage.toFixed(4) !== '0.0000';
+  const skillEvidenceNote = !hasDisplayedRetention
     ? "Aucun avantage prouvé (distribution neutre 5/90, lift 1.00x)."
     : `Skill out-of-fold mesuré (${skillEstimate.source}, n=${skillEstimate.evidenceDraws}) : BSS=${skillEstimate.pointEstimate.toFixed(4)}, σ=${Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty.toFixed(4) : 'n/d'}, rétention λ=${skillEstimate.shrinkage.toFixed(4)}, lift=${expectedLift.toFixed(2)}x.`;
   const confidenceNote = `${HONEST_NOTE} ${skillEvidenceNote}`;
