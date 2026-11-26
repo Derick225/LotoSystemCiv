@@ -1,6 +1,7 @@
 /**
  * Cycle de vie du module Rust/WASM Loto-Engine, télémétrie de fallback et lecture ABI sécurisée.
  */
+import { logger } from '../../utils/logger';
 
 let wasmModuleInstance: any = null;
 let isWasmLoaded = false;
@@ -52,14 +53,17 @@ export async function initializeLotoEngineWasm(): Promise<boolean> {
         }
         wasmModuleInstance = wasm;
         isWasmLoaded = true;
-        console.info('[LOTO-ENGINE] Module Rust/WASM initialisé avec succès (Accélération HPC active).');
+        logger.info('[LOTO-ENGINE] Module Rust/WASM initialisé avec succès (Accélération HPC active).');
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('loto-engine-wasm-ready', { detail: { mode: 'RUST_WASM' } }));
         }
         return true;
       }
     } catch (err) {
-      console.warn('[LOTO-ENGINE] Module WASM non encore compilé ou inaccessible, fallback déterministe actif :', err);
+      logger.warn(
+        { error: err instanceof Error ? err.message : String(err) },
+        '[LOTO-ENGINE] Module WASM non encore compilé ou inaccessible, fallback déterministe actif',
+      );
     }
     isWasmLoaded = false;
     return false;
@@ -89,7 +93,15 @@ export function resetWasmFallbackCount(): void {
 export function recordWasmFallback(context?: string, error?: unknown): void {
   wasmFallbackCount++;
   if (context) {
-    console.warn(`[LOTO-ENGINE FALLBACK #${wasmFallbackCount}] ${context}`, error);
+    logger.warn(
+      {
+        module: 'WASM',
+        fallbackCount: wasmFallbackCount,
+        context,
+        error: error instanceof Error ? error.message : error !== undefined ? String(error) : undefined,
+      },
+      `[LOTO-ENGINE FALLBACK #${wasmFallbackCount}] ${context}`,
+    );
   }
 }
 

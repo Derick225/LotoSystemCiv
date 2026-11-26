@@ -180,9 +180,16 @@ export const analyzeTicketStrengthSync = (
   const warnings: string[] = [];
   let score = 100.0;
 
-  const MAX_PENALTY_AC = 40.0;
-  const MAX_PENALTY_CONSEC = 25.0;
-  const MAX_PENALTY_PARITY = 35.0;
+  // Budgets de pénalité normalisés à 100 points à partir des dispersions empiriques calibrées
+  const wAC = Math.max(1e-6, calibration.stdAC / Math.max(1, calibration.meanAC));
+  const wConsec = Math.max(1e-6, Math.sqrt(Math.max(1e-4, calibration.lambdaConsecutives)));
+  const parityStd = Math.sqrt(Math.max(1, sorted.length) * 0.25);
+  const wParity = parityStd / Math.max(1, sorted.length * 0.5);
+  const wTotal = wAC + wConsec + wParity;
+
+  const MAX_PENALTY_AC = (wAC / wTotal) * 100.0;
+  const MAX_PENALTY_CONSEC = (wConsec / wTotal) * 100.0;
+  const MAX_PENALTY_PARITY = (wParity / wTotal) * 100.0;
 
   const acZScore = (ac - calibration.meanAC) / calibration.stdAC;
   const acPenalty = MAX_PENALTY_AC * (1.0 - Math.exp(-0.5 * Math.pow(acZScore, 2)));
@@ -206,10 +213,11 @@ export const analyzeTicketStrengthSync = (
   const n = sorted.length;
   const p = 0.5;
   const probExactParity = combination(n, odds) * Math.pow(p, odds) * Math.pow(1 - p, n - odds);
-  const maxProbParity = 0.3125; 
+  const modalOdds = Math.floor(n / 2);
+  const maxProbParity = combination(n, modalOdds) * Math.pow(p, modalOdds) * Math.pow(1 - p, n - modalOdds);
   const parityPenalty = MAX_PENALTY_PARITY * (1.0 - (probExactParity / maxProbParity));
   score -= parityPenalty;
-  if (odds === 0 || odds === 5) {
+  if (odds === 0 || odds === n) {
     warnings.push(`Polarisation de parité extrême (Probabilité théorique: ${(probExactParity * 100).toFixed(1)}%)`);
   }
 

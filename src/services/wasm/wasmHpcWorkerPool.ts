@@ -31,6 +31,7 @@ import {
   WasmLyapunovResult,
 } from './lotoEngineBridge';
 import { collectTransferables } from '../workers/zeroCopy';
+import { logger } from '../../utils/logger';
 
 export interface SpatialGridHpcResult {
   gridDensity: Float64Array;
@@ -139,7 +140,10 @@ class WasmHpcWorkerPool {
       };
 
       this.worker.onerror = (err) => {
-        console.warn('[WasmHpcWorkerPool] Erreur sur le worker dédié, repli sur le pont direct :', err);
+        logger.warn(
+          { error: err?.message ?? String(err) },
+          '[WasmHpcWorkerPool] Erreur sur le worker dédié, repli sur le pont direct',
+        );
         this.isReady = false;
         // Purge et rejet des tâches en attente
         for (const [, pending] of Array.from(this.pendingCallbacks.entries())) {
@@ -151,7 +155,10 @@ class WasmHpcWorkerPool {
 
       this.isReady = true;
     } catch (err) {
-      console.warn("[WasmHpcWorkerPool] Impossible d'instancier le Web Worker (mode dégradé actif) :", err);
+      logger.warn(
+        { error: err instanceof Error ? err.message : String(err) },
+        "[WasmHpcWorkerPool] Impossible d'instancier le Web Worker (mode dégradé actif)",
+      );
       this.isReady = false;
       this.worker = null;
     }

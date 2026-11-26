@@ -206,7 +206,7 @@ class CacheService {
       try {
         await set(key, entry);
       } catch (e) {
-        console.warn(`[CacheService] Failed to set IDB key ${key}`, e);
+        logger.warn({ key, error: e instanceof Error ? e.message : String(e) }, "[CacheService] Failed to set IDB key");
       }
     }
   }
@@ -237,7 +237,7 @@ class CacheService {
           await del(key);
         }
       } catch (e) {
-        console.warn(`[CacheService] Failed to fetch IDB key ${key}`, e);
+        logger.warn({ key, error: e instanceof Error ? e.message : String(e) }, "[CacheService] Failed to fetch IDB key");
       }
     }
 
@@ -265,13 +265,15 @@ class CacheService {
         
         if (keysToDelete.length > 0) {
             import('idb-keyval').then(({ delMany }) => {
-                delMany(keysToDelete).catch(e => console.warn(e));
+                delMany(keysToDelete).catch((e) =>
+                  logger.warn({ prefix, error: e instanceof Error ? e.message : String(e) }, "[CacheService] Batch IDB delete failed"),
+                );
             });
         }
       } catch (e) {
-        console.warn(
-          `[CacheService] Prefix invalidation failed for ${prefix}`,
-          e,
+        logger.warn(
+          { prefix, error: e instanceof Error ? e.message : String(e) },
+          "[CacheService] Prefix invalidation failed",
         );
       }
     }
@@ -360,7 +362,7 @@ class CacheService {
       try {
         await del(key);
       } catch (e) {
-        console.warn(`[CacheService] Failed to delete IDB key ${key}`, e);
+        logger.warn({ key, error: e instanceof Error ? e.message : String(e) }, "[CacheService] Failed to delete IDB key");
       }
     }
   }
@@ -403,7 +405,7 @@ class CacheService {
             }
         }
       } catch (e) {
-        console.warn("[CacheService] GC Error on IDB:", e);
+        logger.warn({ error: e instanceof Error ? e.message : String(e) }, "[CacheService] GC Error on IDB");
       }
     }
 
@@ -458,9 +460,9 @@ class CacheService {
             }
         }
       } catch (e) {
-        console.warn(
-          `[CacheService] Failed retrieving domain ${domain} from IDB`,
-          e,
+        logger.warn(
+          { domain, error: e instanceof Error ? e.message : String(e) },
+          "[CacheService] Failed retrieving domain from IDB",
         );
       }
     }
@@ -537,7 +539,10 @@ class CacheService {
           }
         }
       } catch (e) {
-        console.warn("[CacheService] Erreur lors de la purge IDB des tirages synthétiques :", e);
+        logger.warn(
+          { error: e instanceof Error ? e.message : String(e) },
+          "[CacheService] Erreur lors de la purge IDB des tirages synthétiques",
+        );
       }
     }
 

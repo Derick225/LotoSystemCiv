@@ -349,7 +349,6 @@ export function computeEpigenomeMatrixHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_epigenome_matrix_continuous_wasm', e);
-      console.warn('[WASM] Fallback compute_epigenome_matrix_continuous_wasm :', e);
     } finally {
       if (res && typeof res.free === 'function') {
         try {
@@ -399,7 +398,6 @@ export function computeEpigenomeMatrixHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_epigenome_matrix_wasm', e);
-      console.warn('[WASM] Fallback compute_epigenome_matrix_wasm :', e);
     } finally {
       if (res && typeof res.free === 'function') {
         try {
@@ -585,7 +583,6 @@ export function computeSequenceOrderMetricsHpc(
       }
     } catch (e) {
       recordWasmFallback('compute_sequence_order_metrics_wasm', e);
-      console.warn('[WASM] Fallback compute_sequence_order_metrics_wasm :', e);
     }
   }
 
@@ -679,7 +676,6 @@ export function scoreEpigenomeWalkForwardStepHpc(
       };
     } catch (e) {
       recordWasmFallback('score_epigenome_walk_forward_step_calibrated_wasm', e);
-      console.warn('[WASM] Fallback score_epigenome_walk_forward_step_calibrated_wasm :', e);
     } finally {
       if (res && typeof res.free === 'function') {
         try {
@@ -830,7 +826,6 @@ export function computeHedgeFixedShareStepHpc(
       }
     } catch (e) {
       recordWasmFallback('compute_hedge_fixed_share_step_wasm', e);
-      console.warn('[WASM] Fallback compute_hedge_fixed_share_step_wasm :', e);
     }
   }
 

@@ -114,18 +114,23 @@ export const derivedNeighborPlugin: AlgorithmPlugin = {
     });
 
     // 2. Discrete Transformation Score
-    // Gives extra spikes to direct adjacent, mirror or shadow nodes
-    const baseScorePerTransform = 35.0; 
+    // Normalise les transformations locales (voisin, miroir, ombre) sur l'échelle [0, 100]
+    const MAX_LOCAL_TRANSFORM_MODES = 3.0;
+    const baseScorePerTransform = 100.0 / MAX_LOCAL_TRANSFORM_MODES;
     const discreteScore = transformations.length * baseScorePerTransform;
 
     // 3. Fusion and Continuous Scaling
-    // Combines spreading activation and discrete symmetry boosts, then scales via hyperbolic tangent
-    const rawScore = spreadingActivation * 25.0 + discreteScore;
+    // Normalise la somme des noyaux gaussiens par le nombre de graines actives
+    const seedNorm = 100.0 / Math.max(1, topChosen.length);
+    const rawScore = spreadingActivation * seedNorm + discreteScore;
     const normalizedScore = Math.tanh(rawScore / 100.0) * 100.0;
+    const n = ctx.history.length;
+    const confidence =
+      n > 0 ? Math.min(1.0 - 1.0 / 90.0, n / (n + 90.0 / 5.0)) : 0.0;
 
     return {
         score: Math.max(0, Math.min(100, normalizedScore)),
-        confidence: 0.90,
+        confidence: Number(confidence.toFixed(4)),
         metadata: { 
             derived: transformations.length > 0, 
             transformations: transformations,

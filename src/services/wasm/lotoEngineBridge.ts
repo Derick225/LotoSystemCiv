@@ -9,6 +9,7 @@
 
 import { wasmMatrixEngine } from './wasmMatrixCore';
 import { parseDateSafely } from '../../utils/dateUtils';
+import { logger } from '../../utils/logger';
 
 // Types d'interface pour le module WASM généré par wasm-pack
 export interface WasmSpectralResult {
@@ -70,7 +71,6 @@ export function computeRobustHurstHpc(signal: number[] | Float64Array): number {
       return getWasmModuleInstance().compute_robust_hurst_wasm(signalArray);
     } catch (e) {
       recordWasmFallback('compute_robust_hurst_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Hurst, passage au fallback :', e);
     }
   }
 
@@ -116,7 +116,6 @@ export function computeFftPowerSpectrumHpc(signal: number[] | Float64Array): Flo
       return new Float64Array(psd);
     } catch (e) {
       recordWasmFallback('compute_fft_power_spectrum', e);
-      console.error('[LOTO-ENGINE] Erreur WASM FFT, passage au fallback :', e);
     }
   }
 
@@ -160,7 +159,6 @@ export function computeCrossHawkesKernelHpc(params: {
       };
     } catch (e) {
       recordWasmFallback('compute_cross_hawkes_kernel', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Hawkes, passage au fallback :', e);
     }
   }
 
@@ -205,7 +203,6 @@ export function computeMarkovTransitionHpc(
       return new Float64Array(mat);
     } catch (e) {
       recordWasmFallback('compute_markov_transition_matrix_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Markov, passage au fallback :', e);
     }
   }
 
@@ -267,7 +264,6 @@ export function solveCombinatorialAnnealingHpc(params: {
       };
     } catch (e) {
       recordWasmFallback('solve_combinatorial_annealing_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Recuit Simulé, passage au fallback :', e);
     }
   }
 
@@ -311,7 +307,6 @@ export function computeTopologicalLyapunovHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_topological_lyapunov_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Lyapunov, passage au fallback :', e);
     }
   }
 
@@ -360,7 +355,6 @@ export function computeCooccurrenceTensorHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_cooccurrence_tensor_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Cooccurrence Tensor, passage au fallback :', e);
     }
   }
 
@@ -479,7 +473,6 @@ export function computeDominoAdvectionHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_domino_advection_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Domino Advection, passage au fallback :', e);
     }
   }
 
@@ -551,7 +544,6 @@ export function computeButterflyLyapunovHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_butterfly_lyapunov_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Butterfly Lyapunov, passage au fallback :', e);
     }
   }
 
@@ -616,7 +608,6 @@ export function computeGraphHeatKernelHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_graph_heat_kernel_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Graph Heat Kernel, passage au fallback :', e);
     }
   }
 
@@ -746,7 +737,6 @@ export function computeChainReactionResonanceHpc(
       };
     } catch (e) {
       recordWasmFallback('compute_chain_reaction_resonance_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Chain Reaction, passage au fallback :', e);
     }
   }
 
@@ -1038,7 +1028,6 @@ export function runAntColonyOptimizationHpc(params: {
       };
     } catch (e) {
       recordWasmFallback('run_aco_swarm_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM ACO, passage au fallback vectorisé :', e);
     }
   }
 
@@ -1295,7 +1284,6 @@ export function computeHybridRegimeWeightsHpc(params: {
       };
     } catch (e) {
       recordWasmFallback('compute_hybrid_regime_weights_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Hybrid Regime Weights, passage au fallback :', e);
     }
   }
 
@@ -1394,7 +1382,6 @@ export function computeFrequencyCountsHpc(
       return new Int32Array(res);
     } catch (e) {
       recordWasmFallback('compute_frequency_counts_wasm', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Frequency Counts, passage au fallback :', e);
     }
   }
 
@@ -1442,7 +1429,10 @@ export function getOrCreateNativeStoreInstance(): any {
       try {
         wasmStoreInstance = new StoreCtor();
       } catch (e) {
-        console.error('[LOTO-ENGINE] Erreur instanciation InMemoryDrawStore WASM :', e);
+        logger.error(
+          { error: e instanceof Error ? e.message : String(e) },
+          '[LOTO-ENGINE] Erreur instanciation InMemoryDrawStore WASM',
+        );
       }
     }
     return wasmStoreInstance;
@@ -1473,7 +1463,6 @@ export function bootstrapStoreFromJson(jsonPayload: string): number {
       return store.bootstrap_json(jsonPayload);
     } catch (e) {
       recordWasmFallback('bootstrap_json', e);
-      console.warn('[LOTO-ENGINE] Erreur bootstrap WASM store, passage au fallback JS :', e);
     }
   }
 
@@ -1510,7 +1499,10 @@ export function bootstrapStoreFromJson(jsonPayload: string): number {
     }
     return count;
   } catch (err) {
-    console.error('[LOTO-ENGINE] Erreur bootstrap fallback JSON :', err);
+    logger.error(
+      { error: err instanceof Error ? err.message : String(err) },
+      '[LOTO-ENGINE] Erreur bootstrap fallback JSON',
+    );
     return 0;
   }
 }
@@ -1536,7 +1528,6 @@ export function appendSingleDrawToStore(
       );
     } catch (e) {
       recordWasmFallback('append_single_draw', e);
-      console.warn('[LOTO-ENGINE] Erreur appendSingleDraw WASM, passage au fallback :', e);
     }
   }
 
@@ -1600,7 +1591,6 @@ export function getStoreFrequencies(drawName: string): Int32Array {
       if (freqs && freqs.length > 0) return new Int32Array(freqs);
     } catch (e) {
       recordWasmFallback('get_frequencies', e);
-      console.warn('[LOTO-ENGINE] Erreur get_frequencies WASM :', e);
     }
   }
 
@@ -1620,7 +1610,6 @@ export function getStoreCurrentGaps(drawName: string): Int32Array {
       if (gaps && gaps.length > 0) return new Int32Array(gaps);
     } catch (e) {
       recordWasmFallback('get_current_gaps', e);
-      console.warn('[LOTO-ENGINE] Erreur get_current_gaps WASM :', e);
     }
   }
 
@@ -1736,7 +1725,6 @@ export function runNativePredictionHpc(params: {
       }
     } catch (e) {
       recordWasmFallback('run_native_prediction_pipeline', e);
-      console.error('[LOTO-ENGINE] Erreur WASM Native Prediction, passage au fallback :', e);
     }
   }
 
@@ -2029,7 +2017,6 @@ export function analyzeDrawHistoryHpc(drawName: string): PriorAnalysisReportHpc 
       }
     } catch (e) {
       recordWasmFallback('analyze_draw', e);
-      console.warn('[LOTO-ENGINE] Erreur analyze_draw WASM, passage au fallback :', e);
     }
   }
 
@@ -2141,7 +2128,6 @@ export function generateDiversifiedPortfolioHpc(
       }
     } catch (e) {
       recordWasmFallback('generate_portfolio', e);
-      console.warn('[LOTO-ENGINE] Erreur generate_portfolio WASM, passage au fallback :', e);
     }
   }
 
@@ -3099,7 +3085,6 @@ export function computeBivariateCrossDyadsHpc(
       }
     } catch (e) {
       recordWasmFallback('compute_bivariate_dyads_wasm', e);
-      console.warn('[LOTO-ENGINE] Erreur WASM compute_bivariate_dyads, passage au fallback :', e);
     }
   }
 

@@ -185,6 +185,8 @@ export const verifyActivePrediction = (
   }
 
   // --- ANALYSE 3 : Saturation de l'Estimateur (James-Stein Saturation) ---
+  const domainSamples = Math.max(9, rawLocalScores.length);
+  const entropySaturationRef = 1.0 - 1.0 / Math.sqrt(domainSamples);
   if (B > 0.95) {
     detectedDrifts.push({
       type: DriftType.ESTIMATOR_SATURATION,
@@ -192,11 +194,11 @@ export const verifyActivePrediction = (
       description: `Le régularisateur Bayésien domine l'inférence locale (B = ${(B * 100).toFixed(1)}%). Les spécificités du tirage actif sont gommées.`,
       continuousValue: B,
     });
-  } else if (B < 1e-4 && entropyValue < 0.85) {
+  } else if (B < 1e-4 && entropyValue < entropySaturationRef) {
     detectedDrifts.push({
       type: DriftType.ESTIMATOR_SATURATION,
       severity: "info",
-      description: `Régularisation Bayésienne quasi-inactive (B = ${(B * 100).toFixed(4)}%) sous régime d'entropie moyenne.`,
+      description: `Régularisation Bayésienne quasi-inactive (B = ${(B * 100).toFixed(4)}%) sous régime d'entropie inférieure au seuil d'équilibre (${(entropySaturationRef * 100).toFixed(1)}%).`,
       continuousValue: B,
     });
   }

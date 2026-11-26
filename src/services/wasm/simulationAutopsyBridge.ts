@@ -68,7 +68,6 @@ export function runMonteCarloWhatIfHpc(params: {
       return stats;
     } catch (e) {
       recordWasmFallback('run_what_if_monte_carlo_hpc', e);
-      console.warn('[LOTO-ENGINE] WASM Monte Carlo What-If failed, using vectorized fallback :', e);
     }
   }
 
@@ -165,7 +164,6 @@ export function computeKlDivergenceHpc(
       return parseFloat(Math.max(0, kl).toFixed(5));
     } catch (e) {
       recordWasmFallback('compute_kl_divergence_hpc', e);
-      console.warn('[LOTO-ENGINE] WASM KL Divergence failed, using fallback :', e);
     }
   }
 
@@ -236,7 +234,6 @@ export function runFinancialSimulationHpc(params: {
       return output;
     } catch (e) {
       recordWasmFallback('run_simulation_hpc', e);
-      console.warn('[LOTO-ENGINE] WASM financial simulation failed, using fallback :', e);
     }
   }
 
@@ -397,7 +394,6 @@ export function computeClosedLoopAutopsyHpc(params: {
       return out;
     } catch (e) {
       recordWasmFallback('compute_closed_loop_autopsy_wasm', e);
-      console.warn('[LOTO-ENGINE] WASM Closed Loop Autopsy failed, using fallback :', e);
     }
   }
 

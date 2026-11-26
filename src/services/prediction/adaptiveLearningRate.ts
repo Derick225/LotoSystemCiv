@@ -84,8 +84,8 @@ export function computeAdaptiveContinuousLearningRate(
     }
   }
   const totalHits = counts.reduce((a, b) => a + b, 0);
-  let normalizedEntropy = 0.85;
-  let empiricalVariance = 0.005;
+  let normalizedEntropy = 1.0; // Équilibre uniforme maximal en absence de tirages
+  let empiricalVariance = 0.0;
 
   if (totalHits > 0) {
     const probs = counts.slice(1).map((c) => c / totalHits);
@@ -101,21 +101,21 @@ export function computeAdaptiveContinuousLearningRate(
   const persistenceModulator = 1.0 / (1.0 + Math.exp(localLyapunov));
 
   // 4. Modulateur d'entropie (poids d'incertitude)
-  const entropyDamping = Math.pow(Math.max(0.01, 1.0 - normalizedEntropy * 0.5), 1.5);
+  const entropyDamping = Math.pow(Math.max(1.0 / 90.0, 1.0 - normalizedEntropy * 0.5), 1.5);
 
-  // 5. Modulateur de Brier / Fiabilité de prédiction
-  const brierFactor = 1.0 / (1.0 + (recentBrierScore ?? 0.20));
+  // 5. Modulateur de Brier / Fiabilité de prédiction (référence exacte 5/90 : p*(1-p)^2 + (1-p)*p^2)
+  const pUniform = 5.0 / 90.0;
+  const brierUniformRef =
+    pUniform * Math.pow(1.0 - pUniform, 2) + (1.0 - pUniform) * Math.pow(pUniform, 2);
+  const brierFactor = 1.0 / (1.0 + (recentBrierScore ?? brierUniformRef));
 
   // 6. Taux d'apprentissage final modulé continûment
-  // ALGO-7 : l'exposant de Lyapunov local (et son persistenceModulator) est conservé
-  // UNIQUEMENT à des fins de visualisation / audit (champs retournés ci-dessous). Il ne
-  // module plus le taux d'apprentissage : qualifier de « chaotique » une suite de tirages
-  // physiquement aléatoires revient à injecter du bruit d'échantillonnage dans l'adaptation
-  // des poids. Seuls des facteurs statistiquement justifiés (taille d'échantillon via eta0,
-  // entropie, variance empirique, fiabilité de Brier) pilotent désormais eta(t).
+  // Bornes dérivées du domaine : [1/(90 * 10), 1/5]
+  const minLr = 1.0 / (90.0 * 10.0);
+  const maxLr = 1.0 / 5.0;
   const finalLearningRate = Math.max(
-    0.001,
-    Math.min(0.25, eta0 * entropyDamping * brierFactor * (1.0 + Math.sqrt(empiricalVariance)))
+    minLr,
+    Math.min(maxLr, eta0 * entropyDamping * brierFactor * (1.0 + Math.sqrt(empiricalVariance)))
   );
 
   return {

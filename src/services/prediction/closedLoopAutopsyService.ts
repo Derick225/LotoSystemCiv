@@ -2,6 +2,7 @@ import { DrawResult, AlgoWeights } from '../../types';
 import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../../shared/prediction.types';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
 import { drawHasMachineNumbers } from '../../constants';
+import { logger } from '../../utils/logger';
 import { extractFeatures, extractDrawNumbers } from './featureExtractor';
 import { computeAdvancedMetrics } from './predictionOrchestrator';
 import { algorithmRegistry, AlgorithmContext } from './algorithmRegistry';
@@ -1182,7 +1183,10 @@ export const executeBatchClosedLoopAutopsy = async (
         attributionLabels[impact.key] = impact.label;
       });
     } catch (e) {
-      console.warn(`[Batch Autopsy] Tirage ${i} ignoré :`, e);
+      logger.warn(
+        { drawIndex: i, error: e instanceof Error ? e.message : String(e) },
+        '[Batch Autopsy] Tirage ignoré',
+      );
     }
   }
 

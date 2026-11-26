@@ -30,7 +30,10 @@ export const terminateActiveWorkers = (drawName: string): void => {
       try {
         worker.terminate();
       } catch (err) {
-        console.error("Échec de la coupure d'un worker", err);
+        logger.error(
+          { drawName, error: err instanceof Error ? err.message : String(err) },
+          "[Process Manager] Échec de la coupure d'un worker",
+        );
       }
     }
     activeWorkersMap.delete(drawName);
@@ -94,7 +97,10 @@ export const runForensicWorker = async (
       clearTimeout(timer);
       unregisterActiveWorker(drawName, worker);
       worker.terminate();
-      console.error(`[Process Manager] Erreur d'exécution du worker forensic:`, err);
+      logger.error(
+        { drawName, error: err?.message ?? String(err) },
+        "[Process Manager] Erreur d'exécution du worker forensic",
+      );
       resolve(fallbackReport("error-runtime"));
     };
 

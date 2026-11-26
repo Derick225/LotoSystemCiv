@@ -59,9 +59,12 @@ export const shadowProbabilityPlugin: AlgorithmPlugin = {
       this.precompute(ctx);
     }
     const score = ctx.pluginCache![AlgoKey.SHADOW_PROBABILITY][num] || 0.0;
+    const n = ctx.history.length;
+    const confidence =
+      n > 0 ? Math.min(1.0 - 1.0 / 90.0, n / (n + 90.0 / 5.0)) : 0.0;
     return {
       score: Math.max(0.0, Math.min(100.0, score)),
-      confidence: 0.80,
+      confidence: Number(confidence.toFixed(4)),
       metadata: {
         gaussianSigma: 90.0 / 6.0,
         basis: 'Continuous Gaussian Kernel Smoothing'
@@ -171,9 +174,12 @@ export const networkCorrelationPlugin: AlgorithmPlugin = {
       this.precompute(ctx);
     }
     const score = ctx.pluginCache![AlgoKey.NETWORK_CORRELATION][num] || 0.0;
+    const n = ctx.history.length;
+    const confidence =
+      n > 0 ? Math.min(1.0 - 1.0 / 90.0, n / (n + 90.0 / 5.0)) : 0.0;
     return {
       score: Math.max(0.0, Math.min(100.0, score)),
-      confidence: 0.85,
+      confidence: Number(confidence.toFixed(4)),
       metadata: {
         basis: 'Conditional Probability Lift P(A|B) - P(A)'
       }
@@ -265,9 +271,12 @@ export const isolationAnomalyPlugin: AlgorithmPlugin = {
     }
     const cache = ctx.pluginCache![AlgoKey.ISOLATION_ANOMALY];
     const score = cache.fusedScores[num] || 0.0;
+    const n = ctx.history.length;
+    const confidence =
+      n > 0 ? Math.min(1.0 - 1.0 / 90.0, n / (n + 90.0 / 5.0)) : 0.0;
     return {
       score: score,
-      confidence: 0.90,
+      confidence: Number(confidence.toFixed(4)),
       metadata: {
         varAnomaly: parseFloat(cache.varAnomaly.toFixed(4)),
         varGap: parseFloat(cache.varGap.toFixed(4)),

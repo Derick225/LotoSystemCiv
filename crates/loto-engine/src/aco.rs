@@ -160,15 +160,19 @@ pub fn run_aco_optimization_wasm(
     let mut global_best_path = [1i32, 2, 3, 4, 5];
     let mut global_best_score = f64::NEG_INFINITY;
 
-    let mut adaptive_rho = rho.clamp(0.01, 0.95);
-    let mut adaptive_xi = (normalized_entropy / 2.0).clamp(0.01, 0.9);
+    let domain_unit = 1.0 / (NUM_NODES as f64);
+    let ticket_ratio = (TICKET_SIZE as f64) / (NUM_NODES as f64);
+    let max_complement = 1.0 - ticket_ratio;
+
+    let mut adaptive_rho = rho.clamp(domain_unit, max_complement);
+    let mut adaptive_xi = (normalized_entropy / 2.0).clamp(domain_unit, 1.0 - domain_unit);
     let mut last_h_norm = 1.0 / E;
 
-    let eff_ants = ants_count.clamp(10, 200);
-    let eff_gens = generations.clamp(10, 250);
-    let eff_alpha = alpha.max(0.1);
-    let eff_beta = beta.max(0.1);
-    let eff_q0 = q0.clamp(0.05, 0.95);
+    let eff_ants = ants_count.clamp(TICKET_SIZE * 2, NUM_NODES * 2);
+    let eff_gens = generations.clamp(TICKET_SIZE * 2, NUM_NODES * 3);
+    let eff_alpha = alpha.max(ticket_ratio);
+    let eff_beta = beta.max(ticket_ratio);
+    let eff_q0 = q0.clamp(ticket_ratio, max_complement);
 
     let mut node_visits = [0.0f64; MATRIX_DIM];
     let mut cand_nodes = [0usize; NUM_NODES];

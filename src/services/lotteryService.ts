@@ -344,7 +344,10 @@ export const syncHistoryToRustStore = (draws: DrawResult[], targetDrawName?: str
     }
     lastSyncedFingerprintByDraw.set(drawKey, fingerprint);
   } catch (err) {
-    console.warn('[lotteryService] Erreur synchronisation store Rust :', err);
+    logger.warn(
+      { drawName: targetDrawName ?? drawKey, error: err instanceof Error ? err.message : String(err) },
+      '[LotteryService] Erreur synchronisation store Rust',
+    );
   }
 };
 
@@ -460,7 +463,10 @@ export const lotteryService = {
             (e instanceof AppError && (e.code === 'NETWORK_TIMEOUT' || e.severity === 'low')) ||
             (e instanceof Error && (e.message.toLowerCase().includes('timeout') || e.message.toLowerCase().includes('fetch')));
           if (isTimeoutOrNetwork) {
-            console.warn(`[LotteryService] Requête distante Supabase non aboutie (${getErrorMessage(e)}). Bascule locale fluide.`);
+            logger.warn(
+              { drawName, error: getErrorMessage(e) },
+              '[LotteryService] Requête distante Supabase non aboutie, bascule locale fluide',
+            );
           } else {
             logError(e, { source: 'lotteryService.fetchHistory' });
           }
@@ -474,7 +480,10 @@ export const lotteryService = {
       }
 
       // ÉRADICATION TOTALE DES DONNÉES SIMULÉES : ZÉRO FAUX TIRAGE GÉNÉRÉ
-      console.warn(`[LotteryService] Aucun tirage réel disponible pour '${drawName}' (mode hors-ligne ou base non synchronisée). Aucune donnée simulée n'est générée.`);
+      logger.warn(
+        { drawName },
+        '[LotteryService] Aucun tirage réel disponible (mode hors-ligne ou base non synchronisée)',
+      );
       return [];
     })();
 
@@ -1231,7 +1240,10 @@ export const getDailySummary = async (day: string): Promise<DailySummaryItem[]> 
         return enrichDailySummaryWithExceptions(day, summaryResult);
       }
     } catch (err) {
-      console.warn('[getDailySummary] Batch fetch fallback:', err);
+      logger.warn(
+        { error: err instanceof Error ? err.message : String(err) },
+        '[LotteryService] Batch fetch fallback dans getDailySummary',
+      );
     }
   }
 
@@ -1462,7 +1474,10 @@ export const triggerAutomationForNewResults = async (drawName: string, date: str
        logger.debug(`[Autopsie] Enregistrement d'un nouveau tirage sans autopsie.`);
     }
   } catch (e) {
-    console.error("Local automation trigger failed:", e);
+    logger.error(
+      { error: e instanceof Error ? e.message : String(e) },
+      '[LotteryService] Échec du déclenchement d’automatisation locale',
+    );
   }
 };
 

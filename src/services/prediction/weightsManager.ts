@@ -1157,7 +1157,10 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
                   }
                 }
               } catch (parseErr) {
-                console.warn("[WeightsManager] Erreur parsing item prediction:", parseErr);
+                logger.warn(
+                  { key: k, error: parseErr instanceof Error ? parseErr.message : String(parseErr) },
+                  "[WeightsManager] Erreur parsing item prediction",
+                );
               }
             }
           }
@@ -1166,7 +1169,10 @@ export const applyMetaLearning = async (weights: AlgoWeights, history: DrawResul
           }
         }
       } catch (indexErr) {
-        console.warn("[WeightsManager] Erreur reconstruction index feedback:", indexErr);
+        logger.warn(
+          { error: indexErr instanceof Error ? indexErr.message : String(indexErr) },
+          "[WeightsManager] Erreur reconstruction index feedback",
+        );
       }
 
       // Simulation chronologique stricte (du plus ancien au plus récent)

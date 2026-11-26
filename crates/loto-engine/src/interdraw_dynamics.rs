@@ -224,8 +224,10 @@ pub fn compute_domino_advection_wasm(
     damping_gamma: f64,
 ) -> WasmDominoResult {
     let mut domino_energies = vec![0.0f64; 91];
-    let win_cols = 5;
-    let gamma = damping_gamma.max(0.05).min(2.0);
+    let win_cols: usize = 5;
+    let domain_min_gamma = (win_cols as f64) / 90.0;
+    let domain_max_gamma = (90.0f64 / (win_cols as f64)).ln();
+    let gamma = damping_gamma.clamp(domain_min_gamma, domain_max_gamma);
 
     let max_draws = draws_count.min(history_flat.len() / win_cols);
     if max_draws == 0 {

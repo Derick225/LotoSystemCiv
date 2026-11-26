@@ -439,7 +439,7 @@ export const analyzeForManipulation = (
       },
     },
     indicators: indicators.sort((a, b) => b.impact - a.impact),
-    entropyCollapse: entropy.normalized < 0.85,
+    entropyCollapse: indicators.some((ind) => ind.type === "ENTROPY"),
     benfordCompliance: benford.score,
     evidenceLogs: logs,
     executionMs: performance.now() - startTime,

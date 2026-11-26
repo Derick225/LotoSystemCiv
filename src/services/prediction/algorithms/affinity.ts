@@ -245,9 +245,14 @@ export const affinityPlugin: AlgorithmPlugin = {
     const zScore = (rawScore - median) / iqr;
     const score = 100.0 / (1.0 + Math.exp(-2.0 * zScore));
 
+    const n = ctx.history.length;
+    const domainCycle = 90.0 / 5.0; // 18 tirages = 1 cycle uniforme complet
+    const confidence =
+      n > 0 ? Math.min(1.0 - 1.0 / 90.0, n / (n + domainCycle)) : 0.0;
+
     return {
       score: Math.max(0.0, Math.min(100.0, score)),
-      confidence: 0.85,
+      confidence: Number(confidence.toFixed(4)),
       metadata: { rawScore, zScore }
     };
   }

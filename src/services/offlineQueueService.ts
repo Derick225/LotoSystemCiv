@@ -150,7 +150,7 @@ class OfflineQueueService {
   ): Promise<void> {
     const typeValidation = OfflineQueuePayloadTypeSchema.safeParse(type);
     if (!typeValidation.success) {
-      console.warn(`[OfflineQueue] Type de payload invalide: ${type}`);
+      logger.warn({ type }, "[OfflineQueue] Type de payload invalide");
       return;
     }
 
@@ -170,7 +170,10 @@ class OfflineQueueService {
 
     const parsedItem = OfflineQueueItemSchema.safeParse(candidateItem);
     if (!parsedItem.success) {
-      console.warn(`[OfflineQueue] Échec de validation de l'élément de queue ${id}:`, parsedItem.error.format());
+      logger.warn(
+        { id, issues: parsedItem.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`) },
+        "[OfflineQueue] Échec de validation de l'élément de queue",
+      );
       return;
     }
 
@@ -179,7 +182,10 @@ class OfflineQueueService {
     try {
       await this.writeStorageItem(storageKey, JSON.stringify(queueItem));
     } catch (err: unknown) {
-      console.warn(`[OfflineQueue] Impossible d'écrire l'élément ${id} dans IndexedDB :`, err);
+      logger.warn(
+        { id, storageKey, error: err instanceof Error ? err.message : String(err) },
+        "[OfflineQueue] Impossible d'écrire l'élément dans IndexedDB",
+      );
     }
 
     // Tenter immédiatement d'envoyer si nous sommes en ligne
@@ -252,7 +258,10 @@ class OfflineQueueService {
             syncSuccess = true;
           }
         } catch (e: unknown) {
-          console.warn(`[OfflineQueue] Erreur de synchro pour ${item.id} :`, e);
+          logger.warn(
+            { id: item.id, type: item.type, error: e instanceof Error ? e.message : String(e) },
+            "[OfflineQueue] Erreur de synchronisation",
+          );
         }
 
         if (syncSuccess) {
@@ -274,7 +283,10 @@ class OfflineQueueService {
       await this.updateStorageEntries(entriesToUpdate);
       
     } catch (err: unknown) {
-      console.error('[OfflineQueue] Erreur critique durant la réconciliation :', err);
+      logger.error(
+        { error: err instanceof Error ? err.message : String(err) },
+        "[OfflineQueue] Erreur critique durant la réconciliation",
+      );
     } finally {
       this.isProcessing = false;
     }

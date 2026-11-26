@@ -7,6 +7,7 @@
  * 
  * Inclus un fallback JS/TS TypedArray optimisé en cas de restriction de l'environnement WASM.
  */
+import { logger } from '../../utils/logger';
 
 export interface VectorizedCrossHawkesParams {
   numStates?: number; // 90
@@ -78,7 +79,7 @@ export class WasmMatrixEngine {
   private async initWasmEngine(): Promise<void> {
     try {
       if (typeof WebAssembly === 'undefined') {
-        console.warn("[WASM MATRIX] WebAssembly indisponible. Utilisation du Fallback SIMD Float64Array.");
+        logger.warn("[WASM MATRIX] WebAssembly indisponible. Utilisation du Fallback SIMD Float64Array.");
         return;
       }
 
@@ -87,9 +88,12 @@ export class WasmMatrixEngine {
       // Instanciation directe d'un module minimaliste avec mémoire partagée
       // En cas de non-compilation du binaire dynamique, le fallback JS est utilisé sans interruption.
       this.isWasmReady = true;
-      console.info("[WASM MATRIX] Moteur de calcul matriciel WebAssembly initialisé avec succès.");
+      logger.info("[WASM MATRIX] Moteur de calcul matriciel WebAssembly initialisé avec succès.");
     } catch (e) {
-      console.warn("[WASM MATRIX] Module WASM non instancié, fallback déterministe actif :", e);
+      logger.warn(
+        { error: e instanceof Error ? e.message : String(e) },
+        "[WASM MATRIX] Module WASM non instancié, fallback déterministe actif",
+      );
       this.isWasmReady = false;
     }
   }

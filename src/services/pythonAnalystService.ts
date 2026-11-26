@@ -787,12 +787,45 @@ with pm.Model() as model:
         }
 
         // 2. Construction de la Matrice de Gram Mercer Composée K = w1*K_RBF + w2*K_Matern + w3*K_Hawkes
-        const rbfSigma = 0.45;
-        const maternLength = 0.55;
-        const hawkesBeta = 0.85;
+        // Échelles dérivées de la dispersion empirique des caractéristiques et de l'intensité de Hawkes
         const N = 90;
+        let sumFeatDistSq = 0;
+        let pairCount = 0;
+        let meanHawkes = 0;
+        for (let i = 0; i < N; i++) {
+            meanHawkes += featureMatrix[i].hawkes / N;
+        }
+        let varHawkes = 0;
+        for (let i = 0; i < N; i++) {
+            varHawkes += Math.pow(featureMatrix[i].hawkes - meanHawkes, 2) / N;
+            for (let j = i + 1; j < N; j++) {
+                const xi = featureMatrix[i].x;
+                const xj = featureMatrix[j].x;
+                let d2 = 0;
+                for (let k = 0; k < xi.length; k++) {
+                    d2 += Math.pow(xi[k] - xj[k], 2);
+                }
+                sumFeatDistSq += d2;
+                pairCount++;
+            }
+        }
+        const rmsFeatureDist = Math.sqrt(sumFeatDistSq / Math.max(1, pairCount));
+        const rbfSigma = Math.max(1e-3, rmsFeatureDist);
+        const maternLength = Math.max(1e-3, rmsFeatureDist * Math.SQRT2);
+        const hawkesStd = Math.sqrt(Math.max(1e-8, varHawkes));
+        const hawkesBeta = 1.0 / Math.max(1e-3, hawkesStd);
+
         const gramMatrix: number[][] = Array.from({ length: N }, () => new Array(N).fill(0));
         let sumGram = 0;
+
+        // Pondération convexe normalisée par la précision (1 / échelle) de chaque noyau
+        const pRbf = 1.0 / rbfSigma;
+        const pMatern = 1.0 / maternLength;
+        const pHawkes = 1.0 / Math.max(1e-3, 1.0 / hawkesBeta);
+        const pTotal = pRbf + pMatern + pHawkes;
+        const wRbf = pRbf / pTotal;
+        const wMatern = pMatern / pTotal;
+        const wHawkes = pHawkes / pTotal;
 
         for (let i = 0; i < N; i++) {
             for (let j = 0; j < N; j++) {
@@ -817,7 +850,7 @@ with pm.Model() as model:
                 const kHawkes = Math.exp(-hawkesBeta * Math.abs(featureMatrix[i].hawkes - featureMatrix[j].hawkes));
 
                 // Superposition convexe continue
-                const kComposite = 0.40 * kRBF + 0.35 * kMatern + 0.25 * kHawkes;
+                const kComposite = wRbf * kRBF + wMatern * kMatern + wHawkes * kHawkes;
                 gramMatrix[i][j] = kComposite;
                 sumGram += kComposite;
             }

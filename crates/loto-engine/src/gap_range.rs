@@ -692,7 +692,7 @@ fn analyze_chronological_core(
         if !raw_dists.is_empty() {
             let mut sorted_c: Vec<f64> = raw_dists.iter().map(|x| x.3).collect();
             sorted_c.sort_by(|a, b| a.total_cmp(b));
-            w1_bandwidth = sorted_c[sorted_c.len() / 2].max(0.05);
+            w1_bandwidth = sorted_c[sorted_c.len() / 2].max(P_SINGLE);
 
             for (idx_t, w1_d, dna_d, _) in raw_dists {
                 let w1_sim = (-w1_d / w1_bandwidth).exp();

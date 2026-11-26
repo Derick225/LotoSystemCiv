@@ -9,7 +9,11 @@ import {
 } from "../types";
 import { globalCache, CACHE_TTL } from "./cache/CacheService";
 import { parseDateSafely } from "../utils/dateUtils";
-import { healForensicReport } from "./postPredictionAnalysisService";
+import { logger } from "../utils/logger";
+import {
+  healForensicReport,
+  validateAndSanitizeForensicReportMiddleware,
+} from "./postPredictionAnalysisService";
 
 export const CONDENSED_INDEX_PREFIX = "nexus_forensic_index_";
 export const DETAILED_PAYLOAD_PREFIX = "nexus_forensic_detail_";
@@ -211,7 +215,10 @@ export const getCondensedForensicReports = async (drawName?: string): Promise<Co
       }
     }
   } catch (err) {
-    console.warn("[StorageOptimizer] Erreur lecture rapports condensés:", err);
+    logger.warn(
+      { error: err instanceof Error ? err.message : String(err) },
+      "[StorageOptimizer] Erreur lecture rapports condensés",
+    );
   }
 
   return list.sort((a, b) => parseDateSafely(b.date).getTime() - parseDateSafely(a.date).getTime());
@@ -238,22 +245,31 @@ export const getFullForensicReportById = async (id: string): Promise<ForensicRep
       return reassembleFullReport(indexHeader, detailPayload);
     }
 
-    // 3. Fallback direct sur l'ancien format unifié `nexus_forensic_report_` ou `forensic_report_`
-    const legacyUnified = await get(`nexus_forensic_report_${id}`);
+    // 3. Fallback direct via middleware de validation sur l'ancien format unifié
+    const legacyUnifiedKey = `nexus_forensic_report_${id}`;
+    const legacyUnified = await get(legacyUnifiedKey);
     if (legacyUnified) {
-      const parsed = typeof legacyUnified === 'string' ? JSON.parse(legacyUnified) : legacyUnified;
-      const unwrapped = (parsed && parsed.data) ? parsed.data : parsed;
-      return healForensicReport(unwrapped as ForensicReport);
+      const checked = validateAndSanitizeForensicReportMiddleware(legacyUnified, {
+        source: "globalCache:nexus_forensic_report",
+        storageKey: legacyUnifiedKey,
+      });
+      if (checked.valid && checked.report) return checked.report;
     }
 
-    const legacyOld = await get(`${FORENSIC_LEGACY_PREFIX}${id}`);
+    const legacyOldKey = `${FORENSIC_LEGACY_PREFIX}${id}`;
+    const legacyOld = await get(legacyOldKey);
     if (legacyOld) {
-      const parsed = typeof legacyOld === 'string' ? JSON.parse(legacyOld) : legacyOld;
-      const unwrapped = (parsed && parsed.data) ? parsed.data : parsed;
-      return healForensicReport(unwrapped as ForensicReport);
+      const checked = validateAndSanitizeForensicReportMiddleware(legacyOld, {
+        source: "idb:forensic_report_legacy",
+        storageKey: legacyOldKey,
+      });
+      if (checked.valid && checked.report) return checked.report;
     }
   } catch (err) {
-    console.error("[StorageOptimizer] Erreur lazy-loading rapport complet:", err);
+    logger.error(
+      { reportId: id, error: err instanceof Error ? err.message : String(err) },
+      "[StorageOptimizer] Erreur lazy-loading rapport complet",
+    );
   }
   return null;
 };

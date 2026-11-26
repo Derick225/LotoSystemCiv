@@ -132,7 +132,9 @@ pub fn domino_transition_profile(
 /// Plus le portefeuille tente de couvrir le pool, plus la répulsion s'intensifie.
 pub fn repulsion_gamma(k_tickets: usize) -> f64 {
     let selection_pressure = (k_tickets * NUMBERS_PER_DRAW) as f64 / TOTAL_NUMBERS as f64;
-    selection_pressure.clamp(0.05, 0.98)
+    let min_pressure = (NUMBERS_PER_DRAW as f64) / (TOTAL_NUMBERS as f64); // 5/90 = fraction d'un ticket
+    let max_pressure = ((TOTAL_NUMBERS - 1) as f64) / (TOTAL_NUMBERS as f64); // 89/90 < 1
+    selection_pressure.clamp(min_pressure, max_pressure)
 }
 
 /// Poids du canal domino pour le score de base (remplace la constante fixe)

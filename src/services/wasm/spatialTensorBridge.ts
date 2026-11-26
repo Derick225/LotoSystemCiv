@@ -162,7 +162,6 @@ export function computeSpatialGridHpc(
       return out;
     } catch (e) {
       recordWasmFallback('compute_spatial_grid_hpc', e);
-      console.warn('[LOTO-ENGINE] WASM compute_spatial_grid_hpc error, using fallback :', e);
     }
   }
 

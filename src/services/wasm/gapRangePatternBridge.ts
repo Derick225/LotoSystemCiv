@@ -899,7 +899,6 @@ export function computeGapRangeAnalysisHpc(
       return out;
     } catch (e) {
       recordWasmFallback('compute_gap_range_analysis_wasm', e);
-      console.warn('[LOTO-ENGINE] WASM compute_gap_range_analysis_wasm error, using fallback :', e);
     }
   }
 
@@ -944,7 +943,6 @@ export function computeGapRangeWalkForwardHpc(
       return out;
     } catch (e) {
       recordWasmFallback('compute_gap_range_walk_forward_wasm', e);
-      console.warn('[LOTO-ENGINE] WASM compute_gap_range_walk_forward_wasm error, using fallback :', e);
     }
   }
 
@@ -1135,7 +1133,6 @@ export function mineCyclePatternsHpc(
       return out;
     } catch (e) {
       recordWasmFallback('mine_cycle_patterns_wasm', e);
-      console.warn('[LOTO-ENGINE] WASM mine_cycle_patterns_wasm error, using fallback :', e);
     }
   }
 

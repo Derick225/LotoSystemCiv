@@ -558,7 +558,10 @@ export const saveForensicReport = async (report: ForensicReport) => {
       const { saveCompressedForensicReport } = await import("../storageOptimizationService");
       await saveCompressedForensicReport(cleanReport);
     } catch (compErr) {
-      console.warn("Compressed forensic report save warning:", compErr);
+      logger.warn(
+        { reportId: cleanReport.id, error: compErr instanceof Error ? compErr.message : String(compErr) },
+        "[ForensicStorage] Avertissement sauvegarde compressée",
+      );
     }
 
     // Dynamic Pruning: keep local DB clean and high-performing by keeping max 200 recent reports
@@ -573,7 +576,10 @@ export const saveForensicReport = async (report: ForensicReport) => {
         }
       }
     } catch (pruneErr) {
-      console.warn("Forensic reports pruning failed", pruneErr);
+      logger.warn(
+        { reportId: cleanReport.id, error: pruneErr instanceof Error ? pruneErr.message : String(pruneErr) },
+        "[ForensicStorage] Échec de l'élagage des rapports forensic",
+      );
     }
   } catch (e: unknown) {
     logError(
@@ -835,7 +841,10 @@ export const markAutopsyDismissed = async (predictionId: string): Promise<void> 
     const { set: idbSet } = await import("idb-keyval");
     await idbSet(`${DISMISSED_AUTOPSY_PREFIX}${predictionId}`, true);
   } catch (e) {
-    console.warn("[Forensic] Impossible d'enregistrer l'exclusion d'autopsie:", e);
+    logger.warn(
+      { predictionId, error: e instanceof Error ? e.message : String(e) },
+      "[ForensicStorage] Impossible d'enregistrer l'exclusion d'autopsie",
+    );
   }
 };
 
