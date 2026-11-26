@@ -7,6 +7,9 @@
  */
 
 export {
+  validateAndSanitizeForensicReportMiddleware,
+  getForensicValidationLogs,
+  clearForensicValidationLogs,
   getForensicReportByPredictionId,
   getForensicReportById,
   saveForensicReport,
@@ -17,6 +20,11 @@ export {
   getDismissedAutopsyPredictionIds,
   deleteForensicReportLocal,
   deleteMultipleForensicReportsLocal,
+  type ForensicStorageSource,
+  type ForensicValidationAction,
+  type ForensicInconsistencyRecord,
+  type ForensicMiddlewareContext,
+  type ForensicMiddlewareResult,
 } from "./forensic/forensicStorageService";
 
 export {
