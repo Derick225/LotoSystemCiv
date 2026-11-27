@@ -60,9 +60,10 @@ pub fn compute_robust_hurst_wasm(signal: &[f64]) -> f64 {
         1.0
     };
 
-    // Estimation adaptative continue des échelles minimales et maximales
-    let min_win = 4usize.max((4.0 * (-0.15 * local_vol).exp()).floor() as usize);
-    let max_win = (n / 2).min((min_win + 2).max((n as f64 * 0.75 * (1.0 + 0.2 * local_vol).tanh()).floor() as usize));
+    // Estimation adaptative continue des échelles minimales et maximales (ln(N) .. N/2)
+    let min_win = 4usize.max((n as f64).ln().floor() as usize);
+    let vol_ratio = (1.0 - (-local_vol).exp()).max(0.5);
+    let max_win = (n / 2).min((min_win + 2).max(((n as f64 / 2.0) * vol_ratio).floor() as usize));
 
     let num_scales = 5;
     let mut window_sizes: Vec<usize> = Vec::with_capacity(num_scales);
@@ -143,7 +144,8 @@ pub fn compute_robust_hurst_wasm(signal: &[f64]) -> f64 {
 
     if den.abs() > 1e-12 {
         let hurst = num / den;
-        hurst.max(0.01).min(0.99)
+        let eps = 1.0 / (n as f64).max(10.0);
+        hurst.clamp(eps, 1.0 - eps)
     } else {
         0.5
     }

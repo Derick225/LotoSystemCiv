@@ -72,10 +72,18 @@ fn compute_oof_scores(training: &[crate::in_memory_store::CompactDraw]) -> [f64;
         }
     }
 
+    // Prior de Jeffreys non-informatif Beta(1/2, 1/2)
+    let jeffreys_prior = 0.5;
     let total_balls = (n_train * NUMBERS_PER_DRAW) as f64;
     let mut pred = [0.0f64; TOTAL_NUMBERS + 1];
     for n in 1..=TOTAL_NUMBERS {
-        pred[n] = crate::scoring::compute_bayesian_poisson_score(freqs[n], gaps[n], total_balls, 0.5, 0.5);
+        pred[n] = crate::scoring::compute_bayesian_poisson_score(
+            freqs[n],
+            gaps[n],
+            total_balls,
+            jeffreys_prior,
+            jeffreys_prior,
+        );
     }
     crate::scoring::project_to_marginal_simplex(&mut pred, NUMBERS_PER_DRAW as f64);
     pred
@@ -230,14 +238,19 @@ fn evaluate_wf_impl(
     let brier_skill_score = (1.0 - (mean_brier / UNIFORM_BRIER_REFERENCE)).clamp(-1.0, 1.0);
 
     // Estimation différentiable des paramètres de Platt (alpha, beta) — TUNING uniquement
+    let domain_slope_bound = (TOTAL_NUMBERS as f64 / NUMBERS_PER_DRAW as f64).sqrt();
     let (platt_alpha, platt_beta) = if total_pairs > 10 {
         let n_f = total_pairs as f64;
         let mean_x = sum_raw_score / n_f;
         let mean_y = sum_target / n_f;
         let cov_xy = sum_prod - n_f * mean_x * mean_y;
         let var_x = sum_raw_sq - n_f * mean_x * mean_x;
-        let alpha = if var_x > 1e-9 { (cov_xy / var_x).clamp(0.5, 3.0) } else { 1.0 };
-        let beta = (mean_y - alpha * mean_x).clamp(-2.0, 2.0);
+        let alpha = if var_x > 1e-9 {
+            (cov_xy / var_x).clamp(1.0 / domain_slope_bound, domain_slope_bound)
+        } else {
+            1.0
+        };
+        let beta = (mean_y - alpha * mean_x).clamp(-1.0, 1.0);
         (alpha, beta)
     } else {
         (1.0, 0.0)
@@ -302,16 +315,19 @@ fn evaluate_wf_impl(
     }
     let (bss_mean, bss_std) = validation::block_stats(&bss_samples);
 
-    // Indice de fiabilité empirique continue sur [0, 100]
+    // Indice de fiabilité empirique continue sur (0, 100) : moyenne centrée du BSS et du lift top-5
     let base_skill = (brier_skill_score * 50.0) + 50.0;
-    let reliability = (base_skill * 0.7 + mean_hits * 30.0).clamp(10.0, 98.0);
+    let hit_skill = 100.0 / (1.0 + (-(lift_vs_random - 1.0)).exp());
+    let eps_pct = 100.0 / (TOTAL_NUMBERS as f64);
+    let reliability = (0.5 * base_skill + 0.5 * hit_skill).clamp(eps_pct, 100.0 - eps_pct);
 
-    // Classification continue dérivée de l'erreur type de l'échantillon (zéro seuil magique fixe)
-    let bss_se = 1.0 / ((num_samples as f64).sqrt() * (TOTAL_NUMBERS as f64).sqrt()).max(1e-4);
-    let p_high = 1.0 / (1.0 + (-10.0 * (brier_skill_score - 2.0 * bss_se)).exp());
-    let p_mid = 1.0 / (1.0 + (-10.0 * (brier_skill_score - bss_se)).exp());
+    // Classification continue standardisée par l'erreur type de l'échantillon (Z_BSS = BSS / SE)
+    let bss_se = (1.0 / ((num_samples as f64).sqrt() * (TOTAL_NUMBERS as f64).sqrt())).max(1e-4);
+    let z_bss = brier_skill_score / bss_se;
+    let p_high = 1.0 / (1.0 + (-(z_bss - 2.0)).exp());
+    let p_mid = 1.0 / (1.0 + (-(z_bss - 1.0)).exp());
 
-    let quality_label = if p_high > 0.6 {
+    let quality_label = if p_high > 0.5 {
         "HAUTE_CALIBRATION_EMPIRIQUE".to_string()
     } else if p_mid > 0.5 {
         "CALIBRATION_STOCHASTIQUE_STABLE".to_string()

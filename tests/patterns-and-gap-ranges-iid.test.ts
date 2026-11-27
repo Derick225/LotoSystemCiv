@@ -234,6 +234,11 @@ describe('Audit i.i.d. : Tranches d’Écarts & Motifs Répétitifs', () => {
       expect(detectedTriplet).toBeDefined();
       expect(detectedTriplet?.zScore).toBeGreaterThan(2.0);
       expect(detectedTriplet?.hasEmpiricalProof).toBe(true);
+      expect(typeof detectedTriplet?.ebCredibility).toBe('number');
+      expect(detectedTriplet?.ebCredibility).toBeGreaterThanOrEqual(0.5);
+      expect(detectedTriplet?.ebCredibility).toBeLessThanOrEqual(1);
+      expect(typeof detectedTriplet?.qValue).toBe('number');
+      expect(detectedTriplet?.qValue).toBeLessThanOrEqual(0.05);
 
       // La confiance de sélection doit être significativement supérieure au bruit pur (>= 45%)
       expect(signalSummary.recommendedSelection).toBeDefined();

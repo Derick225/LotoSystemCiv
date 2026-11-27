@@ -152,10 +152,12 @@ pub fn analyze_draw_timeline(timeline: &DrawTimeline) -> PriorAnalysisReport {
     let thermal_volatility = ((gap_variance / (TOTAL_NUMBERS as f64)).sqrt() / expected_gap).clamp(0.0, 3.0);
 
     // 4. Classification continue C^∞ du régime dynamique via sigmoïdes logistiques
-    // Éradication stricte des portes d'activation brusques H > 0.55 / H < 0.45 (AGENTS.md)
-    let p_persistent = 1.0 / (1.0 + (-12.0 * (hurst - 0.52)).exp());
-    let p_mean_reverting = 1.0 / (1.0 + (12.0 * (hurst - 0.48)).exp());
-    let p_diffusion = (1.0 - (p_persistent + p_mean_reverting - 1.0).abs()).max(0.0);
+    // Centrée sur l'espérance brownienne H0 = 0.5 avec échelle d'erreur type 1/sqrt(T)
+    let hurst_se = (1.0 / (sample_size as f64).sqrt()).clamp(1e-3, 0.25);
+    let z_hurst = (hurst - 0.5) / hurst_se;
+    let p_persistent = 1.0 / (1.0 + (-(z_hurst - 1.0)).exp());
+    let p_mean_reverting = 1.0 / (1.0 + (z_hurst + 1.0).exp());
+    let p_diffusion = (1.0 - p_persistent - p_mean_reverting).max(0.0);
 
     let regime_label = if p_persistent > p_diffusion && p_persistent > p_mean_reverting {
         "PERSISTENT_ATTRACTOR".to_string()
@@ -320,7 +322,8 @@ pub fn generate_multi_ticket_portfolio(
                 }
             }
         }
-        base_scores[n] = (base + w_h * hurst_signal[n] + domino_boost).max(0.001);
+        let domain_floor = 1.0 / ((TOTAL_NUMBERS as f64) * (TOTAL_NUMBERS as f64));
+        base_scores[n] = (base + w_h * hurst_signal[n] + domino_boost).max(domain_floor);
     }
 
     // 3. Calibration de Platt appliquée aux scores bruts (régression OOF), puis simplexe strict

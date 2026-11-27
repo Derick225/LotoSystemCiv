@@ -306,6 +306,12 @@ export const DnaGeneSequencerPanel: React.FC<{
 
   const { sequenceMetrics, sourcesUsed, regimeContext, codons, epistaticCouplings, auditTrail } = result;
   const provenGenesCount = result.geneSequence.filter((g) => g.hasEmpiricalProof).length;
+  const meanEbCredPct =
+    result.geneSequence.length > 0
+      ? (result.geneSequence.reduce((s, g) => s + (g.ebCredibility ?? (g.hasEmpiricalProof ? 1 : 0)), 0) /
+          result.geneSequence.length) *
+        100
+      : 0;
 
   return (
     <div className="space-y-6">
@@ -385,11 +391,11 @@ export const DnaGeneSequencerPanel: React.FC<{
           </div>
 
           <div className="p-4 bg-slate-950/60 border border-slate-800/80 rounded-xl space-y-1">
-            <div className="text-xs text-slate-400 font-medium">Preuve Rang WY max-T &amp; Diversité</div>
+            <div className="text-xs text-slate-400 font-medium">Crédibilité EB &amp; Preuve WY max-T</div>
             <div className="text-2xl font-mono font-bold text-white tabular-nums">
-              {provenGenesCount}
+              {meanEbCredPct.toFixed(1)}
               <span className="text-xs text-slate-400 font-normal ml-1.5">
-                / {result.geneSequence.length} prouvés
+                % ({provenGenesCount}/{result.geneSequence.length} WY)
               </span>
             </div>
             <div className="text-xs font-mono text-emerald-400 tabular-nums">
@@ -801,15 +807,20 @@ export const DnaGeneSequencerPanel: React.FC<{
                       {(node.epistaticSynergy * 100).toFixed(1)}%
                     </td>
                     <td className="py-2.5 px-3 text-right font-mono tabular-nums whitespace-nowrap">
-                      {node.hasEmpiricalProof ? (
-                        <span className="text-emerald-400 font-semibold">
-                          ✓ Z={node.proofZScore.toFixed(2)} (q={node.qValue.toFixed(3)})
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">
-                          EB Rétréci (Z={node.proofZScore.toFixed(2)})
-                        </span>
-                      )}
+                      {(() => {
+                        const credPct = (node.ebCredibility ?? (node.hasEmpiricalProof ? 1 : 0)) * 100;
+                        const tone =
+                          credPct >= 50
+                            ? "text-emerald-400 font-semibold"
+                            : credPct > 0
+                              ? "text-cyan-400"
+                              : "text-slate-500";
+                        return (
+                          <span className={tone}>
+                            EB {credPct.toFixed(0)}% · Z={node.proofZScore.toFixed(2)} (q={node.qValue.toFixed(3)})
+                          </span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 );

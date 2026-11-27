@@ -586,6 +586,40 @@ describe('dnaGeneSequenceService (EpiGenome-SQ)', () => {
       expect(prof.meanBrierEpigenome).toBeLessThanOrEqual(1);
     }
   });
+
+  it('expose ebCredibility continu sur chaque DnaGeneNode et aligne expressionState sans dépendre du verrou binaire hasProof', () => {
+    const drawName = 'NATIONAL';
+    const history = makeDeterministicHistory(drawName, 25);
+    const weights = getDefaultWeights();
+    const proofMap = buildProofMap([AlgoKey.BAYES]);
+    // Preuve continue forte (ebCredibility >= 0.5) même si le drapeau binaire hérité hasProof est false
+    proofMap[AlgoKey.SPECTRAL] = {
+      hasProof: false,
+      proofScore: 3.1,
+      empiricalHitRate: 0.082,
+      baselineRate: 5 / 90,
+      confidence: 0.99,
+      pValue: 0.001,
+      qValue: 0.01,
+    };
+
+    const res = synthesizeDnaGeneSequenceAndWeights({
+      drawName,
+      history,
+      currentWeights: weights,
+      proofMapOverride: proofMap,
+    });
+
+    const bayesNode = res.geneSequence.find((g) => g.key === AlgoKey.BAYES);
+    const spectralNode = res.geneSequence.find((g) => g.key === AlgoKey.SPECTRAL);
+    const freqNode = res.geneSequence.find((g) => g.key === AlgoKey.FREQUENCY);
+
+    expect(bayesNode).toBeDefined();
+    expect(spectralNode).toBeDefined();
+    expect(freqNode).toBeDefined();
+    expect(bayesNode!.ebCredibility).toBeGreaterThan(0.5);
+    expect(spectralNode!.ebCredibility).toBeGreaterThan(0.5);
+    expect(freqNode!.ebCredibility).toBe(0);
+    expect(spectralNode!.rationale).toContain('Crédibilité EB');
+  });
 });
-
-

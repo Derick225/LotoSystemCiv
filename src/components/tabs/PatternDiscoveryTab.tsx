@@ -841,15 +841,25 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                       {pat.type.replace('_', ' ')}
                     </span>
                     {getDriverBadge(pat)}
-                    {pat.hasEmpiricalProof ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <ShieldCheck size={11} /> Z = +{pat.zScore}
-                      </span>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400">
-                        Z = {pat.zScore}
-                      </span>
-                    )}
+                    {(() => {
+                      const ebPct = (pat.ebCredibility ?? (pat.hasEmpiricalProof ? 1 : 0)) * 100;
+                      const qText = pat.qValue !== undefined ? ` · q=${pat.qValue.toFixed(3)}` : '';
+                      const tone =
+                        ebPct >= 50
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25'
+                          : ebPct > 0
+                            ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20'
+                            : 'bg-slate-800/80 text-slate-400 border-slate-700/60';
+                      return (
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-mono tabular-nums font-bold ${tone}`}
+                        >
+                          {ebPct >= 50 && <ShieldCheck size={11} />}
+                          EB {ebPct.toFixed(1)}% · Z = {pat.zScore >= 0 ? `+${pat.zScore}` : pat.zScore}
+                          {qText}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   {getPhaseBadge(pat.cyclePhasePreference)}
@@ -1078,8 +1088,15 @@ export const PatternDiscoveryTab: React.FC<PatternDiscoveryTabProps> = ({ drawNa
                 </strong>
               </div>
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <span className="text-slate-400 block text-[10px] uppercase">Preuve Statistique Z</span>
-                <strong className="text-amber-400 text-sm">Z = {selectedPattern.zScore}</strong>
+                <span className="text-slate-400 block text-[10px] uppercase">Crédibilité EB &amp; Preuve Z</span>
+                <strong className="text-amber-400 text-sm font-mono tabular-nums">
+                  {((selectedPattern.ebCredibility ?? (selectedPattern.hasEmpiricalProof ? 1 : 0)) * 100).toFixed(1)}% · Z = {selectedPattern.zScore}
+                </strong>
+                {selectedPattern.qValue !== undefined && (
+                  <span className="block text-[10px] font-mono tabular-nums text-slate-400 mt-0.5">
+                    q_BH = {selectedPattern.qValue.toFixed(4)}
+                  </span>
+                )}
               </div>
             </div>
 

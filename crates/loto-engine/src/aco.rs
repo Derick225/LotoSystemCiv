@@ -111,13 +111,14 @@ pub fn run_aco_optimization_wasm(
         }
     }
     let max_entropy = (NUM_NODES as f64).ln() / LN_2;
-    let normalized_entropy = (h_shannon / max_entropy).clamp(0.01, 0.99);
+    let entropy_eps = 1.0 / (NUM_NODES as f64);
+    let normalized_entropy = (h_shannon / max_entropy).clamp(entropy_eps, 1.0 - entropy_eps);
 
     // 2. Initialisation de la matrice heuristique (eta) par co-occurrence pondérée exponentiellement
     let base_eta = 1.0 / (NUM_NODES as f64);
     let mut eta = vec![base_eta; MATRIX_DIM * MATRIX_DIM];
     let eval_horizon = actual_draws.min(100);
-    let decay_rate = 1.0 / ((eval_horizon as f64).sqrt().max(5.0));
+    let decay_rate = 1.0 / ((eval_horizon as f64).sqrt().max(TICKET_SIZE as f64));
 
     for d in 0..eval_horizon {
         let recency_weight = (-decay_rate * (d as f64)).exp();
@@ -298,11 +299,32 @@ pub fn run_aco_optimization_wasm(
         }
     }
 
-    let expected_base =
-        ((TICKET_SIZE * (TICKET_SIZE - 1)) as f64 / 2.0) * (tau0 * 0.5f64.powf(eff_beta));
-    let score_ratio = global_best_score / expected_base.max(1e-9);
-    let conf_sig = 1.0 / (1.0 + (-0.1 * (score_ratio - 1.0)).exp());
-    let confidence = (conf_sig * 100.0).round().clamp(1.0, 99.0);
+    // Standardisation Z exacte du score ACO par la moyenne et l'écart-type des arêtes hors-diagonale de eta
+    let num_pairs = (TICKET_SIZE * (TICKET_SIZE - 1)) as f64 / 2.0;
+    let mut eta_sum = 0.0f64;
+    let mut eta_sq_sum = 0.0f64;
+    let mut eta_edges = 0.0f64;
+    for u in 1..=NUM_NODES {
+        for v in (u + 1)..=NUM_NODES {
+            let val = eta[get_idx(u, v)];
+            eta_sum += val;
+            eta_sq_sum += val * val;
+            eta_edges += 1.0;
+        }
+    }
+    let mean_eta = if eta_edges > 0.0 { eta_sum / eta_edges } else { base_eta };
+    let var_eta = if eta_edges > 1.0 {
+        (eta_sq_sum / eta_edges - mean_eta * mean_eta).max(0.0)
+    } else {
+        0.0
+    };
+    let expected_base = num_pairs * mean_eta;
+    let expected_std = (num_pairs * var_eta).sqrt().max(1e-9);
+    let z_aco = (global_best_score - expected_base) / expected_std;
+    let conf_sig = 1.0 / (1.0 + (-z_aco).exp());
+    let min_pct = 100.0 * domain_unit;
+    let max_pct = 100.0 * (1.0 - domain_unit);
+    let confidence = (conf_sig * 100.0).round().clamp(min_pct.ceil(), max_pct.floor());
 
     AcoResultHpc {
         best_numbers: global_best_path.to_vec(),

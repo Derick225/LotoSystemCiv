@@ -3,7 +3,10 @@ import { DrawResult, AlgoWeights, ForensicReport } from "../../types";
 import { purifyHistoryForDraw } from "../../utils/arrayUtils";
 import { LABELS_MAP, ALGO_CATEGORIES } from "../../hooks/useAlgorithmSync";
 import { runSystematicDnaAudit } from "./dnaAuditService";
-import { evaluateAlgoEmpiricalProof } from "./weightsManager";
+import {
+  evaluateAlgoEmpiricalProof,
+  computeEmpiricalBayesProofCredibility,
+} from "./weightsManager";
 import { extractFeatures } from "./featureExtractor";
 import { computeAdvancedMetrics } from "./advancedMetricsCalculator";
 import { getAlgorithmsForContext, AlgorithmContext } from "./algorithmRegistry";
@@ -19,6 +22,8 @@ export interface SubAlgoCorrelationMetric {
   
   // Preuve empirique objective sur le tirage actif
   hasEmpiricalProof: boolean;
+  ebCredibility: number; // Crédibilité Empirical-Bayes continue [0, 1]
+  qValue: number; // Valeur q Westfall-Young [0, 1]
   proofScore: number;
   empiricalHitRate: number;
   baselineRate: number;
@@ -430,10 +435,10 @@ export async function computeSubAlgorithmDivergenceCorrelations(
       falsePositiveRate
     ) / 4.0;
 
-    // Activation logistique continue centrée sur 0.5
+    // Activation logistique continue centrée sur 0.5 avec pente canonique 2·e
     const toxicityIndex = Math.min(
       100,
-      Math.max(0, Math.round(100.0 / (1.0 + Math.exp(-6.0 * (normalizedComposite - 0.45)))))
+      Math.max(0, Math.round(100.0 / (1.0 + Math.exp(-2.0 * Math.E * (normalizedComposite - 0.5)))))
     );
     const reliabilityScore = 100 - toxicityIndex;
 
@@ -453,6 +458,8 @@ export async function computeSubAlgorithmDivergenceCorrelations(
     }
 
     const proof = proofMap[algoKey];
+    const ebCredibility = parseFloat(computeEmpiricalBayesProofCredibility(proof).toFixed(4));
+    const qValue = parseFloat((proof?.qValue ?? (proof?.hasProof ? 0 : 1)).toFixed(4));
 
     correlationMetrics.push({
       algoKey,
@@ -462,6 +469,8 @@ export async function computeSubAlgorithmDivergenceCorrelations(
       canonicalWeight,
       weightDriftDelta,
       hasEmpiricalProof: Boolean(proof?.hasProof),
+      ebCredibility,
+      qValue,
       proofScore: proof?.proofScore || 0,
       empiricalHitRate: proof?.empiricalHitRate || 0,
       baselineRate: proof?.baselineRate ?? 5 / 90,

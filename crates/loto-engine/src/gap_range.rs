@@ -310,7 +310,7 @@ fn analyze_chronological_core(
             model_weights: [0.2; 5],
             kl_m1: 0.0,
             kl_m2: 0.0,
-            wasserstein_bandwidth: 0.15,
+            wasserstein_bandwidth: P_SINGLE,
             ball_current_gaps: [0; TOTAL_NUMBERS + 1],
             ball_stouffer_z: [0.0; TOTAL_NUMBERS + 1],
             ball_stouffer_p: [0.5; TOTAL_NUMBERS + 1],
@@ -321,8 +321,8 @@ fn analyze_chronological_core(
             reserve_two: [6, 7],
             tranche_quotas: [0, 1, 1, 2, 1, 0, 0],
             ticket_stouffer_z: 0.0,
-            selection_confidence: 25.4,
-            expected_next_mean: 12.5,
+            selection_confidence: ((P_SINGLE * 100.0) * 10.0).round() / 10.0,
+            expected_next_mean: (TOTAL_NUMBERS as f64) / (NUMBERS_PER_DRAW as f64),
         };
     }
 
@@ -406,7 +406,7 @@ fn analyze_chronological_core(
             for b in 0..NUM_BINS {
                 let c = bin_counts[b];
                 if c > 0 {
-                    let rarity_w = (c as f64) / geo_probs[b].max(0.02);
+                    let rarity_w = (c as f64) / geo_probs[b].max(P_SINGLE * P_SINGLE);
                     if rarity_w > max_bin_score {
                         max_bin_score = rarity_w;
                         dominant_bin = b;
@@ -639,7 +639,7 @@ fn analyze_chronological_core(
 
     // 6. Analogues topologiques 1-Wasserstein + ADN 4D
     let mut top_matches: Vec<(usize, f64, f64, f64)> = Vec::new(); // (fp_idx, sim, w1_sim, dna_sim)
-    let mut w1_bandwidth = 0.15f64;
+    let mut w1_bandwidth = P_SINGLE;
 
     if n_fp >= 6 {
         let last_fp = &footprints[n_fp - 1];
@@ -745,8 +745,8 @@ fn analyze_chronological_core(
 
     let ev_emp = 1.0 / k_f.sqrt();
     let ev_m1 = cred_m1 * (ev_emp + kl_m1.sqrt());
-    let ev_m2 = cred_m2 * (ev_emp * 0.75 + kl_m2.sqrt());
-    let ev_renewal = ev_emp * 0.8 + kl_renewal.sqrt();
+    let ev_m2 = cred_m2 * (ev_emp * cred_m1 + kl_m2.sqrt());
+    let ev_renewal = ev_emp * (((NUM_BINS as f64) - 1.0) / (NUM_BINS as f64)) + kl_renewal.sqrt();
     let ev_echo = cred_echo * (ev_emp + kl_echo.sqrt());
 
     let ev_sum = (ev_emp + ev_m1 + ev_m2 + ev_renewal + ev_echo).max(1e-9);
@@ -758,6 +758,7 @@ fn analyze_chronological_core(
         ev_echo / ev_sum,
     ];
 
+    let avail_exponent = 1.0 / (NUM_BINS as f64).sqrt();
     let mut raw_blended = [0.0f64; NUM_BINS];
     let mut total_raw = 0.0f64;
     for b in 0..NUM_BINS {
@@ -769,7 +770,7 @@ fn analyze_chronological_core(
         let avail = if pool_sizes[b] == 0 {
             0.0
         } else {
-            (((pool_sizes[b] as f64) / 90.0) / pool_baseline[b].max(1e-4)).powf(0.35)
+            (((pool_sizes[b] as f64) / (TOTAL_NUMBERS as f64)) / pool_baseline[b].max(P_SINGLE * P_SINGLE)).powf(avail_exponent)
         };
         raw_blended[b] = (lin * avail).max(0.0);
         total_raw += raw_blended[b];

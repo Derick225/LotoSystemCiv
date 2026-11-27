@@ -513,15 +513,25 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
                         </td>
 
                         <td className="py-2 px-3 text-center">
-                          {item.hasEmpiricalProof ? (
-                            <span className="px-2 py-0.5 rounded-lg bg-emerald-950/80 text-emerald-300 border border-emerald-500/30 text-[9px] font-bold">
-                              +{item.proofScore.toFixed(1)}σ{item.qValue !== undefined ? ` (q=${item.qValue.toFixed(2)})` : ""}
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-lg bg-slate-950 text-slate-400 border border-white/10 text-[9px] font-bold">
-                              {item.ebCredibility !== undefined ? `EB ${(item.ebCredibility * 100).toFixed(0)}%` : "0 preuve"}
-                            </span>
-                          )}
+                          {(() => {
+                            const ebPct = (item.ebCredibility ?? (item.hasEmpiricalProof ? 1 : 0)) * 100;
+                            const isHigh = ebPct >= 50;
+                            return (
+                              <span
+                                className={`px-2 py-0.5 rounded-lg text-[9px] font-bold font-mono tabular-nums border ${
+                                  isHigh
+                                    ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/30"
+                                    : ebPct > 0
+                                      ? "bg-cyan-950/70 text-cyan-300 border-cyan-500/30"
+                                      : "bg-slate-950 text-slate-400 border-white/10"
+                                }`}
+                              >
+                                EB {ebPct.toFixed(0)}% · {item.proofScore >= 0 ? "+" : ""}
+                                {item.proofScore.toFixed(1)}σ
+                                {item.qValue !== undefined ? ` (q=${item.qValue.toFixed(2)})` : ""}
+                              </span>
+                            );
+                          })()}
                         </td>
 
                         <td className="py-2 px-3 text-center">

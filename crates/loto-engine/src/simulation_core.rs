@@ -80,6 +80,8 @@ pub fn run_simulation_hpc(
     // Probabilité théorique C(5,2)*C(85,3)/C(90,5) ~= 0.022473677
     let theoretical_prob: f64 = (10.0 * 98770.0) / 43949268.0;
     let ln2 = core::f64::consts::LN_2;
+    let euler = core::f64::consts::E;
+    let domain_unit = 1.0 / 90.0;
 
     for i in 0..n {
         if balance < unit_bet {
@@ -102,7 +104,7 @@ pub fn run_simulation_hpc(
                 // MARTINGALE DYNAMIQUE CONTINU
                 let growth_factor = (consecutive_losses as f64 * ln2).exp();
                 bet = unit_bet * growth_factor;
-                let dynamic_cap = balance * (-max_drawdown * 5.0).exp();
+                let dynamic_cap = balance * (-max_drawdown * euler).exp();
                 bet = bet.min(dynamic_cap).max(unit_bet);
             }
             2 => {
@@ -111,10 +113,11 @@ pub fn run_simulation_hpc(
                 let p = model_prob * empirical_prob + (1.0 - model_prob) * theoretical_prob;
                 let q = 1.0 - p;
                 let avg_payout_odds = 1.0 / theoretical_prob.max(1e-6);
-                let b = (avg_payout_odds - 1.0).max(0.01);
+                let b = (avg_payout_odds - 1.0).max(domain_unit);
                 let mut f = ((b * p - q) / b).max(0.0);
                 
-                let risk_tolerance = (-max_drawdown * 3.0).exp();
+                // Tolérance au risque proportionnelle au capital résiduel (1 - drawdown)
+                let risk_tolerance = (1.0 - max_drawdown).clamp(domain_unit, 1.0);
                 f *= risk_tolerance;
                 
                 // Pénalité de variance continue
@@ -132,10 +135,11 @@ pub fn run_simulation_hpc(
                 // CONFIDENCE_SMART
                 let recent_form = if i > 0 { (rolling_wins as f64) / (i as f64) } else { theoretical_prob };
                 let form_z = if recent_form > 0.0 { (recent_form / theoretical_prob).ln() } else { 0.0 };
-                let form_weight = if i > 0 { 1.0 / ((i + 2) as f64).ln() } else { 0.1 };
+                let form_weight = if i > 0 { 1.0 / ((i + 2) as f64).ln() } else { 0.0 };
                 let continuous_mult = (model_prob + form_z * form_weight).exp();
                 bet = (unit_bet * continuous_mult).floor();
-                let dynamic_cap = balance * (0.01f64).max(model_prob * (-max_drawdown * 4.0).exp());
+                let min_bet_fraction = (unit_bet / balance.max(unit_bet)).clamp(domain_unit, 1.0);
+                let dynamic_cap = balance * min_bet_fraction.max(model_prob * (-max_drawdown * euler).exp());
                 bet = bet.min(dynamic_cap).max(unit_bet);
             }
             _ => {

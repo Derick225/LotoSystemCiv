@@ -42,7 +42,9 @@ export interface RecurringSequencePattern {
   lift: number;                    // supportRate / expectedSupportRate
   confidence: number;              // Empirical Bayesian confidence score [0..100]
   zScore: number;                  // Standardized statistical proof score
-  hasEmpiricalProof: boolean;      // Statistical significance indicator
+  hasEmpiricalProof: boolean;      // Statistical significance indicator (backward-compatible ebCredibility >= 0.5)
+  ebCredibility?: number;          // Continuous Empirical-Bayes posterior credibility [0..1]
+  qValue?: number;                 // Benjamini-Hochberg universe-scaled FDR q-value [0..1]
   cycleOccurrences: number[];      // Indices of cycles where pattern appeared
   lastSeenCycle: number;           // 0 = current/most recent cycle, 1 = 1 cycle ago, etc.
   meanCycleInterval: number;       // Average distance in cycles between occurrences
@@ -827,7 +829,9 @@ export const patternDiscoveryService = {
         lift: parseFloat(lift.toFixed(2)),
         confidence: parseFloat(confidence.toFixed(1)),
         zScore: parseFloat(zScore.toFixed(2)),
-        hasEmpiricalProof: zScore >= 2.58 && lift >= 1.15 && (pmi > 0.2 || sameDrawCount >= 2),
+        hasEmpiricalProof: false,
+        ebCredibility: 0,
+        qValue: 1,
         cycleOccurrences: sortedCycles,
         lastSeenCycle: cyclesAgo,
         meanCycleInterval: parseFloat(meanInterval.toFixed(1)),
@@ -1112,7 +1116,9 @@ export const patternDiscoveryService = {
           lift: parseFloat(lift.toFixed(2)),
           confidence: parseFloat(transConf.toFixed(1)),
           zScore: parseFloat(zScore.toFixed(2)),
-          hasEmpiricalProof: zScore >= Z_GAUSS_90 || (zScore > 0.6 && pmi > 0.35),
+          hasEmpiricalProof: false,
+          ebCredibility: 0,
+          qValue: 1,
           cycleOccurrences: sortedTransCycles,
           lastSeenCycle: isTargetInActiveCycle ? 0 : lastCycleSeen,
           meanCycleInterval: parseFloat(meanInterval.toFixed(1)),
@@ -1195,15 +1201,20 @@ export const patternDiscoveryService = {
       return 1 / (1 + Math.max(0, qUnc));
     };
 
-    allPairs.forEach((p) => {
-      p.hasEmpiricalProof = (qValues[p.id] ?? 1.0) <= 0.05 && p.lift > 1.05 && p.zScore > 0;
-    });
-    allTriplets.forEach((t) => {
-      t.hasEmpiricalProof = (qValues[t.id] ?? 1.0) <= 0.05 && t.lift > 1.05 && t.zScore > 0;
-    });
-    topCrossCycleTransitions.forEach((tr) => {
-      tr.hasEmpiricalProof = (qValues[tr.id] ?? 1.0) <= 0.05 && tr.lift > 1.05 && tr.zScore > 0;
-    });
+    const domainOddsScale = TOTAL_BALLS / 5; // Ratio canonique 90/5 = 18 (aligné sur weightsManager)
+    const calibratePatternCredibility = (pat: RecurringSequencePattern) => {
+      const qVal = qValues[pat.id] ?? 1.0;
+      const qEvidence = Math.pow(Math.max(0, 1.0 - qVal), domainOddsScale);
+      const zEvidence = pat.zScore > 0 ? Math.tanh(pat.zScore * Math.SQRT1_2) : 0;
+      const cred = pat.zScore > 0 && pat.lift > 1.0 ? zEvidence * qEvidence : 0;
+      pat.qValue = parseFloat(qVal.toFixed(6));
+      pat.ebCredibility = parseFloat(cred.toFixed(4));
+      pat.hasEmpiricalProof = cred >= 0.5;
+    };
+
+    allPairs.forEach(calibratePatternCredibility);
+    allTriplets.forEach(calibratePatternCredibility);
+    topCrossCycleTransitions.forEach(calibratePatternCredibility);
 
     topCrossCycleTransitions.sort(
       (a, b) =>
@@ -1761,17 +1772,23 @@ export const patternDiscoveryService = {
     const selectedMotifs = highPrecisionMotifs.filter((m) =>
       optimalFive.some((n) => m.sequence.includes(n))
     );
-    const provenSelectedMotifs = selectedMotifs.filter(
-      (m) => m.hasEmpiricalProof
-    );
-    const maxPatternZ =
-      provenSelectedMotifs.length > 0
-        ? Math.max(...provenSelectedMotifs.map((m) => m.zScore))
-        : 0;
-    const baselineH0SelectionConf = 25.4;
+    const baselineH0SelectionConf =
+      (1 - combinations(TOTAL_BALLS - 5, 5) / combinations(TOTAL_BALLS, 5)) * 100;
     const internalConfScore =
       0.55 * meanConv + 0.25 * pairwiseSynergyScore + 0.2 * phaseCoherenceScore;
-    const zEvidenceGain = Math.max(0, Math.min(1, (maxPatternZ - 1.96) / 2.5));
+    // Gain continu Empirical-Bayes : crédibilité maximale des motifs du ticket (0 sous H0, -> 1 quand signal confirmé)
+    const zEvidenceGain =
+      selectedMotifs.length > 0
+        ? Math.min(
+            1,
+            Math.max(
+              0,
+              ...selectedMotifs.map((m) =>
+                m.ebCredibility ?? (m.hasEmpiricalProof ? 1 : 0)
+              )
+            )
+          )
+        : 0;
 
     const selectionConfidence = parseFloat(
       (

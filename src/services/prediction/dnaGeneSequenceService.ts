@@ -99,6 +99,7 @@ export interface DnaGeneNode {
   stabilityScore: number; // [0, 1] stabilité inter-générationnelle
   proofZScore: number;
   qValue: number;
+  ebCredibility: number;
   hasEmpiricalProof: boolean;
   expressionState: GeneExpressionState;
   rationale: string;
@@ -1130,6 +1131,7 @@ export function synthesizeDnaGeneSequenceAndWeights(
     const proof = proofMap[k];
     const proofZScore = proof?.proofScore ?? 0;
     const qValue = proof?.qValue ?? 1.0;
+    const ebCredibility = computeEmpiricalBayesProofCredibility(proof);
     const hasEmpiricalProof = Boolean(proof && proof.hasProof && proof.proofScore > 0);
     const pmSignal = postMortemSignalByGene[k];
     const epSyn = epistaticSynergyByGene[k];
@@ -1139,7 +1141,7 @@ export function synthesizeDnaGeneSequenceAndWeights(
       expressionState = 'SILENCED';
     } else {
       const zW = stdOptW > 1e-7 ? (optW - meanOptW) / stdOptW : 0;
-      if (zW > dominantZGate || (hasEmpiricalProof && rank <= topCodonRankLimit)) {
+      if (zW > dominantZGate || (ebCredibility >= 0.5 && rank <= topCodonRankLimit)) {
         expressionState = 'DOMINANT';
       } else if (pmSignal > signalExprScale || epSyn > signalExprScale) {
         expressionState = 'CO_EXPRESSIVE';
@@ -1152,10 +1154,10 @@ export function synthesizeDnaGeneSequenceAndWeights(
     let rationale = `Équilibre homéostatique (poids ${(optW * 100).toFixed(2)}%).`;
     if (expressionState === 'SILENCED') {
       rationale = `Gène neutralisé (données machine absentes ou canal retiré).`;
-    } else if (hasEmpiricalProof) {
-      rationale = `Expression amplifiée avec preuve rang WY max-T (Z=${proofZScore.toFixed(2)}, q=${qValue.toFixed(3)}) et signal post-mortem ${(pmSignal * 100).toFixed(1)}%.`;
+    } else if (ebCredibility >= 0.5) {
+      rationale = `Expression amplifiée (Crédibilité EB ${(ebCredibility * 100).toFixed(1)}%, Z=${proofZScore.toFixed(2)}, q=${qValue.toFixed(3)}, signal ${(pmSignal * 100).toFixed(1)}%).`;
     } else if (pmSignal < -signalExprScale * 0.25) {
-      rationale = `Amorti par rétroaction post-mortem (${(pmSignal * 100).toFixed(1)}%) ; rétrécissement Empirical-Bayes actif.`;
+      rationale = `Amorti par rétroaction post-mortem (${(pmSignal * 100).toFixed(1)}%) ; rétrécissement Empirical-Bayes ${(ebCredibility * 100).toFixed(1)}%.`;
     } else if (epSyn > signalExprScale * 0.5) {
       rationale = `Maintenu en co-expression épistasique (+${(epSyn * 100).toFixed(1)}% synergie partenaire).`;
     }
@@ -1180,6 +1182,7 @@ export function synthesizeDnaGeneSequenceAndWeights(
       stabilityScore: parseFloat((geneStability[k] ?? 1.0).toFixed(4)),
       proofZScore: parseFloat(proofZScore.toFixed(3)),
       qValue: parseFloat(qValue.toFixed(5)),
+      ebCredibility: parseFloat(ebCredibility.toFixed(4)),
       hasEmpiricalProof,
       expressionState,
       rationale,
@@ -1320,11 +1323,15 @@ export function synthesizeDnaGeneSequenceAndWeights(
   const sequenceSignature = buildSequenceSignature(optimizedSequenceOrder, baseFingerprint);
 
   const provenCount = geneSequence.filter((g) => g.hasEmpiricalProof).length;
+  const meanEbCredPct =
+    geneSequence.length > 0
+      ? (geneSequence.reduce((s, g) => s + g.ebCredibility, 0) / geneSequence.length) * 100
+      : 0;
   const auditTrail: string[] = [
     `Séquençage Génomique EpiGenome-SQ exécuté sur ${drawName} (${pureHistory.length} tirages, H=${bounds.hurstExponent.toFixed(3)}, S=${normalizedEntropy.toFixed(3)}).`,
     `Sources fusionnées : ${usableForensics.length} rapport(s) post-mortem, ${combinedAutopsies.length} autopsie(s) fermée(s), ${genomicEvaluatedCount} gènes d'audit génomique, ${cleanLineage.length} génération(s) ADN.`,
     `Séquence chromosomique : ${sequenceSignature} (Décalage Kendall-Tau=${(kendallTauShiftVsActive * 100).toFixed(1)}%, Diversité Shannon=${(shannonWeightDiversity * 100).toFixed(1)}%).`,
-    `Garde empirique BH : ${provenCount}/${K} gène(s) avec preuve statistique ; ${codons.length} codon(s) épistasique(s) identifié(s).`,
+    `Rétrécissement Empirical-Bayes : crédibilité moyenne ${meanEbCredPct.toFixed(1)}% (${provenCount}/${K} gène(s) WY max-T) ; ${codons.length} codon(s) épistasique(s) identifié(s).`,
     wasDamped
       ? `Régulation critique appliquée : Δmax=${(maxDelta * 100).toFixed(2)}% > seuil τ=${(criticalThreshold * 100).toFixed(2)}% (facteur amortissement=${dampingFactor.toFixed(3)}).`
       : `Dérive maîtrisée : Δmax=${(finalDriftMetrics.maxDelta * 100).toFixed(2)}% <= seuil τ=${(criticalThreshold * 100).toFixed(2)}%.`,

@@ -142,7 +142,10 @@ pub fn compute_graph_heat_kernel_wasm(
 
     // Exponentielle de matrice exp(-t * L) via Taylor jusqu'à convergence
     // exp(-tL) = I - tL + (tL)^2 / 2! - (tL)^3 / 3! + ...
-    let t = diffusion_time_t.max(0.01).min(5.0);
+    // Bornes temporelles dérivées du spectre du Laplacien normalisé et de la dimension du graphe
+    let t_min = 1.0 / (n as f64).max(1.0);
+    let t_max = (n as f64).ln().max(2.0);
+    let t = diffusion_time_t.clamp(t_min, t_max);
     let mut current_term = vec![0.0f64; n * n];
     let mut exp_matrix = vec![0.0f64; n * n];
 
@@ -299,27 +302,41 @@ pub fn compute_butterfly_lyapunov_wasm(
     }
 
     // Calcul des divergences successives |delta x_{k+1} - delta x_k|
+    let mut ln_divs: Vec<f64> = Vec::with_capacity(n.saturating_sub(2));
     let mut sum_ln_divergence = 0.0f64;
-    let mut count = 0;
     let eps = 1e-7;
 
     for k in 1..(n - 1) {
         let diff_next = (lag_series[k + 1] - lag_series[k]).abs() + eps;
         let diff_curr = (lag_series[k] - lag_series[k - 1]).abs() + eps;
-        let ratio = diff_next / diff_curr;
-        sum_ln_divergence += ratio.ln();
-        count += 1;
+        let ln_r = (diff_next / diff_curr).ln();
+        ln_divs.push(ln_r);
+        sum_ln_divergence += ln_r;
     }
 
+    let count = ln_divs.len();
     let lyapunov_exp = if count > 0 {
         sum_ln_divergence / (count as f64)
     } else {
         0.0
     };
 
-    // Sensibilité continue sigmoïde
-    let sensitivity = 1.0 / (1.0 + (-2.5 * lyapunov_exp).exp());
-    let is_chaotic = lyapunov_exp > 0.02;
+    let mut var_ln = 0.0f64;
+    for &v in &ln_divs {
+        let d = v - lyapunov_exp;
+        var_ln += d * d;
+    }
+    let sigma_ln = if count > 1 {
+        (var_ln / (count as f64)).sqrt().max(eps)
+    } else {
+        1.0
+    };
+
+    // Sensibilité continue sigmoïde normée par l'écart-type empirique des taux de divergence
+    let z_lyap = lyapunov_exp / sigma_ln;
+    let sensitivity = 1.0 / (1.0 + (-z_lyap).exp());
+    // Critère mathématique canonique du chaos de Lyapunov : exposant positif (> 0.0)
+    let is_chaotic = lyapunov_exp > 0.0;
 
     // Coordonnées de l'espace des phases (vitesse, accélération, dimension fractale Hurst)
     let vx = lag_series[n - 1] - lag_series[n - 2];
@@ -352,12 +369,14 @@ pub fn compute_chain_reaction_resonance_wasm(
     let actual_draws = draws_count.min(recent_draws_flat.len() / win_cols);
 
     let sources = num_sources.min(source_couplings.len()).max(1);
+    let min_coupling_floor = 1.0 / (90.0 * (sources as f64));
+    let phi_conjugate = (5.0f64.sqrt() - 1.0) / 2.0; // Conjugué du nombre d'or (≈ 0.6180339887)
 
-    // Superposition d'ondes harmoniques Psi(n) = sum_d W(d) * cos(2*pi*f_d*n/90 + phi_d)
+    // Superposition d'ondes harmoniques quasi-périodiques Psi(n) = sum_d W(d) * cos(2*pi*f_d*n/90 + phi_d)
     for s in 0..sources {
-        let weight = source_couplings[s].max(0.01);
-        let freq = 1.0 + (s as f64) * 0.47;
-        let phase = ((s + 1) as f64) * 0.6180339887; // Ratio d'or continu déterministe
+        let weight = source_couplings[s].max(min_coupling_floor);
+        let freq = 1.0 + (s as f64) * phi_conjugate;
+        let phase = ((s + 1) as f64) * phi_conjugate;
 
         for n in 1..=90 {
             let theta = (2.0 * std::f64::consts::PI * freq * (n as f64)) / 90.0 + phase;
@@ -369,7 +388,7 @@ pub fn compute_chain_reaction_resonance_wasm(
     // Accumulation d'énergie d'avalanche (SOC - Self-Organized Criticality)
     let mut avalanche_potentials = vec![0.0f64; 91];
     for d in 0..actual_draws {
-        let recency_weight = 1.0 / (1.0 + (d as f64) * 0.2);
+        let recency_weight = 1.0 / (1.0 + (d as f64) / (win_cols as f64));
         for col in 0..win_cols {
             let num = recent_draws_flat[d * win_cols + col] as usize;
             if num >= 1 && num <= 90 {
@@ -378,14 +397,34 @@ pub fn compute_chain_reaction_resonance_wasm(
         }
     }
 
-    // Fusion de la résonance et du potentiel critique
+    // Fusion standardisée Z-score de la résonance spectrale et du potentiel critique SOC (zéro poids fixes)
+    let mean_spec = spectrum[1..=90].iter().sum::<f64>() / 90.0;
+    let std_spec = (spectrum[1..=90]
+        .iter()
+        .map(|v| (v - mean_spec).powi(2))
+        .sum::<f64>()
+        / 90.0)
+        .sqrt()
+        .max(f64::EPSILON);
+
+    let mean_av = avalanche_potentials[1..=90].iter().sum::<f64>() / 90.0;
+    let std_av = (avalanche_potentials[1..=90]
+        .iter()
+        .map(|v| (v - mean_av).powi(2))
+        .sum::<f64>()
+        / 90.0)
+        .sqrt()
+        .max(f64::EPSILON);
+
     let mut critical_indexed: Vec<(usize, f64)> = Vec::with_capacity(90);
     let mut max_amp = 0.0f64;
     let mut total_crit_density = 0.0f64;
 
     for n in 1..=90 {
-        let combined = spectrum[n] + avalanche_potentials[n] * 1.5;
-        let score = 100.0 / (1.0 + (-0.8 * combined).exp());
+        let z_spec = (spectrum[n] - mean_spec) / std_spec;
+        let z_av = (avalanche_potentials[n] - mean_av) / std_av;
+        let z_combined = (z_spec + z_av) * std::f64::consts::FRAC_1_SQRT_2; // Combinaison de Stouffer ~ N(0,1)
+        let score = 100.0 / (1.0 + (-z_combined).exp());
         spectrum[n] = (score * 10.0).round() / 10.0;
 
         if spectrum[n] > max_amp {

@@ -111,6 +111,12 @@ describe('Améliorations Avancées de Détection & Intelligence Décisionnelle (
         expect(m.nearMissSensitivity).toBeLessThanOrEqual(1);
         expect(m.toxicityIndex).toBeGreaterThanOrEqual(0);
         expect(m.toxicityIndex).toBeLessThanOrEqual(100);
+        expect(typeof m.ebCredibility).toBe('number');
+        expect(m.ebCredibility).toBeGreaterThanOrEqual(0);
+        expect(m.ebCredibility).toBeLessThanOrEqual(1);
+        expect(typeof m.qValue).toBe('number');
+        expect(m.qValue).toBeGreaterThanOrEqual(0);
+        expect(m.qValue).toBeLessThanOrEqual(1);
         expect(m.drawDivergences.length).toBe(10);
       }
     });

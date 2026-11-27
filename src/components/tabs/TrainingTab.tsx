@@ -71,8 +71,92 @@ import {
 const formatLabel = (key: string) => LABELS_MAP[key as AlgoKey] || key;
 
 type OptimizerType = "meta" | "pso" | "genetic" | "bayesian" | "gradient";
-type PresetStrategy = "BALANCED" | "HYPER_CONVERGENCE" | "EXPLORATORY" | "REGULARIZED_L2";
+type PresetStrategy =
+  | "BALANCED"
+  | "CONSERVATIVE"
+  | "DEEP_EXPLORATION"
+  | "RAPID_ADAPTATION"
+  | "CUSTOM";
 type SubTabType = "training" | "feedback";
+
+const CALIBRATION_PRESETS: Array<{
+  id: Exclude<PresetStrategy, "CUSTOM">;
+  label: string;
+  scopeLabel: string;
+  generations: number;
+  historyFraction: number;
+  defaultOptimizer: OptimizerType;
+  icon: typeof Sparkles;
+}> = [
+  {
+    id: "BALANCED",
+    label: "Équilibré",
+    scopeLabel: "60 gén. · 2/3 hist.",
+    generations: 60,
+    historyFraction: 2 / 3,
+    defaultOptimizer: "meta",
+    icon: Sparkles,
+  },
+  {
+    id: "CONSERVATIVE",
+    label: "Anti-Surapprentissage",
+    scopeLabel: "40 gén. · Max hist.",
+    generations: 40,
+    historyFraction: 1,
+    defaultOptimizer: "bayesian",
+    icon: ShieldCheck,
+  },
+  {
+    id: "DEEP_EXPLORATION",
+    label: "Exploration Profonde",
+    scopeLabel: "120 gén. · 1/2 hist.",
+    generations: 120,
+    historyFraction: 0.5,
+    defaultOptimizer: "genetic",
+    icon: Activity,
+  },
+  {
+    id: "RAPID_ADAPTATION",
+    label: "Capture Récente",
+    scopeLabel: "80 gén. · 1/3 hist.",
+    generations: 80,
+    historyFraction: 1 / 3,
+    defaultOptimizer: "gradient",
+    icon: Zap,
+  },
+];
+
+const SOLVER_OPTIONS: Array<{
+  id: OptimizerType;
+  label: string;
+  detail: string;
+}> = [
+  {
+    id: "meta",
+    label: "Omni",
+    detail: "Fusion Softargmax des 4 solveurs mathématiques",
+  },
+  {
+    id: "gradient",
+    label: "Descente",
+    detail: "Descente continue sur le simplexe avec régularisation",
+  },
+  {
+    id: "pso",
+    label: "Essaim PSO",
+    detail: "Essaim particulaire à inertie pilotée par Hurst",
+  },
+  {
+    id: "genetic",
+    label: "Génétique",
+    detail: "Évolution élitiste par croisement arithmétique",
+  },
+  {
+    id: "bayesian",
+    label: "Kriging",
+    detail: "Processus Gaussien RBF & acquisition UCB",
+  },
+];
 
 export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
   const { showToast } = useToast();
@@ -221,33 +305,28 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
     setLogs((prev) => [...prev.slice(-60), `[${new Date().toLocaleTimeString()}] ${msg}`]);
   };
 
-  // Preset Handler
-  const applyPreset = (selectedPreset: PresetStrategy) => {
-    setPreset(selectedPreset);
-    audioEngine.play("click");
-    switch (selectedPreset) {
-      case "HYPER_CONVERGENCE":
-        setOptimizerType("gradient");
-        setGenerations(100);
-        addLog("Preset activé : HYPER-CONVERGENCE (Descente de gradient continue coordonnée)");
-        break;
-      case "EXPLORATORY":
-        setOptimizerType("genetic");
-        setGenerations(80);
-        addLog("Preset activé : EXPLORATOIRE (Algorithme génétique à haute entropie)");
-        break;
-      case "REGULARIZED_L2":
-        setOptimizerType("bayesian");
-        setGenerations(50);
-        addLog("Preset activé : RÉGULARISÉ L2 (Pénalisation de complexité & parcimonie)");
-        break;
-      case "BALANCED":
-      default:
-        setOptimizerType("meta");
-        setGenerations(60);
-        addLog("Preset activé : ÉQUILIBRÉ META-HEURISTIQUE (Omni-Optimizer multi-échelles)");
-        break;
+  // Preset Handler — configure l'objectif de calibration (générations + fenêtre d'historique + solveur recommandé)
+  const applyPreset = (selectedPreset: Exclude<PresetStrategy, "CUSTOM">) => {
+    const def = CALIBRATION_PRESETS.find((p) => p.id === selectedPreset) ?? CALIBRATION_PRESETS[0];
+    setPreset(def.id);
+    setGenerations(def.generations);
+    setOptimizerType(def.defaultOptimizer);
+
+    const maxSample = Math.max(15, cleanHistory.length - 2);
+    const computedSample =
+      cleanHistory.length > 0
+        ? Math.max(15, Math.min(maxSample, Math.round(maxSample * def.historyFraction)))
+        : sampleSize;
+    if (cleanHistory.length > 0) {
+      setSampleSize(computedSample);
     }
+
+    const solverLabel =
+      SOLVER_OPTIONS.find((s) => s.id === def.defaultOptimizer)?.label ?? def.defaultOptimizer;
+    audioEngine.play("click");
+    addLog(
+      `Profil activé : ${def.label} (${def.generations} gén., ${computedSample} tirages, solveur ${solverLabel})`,
+    );
   };
 
   const startTraining = async () => {
@@ -823,40 +902,41 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
             <div className="lg:col-span-4 space-y-6">
               
               <div className="bg-slate-900/60 p-6 rounded-3xl border border-slate-800 space-y-6 shadow-xl">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                    <Sliders size={14} className="text-indigo-400" /> Presets Stratégiques
+                    <Sliders size={14} className="text-indigo-400" /> Profils de Calibration
                   </h3>
-                  <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                    100% Déterministe
+                  <span className="text-[11px] font-medium text-emerald-400 whitespace-nowrap">
+                    {preset === "CUSTOM" ? "Personnalisé · Déterministe" : "Déterministe"}
                   </span>
                 </div>
 
-                {/* Strategy Preset Pills */}
+                {/* Calibration Strategy Selector (Objectif & Fenêtre temporelle) */}
                 <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: "BALANCED", label: "Équilibré", icon: Sparkles },
-                    { id: "HYPER_CONVERGENCE", label: "Gradient", icon: Zap },
-                    { id: "EXPLORATORY", label: "Darwinien", icon: Activity },
-                    { id: "REGULARIZED_L2", label: "Bayésien L2", icon: ShieldCheck },
-                  ].map((p) => {
+                  {CALIBRATION_PRESETS.map((p) => {
                     const Icon = p.icon;
                     const isActive = preset === p.id;
                     return (
                       <button
                         key={p.id}
-                        onClick={() => applyPreset(p.id as PresetStrategy)}
+                        type="button"
+                        onClick={() => applyPreset(p.id)}
                         disabled={status === "running"}
-                        className={`p-3 rounded-2xl border text-left flex flex-col justify-between gap-1 transition-all cursor-pointer ${
+                        className={`p-3 rounded-2xl border text-left flex flex-col justify-between gap-1.5 transition-all cursor-pointer ${
                           isActive
                             ? "bg-indigo-600/20 border-indigo-500 text-white shadow-lg"
                             : "bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700"
                         }`}
                       >
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] font-black uppercase tracking-wider">{p.label}</span>
-                          <Icon size={12} className={isActive ? "text-indigo-400" : "text-slate-500"} />
+                        <div className="flex justify-between items-center gap-1">
+                          <span className="text-[10px] font-black uppercase tracking-wider truncate">
+                            {p.label}
+                          </span>
+                          <Icon size={12} className={`shrink-0 ${isActive ? "text-indigo-400" : "text-slate-500"}`} />
                         </div>
+                        <span className="text-[10px] font-mono tabular-nums text-slate-500">
+                          {p.scopeLabel}
+                        </span>
                       </button>
                     );
                   })}
@@ -868,7 +948,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   <div className="space-y-2">
                     <div className="flex justify-between items-end">
                       <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Générations</span>
-                      <span className="text-sm font-black text-indigo-400 font-mono">{generations}</span>
+                      <span className="text-sm font-black text-indigo-400 font-mono tabular-nums">{generations}</span>
                     </div>
                     <input
                       type="range"
@@ -876,7 +956,10 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       max="300"
                       step="10"
                       value={generations}
-                      onChange={(e) => setGenerations(Number(e.target.value))}
+                      onChange={(e) => {
+                        setGenerations(Number(e.target.value));
+                        setPreset("CUSTOM");
+                      }}
                       disabled={status === "running"}
                       className="w-full h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500"
                     />
@@ -885,8 +968,8 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                   {/* Slider Sample Size */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-end">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Échantillon Retrospectif</span>
-                      <span className="text-sm font-black text-emerald-400 font-mono">{sampleSize} tirages</span>
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Échantillon Rétrospectif</span>
+                      <span className="text-sm font-black text-emerald-400 font-mono tabular-nums">{sampleSize} tirages</span>
                     </div>
                     <input
                       type="range"
@@ -894,40 +977,49 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
                       max={Math.max(15, cleanHistory.length)}
                       step="1"
                       value={sampleSize}
-                      onChange={(e) => setSampleSize(Number(e.target.value))}
+                      onChange={(e) => {
+                        setSampleSize(Number(e.target.value));
+                        setPreset("CUSTOM");
+                      }}
                       disabled={status === "running"}
                       className="w-full h-1.5 bg-slate-800 rounded-full appearance-none cursor-pointer accent-indigo-500"
                     />
                   </div>
 
-                  {/* Moteur de Résolution */}
-                  <div className="space-y-2">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Moteur d'Optimisation</span>
-                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                      {[
-                        { id: "meta", label: "Omni" },
-                        { id: "gradient", label: "Gradient" },
-                        { id: "pso", label: "PSO" },
-                        { id: "genetic", label: "Darwin" },
-                        { id: "bayesian", label: "Bayes" },
-                      ].map((opt) => (
+                  {/* Solveur Mathématique */}
+                  <div className="space-y-2 pt-2 border-t border-slate-800/60">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        Moteur d'Optimisation
+                      </span>
+                      <span className="text-[10px] font-mono text-slate-500">Solveur</span>
+                    </div>
+                    <div className="grid grid-cols-6 gap-1.5">
+                      {SOLVER_OPTIONS.map((opt, idx) => (
                         <button
                           key={opt.id}
+                          type="button"
                           onClick={() => {
                             audioEngine.play("click");
-                            setOptimizerType(opt.id as any);
+                            setOptimizerType(opt.id);
+                            setPreset("CUSTOM");
                           }}
                           disabled={status === "running"}
-                          className={`py-2 px-2 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer ${
-                            optimizerType === opt.id 
-                            ? "bg-indigo-600 text-white shadow-md" 
-                            : "bg-slate-950/60 text-slate-400 hover:bg-slate-800"
+                          className={`${
+                            idx < 3 ? "col-span-2" : "col-span-3"
+                          } py-2 px-3 text-[10px] font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                            optimizerType === opt.id
+                              ? "bg-indigo-600 text-white shadow-md"
+                              : "bg-slate-950/60 text-slate-400 hover:bg-slate-800"
                           }`}
                         >
                           {opt.label}
                         </button>
                       ))}
                     </div>
+                    <p className="text-[11px] text-slate-500 leading-snug pt-0.5">
+                      {SOLVER_OPTIONS.find((opt) => opt.id === optimizerType)?.detail}
+                    </p>
                   </div>
                 </div>
 
