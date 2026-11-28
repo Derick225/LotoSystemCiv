@@ -244,21 +244,32 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
 
         if (uniqueBankers.length > 0) {
           const subPool = pool.filter((n) => !uniqueBankers.includes(n));
-          const subSize = 5 - uniqueBankers.length;
+          const subSize = Math.max(1, 5 - uniqueBankers.length);
+          const effectiveSubG =
+            guarantee === 5
+              ? subSize
+              : Math.max(1, Math.min(subSize, Math.max(2, guarantee - uniqueBankers.length)));
           const { tickets: subTickets, diagnostics } = generateAbbreviatedWheel(
             subPool,
             [],
             subSize,
-            guarantee === 5
-              ? subSize
-              : Math.max(2, guarantee - uniqueBankers.length),
+            effectiveSubG,
             wheelMode,
             marginalProbMap
           );
           baseTickets = subTickets.map((t) =>
             [...uniqueBankers, ...t].sort((a, b) => a - b),
           );
-          setWheelDiagnostics(diagnostics);
+          setWheelDiagnostics({
+            ...diagnostics,
+            totalPoolSize: pool.length,
+            ticketSize: 5,
+            requestedGuarantee: guarantee,
+            bankersCount: uniqueBankers.length,
+            effectiveSubGuarantee: effectiveSubG,
+            conditionalGuaranteeLabel: `${effectiveSubG}/${subSize} hors bases (${guarantee}/5 si les ${uniqueBankers.length} base(s) sortent)`,
+            conditionalGuaranteeDisclaimer: `Couverture conditionnelle : la garantie ${guarantee}/5 exige que les ${uniqueBankers.length} base(s) fixes sortent ET que le reste du pool couvre ${effectiveSubG} numéros gagnants. Sans les bases, la garantie effective sur le sous-pool devient ${effectiveSubG}/${subSize} (max(2, ${guarantee} − ${uniqueBankers.length})).`,
+          });
         } else {
           const { tickets, diagnostics } = generateAbbreviatedWheel(
             pool,
@@ -761,6 +772,15 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
                     </div>
                   </div>
 
+                  <div className="bg-black/30 p-3 rounded-xl border border-amber-500/20">
+                    <div className="text-[10px] text-amber-300 font-sans uppercase font-bold">
+                      Garantie Conditionnelle
+                    </div>
+                    <div className="text-xs font-black text-amber-400 mt-1 leading-snug">
+                      {wheelDiagnostics.conditionalGuaranteeLabel}
+                    </div>
+                  </div>
+
                   {typeof wheelDiagnostics.simplexExpectation === "number" && (
                     <div className="bg-indigo-950/40 p-3 rounded-xl border border-indigo-500/20">
                       <div className="text-[10px] text-indigo-300 font-sans uppercase font-bold">
@@ -774,6 +794,10 @@ export const CombinationsTab: React.FC<CombinationsTabProps> = ({
                       </div>
                     </div>
                   )}
+
+                  <div className="col-span-2 md:col-span-4 text-[11px] font-sans text-slate-300 bg-black/20 px-3 py-2 rounded-xl border border-white/5">
+                    {wheelDiagnostics.conditionalGuaranteeDisclaimer}
+                  </div>
                 </div>
               )}
 

@@ -32,6 +32,157 @@ export const SAMPLE_CYCLE_SCALE = DOMAIN_SIZE / DRAW_PICK_SIZE; // 90/5 = 18 tir
 export const PROB_EPSILON = 1e-6;
 export const MAX_PLAUSIBLE_SLOPE = 3.0;
 export const MIN_PLAUSIBLE_SLOPE = 0.2;
+export const Z_95_ONE_SIDED = 1.644854; // Quantile normal unilatéral alpha=0.05
+export const Z_95_TWO_SIDED = 1.959964; // Quantile normal bilatéral alpha=0.05
+export const LOGIT_UNIFORM_PRIOR = Math.log(UNIFORM_MARGINAL_PROB / (1.0 - UNIFORM_MARGINAL_PROB)); // ln(5/85) ≈ -2.833213
+
+export interface CanonicalMatchSummary {
+  predictedTop5: number[];
+  actualUnique: number[];
+  exactHits: number;
+  exactHitNumbers: number[];
+  nearMissCount: number;
+  nearMissDetails: Array<{ predicted: number; actual: number; type: '-1' | '+1' }>;
+}
+
+/**
+ * Déduplique et borne strictement une sélection à Top-K (défaut 5) entiers valides dans [1..90].
+ */
+export function sanitizeTop5Numbers(raw: ArrayLike<number>, maxCount: number = DRAW_PICK_SIZE): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  if (!raw) return out;
+  for (let i = 0; i < raw.length; i++) {
+    const n = Number(raw[i]);
+    if (Number.isInteger(n) && n >= 1 && n <= DOMAIN_SIZE && !seen.has(n)) {
+      seen.add(n);
+      out.push(n);
+      if (out.length >= maxCount) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Définition canonique unique des exact hits et des near-misses circulaires (±1 sur Z/90Z) :
+ * - Compare uniquement Top-5 dédupliqué vs gagnants uniques (garantit 0 <= exactHits <= 5).
+ * - Near-misses circulaires (1 <-> 90) STRICTEMENT diagnostiques : au plus 1 near-miss par numéro prédit non-hit
+ *   et par gagnant non encore couvert, évitant le double comptage d'un même numéro.
+ */
+export function computeCanonicalExactHitsAndNearMisses(
+  predictedRaw: ArrayLike<number>,
+  actualRaw: ArrayLike<number>
+): CanonicalMatchSummary {
+  const predictedTop5 = sanitizeTop5Numbers(predictedRaw, DRAW_PICK_SIZE);
+  const actualUnique = sanitizeTop5Numbers(actualRaw, DRAW_PICK_SIZE);
+  const actualSet = new Set(actualUnique);
+
+  const exactHitNumbers: number[] = [];
+  const unmatchedPredicted: number[] = [];
+  const coveredWinners = new Set<number>();
+
+  for (const p of predictedTop5) {
+    if (actualSet.has(p)) {
+      exactHitNumbers.push(p);
+      coveredWinners.add(p);
+    } else {
+      unmatchedPredicted.push(p);
+    }
+  }
+
+  const nearMissDetails: Array<{ predicted: number; actual: number; type: '-1' | '+1' }> = [];
+  for (const p of unmatchedPredicted) {
+    const minus1 = p > 1 ? p - 1 : DOMAIN_SIZE;
+    const plus1 = p < DOMAIN_SIZE ? p + 1 : 1;
+
+    if (actualSet.has(minus1) && !coveredWinners.has(minus1)) {
+      coveredWinners.add(minus1);
+      nearMissDetails.push({ predicted: p, actual: minus1, type: '-1' });
+    } else if (actualSet.has(plus1) && !coveredWinners.has(plus1)) {
+      coveredWinners.add(plus1);
+      nearMissDetails.push({ predicted: p, actual: plus1, type: '+1' });
+    }
+  }
+
+  return {
+    predictedTop5,
+    actualUnique,
+    exactHits: exactHitNumbers.length,
+    exactHitNumbers,
+    nearMissCount: nearMissDetails.length,
+    nearMissDetails,
+  };
+}
+
+/**
+ * Perte topologique canonique normalisée sur [0, 1] sans pondérations numérologiques arbitraires.
+ * Combine distance circulaire sur Z/90Z (échelle T₀=18) et distance euclidienne sur grille 9x10 (échelle √18).
+ */
+export function computeCanonicalTopologicalLoss(
+  predictedRaw: ArrayLike<number>,
+  actualRaw: ArrayLike<number>
+): number {
+  const predicted = sanitizeTop5Numbers(predictedRaw, DRAW_PICK_SIZE);
+  const actual = sanitizeTop5Numbers(actualRaw, DRAW_PICK_SIZE);
+  if (predicted.length === 0 || actual.length === 0) return 1.0;
+
+  const gridScale = Math.sqrt(SAMPLE_CYCLE_SCALE);
+  let totalLoss = 0;
+
+  for (const w of actual) {
+    const rowW = Math.floor((w - 1) / 10);
+    const colW = (w - 1) % 10;
+    let bestSim = 0;
+
+    for (const p of predicted) {
+      if (p === w) {
+        bestSim = 1.0;
+        break;
+      }
+      const linDist = Math.abs(p - w);
+      const circDist = Math.min(linDist, DOMAIN_SIZE - linDist);
+      const circSim = Math.exp(-circDist / gridScale);
+
+      const rowP = Math.floor((p - 1) / 10);
+      const colP = (p - 1) % 10;
+      const gridDist = Math.hypot(rowP - rowW, colP - colW);
+      const gridSim = Math.exp(-gridDist / gridScale);
+
+      const sim = Math.max(circSim, gridSim);
+      if (sim > bestSim) bestSim = sim;
+    }
+
+    totalLoss += 1.0 - bestSim;
+  }
+
+  return totalLoss / actual.length;
+}
+
+/**
+ * Probabilité exacte P(X >= k) sous l'hypothèse nulle hypergéométrique H(N=90, K=5, n=5).
+ */
+export function computeHypergeometricTailPValue(hits: number): number {
+  const kObs = Math.max(0, Math.min(DRAW_PICK_SIZE, Math.floor(hits)));
+  if (kObs <= 0) return 1.0;
+
+  const comb = (n: number, k: number): number => {
+    if (k < 0 || k > n) return 0;
+    if (k === 0 || k === n) return 1;
+    const r = Math.min(k, n - k);
+    let res = 1;
+    for (let i = 1; i <= r; i++) {
+      res = (res * (n - r + i)) / i;
+    }
+    return res;
+  };
+
+  const totalWays = comb(DOMAIN_SIZE, DRAW_PICK_SIZE);
+  let tailSum = 0;
+  for (let k = kObs; k <= DRAW_PICK_SIZE; k++) {
+    tailSum += comb(DRAW_PICK_SIZE, k) * comb(DOMAIN_SIZE - DRAW_PICK_SIZE, DRAW_PICK_SIZE - k);
+  }
+  return Math.max(0, Math.min(1, tailSum / totalWays));
+}
 
 export interface MarginalEvaluationResult {
   marginals90: number[]; // index 0..89 <=> numéros 1..90, somme = DRAW_PICK_SIZE (5)
@@ -114,7 +265,10 @@ export interface LearningAuditPayload {
   sampleAttenuation: number;
   effectiveLearningRate: number;
   uncertaintySE: number;
+  zSkillBrier?: number;
   prudenceModeActive: boolean;
+  prudenceBarrierEnforced?: boolean;
+  isSingleDrawEceUninformative?: boolean;
   nearMissesExcludedFromLearning: boolean;
   baselines: {
     uniformBrier: number;
@@ -127,7 +281,7 @@ export interface LearningAuditPayload {
   calibration: {
     brierScore: number;
     logLoss: number;
-    ece: number;
+    ece: number | null;
     brierSkillVsUniform: number;
     logLossSkillVsUniform: number;
     brierSkillVsHistorical: number | null;
@@ -820,6 +974,7 @@ export function computeCautiousAggregatedWeightUpdate(params: {
   forcedZeroKeys?: Set<string>;
   lockedMaxKeys?: Set<string>;
   modelVersion?: string;
+  singleDrawOnlineUpdate?: boolean;
 }): {
   updatedWeights: Record<string, number>;
   audit: LearningAuditPayload;
@@ -836,6 +991,7 @@ export function computeCautiousAggregatedWeightUpdate(params: {
     forcedZeroKeys = new Set<string>(),
     lockedMaxKeys = new Set<string>(),
     modelVersion = FORENSIC_MODEL_VERSION,
+    singleDrawOnlineUpdate = false,
   } = params;
 
   const keys = Object.keys(currentWeights);
@@ -843,6 +999,7 @@ export function computeCautiousAggregatedWeightUpdate(params: {
   const activeCount = Math.max(1, keys.filter((k) => !forcedZeroKeys.has(k) && (currentNorm[k] ?? 0) > 0).length);
 
   const N = Math.max(1, windowMetrics.length);
+  const isSingleDrawEceUninformative = N < SAMPLE_CYCLE_SCALE;
   // Atténuation continue issue de l'échelle naturelle du jeu (90/5 = 18 tirages)
   const sampleAttenuation = Math.tanh(N / SAMPLE_CYCLE_SCALE);
 
@@ -858,12 +1015,15 @@ export function computeCautiousAggregatedWeightUpdate(params: {
 
   const meanBrier = brierArr.reduce((a, b) => a + b, 0) / N;
   const meanLogLoss = logLossArr.reduce((a, b) => a + b, 0) / N;
-  const meanEce = eceArr.reduce((a, b) => a + b, 0) / N;
+  const meanEce = isSingleDrawEceUninformative ? null : eceArr.reduce((a, b) => a + b, 0) / N;
 
   const brierSkills = brierArr.map((b) => 1.0 - b / UNIFORM_BRIER_BASELINE);
   const meanBrierSkill = brierSkills.reduce((a, s) => a + s, 0) / N;
   const skillVar = brierSkills.reduce((a, s) => a + (s - meanBrierSkill) ** 2, 0) / Math.max(1, N - 1);
-  const skillSE = N > 1 ? Math.sqrt(skillVar / N) : Math.abs(meanBrierSkill) + 1.0 / Math.sqrt(DOMAIN_SIZE);
+  // Plancher binomial minimal sur N*90 observations pour éviter SE=0 sur fenêtre constante
+  const bssMinFloor = UNIFORM_BRIER_BASELINE / Math.sqrt(N * DOMAIN_SIZE);
+  const skillSE = N > 1 ? Math.max(bssMinFloor, Math.sqrt(skillVar / N)) : Math.abs(meanBrierSkill) + 1.0 / Math.sqrt(DOMAIN_SIZE);
+  const zSkillBrier = meanBrierSkill / Math.max(1e-6, skillSE);
 
   const meanLogLossSkill = 1.0 - meanLogLoss / UNIFORM_LOG_LOSS_BASELINE;
 
@@ -875,7 +1035,17 @@ export function computeCautiousAggregatedWeightUpdate(params: {
   const meanHistLogLoss = histLogLossValues.length > 0 ? histLogLossValues.reduce((a, b) => a + b, 0) / histLogLossValues.length : null;
   const meanHistHits = histHitsValues.length > 0 ? histHitsValues.reduce((a, b) => a + b, 0) / histHitsValues.length : null;
 
-  // Taux d'apprentissage effectif continu : 1/sqrt(K_active) * tanh(N/18) * entropie * persistance Hurst * ratio signal/bruit
+  // Barrière Prudence statistique réelle (A.7) :
+  // Active si mise à jour mono-tirage isolée, échantillon insuffisant (N < 18), test z unilatéral < 1.645,
+  // perte Log-Loss sous l'uniforme ou rendement Top-5 <= 25/90.
+  const prudenceModeActive =
+    singleDrawOnlineUpdate ||
+    N < SAMPLE_CYCLE_SCALE ||
+    zSkillBrier < Z_95_ONE_SIDED ||
+    meanLogLossSkill <= 0 ||
+    meanHits <= UNIFORM_EXPECTED_HITS_TOP5;
+
+  // Taux d'apprentissage effectif continu : 0 strict quand la barrière Prudence est active !
   const eta0 = baseLearningRate ?? 1.0 / Math.sqrt(activeCount);
   const normH = clamp(hurstExponent, 0.01, 0.99);
   const hurstModulator = 1.0 / (1.0 + Math.exp(-4.0 * (normH - 0.5))); // 0.5 en marche aléatoire H=0.5
@@ -883,13 +1053,15 @@ export function computeCautiousAggregatedWeightUpdate(params: {
   const entropyDampener = Math.exp(-ent);
   const skillConfidence = N >= 2 ? 0.5 * (1.0 + Math.tanh(meanBrierSkill / Math.max(1e-4, skillSE))) : sampleAttenuation;
 
-  const effectiveLearningRate = clamp(
-    eta0 * sampleAttenuation * (0.5 + hurstModulator) * entropyDampener * Math.max(0.1, skillConfidence),
-    1e-4,
-    1.0 / Math.sqrt(activeCount)
-  );
+  const effectiveLearningRate = prudenceModeActive
+    ? 0
+    : clamp(
+        eta0 * sampleAttenuation * (0.5 + hurstModulator) * entropyDampener * Math.max(0.1, skillConfidence),
+        1e-4,
+        1.0 / Math.sqrt(activeCount)
+      );
 
-  // Agrégation contrefactuelle PAR GÈNE sur les tirages disponibles
+  // Agrégation contrefactuelle PAR GÈNE sur les tirages distincts disponibles
   const attrWindowN = Math.max(1, drawAttributionsWindow.length);
   const attrByGene: Record<string, GeneCounterfactualAttribution[]> = {};
   for (const k of keys) attrByGene[k] = [];
@@ -963,8 +1135,9 @@ export function computeCautiousAggregatedWeightUpdate(params: {
         ? (meanScore * meanScore) / (meanScore * meanScore + se * se)
         : Math.tanh(m / SAMPLE_CYCLE_SCALE);
 
-    // Centrage par la moyenne d'ablation afin que l'exponentielle n'écrase pas ou ne gonfle pas tous les gènes en bloc
-    const signedStep = clamp(effectiveLearningRate * meanScore * snrShrinkage, -maxLogStep, maxLogStep);
+    const signedStep = prudenceModeActive
+      ? 0
+      : clamp(effectiveLearningRate * meanScore * snrShrinkage, -maxLogStep, maxLogStep);
     const rawTarget = curW * Math.exp(signedStep);
     candidateRaw[k] = rawTarget;
 
@@ -981,17 +1154,21 @@ export function computeCautiousAggregatedWeightUpdate(params: {
     });
   }
 
-  const updatedWeights = normalizeWeightsSimplex(candidateRaw, {
-    forcedZeroKeys,
-    lockedMaxKeys,
-    baselineWeights: currentNorm,
-  });
+  // Lorsque Prudence est active, aucune mutation des poids n'est effectuée :
+  // on retourne strictement les poids normalisés inchangés (barrière réelle A.7).
+  const updatedWeights = prudenceModeActive
+    ? { ...currentNorm }
+    : normalizeWeightsSimplex(candidateRaw, {
+        forcedZeroKeys,
+        lockedMaxKeys,
+        baselineWeights: currentNorm,
+      });
 
   const weightDeltas: Record<string, number> = {};
   const aggregatedAttributions: AggregatedGeneAttribution[] = preliminaryMeta
     .map((item) => {
       const propW = updatedWeights[item.key] ?? 0;
-      const delta = parseFloat((propW - item.currentWeight).toFixed(6));
+      const delta = prudenceModeActive ? 0 : parseFloat((propW - item.currentWeight).toFixed(6));
       weightDeltas[item.key] = delta;
       return {
         key: item.key,
@@ -1005,28 +1182,29 @@ export function computeCautiousAggregatedWeightUpdate(params: {
         proposedWeight: propW,
         weightDelta: delta,
         deltaPercent:
-          item.currentWeight > 0
+          !prudenceModeActive && item.currentWeight > 0
             ? parseFloat((((propW - item.currentWeight) / item.currentWeight) * 100).toFixed(2))
             : 0,
       };
     })
     .sort((a, b) => b.meanCounterfactualScore - a.meanCounterfactualScore || a.key.localeCompare(b.key));
 
-  // Mode Prudence déterministe : actif si échantillon faible (N < 18) OU si rendement sous l'uniforme (<= 25/90) OU BSS <= 0
-  const prudenceModeActive =
-    N < SAMPLE_CYCLE_SCALE ||
-    meanHits <= UNIFORM_EXPECTED_HITS_TOP5 ||
-    meanBrierSkill <= 0;
-
-  // Calibration sigmoïde Platt prudente & atténuée par la taille d'échantillon
-  const defaultSlope = baseSigmoidSlope ?? Math.max(MIN_PLAUSIBLE_SLOPE, 1.2 - 0.8 * ent);
-  const defaultIntercept = baseSigmoidIntercept ?? -0.5 - 1.5 * ent;
-  const slopeDelta =
-    sampleAttenuation *
-    (1.0 / Math.sqrt(activeCount)) *
-    Math.tanh(meanBrierSkill / Math.max(1e-4, skillSE + UNIFORM_BRIER_BASELINE));
+  // Calibration Platt ancrée sur le prior log-odds exact ln(5/85) sans nombres magiques ;
+  // figée à zéro variation lorsque Prudence est active ou fenêtre < 18 (A.7 / A.8).
+  const defaultSlope = typeof baseSigmoidSlope === 'number' && Number.isFinite(baseSigmoidSlope)
+    ? clamp(baseSigmoidSlope, MIN_PLAUSIBLE_SLOPE, MAX_PLAUSIBLE_SLOPE)
+    : 1.0;
+  const defaultIntercept = typeof baseSigmoidIntercept === 'number' && Number.isFinite(baseSigmoidIntercept)
+    ? baseSigmoidIntercept
+    : LOGIT_UNIFORM_PRIOR;
+  const slopeDelta = prudenceModeActive
+    ? 0
+    : sampleAttenuation *
+      (1.0 / Math.sqrt(activeCount)) *
+      Math.tanh(meanBrierSkill / Math.max(1e-4, skillSE + UNIFORM_BRIER_BASELINE));
   const newSigmoidSlope = clamp(defaultSlope + slopeDelta, MIN_PLAUSIBLE_SLOPE, MAX_PLAUSIBLE_SLOPE);
-  const interceptDelta = -slopeDelta * UNIFORM_MARGINAL_PROB * DRAW_PICK_SIZE;
+  // Ancrage logistique au prior 5/90 : delta_intercept maintient p(logit_prior) centré
+  const interceptDelta = prudenceModeActive ? 0 : -slopeDelta * LOGIT_UNIFORM_PRIOR;
   const newSigmoidIntercept = defaultIntercept + interceptDelta;
 
   const audit: LearningAuditPayload = {
@@ -1035,7 +1213,10 @@ export function computeCautiousAggregatedWeightUpdate(params: {
     sampleAttenuation: parseFloat(sampleAttenuation.toFixed(6)),
     effectiveLearningRate: parseFloat(effectiveLearningRate.toFixed(6)),
     uncertaintySE: parseFloat(skillSE.toFixed(6)),
+    zSkillBrier: parseFloat(zSkillBrier.toFixed(4)),
     prudenceModeActive,
+    prudenceBarrierEnforced: prudenceModeActive,
+    isSingleDrawEceUninformative,
     nearMissesExcludedFromLearning: true,
     baselines: {
       uniformBrier: UNIFORM_BRIER_BASELINE,
@@ -1048,7 +1229,7 @@ export function computeCautiousAggregatedWeightUpdate(params: {
     calibration: {
       brierScore: parseFloat(meanBrier.toFixed(6)),
       logLoss: parseFloat(meanLogLoss.toFixed(6)),
-      ece: parseFloat(meanEce.toFixed(6)),
+      ece: meanEce !== null ? parseFloat(meanEce.toFixed(6)) : null,
       brierSkillVsUniform: parseFloat(meanBrierSkill.toFixed(6)),
       logLossSkillVsUniform: parseFloat(meanLogLossSkill.toFixed(6)),
       brierSkillVsHistorical:
@@ -1065,11 +1246,11 @@ export function computeCautiousAggregatedWeightUpdate(params: {
     aggregatedAttributions,
     weightDeltas,
     justificationSummary:
-      `Fenêtre N=${N} (atténuation ${(sampleAttenuation * 100).toFixed(1)}%, fenêtre gènes=${attrWindowN}) : ` +
+      `Fenêtre N=${N} tirages distincts (atténuation ${(sampleAttenuation * 100).toFixed(1)}%, gènes=${attrWindowN}) : ` +
       `Hits moyens ${meanHits.toFixed(3)}±${hitsSE.toFixed(3)} vs uniforme ${UNIFORM_EXPECTED_HITS_TOP5.toFixed(3)}, ` +
-      `Brier ${meanBrier.toFixed(5)} (BSS ${(meanBrierSkill * 100).toFixed(2)}%), ` +
+      `Brier ${meanBrier.toFixed(5)} (BSS ${(meanBrierSkill * 100).toFixed(2)}%, z=${zSkillBrier.toFixed(2)}), ` +
       `LogLoss ${meanLogLoss.toFixed(5)} (LLSS ${(meanLogLossSkill * 100).toFixed(2)}%). ` +
-      `Prudence=${prudenceModeActive ? 'ACTIVE' : 'STANDARD'}.`,
+      `Prudence=${prudenceModeActive ? 'ACTIVE (mutation bloquée)' : 'STANDARD'}.`,
   };
 
   return { updatedWeights, audit };

@@ -68,12 +68,23 @@ const toCount = (v: unknown): number => {
  */
 const clampBss = (v: number): number => clamp(v, -1, 1);
 
+const erfApprox = (x: number): number => {
+  const sign = x < 0 ? -1 : 1;
+  const ax = Math.abs(x);
+  const t = 1.0 / (1.0 + 0.3275911 * ax);
+  const poly =
+    (((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t) *
+    Math.exp(-ax * ax);
+  return sign * (1.0 - poly);
+};
+
 /**
  * Dérive λ à partir de la preuve out-of-fold. Priorité à la holdout (la plus honnête),
  * puis au bootstrap de blocs (moyenne + écart-type mesurés), puis au BSS walk-forward.
  *
- * Sans écart-type bootstrap, σ est borné par l'inégalité de Popoviciu pour un score borné
- * dans [−1, 1] : sd ≤ 1, donc SE ≤ 1/√n. C'est une borne conservatrice, pas un réglage.
+ * Corrige le biais de sélection (« malédiction du vainqueur » de max(0, BSS)) en atténuant
+ * continûment l'estimation positive par erf((μ₊ / σ) / √2) avant le calcul Empirical-Bayes.
  */
 export function deriveSkillShrinkage(evidence: SkillEvidence): EmpiricalSkillEstimate {
   const holdoutDraws = toCount(evidence.holdoutDraws);
@@ -114,7 +125,7 @@ export function deriveSkillShrinkage(evidence: SkillEvidence): EmpiricalSkillEst
     };
   }
 
-  const positiveEstimate = Math.max(0, pointEstimate);
+  const rawPositiveEstimate = Math.max(0, pointEstimate);
   const measuredStd = bootstrapStd !== null && bootstrapStd > 0 ? bootstrapStd : null;
   const popoviciuSe = 1 / Math.sqrt(evidenceDraws);
   // Pour la holdout, blockBootstrapBssStd provient du bloc tuning : on conserve donc
@@ -122,6 +133,12 @@ export function deriveSkillShrinkage(evidence: SkillEvidence): EmpiricalSkillEst
   const uncertainty = source === 'holdout'
     ? Math.max(measuredStd ?? 0, popoviciuSe)
     : (measuredStd ?? popoviciuSe);
+
+  // Atténuation continue anti-malédiction du vainqueur : sous H0 (BSS ~ N(0, σ²)),
+  // P(|Z| <= μ₊/σ) = erf((μ₊/σ)/√2) réduit naturellement la fausse confiance quand μ₊ ~ O(σ).
+  const zPositive = uncertainty > 0 && Number.isFinite(uncertainty) ? rawPositiveEstimate / uncertainty : 0;
+  const noiseExceedanceWeight = rawPositiveEstimate > 0 ? clampUnit(erfApprox(zPositive / Math.SQRT2)) : 0;
+  const positiveEstimate = rawPositiveEstimate * noiseExceedanceWeight;
 
   const shrinkage = positiveEstimate > 0
     ? (positiveEstimate * positiveEstimate) /

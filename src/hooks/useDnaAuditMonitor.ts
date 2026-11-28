@@ -87,6 +87,22 @@ export function useDnaAuditMonitor(targetDrawName?: string) {
         { applyWeights: true }
       );
 
+      if (!synthesis.applied) {
+        addAgentLog({
+          id: `epigenome_reharmonize_blocked_${Date.now()}`,
+          timestamp: new Date(),
+          action: `Ré-harmonisation simulée pour ${drawName} bloquée (${synthesis.walkForwardVerdict ?? "PARITY_WITH_BASELINE"}).`,
+          type: "AUTOTUNE",
+          impact: synthesis.applicationBlockedReason || "Preuve OOS insuffisante",
+        });
+        showToast(
+          synthesis.applicationBlockedReason ||
+            `Ré-harmonisation bloquée sur ${drawName} : aucun gain hors-échantillon significatif.`,
+          "info"
+        );
+        return;
+      }
+
       setGlobalWeights(synthesis.optimizedWeights);
       const updatedReport = await runSystematicDnaAudit(
         drawName,

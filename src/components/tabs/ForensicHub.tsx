@@ -625,20 +625,35 @@ export const ForensicHub: React.FC<{
         applyWeights: true,
       });
 
-      setGlobalWeights(synthesis.optimizedWeights);
-      addAgentLog({
-        id: `retro_epigenome_${Date.now()}`,
-        timestamp: new Date(),
-        action: `Rétro-propagation génomique consolidée (${drawName}) sur ${scopedReports.length} rapport(s) · ${synthesis.sequenceMetrics.sequenceSignature}`,
-        type: "AUTOTUNE",
-        impact: `Cohérence épistasique ${synthesis.sequenceMetrics.epistaticCoherenceScore}% · Δmax ${(synthesis.sequenceMetrics.maxWeightDelta * 100).toFixed(2)}%`,
-      });
+      if (synthesis.applied) {
+        setGlobalWeights(synthesis.optimizedWeights);
+        addAgentLog({
+          id: `retro_epigenome_${Date.now()}`,
+          timestamp: new Date(),
+          action: `Rétro-propagation génomique consolidée (${drawName}) sur ${scopedReports.length} rapport(s) · ${synthesis.sequenceMetrics.sequenceSignature}`,
+          type: "AUTOTUNE",
+          impact: `Cohérence épistasique ${synthesis.sequenceMetrics.epistaticCoherenceScore}% · Δmax ${(synthesis.sequenceMetrics.maxWeightDelta * 100).toFixed(2)}%`,
+        });
 
-      showToast(
-        `Rétro-propagation consolidée (${scopedReports.length} rapports · ${synthesis.sequenceMetrics.sequenceSignature}) effectuée avec succès !`,
-        "success"
-      );
-      audioEngine.play("success");
+        showToast(
+          `Rétro-propagation consolidée (${scopedReports.length} rapports · ${synthesis.sequenceMetrics.sequenceSignature}) effectuée avec succès !`,
+          "success"
+        );
+        audioEngine.play("success");
+      } else {
+        addAgentLog({
+          id: `retro_epigenome_dryrun_${Date.now()}`,
+          timestamp: new Date(),
+          action: `Rétro-propagation génomique simulée (${drawName}) bloquée (${synthesis.walkForwardVerdict ?? "PARITY_WITH_BASELINE"})`,
+          type: "AUTOTUNE",
+          impact: synthesis.applicationBlockedReason || "Gain hors-échantillon non significatif",
+        });
+        showToast(
+          synthesis.applicationBlockedReason ||
+            `Simulation sèche uniquement : avantage hors-échantillon non démontré sur ${drawName}.`,
+          "info"
+        );
+      }
     } catch (e) {
       console.error("Batch retro-propagation error:", e);
       showToast("Erreur lors de la rétro-propagation", "error");

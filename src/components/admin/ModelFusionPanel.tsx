@@ -593,7 +593,7 @@ export const ModelFusionPanel: React.FC<ModelFusionPanelProps> = ({
           `Calibration manuelle depuis le panneau de Fusion de Modèles Admin.`,
         ],
         reason: `Fusion de Modèles Admin (${selectedDrawName})`,
-        allowCriticalDrift: true,
+        allowCriticalDrift: false,
         history,
       });
 

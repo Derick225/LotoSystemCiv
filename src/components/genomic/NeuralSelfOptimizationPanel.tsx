@@ -110,9 +110,29 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
     }
   };
 
+  const canApplyOptimizedWeights = useMemo(() => {
+    if (!optimizationResult) return false;
+    if (!optimizationResult.isValidationAvailable) return false;
+    if ((optimizationResult.validationSampleCount ?? 0) <= 0) return false;
+    if (optimizationResult.bestEpoch <= 0) return false;
+    const vInit = optimizationResult.validationLossInitial;
+    const vFinal = optimizationResult.validationLossFinal;
+    if (vInit === undefined || vFinal === undefined) return false;
+    return vFinal < vInit - 1e-6;
+  }, [optimizationResult]);
+
   // Application des poids optimisés via la passerelle unifiée (dérive, version ADN, audit)
   const handleApplyOptimizedWeights = async () => {
     if (!optimizationResult) return;
+    if (!canApplyOptimizedWeights) {
+      showToast(
+        !optimizationResult.isValidationAvailable
+          ? "Application bloquée : échantillon de validation insuffisant (< 4 tirages)."
+          : "Application bloquée : la perte de validation hors-échantillon n'a pas diminué.",
+        "info"
+      );
+      return;
+    }
     try {
       audioEngine.play("success");
     } catch (err) {
@@ -123,7 +143,7 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
       const { applyOptimizedWeights } = await import(
         "../../services/prediction/optimizationController"
       );
-      await applyOptimizedWeights({
+      const optRes = await applyOptimizedWeights({
         drawName,
         weights: optimizationResult.optimizedWeights,
         origin: "SGD_CYBERNETIC",
@@ -132,20 +152,22 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
           relativeGain: optimizationResult.accuracyGain,
         },
         causalAuditTrail: [
-          `Auto-optimisation neurale par rétropropagation sur ${drawName} (${optimizationResult.epochsCompleted} époques)`,
+          `Auto-optimisation neurale par rétropropagation sur ${drawName} (${optimizationResult.epochsCompleted} époques, meilleur point ép. ${optimizationResult.bestEpoch})`,
           `Split Walk-Forward : ${optimizationResult.trainingSampleCount ?? optimizationResult.batchSize} train / ${optimizationResult.validationSampleCount ?? 0} validation`,
-          `Réduction de perte train : -${optimizationResult.lossReductionPct}% | Gain hors-échantillon (validation) : ${optimizationResult.accuracyGain >= 0 ? "+" : ""}${optimizationResult.accuracyGain}%`,
+          `Perte validation : ${optimizationResult.validationLossInitial?.toFixed(4)} → ${optimizationResult.validationLossFinal?.toFixed(4)} | Gain OOS : ${optimizationResult.accuracyGain >= 0 ? "+" : ""}${optimizationResult.accuracyGain}%`,
         ],
         reason: `Rétropropagation Neurale Walk-Forward (${optimizationResult.epochsCompleted} époques)`,
         history,
       });
+
+      setGlobalWeights(optRes.appliedWeights, drawName);
 
       addAgentLog({
         id: `neural_backprop_apply_${Date.now()}`,
         timestamp: new Date(),
         action: `Auto-optimisation neurale (Walk-Forward) appliquée sur ${drawName} (${optimizationResult.epochsCompleted} époques).`,
         type: "AUTOTUNE",
-        impact: `Précision hors-échantillon (validation) : ${optimizationResult.initialAccuracy}% → ${optimizationResult.finalAccuracy}% (${optimizationResult.accuracyGain >= 0 ? "+" : ""}${optimizationResult.accuracyGain}%) | Réduction perte : -${optimizationResult.lossReductionPct}%.`,
+        impact: `Perte validation : ${optimizationResult.validationLossInitial?.toFixed(4)} → ${optimizationResult.validationLossFinal?.toFixed(4)} | Précision OOS : ${optimizationResult.initialAccuracy}% → ${optimizationResult.finalAccuracy}%.`,
       });
 
       showToast(
@@ -226,10 +248,28 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
               <button
                 id="btn-apply-neural-weights"
                 onClick={handleApplyOptimizedWeights}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all active:scale-95 shadow-lg shadow-emerald-600/30 border border-emerald-400/30 cursor-pointer"
+                disabled={!canApplyOptimizedWeights}
+                title={
+                  !optimizationResult.isValidationAvailable
+                    ? "Validation indisponible (< 4 tirages)"
+                    : !canApplyOptimizedWeights
+                    ? "Bloqué : la perte de validation hors-échantillon n'a pas diminué"
+                    : "Appliquer les poids retenus au meilleur point de contrôle de validation"
+                }
+                className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all shadow-lg ${
+                  canApplyOptimizedWeights
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white active:scale-95 shadow-emerald-600/30 border border-emerald-400/30 cursor-pointer"
+                    : "bg-slate-800 text-slate-500 border border-white/10 cursor-not-allowed opacity-60"
+                }`}
               >
-                <CheckCircle2 size={14} />
-                <span>Appliquer les Poids</span>
+                {canApplyOptimizedWeights ? (
+                  <CheckCircle2 size={14} />
+                ) : (
+                  <Lock size={14} />
+                )}
+                <span>
+                  {canApplyOptimizedWeights ? "Appliquer les Poids" : "Application Bloquée (OOS)"}
+                </span>
               </button>
             )}
           </div>
@@ -356,16 +396,27 @@ export const NeuralSelfOptimizationPanel: React.FC<NeuralSelfOptimizationPanelPr
 
             <div className="p-4 bg-slate-900/60 rounded-2xl border border-white/10 flex flex-col justify-between">
               <span className="text-[10px] font-black uppercase text-slate-400">Précision Hors-Échantillon (Val)</span>
-              <div className="flex items-baseline gap-1.5 mt-1">
-                <span className="text-2xl font-black font-mono text-cyan-400">
-                  {optimizationResult.accuracyGain >= 0
-                    ? `+${optimizationResult.accuracyGain}%`
-                    : `${optimizationResult.accuracyGain}%`}
-                </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  ({optimizationResult.initialAccuracy}% → {optimizationResult.finalAccuracy}%)
-                </span>
-              </div>
+              {optimizationResult.isValidationAvailable ? (
+                <div className="flex items-baseline gap-1.5 mt-1">
+                  <span className="text-2xl font-black font-mono text-cyan-400">
+                    {optimizationResult.accuracyGain >= 0
+                      ? `+${optimizationResult.accuracyGain}%`
+                      : `${optimizationResult.accuracyGain}%`}
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    ({optimizationResult.initialAccuracy}% → {optimizationResult.finalAccuracy}%)
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-baseline gap-1.5 mt-1">
+                  <span className="text-sm font-black font-mono text-amber-400">
+                    n/d
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    échantillon &lt; 4
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="p-4 bg-slate-900/60 rounded-2xl border border-white/10 flex flex-col justify-between">

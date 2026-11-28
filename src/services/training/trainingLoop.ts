@@ -64,24 +64,22 @@ export const applyOnlineLearningCore = async (
   const predicted = prediction.suggestedNumbers;
   const hits = predicted.filter((n) => actualWinners.includes(n)).length;
 
-  // Signal de récompense continu RLHF
+  // Signal de récompense continu basé sur l'espérance hypergéométrique 25/90 ≈ 0.278
+  const UNIFORM_EXPECTED_HITS = 25.0 / 90.0;
   const baseReward = hits / 5.0; // [0, 1]
   const rlhfSignal = userFeedbackScore ? userFeedbackScore * 0.5 : 0;
   const totalSignal = Math.max(
     -1.0,
-    Math.min(1.0, baseReward * 2.0 - 1.0 + rlhfSignal)
+    Math.min(1.0, (baseReward - UNIFORM_EXPECTED_HITS / 5.0) * 2.0 + rlhfSignal)
   );
 
   // Modulation mathématique du Learning Rate continue via Lyapunov, Entropie de Shannon et Fiabilité
   const brierScore = (prediction as any).brierScore ?? (prediction as any).metrics?.brierScore;
   const adaptiveLrRes = computeAdaptiveContinuousLearningRate(purifiedHistory, undefined, brierScore);
   const signalStrength = Math.abs(totalSignal);
-  const historyReliability = Math.max(
-    0.2,
-    Math.min(1.0, purifiedHistory.length / 100.0)
-  );
-  // Plus de hits ou de rétroaction positive augmente la confiance
-  const forensicConfidence = Math.max(0.5, Math.min(1.5, 1.0 + (hits - 2) * 0.1));
+  const SAMPLE_CYCLE_SCALE = 90.0 / 5.0; // 18 tirages
+  const historyReliability = Math.tanh(purifiedHistory.length / (2.0 * SAMPLE_CYCLE_SCALE));
+  const forensicConfidence = 1.0 / (1.0 + Math.exp(-(hits - UNIFORM_EXPECTED_HITS)));
   const learningRate = adaptiveLrRes.learningRate * signalStrength * historyReliability * forensicConfidence;
 
   const newWeights: Record<string, number> = { ...currentWeights } as any;
@@ -113,10 +111,12 @@ export const applyOnlineLearningCore = async (
     algoScoreForWinners /= actualWinners.length || 1;
     algoScoreForLosers /= 90 - actualWinners.length || 1;
 
-    // Discrimination Power
+    // Contraste normalisé gagnants vs non-gagnants (adimensionnel)
     const discriminationPower = algoScoreForWinners - algoScoreForLosers;
+    const normalizedDiscrim =
+      discriminationPower / (Math.abs(algoScoreForWinners) + Math.abs(algoScoreForLosers) + 1.0);
 
-    // Top 5 Winner Presence
+    // Top 5 Winner Lift au-dessus de la ligne de base uniforme 5/90
     const sortedForAlgo = Array.from({ length: 90 }, (_, i) => i + 1).sort(
       (a, b) =>
         (Number(prediction.breakdown[b]?.[algo]) || 0) -
@@ -124,25 +124,10 @@ export const applyOnlineLearningCore = async (
     );
     const algoTop5 = sortedForAlgo.slice(0, 5);
     const algoTop5Hits = algoTop5.filter((n) => actualWinners.includes(n)).length;
-    const top5WinnerPresence = algoTop5Hits / 5.0;
+    const top5Lift = algoTop5Hits / 5.0 - 5.0 / 90.0;
 
-    // False Positive Burden
-    const algoFalsePositives = algoTop5.filter((n) => !actualWinners.includes(n));
-    const falsePositiveBurden =
-      algoFalsePositives.reduce(
-        (sum, n) => sum + (Number(prediction.breakdown[n]?.[algo]) || 0),
-        0
-      ) / 5.0;
-
-    // Overconfidence
-    const overconfidence = Math.max(0, falsePositiveBurden - top5WinnerPresence);
-
-    // Signal de mise à jour composite
-    const algoUpdateSignal =
-      discriminationPower +
-      top5WinnerPresence * 0.3 -
-      falsePositiveBurden * 0.1 -
-      overconfidence * 0.2;
+    // Signal de mise à jour composite borné continûment dans [-1, 1]
+    const algoUpdateSignal = Math.tanh(normalizedDiscrim + top5Lift);
 
     // Évaluation empirique continue (AGENTS.md : zéro seuil binaire, rétrécissement Empirical-Bayes continu)
     const proofMetric = empiricalProofMap[algo];

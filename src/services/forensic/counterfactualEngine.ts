@@ -18,8 +18,8 @@ export const runCounterfactualSimulation = (
   driftTolerance: number = 0.3,
 ): { counterfactuals: CounterfactualResult[]; baselineLoss: number; baselineWassersteinLoss?: number } => {
   const results: CounterfactualResult[] = [];
-  const defaultBaselineLoss = 1.0 - Math.exp(-1.0);
-  const defaultWassersteinLoss = (90.0 / 4.0) * (1.0 - Math.exp(-1.0));
+  const defaultBaselineLoss = 1.0;
+  const defaultWassersteinLoss = 1.0;
 
   if (!breakdown || Object.keys(breakdown).length === 0) {
     return { counterfactuals: [], baselineLoss: defaultBaselineLoss, baselineWassersteinLoss: defaultWassersteinLoss };
@@ -89,178 +89,90 @@ export const runCounterfactualSimulation = (
     const missedNumbers = actualWinners.filter((n) => !top5.includes(n));
 
     // ========================================================================
-    // REPRÉSENTATION DU SYSTEM EN MODE AUTOPSIE : SOFTMAX SENSITIVE TO ALL NEAR MISSES
-    // ZÉRO HASARD - TOTALEMENT DÉTERMINISTE & CONTINU
-    // ZÉRO NOMBRE MAGIQUE - TOUT EST DÉRIVÉ DE LA GÉOMÉTRIE DU JEU
+    // ÉVALUATION PROPRE INVARIANTE PAR PERMUTATION DES ÉTIQUETTES [1..90]
+    // Marginales cohérentes Σ q_n = 5 (water-filling), Log-Loss et Brier propres
+    // ZÉRO HASARD, ZÉRO BIAIS D'ORDRE NUMÉRIQUE (pas de W1 sur 1..90)
     // ========================================================================
+    const DOMAIN_SIZE = 90;
+    const DRAW_SIZE = 5;
+    const UNIFORM_P = DRAW_SIZE / DOMAIN_SIZE;
+    const UNIFORM_BRIER = UNIFORM_P * (1.0 - UNIFORM_P);
+    const UNIFORM_LOG_LOSS = -(
+      UNIFORM_P * Math.log(UNIFORM_P) +
+      (1.0 - UNIFORM_P) * Math.log(1.0 - UNIFORM_P)
+    );
+    const PROB_EPS = 1e-6;
 
-    // 1. Calcul de la température à partir de l'écart-type réel des scores pour éviter tout nombre magique
     const scoreVals = scores.map((x) => x.s);
     const scoreMean = scoreVals.reduce((a, b) => a + b, 0) / scoreVals.length;
-    const scoreStdDev = Math.sqrt(
-      scoreVals.reduce((a, b) => a + Math.pow(b - scoreMean, 2), 0) / scoreVals.length
-    ) || Number.EPSILON;
+    const scoreStdDev =
+      Math.sqrt(
+        scoreVals.reduce((a, b) => a + Math.pow(b - scoreMean, 2), 0) / scoreVals.length
+      ) || Number.EPSILON;
 
     const temperature = Math.max(scoreStdDev, 1.0);
     const maxS = Math.max(...scoreVals);
 
-    // 2. Calcul des probabilités de Softmax continu
     const expScores = scores.map((x) => ({
       n: x.n,
-      p: Math.exp((x.s - maxS) / temperature)
+      p: Math.exp((x.s - maxS) / temperature),
     }));
     const sumExp = expScores.reduce((sum, x) => sum + x.p, 0) || 1;
-    const softmaxProbs = expScores.map((x) => ({
-      n: x.n,
-      prob: x.p / sumExp
-    }));
 
-    const getGridPos = (val: number) => {
-      const row = Math.floor((val - 1) / 10);
-      const col = (val - 1) % 10;
-      return { row, col };
-    };
-
-    // 3. Fonction générique et robuste de calcul de similarité entre p et w
-    // ZÉRO NOMBRE MAGIQUE : Toutes les variances (sigma) de notre Kernel Gaussien
-    // sont strictement dérivées de l'espérance mathématique de l'espacement uniforme
-    // des numéros tirés (N=90, K=5).
-    const DOMAIN_SIZE = 90;
-    const DRAW_SIZE = 5;
-
-    // Pour une grille physique 1D, un numéro contrôle un segment attendu de DOMAIN_SIZE / DRAW_SIZE (18)
-    // Déviation standard configurée de sorte qu'à l'espacement attendu, l'influence tombe à e^-2 (~0.13)
-    const expectedSegment = DOMAIN_SIZE / DRAW_SIZE;
-    const twoSigmaSq1D = Math.pow(expectedSegment, 2) / 2.0;
-
-    // Pour une grille physique 2D, l'aire attendue est 18. Le côté attendu est sqrt(18).
-    const expectedSide = Math.sqrt(expectedSegment);
-    const twoSigmaSqGrid = Math.pow(expectedSide, 2) / 2.0;
-
-    // Décimales (Modulo 10) : Espace de 10 numéros partagé par 5 tirages (espérance 2)
-    const expectedModSegment = 10.0 / DRAW_SIZE;
-    const twoSigmaSqMod = Math.pow(expectedModSegment, 2) / 2.0;
-
-    // Décades (9 lignes) : Espace de 9 décades partagé par 5 tirages (espérance 1.8)
-    const expectedDecadeSegment = 9.0 / DRAW_SIZE;
-    const twoSigmaSqDecade = Math.pow(expectedDecadeSegment, 2) / 2.0;
-
-    // Maximum Information Surprisal pour le domaine de notre loi GCD
-    const maxSurprisal = 2.0 * Math.log(DOMAIN_SIZE / 2.0);
-
-    // NOYAU GAUSSIEN CIRCULAIRE (VON MISES PROXY COHÉRENT ET SANS DISCONTINUITÉ)
-    const circularGaussianKernel = (x: number, y: number, L: number, twoSigmaSq: number): number => {
-      const theta = (2.0 * Math.PI * (x - y)) / L;
-      const scalingFactor = Math.pow(L / (2.0 * Math.PI), 2);
-      const circularDistSq = scalingFactor * 2.0 * (1.0 - Math.cos(theta));
-      return Math.exp(-circularDistSq / twoSigmaSq);
-    };
-
-    const calculateSimilarity = (p: number, w: number): number => {
-      if (p === w) return 1.0;
-
-      // Proximité linéaire 1D Circulaire canonique
-      const linSim = circularGaussianKernel(p, w, DOMAIN_SIZE, twoSigmaSq1D);
-
-      // Proximité sur la grille plane physique torus 2D (sans effet de bord)
-      const posP = getGridPos(p);
-      const posW = getGridPos(w);
-      const colDistSq = Math.pow(10.0 / (2.0 * Math.PI), 2) * 2.0 * (1.0 - Math.cos((2.0 * Math.PI * (posP.col - posW.col)) / 10.0));
-      const rowDistSq = Math.pow(9.0 / (2.0 * Math.PI), 2) * 2.0 * (1.0 - Math.cos((2.0 * Math.PI * (posP.row - posW.row)) / 9.0));
-      const gridSim = Math.exp(-(colDistSq + rowDistSq) / twoSigmaSqGrid);
-
-      // Symétrie miroir physique centrale (91 - p)
-      const symmetricPoint = (DOMAIN_SIZE + 1) - p;
-      const mirror91Sim = circularGaussianKernel(symmetricPoint, w, DOMAIN_SIZE, twoSigmaSq1D);
-
-      // Symétrie miroir par retournement de chiffres (ex: 12 <-> 21)
-      const revP = parseInt(p.toString().split("").reverse().join(""), 10) || 0;
-      let mirrorRevSim = 0.0;
-      if (revP >= 1 && revP <= DOMAIN_SIZE) {
-        mirrorRevSim = circularGaussianKernel(revP, w, DOMAIN_SIZE, twoSigmaSq1D);
+    // Projection exacte par bisection sur le simplexe marginal Σ q_n = DRAW_SIZE, q_n ∈ [ε, 1-ε]
+    let lo = -12.0;
+    let hi = 12.0;
+    const rawRel = new Float64Array(DOMAIN_SIZE);
+    for (const item of expScores) {
+      if (item.n >= 1 && item.n <= DOMAIN_SIZE) {
+        rawRel[item.n - 1] = (item.p / sumExp) * DRAW_SIZE;
       }
-
-      // Harmoniques décimales de finaux (Distance angulaire Modulo 10)
-      const harmonicSim = circularGaussianKernel(p % 10, w % 10, 10.0, twoSigmaSqMod);
-
-      // Structure de décade (KDE 1D sur l'axe des dizaines, période de 9 décades)
-      const decadeP = Math.floor((p - 1) / 10);
-      const decadeW = Math.floor((w - 1) / 10);
-      const decadeSim = circularGaussianKernel(decadeP, decadeW, 9.0, twoSigmaSqDecade);
-
-      // Harmoniques Divisionnaires (Arithmétique spectrale du GCD via Théorie de l'Information)
-      const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
-      const commonDiv = gcd(p, w);
-      const primeHarmonicSim = commonDiv > 1 ? (2.0 * Math.log(commonDiv)) / maxSurprisal : 0.0;
-
-      const baseSim = Math.max(linSim, gridSim, mirror91Sim, mirrorRevSim, harmonicSim, decadeSim, primeHarmonicSim);
-
-      // ASYMMETRIC RE-EVALUATION MODULATORS (Continuous & Geometric, Zero Magic Numbers)
-      const parityDist = Math.abs((p % 2) - (w % 2));
-      const parityFactor = 0.85 + 0.30 * Math.exp(-Math.pow(parityDist, 2) / 0.5);
-
-      const mirrorBoost = 1.0 + 0.45 * Math.max(mirrorRevSim, mirror91Sim);
-
-      const mod90Dist = Math.min(Math.abs(p - w), DOMAIN_SIZE - Math.abs(p - w));
-      const modProximityBoost = 1.0 + Math.exp(-mod90Dist / expectedSegment);
-
-      return Math.min(0.99, baseSim * parityFactor * mirrorBoost * modProximityBoost);
-    };
-
-    let totalContinLoss = 0;
-    let topologicalScore = 0;
-
-    actualWinners.forEach((w) => {
-      // Enveloppe discrète classique sur le Top-5
-      let maxSimForWinner = 1e-9;
-      top5.forEach((p) => {
-        const sim = calculateSimilarity(p, w);
-        if (sim > maxSimForWinner) maxSimForWinner = sim;
-      });
-
-      // Espérance continue douce (Softmax weighted expectation) sur l'intégralité des 90 numéros
-      let softExpectation = 0;
-      softmaxProbs.forEach((sp) => {
-        const similarity = calculateSimilarity(sp.n, w);
-        softExpectation += sp.prob * similarity;
-      });
-
-      // L'agrégation hybride garantit à la fois une optimisation orientée top5 et un gradient ultra-sensible aux Near Misses partout ailleurs
-      const topRatio = DRAW_SIZE / DOMAIN_SIZE; // Ratio canonique 5/90 ≈ 0.0556
-      const combinedSim = (1.0 - topRatio) * softExpectation + topRatio * maxSimForWinner;
-
-      totalContinLoss += (1.0 - combinedSim);
-      topologicalScore += combinedSim;
-    });
-
-    // 2.5 Calcul de la distance de Wasserstein (Earth Mover's Distance) en 1D
-    const P_dist = new Array(DOMAIN_SIZE).fill(0);
-    softmaxProbs.forEach((sp) => {
-      if (sp.n >= 1 && sp.n <= DOMAIN_SIZE) {
-        P_dist[sp.n - 1] = sp.prob;
+    }
+    const clampProb = (v: number) => Math.max(PROB_EPS, Math.min(1.0 - PROB_EPS, v));
+    for (let iter = 0; iter < 36; iter++) {
+      const mid = 0.5 * (lo + hi);
+      const scale = Math.exp(mid);
+      let s = 0;
+      for (let i = 0; i < DOMAIN_SIZE; i++) {
+        s += clampProb(rawRel[i] * scale);
       }
-    });
-
-    const Q_dist = new Array(DOMAIN_SIZE).fill(0);
-    const numWinners = actualWinners.length || 1;
-    actualWinners.forEach((w) => {
-      if (w >= 1 && w <= DOMAIN_SIZE) {
-        Q_dist[w - 1] = 1.0 / numWinners;
+      if (s < DRAW_SIZE) {
+        lo = mid;
+      } else {
+        hi = mid;
       }
-    });
-
-    let cdfP = 0;
-    let cdfQ = 0;
-    let wassersteinLoss = 0;
+    }
+    const finalScale = Math.exp(0.5 * (lo + hi));
+    const marginals = new Float64Array(DOMAIN_SIZE);
     for (let i = 0; i < DOMAIN_SIZE; i++) {
-      cdfP += P_dist[i];
-      cdfQ += Q_dist[i];
-      wassersteinLoss += Math.abs(cdfP - cdfQ);
+      marginals[i] = clampProb(rawRel[i] * finalScale);
     }
 
-    // Intégration de la distance de Wasserstein comme terme de régularisation différentiable de premier ordre
-    const wassersteinWeight = DRAW_SIZE / DOMAIN_SIZE;
-    const continuousTopologicalLoss = totalContinLoss + wassersteinWeight * wassersteinLoss;
+    const winnerSet = new Set(actualWinners.filter((w) => w >= 1 && w <= DOMAIN_SIZE));
+    let logLossSum = 0;
+    let brierSum = 0;
+    for (let i = 0; i < DOMAIN_SIZE; i++) {
+      const q = marginals[i];
+      const y = winnerSet.has(i + 1) ? 1.0 : 0.0;
+      logLossSum += -(y * Math.log(q) + (1.0 - y) * Math.log(1.0 - q));
+      brierSum += Math.pow(q - y, 2);
+    }
+
+    const meanLogLoss = logLossSum / DOMAIN_SIZE;
+    const meanBrier = brierSum / DOMAIN_SIZE;
+
+    // Ratios adimensionnels centrés à 1.0 sous bruit uniforme (invariants à toute permutation de 1..90)
+    const continuousTopologicalLoss = meanLogLoss / UNIFORM_LOG_LOSS;
+    const marginalBrierRatio = meanBrier / UNIFORM_BRIER;
+
+    let winnerAlignment = 0;
+    if (winnerSet.size > 0) {
+      winnerSet.forEach((w) => {
+        winnerAlignment += marginals[w - 1] / UNIFORM_P;
+      });
+      winnerAlignment /= winnerSet.size;
+    }
+    const topologicalScore = winnerAlignment;
 
     let rankSum = 0;
     actualWinners.forEach((winner) => {
@@ -270,7 +182,16 @@ export const runCounterfactualSimulation = (
     const avgRank =
       actualWinners.length > 0 ? rankSum / actualWinners.length : 90;
 
-    return { top5, hits, missedNumbers, avgRank, scores, topologicalScore, continuousTopologicalLoss, wassersteinLoss };
+    return {
+      top5,
+      hits,
+      missedNumbers,
+      avgRank,
+      scores,
+      topologicalScore,
+      continuousTopologicalLoss,
+      wassersteinLoss: marginalBrierRatio,
+    };
   };
 
   const baseline = evaluateWeights(currentWeights);
@@ -456,9 +377,10 @@ export const runCounterfactualSimulation = (
         const fam2 = determineFamily(algo2);
         const isOrthogonal = fam1 !== fam2;
 
+        const rankGainFloor = 90.0 / Math.max(1, algos.length);
         if (
           synergy.hits.length >= 2 ||
-          synergy.avgRank < baseline.avgRank - 5
+          synergy.avgRank < baseline.avgRank - rankGainFloor
         ) {
           results.push({
             algo: `${algo1} + ${algo2}`,

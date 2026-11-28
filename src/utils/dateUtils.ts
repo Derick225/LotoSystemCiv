@@ -100,3 +100,71 @@ export const isDrawToday = (dateVal: any): boolean => {
   );
 };
 
+/**
+ * Parsing strict d'horodatage sans fallback Date.now() (fail-closed pour garde causale).
+ * Retourne null si la date est absente, vide ou calendairement invalide (ex: 31/02/2026).
+ */
+export const parseStrictTimestampMs = (dateVal: unknown): number | null => {
+  if (dateVal === null || dateVal === undefined) return null;
+  if (typeof dateVal === 'number') {
+    return Number.isFinite(dateVal) && dateVal > 0 ? dateVal : null;
+  }
+  if (dateVal instanceof Date) {
+    const ms = dateVal.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const dateStr = String(dateVal).trim();
+  if (!dateStr) return null;
+
+  // Format français DD/MM/YYYY [HH:MM[:SS]]
+  const frMatch = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(dateStr);
+  if (frMatch) {
+    const day = Number(frMatch[1]);
+    const month = Number(frMatch[2]) - 1;
+    const year = Number(frMatch[3]);
+    const hour = frMatch[4] ? Number(frMatch[4]) : 0;
+    const minute = frMatch[5] ? Number(frMatch[5]) : 0;
+    const second = frMatch[6] ? Number(frMatch[6]) : 0;
+    const d = new Date(year, month, day, hour, minute, second);
+    if (
+      d.getFullYear() === year &&
+      d.getMonth() === month &&
+      d.getDate() === day &&
+      Number.isFinite(d.getTime())
+    ) {
+      return d.getTime();
+    }
+    return null;
+  }
+
+  // Format ISO YYYY-MM-DD ou YYYY/MM/DD [HH:MM[:SS]]
+  const isoDayMatch = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(dateStr);
+  if (isoDayMatch) {
+    const year = Number(isoDayMatch[1]);
+    const month = Number(isoDayMatch[2]) - 1;
+    const day = Number(isoDayMatch[3]);
+    const hour = isoDayMatch[4] ? Number(isoDayMatch[4]) : 0;
+    const minute = isoDayMatch[5] ? Number(isoDayMatch[5]) : 0;
+    const second = isoDayMatch[6] ? Number(isoDayMatch[6]) : 0;
+    const d = new Date(year, month, day, hour, minute, second);
+    if (
+      d.getFullYear() === year &&
+      d.getMonth() === month &&
+      d.getDate() === day &&
+      Number.isFinite(d.getTime())
+    ) {
+      return d.getTime();
+    }
+    return null;
+  }
+
+  // ISO complet avec fuseau horaire (ex: 2026-11-27T12:00:00Z)
+  if (/^\d{4}-\d{2}-\d{2}T/.test(dateStr)) {
+    const ms = Date.parse(dateStr);
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  return null;
+};
+
+

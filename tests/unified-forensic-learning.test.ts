@@ -378,7 +378,7 @@ describe('Moteur Unifié d’Apprentissage Post-Mortem (5/90)', () => {
     expect(res1.body.report.modelVersion).toBe(FORENSIC_MODEL_VERSION);
     expect(res1.body.report.marginalSum).toBeCloseTo(5.0, 5);
     expect(res1.body.report.nearMissesExcludedFromLearning).toBe(true);
-    expect(res1.body.report.modelUsed).toBe('deterministic-narrative-v1');
+    expect(res1.body.report.modelUsed).toBe('deterministic-narrative-v2');
     expect(atomicPersistSpy).toHaveBeenCalledTimes(1);
 
     const wSum = Object.values(res1.body.report.updatedWeights as Record<string, number>).reduce(

@@ -233,7 +233,11 @@ export async function handleCronSync(req: Request, reqBody?: any): Promise<Respo
               const chunk = pendingSnapshots.slice(i, i + 5)
               await Promise.all(
                 chunk.map((snap: { id: string }) =>
-                  handleForensicAutopsy(req, { snapshotId: snap.id, drawResultId: result.id }).catch((e) =>
+                  handleForensicAutopsy(
+                    req,
+                    { snapshotId: snap.id, drawResultId: result.id },
+                    { systemTrusted: true }
+                  ).catch((e) =>
                     console.error(`Forensic autopsy trigger error for ${snap.id}:`, e)
                   )
                 )

@@ -42,6 +42,7 @@ export interface OptimizationRequest {
   allowCriticalDrift?: boolean;
   isRetroactive?: boolean;
   skipLiveWeightsUpdate?: boolean;
+  walkForwardVerdict?: ModelDnaRecord['walkForwardVerdict'];
 }
 
 export interface OptimizationResponse {
@@ -230,6 +231,7 @@ export async function applyOptimizedWeights(
           }
         : undefined,
       causalAuditTrail: fullAuditTrail,
+      walkForwardVerdict: request.walkForwardVerdict,
     });
   } catch (dnaErr) {
     // Rollback atomique des poids en cas d'échec de l'archivage ADN (seulement si poids actifs modifiés)

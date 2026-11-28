@@ -111,6 +111,26 @@ export const ForensicAuditLogsView: React.FC<ForensicAuditLogsViewProps> = ({
         }
       );
 
+      if (synthesis.walkForwardResult) {
+        // Conserver le contexte statistique même si l'application est refusée
+      }
+
+      if (!synthesis.applied) {
+        addAgentLog({
+          id: `epigenome_forensic_blocked_${Date.now()}`,
+          timestamp: new Date(),
+          action: `Régulation EpiGenome-SQ simulée uniquement (${drawName}) — poids conservés.`,
+          type: "META",
+          impact: synthesis.applicationBlockedReason || `Verdict walk-forward: ${synthesis.walkForwardVerdict || 'N/A'}`,
+        });
+        showToast(
+          synthesis.applicationBlockedReason ||
+            `Application bloquée : aucune surperformance walk-forward démontrée (${synthesis.walkForwardVerdict || 'PARITY'}).`,
+          "info"
+        );
+        return;
+      }
+
       setGlobalWeights(synthesis.optimizedWeights);
       const updatedAudit = await runSystematicDnaAudit(
         drawName,

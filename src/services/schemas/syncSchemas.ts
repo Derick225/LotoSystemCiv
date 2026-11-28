@@ -106,6 +106,7 @@ export const OfflineQueueItemSchema = z.object({
   type: OfflineQueuePayloadTypeSchema,
   drawName: z.string(),
   payload: z.record(z.string(), z.unknown()),
+  originUserId: z.string().nullable().optional(),
   timestamp: z.number(),
   attempts: z.number().int().nonnegative().default(0),
 });

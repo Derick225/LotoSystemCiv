@@ -52,6 +52,11 @@ export interface WheelDiagnostics {
   totalPoolSize: number;
   ticketSize: number;
   guarantee: number;
+  requestedGuarantee: number;
+  bankersCount: number;
+  effectiveSubGuarantee: number;
+  conditionalGuaranteeLabel: string;
+  conditionalGuaranteeDisclaimer: string;
   totalCombinationsFull: number;
   generatedTicketsCount: number;
   scenariosCount: number;
@@ -87,6 +92,43 @@ export const generateAbbreviatedWheel = (
   const totalFull = nCr(numbers.length, ticketSize);
   const schonheimBound = calculateSchonheimBound(n, kNeeded, guarantee);
 
+  const buildConditionalGuaranteeMeta = (
+    reqG: number,
+    bCount: number,
+    effSubG: number
+  ): {
+    requestedGuarantee: number;
+    bankersCount: number;
+    effectiveSubGuarantee: number;
+    conditionalGuaranteeLabel: string;
+    conditionalGuaranteeDisclaimer: string;
+  } => {
+    if (bCount > 0) {
+      return {
+        requestedGuarantee: reqG,
+        bankersCount: bCount,
+        effectiveSubGuarantee: effSubG,
+        conditionalGuaranteeLabel: `${effSubG}/${Math.max(1, ticketSize - bCount)} hors bases (${reqG}/5 si les ${bCount} base(s) sortent)`,
+        conditionalGuaranteeDisclaimer: `Couverture conditionnelle : la garantie ${reqG}/5 exige que toutes les ${bCount} base(s) fixes sortent ET que le reste du pool couvre ${effSubG} numéros gagnants. Sans les bases, la garantie effective sur le sous-pool devient max(2, ${reqG} - ${bCount}) = ${effSubG}.`,
+      };
+    }
+    return {
+      requestedGuarantee: reqG,
+      bankersCount: 0,
+      effectiveSubGuarantee: effSubG,
+      conditionalGuaranteeLabel: `${reqG}/${ticketSize} conditionnelle (si ${reqG}+ gagnants dans le pool)`,
+      conditionalGuaranteeDisclaimer: `Système réducteur : garantit au moins ${reqG} correspondances uniquement sous condition que ${reqG} numéros gagnants ou plus figurent dans votre pool sélectionné (jamais une garantie de gain absolu).`,
+    };
+  };
+
+  const uniqueBankersCount = Array.from(new Set(bankers)).length;
+  const subGuarantee =
+    uniqueBankersCount > 0
+      ? Math.max(1, Math.min(Math.max(1, kNeeded), guarantee === 5 ? kNeeded : Math.max(2, guarantee - uniqueBankersCount)))
+      : guarantee;
+
+  const meta = buildConditionalGuaranteeMeta(guarantee, uniqueBankersCount, subGuarantee);
+
   if (kNeeded <= 0) {
     const singleTicket = [[...bankers].sort((a, b) => a - b)];
     return {
@@ -95,6 +137,7 @@ export const generateAbbreviatedWheel = (
         totalPoolSize: numbers.length,
         ticketSize,
         guarantee,
+        ...meta,
         totalCombinationsFull: totalFull,
         generatedTicketsCount: 1,
         scenariosCount: 1,
@@ -228,6 +271,7 @@ export const generateAbbreviatedWheel = (
       totalPoolSize: numbers.length,
       ticketSize,
       guarantee,
+      ...meta,
       totalCombinationsFull: totalFull,
       generatedTicketsCount: selectedTickets.length,
       scenariosCount: totalScenarios,

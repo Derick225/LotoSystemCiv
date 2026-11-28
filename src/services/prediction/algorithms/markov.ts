@@ -22,7 +22,7 @@ function getGameProfile(drawName: string): GameProfile {
   if (lower.includes("mega million") || lower.includes("megamillion")) {
     return { name: "Mega Millions", mainMax: 70, mainCount: 5, specialMax: 25, specialCount: 1, isSpecialActive: true };
   }
-  return { name: "Loto 5/90", mainMax: 90, mainCount: 5, specialMax: 90, specialCount: 5, isSpecialActive: true };
+  return { name: "STANDARD_5_90", mainMax: 90, mainCount: 5, specialMax: 90, specialCount: 5, isSpecialActive: true };
 }
 
 export const markovPlugin: AlgorithmPlugin = {
@@ -34,7 +34,7 @@ export const markovPlugin: AlgorithmPlugin = {
   isStrictlyDeterministic: true,
   
   precompute(ctx) {
-    const drawName = ctx.drawName || "Loto 5/90";
+    const drawName = ctx.drawName || "";
     const profile = getGameProfile(drawName);
     const domainSize = profile.mainMax;
     

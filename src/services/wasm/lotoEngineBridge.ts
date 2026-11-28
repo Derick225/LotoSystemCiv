@@ -2488,40 +2488,211 @@ function projectToMarginalSimplex(scores: Float64Array, targetSum: number = 5.0)
   }
 }
 
-function computeOofBayesianPoissonScores(training: FallbackDraw[]): Float64Array {
+function logitProb(p: number): number {
+  const pc = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
+  return Math.log(pc / (1.0 - pc));
+}
+
+function applyLogisticPlattSimplex(probs: Float64Array, alpha: number, beta: number): void {
+  for (let n = 1; n <= 90; n++) {
+    const z = Math.max(-20.0, Math.min(20.0, alpha * logitProb(probs[n]) + beta));
+    probs[n] = 1.0 / (1.0 + Math.exp(-z));
+  }
+  projectToMarginalSimplex(probs, 5.0);
+}
+
+/**
+ * Ensemble OOF causal à 6 canaux orthogonaux (parité stricte Rust calibration.rs) :
+ * 1) Fréquence bayésienne lissée (Laplace)
+ * 2) Aléa temporel d'écart exponentiel (Hazard)
+ * 3) Momentum EMA adaptatif (demi-vie √N)
+ * 4) Transition conditionnelle Markov d'ordre 1 depuis le dernier tirage causal
+ * 5) Affinité de co-occurrence avec les gagnants du dernier tirage causal
+ * 6) Diffusion spatiale circulaire Z/90Z autour du dernier tirage causal
+ * Agrégés en log-linéaire géométrique puis projetés sur le simplexe marginal Σp = 5.0.
+ */
+function computeOofEnsembleScores(training: FallbackDraw[]): Float64Array {
   const nTrain = training.length;
   const freqs = new Int32Array(91);
   const gaps = new Int32Array(91);
   const lastSeen = new Uint8Array(91);
+  const momentum = new Float64Array(91);
+  const markovCounts = new Float64Array(91);
+  const cooccCounts = new Float64Array(91);
+  const spatialResonance = new Float64Array(91);
+
+  if (nTrain === 0) {
+    const uniform = new Float64Array(91);
+    for (let n = 1; n <= 90; n++) uniform[n] = 5.0 / 90.0;
+    return uniform;
+  }
+
+  const tauMomentum = Math.max(2.0, Math.sqrt(nTrain));
+  const lastDraw = training[nTrain - 1];
+  const lastWinnerSet = new Set<number>();
+  for (const w of lastDraw.winners) {
+    if (w >= 1 && w <= 90) lastWinnerSet.add(w);
+  }
+
+  let totalMomentum = 0.0;
+  let totalMarkovHits = 0.0;
+  let totalCooccHits = 0.0;
 
   for (let d = 0; d < nTrain; d++) {
     const draw = training[nTrain - 1 - d];
+    const decay = Math.exp(-d / tauMomentum);
+
+    // Co-occurrence avec le vecteur des derniers gagnants (sur les tirages strictement antérieurs d >= 1)
+    let overlapWithLast = 0;
+    if (d >= 1 && lastWinnerSet.size > 0) {
+      for (const w of draw.winners) {
+        if (lastWinnerSet.has(w)) overlapWithLast++;
+      }
+    }
+
     for (const w of draw.winners) {
       if (w >= 1 && w <= 90) {
         freqs[w]++;
+        momentum[w] += decay;
+        totalMomentum += decay;
         if (!lastSeen[w]) {
           gaps[w] = d;
           lastSeen[w] = 1;
         }
+        if (overlapWithLast > 0) {
+          cooccCounts[w] += overlapWithLast;
+          totalCooccHits += overlapWithLast;
+        }
+      }
+    }
+
+    // Transition Markov d'ordre 1 : training[k-1] -> training[k]
+    if (d >= 1 && d < nTrain && lastWinnerSet.size > 0) {
+      const prevDraw = training[nTrain - 1 - d];
+      const nextDraw = training[nTrain - d];
+      let prevOverlap = 0;
+      for (const wPrev of prevDraw.winners) {
+        if (lastWinnerSet.has(wPrev)) prevOverlap++;
+      }
+      if (prevOverlap > 0) {
+        for (const wNext of nextDraw.winners) {
+          if (wNext >= 1 && wNext <= 90) {
+            markovCounts[wNext] += prevOverlap;
+            totalMarkovHits += prevOverlap;
+          }
+        }
       }
     }
   }
+
   for (let n = 1; n <= 90; n++) {
     if (!lastSeen[n]) gaps[n] = nTrain;
   }
 
-  const totalBalls = nTrain * 5.0;
+  const totalBalls = Math.max(5.0, nTrain * 5.0);
   const expectedGap = 90.0 / 5.0;
-  const scores = new Float64Array(91);
-  // Parité stricte avec crates/loto-engine/src/scoring.rs : compute_bayesian_poisson_score(..., 0.5, 0.5)
+  const twoSigmaSq = 2.0 * (90.0 / 25.0);
+  const laplacePrior = 5.0 / 90.0;
+
+  const chFreq = new Float64Array(91);
+  const chGap = new Float64Array(91);
+  const chMom = new Float64Array(91);
+  const chMarkov = new Float64Array(91);
+  const chCoocc = new Float64Array(91);
+  const chSpatial = new Float64Array(91);
+
   for (let n = 1; n <= 90; n++) {
-    const fScore = (freqs[n] + 1.0) / (totalBalls + 90.0);
+    chFreq[n] = (freqs[n] + 0.5) / (totalBalls + 45.0);
     const gRatio = gaps[n] / expectedGap;
-    const gScore = Math.tanh(Math.min(3.0, gRatio) / 3.0);
-    scores[n] = 0.5 * (fScore * 90.0) + 0.5 * gScore;
+    chGap[n] = 0.25 + 0.75 * Math.tanh(Math.min(3.0, gRatio) / 3.0);
+    chMom[n] = (momentum[n] + laplacePrior) / (totalMomentum + 5.0);
+    chMarkov[n] = (markovCounts[n] + laplacePrior) / (totalMarkovHits + 5.0);
+    chCoocc[n] = (cooccCounts[n] + laplacePrior) / (totalCooccHits + 5.0);
+
+    let spAcc = laplacePrior;
+    lastWinnerSet.forEach((lw) => {
+      const diff = Math.abs(n - lw);
+      const circ = Math.min(diff, 90 - diff);
+      spAcc += Math.exp(-(circ * circ) / twoSigmaSq);
+    });
+    spatialResonance[n] = spAcc;
+    chSpatial[n] = spAcc;
+  }
+
+  projectToMarginalSimplex(chFreq, 5.0);
+  projectToMarginalSimplex(chGap, 5.0);
+  projectToMarginalSimplex(chMom, 5.0);
+  projectToMarginalSimplex(chMarkov, 5.0);
+  projectToMarginalSimplex(chCoocc, 5.0);
+  projectToMarginalSimplex(chSpatial, 5.0);
+
+  const scores = new Float64Array(91);
+  const invChannels = 1.0 / 6.0;
+  for (let n = 1; n <= 90; n++) {
+    const logMix =
+      invChannels *
+      (Math.log(Math.max(1e-9, chFreq[n])) +
+        Math.log(Math.max(1e-9, chGap[n])) +
+        Math.log(Math.max(1e-9, chMom[n])) +
+        Math.log(Math.max(1e-9, chMarkov[n])) +
+        Math.log(Math.max(1e-9, chCoocc[n])) +
+        Math.log(Math.max(1e-9, chSpatial[n])));
+    scores[n] = Math.exp(logMix);
   }
   projectToMarginalSimplex(scores, 5.0);
   return scores;
+}
+
+/**
+ * Régression logistique de Platt régularisée L2 autour de l'identité (alpha=1, beta=0)
+ * résolue par Newton-Raphson déterministe sur log-odds x_i = logit(p_i).
+ */
+function fitRegularizedLogisticPlatt(
+  pairs: ReadonlyArray<{ p: number; y: number }>
+): { alpha: number; beta: number } {
+  if (pairs.length <= 10) {
+    return { alpha: 1.0, beta: 0.0 };
+  }
+
+  const lambdaReg = 1.0;
+  let alpha = 1.0;
+  let beta = 0.0;
+
+  for (let iter = 0; iter < 15; iter++) {
+    let gA = lambdaReg * (alpha - 1.0);
+    let gB = lambdaReg * beta;
+    let hAA = lambdaReg;
+    let hAB = 0.0;
+    let hBB = lambdaReg;
+
+    for (let i = 0; i < pairs.length; i++) {
+      const x = logitProb(pairs[i].p);
+      const y = pairs[i].y;
+      const z = Math.max(-20.0, Math.min(20.0, alpha * x + beta));
+      const q = 1.0 / (1.0 + Math.exp(-z));
+      const diff = q - y;
+      const w = Math.max(1e-9, q * (1.0 - q));
+
+      gA += diff * x;
+      gB += diff;
+      hAA += w * x * x;
+      hAB += w * x;
+      hBB += w;
+    }
+
+    const det = hAA * hBB - hAB * hAB;
+    if (!(det > 1e-12)) break;
+
+    const stepA = (hBB * gA - hAB * gB) / det;
+    const stepB = (hAA * gB - hAB * gA) / det;
+
+    alpha = Math.max(0.5, Math.min(3.0, alpha - stepA));
+    beta = Math.max(-2.0, Math.min(2.0, beta - stepB));
+
+    if (Math.abs(stepA) + Math.abs(stepB) < 1e-7) break;
+  }
+
+  return { alpha, beta };
 }
 
 function buildBlockRanges(total: number): Array<[number, number]> {
@@ -2559,11 +2730,8 @@ function evaluateHoldoutBrierSkill(
   for (let t = startIdx; t < end; t++) {
     const training = history.slice(0, t);
     const actual = history[t];
-    const probs = computeOofBayesianPoissonScores(training);
-    for (let n = 1; n <= 90; n++) {
-      probs[n] = Math.max(0.0, plattAlpha * probs[n] + plattBeta);
-    }
-    projectToMarginalSimplex(probs, 5.0);
+    const probs = computeOofEnsembleScores(training);
+    applyLogisticPlattSimplex(probs, plattAlpha, plattBeta);
 
     const targetSet = new Set(actual.winners);
     let windowBrier = 0.0;
@@ -2634,11 +2802,6 @@ function evaluateWalkForwardTimeline(
   let totalLogLoss = 0.0;
   let totalHits = 0;
   let numSamples = 0;
-
-  let sumRaw = 0.0;
-  let sumTarget = 0.0;
-  let sumRawSq = 0.0;
-  let sumProd = 0.0;
   let totalPairs = 0;
 
   const oofPairs: Array<{ p: number; y: number; seq: number }> = [];
@@ -2646,7 +2809,7 @@ function evaluateWalkForwardTimeline(
   for (let t = startIdx; t < tuningEnd; t++) {
     const training = history.slice(0, t);
     const target = history[t];
-    const scores = computeOofBayesianPoissonScores(training);
+    const scores = computeOofEnsembleScores(training);
 
     let windowBrier = 0.0;
     const targetSet = new Set(target.winners);
@@ -2660,11 +2823,6 @@ function evaluateWalkForwardTimeline(
       const pClamp = Math.max(1e-9, Math.min(1.0 - 1e-9, p));
       totalLogLoss += -(y * Math.log(pClamp) + (1.0 - y) * Math.log(1.0 - pClamp));
       oofPairs.push({ p: pClamp, y, seq: totalPairs });
-
-      sumRaw += p;
-      sumTarget += y;
-      sumRawSq += p * p;
-      sumProd += p * y;
       totalPairs++;
     }
 
@@ -2683,6 +2841,9 @@ function evaluateWalkForwardTimeline(
   const meanBrier = numSamples > 0 ? totalBrier / numSamples : UNIFORM_BRIER_BENCHMARK;
   const brierSkillScore = Math.max(-1.0, Math.min(1.0, 1.0 - (meanBrier / UNIFORM_BRIER_BENCHMARK)));
   const meanLogLoss = totalPairs > 0 ? totalLogLoss / totalPairs : 0.0;
+
+  // Régression logistique de Platt régularisée L2 sur les log-odds OOF (avant tri par p)
+  const { alpha: plattAlpha, beta: plattBeta } = fitRegularizedLogisticPlatt(oofPairs);
 
   // Déciles quantiles réels triés sur les probabilités OOF (chaque décile D1..D10 contient ~10% des observations)
   let eceAcc = 0.0;
@@ -2714,18 +2875,6 @@ function evaluateWalkForwardTimeline(
     }
   } else {
     decileBuckets.push(...emptyDeciles);
-  }
-
-  let plattAlpha = 1.0;
-  let plattBeta = 0.0;
-  if (totalPairs > 10) {
-    const nF = totalPairs;
-    const meanX = sumRaw / nF;
-    const meanY = sumTarget / nF;
-    const cov = sumProd - nF * meanX * meanY;
-    const varX = sumRawSq - nF * meanX * meanX;
-    plattAlpha = varX > 1e-9 ? Math.max(0.5, Math.min(3.0, cov / varX)) : 1.0;
-    plattBeta = Math.max(-2.0, Math.min(2.0, meanY - plattAlpha * meanX));
   }
 
   // Évaluation Holdout finale gelée (paramètres Platt figés sur tuning, sans fuite)

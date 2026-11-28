@@ -56,13 +56,28 @@ export interface NeuralOptimizationResult {
   batchSize: number;
   trainingSampleCount?: number;
   validationSampleCount?: number;
+  isValidationAvailable: boolean;
+  bestEpoch: number;
+  earlyStopped: boolean;
   initialWeights: AlgoWeights;
   optimizedWeights: AlgoWeights;
   algoGradients: AlgoNeuralGradientInfo[];
   epochHistory: NeuralEpochLog[];
   trainingDurationMs: number;
-  convergenceStatus: 'CONVERGED' | 'PLATEAU' | 'MAX_EPOCHS_REACHED';
+  convergenceStatus:
+    | 'CONVERGED'
+    | 'PLATEAU'
+    | 'OVERFIT_ROLLED_BACK'
+    | 'INSUFFICIENT_VALIDATION'
+    | 'MAX_EPOCHS_REACHED';
 }
+
+export type NeuralEpochProgressCallback = (
+  epoch: number,
+  totalEpochs: number,
+  currentLoss: number,
+  currentAccDelta: number
+) => void;
 
 export interface NeuralHyperparameters {
   epochs: number; // 5 to 50
@@ -725,7 +740,8 @@ export const runNeuralSelfOptimization = (
   drawName: string,
   history: DrawResult[],
   initialWeights: AlgoWeights,
-  params: Partial<NeuralHyperparameters> = {}
+  params: Partial<NeuralHyperparameters> = {},
+  onEpochProgress?: NeuralEpochProgressCallback
 ): NeuralOptimizationResult => {
   const startTime = Date.now();
   const hyperparams: NeuralHyperparameters = {
@@ -777,24 +793,29 @@ export const runNeuralSelfOptimization = (
       batchSize: 0,
       trainingSampleCount: 0,
       validationSampleCount: 0,
+      isValidationAvailable: false,
+      bestEpoch: 0,
+      earlyStopped: false,
       initialWeights: { ...normalizedInit },
       optimizedWeights: { ...normalizedInit },
       algoGradients: [],
       epochHistory: [],
       trainingDurationMs: 0,
-      convergenceStatus: 'PLATEAU',
+      convergenceStatus: 'INSUFFICIENT_VALIDATION',
     };
   }
 
   // Partition chronologique Walk-Forward :
   // - `valTensors` : les tirages les plus récents (indices 0..valCount-1, hors-échantillon)
-  // - `trainTensors` : les tirages antérieurs (indices valCount..N-1) utilisés pour les gradients
+  // - `trainTensors` : les tirages antérieurs (indices valCount..N-1)
+  // Si effectiveBatchSize < 4, aucune validation fiable n'est disponible : valTensors reste vide (jamais d'aliasing avec train).
   const valCount =
     effectiveBatchSize >= 4
       ? Math.max(1, Math.min(Math.floor(effectiveBatchSize * 0.3), effectiveBatchSize - 2))
       : 0;
-  const valTensors = valCount > 0 ? allTensors.slice(0, valCount) : allTensors;
-  const trainTensors = valCount > 0 ? allTensors.slice(valCount) : allTensors;
+  const isValidationAvailable = valCount > 0;
+  const valTensors = isValidationAvailable ? allTensors.slice(0, valCount) : [];
+  const trainTensors = isValidationAvailable ? allTensors.slice(valCount) : allTensors;
 
   // Preuve empirique évaluée sans fuite temporelle sur la fenêtre d'entraînement
   const proofHistory = pureHistory.slice(valCount);
@@ -821,13 +842,23 @@ export const runNeuralSelfOptimization = (
   });
 
   const initialTrainEval = evaluateSampleSet(trainTensors, currentW, validKeys);
-  const initialValEval = evaluateSampleSet(valTensors, currentW, validKeys);
+  const initialValEval = isValidationAvailable
+    ? evaluateSampleSet(valTensors, currentW, validKeys)
+    : null;
 
   const epochHistory: NeuralEpochLog[] = [];
   let initialLoss = initialTrainEval.meanLoss;
   let finalLoss = initialTrainEval.meanLoss;
   const maxEpochs = hyperparams.epochs;
   let lastGradients: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+
+  let bestEpoch = 0;
+  let bestWeights: Record<AlgoKey, number> = { ...currentW };
+  let bestValLoss = initialValEval ? initialValEval.meanLoss : initialTrainEval.meanLoss;
+  let lastObservedValLoss = bestValLoss;
+  let epochsWithoutImprovement = 0;
+  const earlyStopPatience = Math.max(3, Math.ceil(maxEpochs / 3));
+  let earlyStopped = false;
 
   for (let ep = 0; ep < maxEpochs; ep++) {
     const gradients: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
@@ -922,7 +953,6 @@ export const runNeuralSelfOptimization = (
       if (step < 0) {
         step *= credibilityByKey[k] ?? 0;
       }
-      // Mise à jour multiplicative (Exponentiated Gradient sur le simplexe) évitant l'extinction à 0.0001
       candidateStep[k] = currentW[k] * Math.exp(-step * 2.5);
     });
 
@@ -939,32 +969,74 @@ export const runNeuralSelfOptimization = (
     const meanEntropy =
       epochEntropySum / (trainTensors.length * Math.log2(90));
     const meanLoss = epochLoss / trainTensors.length;
-    const valEval = evaluateSampleSet(valTensors, currentW, validKeys);
+    const valEval = isValidationAvailable
+      ? evaluateSampleSet(valTensors, currentW, validKeys)
+      : null;
 
     if (ep === 0) initialLoss = meanLoss;
     finalLoss = meanLoss;
 
+    const accuracyDeltaVal =
+      isValidationAvailable && valEval && initialValEval
+        ? parseFloat((valEval.accuracy - initialValEval.accuracy).toFixed(2))
+        : 0;
+
     epochHistory.push({
       epoch: ep + 1,
       loss: parseFloat(meanLoss.toFixed(5)),
-      validationLoss: parseFloat(valEval.meanLoss.toFixed(5)),
-      accuracyDelta: parseFloat(
-        (valEval.accuracy - initialValEval.accuracy).toFixed(2)
-      ),
+      validationLoss: valEval ? parseFloat(valEval.meanLoss.toFixed(5)) : undefined,
+      accuracyDelta: accuracyDeltaVal,
       gradientNorm: parseFloat(gradNorm.toFixed(5)),
       learningRate: parseFloat(dynamicLR.toFixed(5)),
       meanEntropy: parseFloat(meanEntropy.toFixed(4)),
     });
+
+    if (onEpochProgress) {
+      onEpochProgress(
+        ep + 1,
+        maxEpochs,
+        parseFloat(meanLoss.toFixed(5)),
+        accuracyDeltaVal
+      );
+    }
+
+    if (isValidationAvailable && valEval) {
+      lastObservedValLoss = valEval.meanLoss;
+      if (valEval.meanLoss < bestValLoss - 1e-6) {
+        bestValLoss = valEval.meanLoss;
+        bestWeights = { ...currentW };
+        bestEpoch = ep + 1;
+        epochsWithoutImprovement = 0;
+      } else {
+        epochsWithoutImprovement += 1;
+        if (epochsWithoutImprovement >= earlyStopPatience) {
+          earlyStopped = true;
+          break;
+        }
+      }
+    } else if (meanLoss < bestValLoss - 1e-6) {
+      bestValLoss = meanLoss;
+      bestWeights = { ...currentW };
+      bestEpoch = ep + 1;
+    }
   }
 
-  const finalTrainEval = evaluateSampleSet(trainTensors, currentW, validKeys);
-  const finalValEval = evaluateSampleSet(valTensors, currentW, validKeys);
+  // Rollback systématique au meilleur point de contrôle de validation (ou initial si dégradation continue)
+  validKeys.forEach((k) => {
+    currentW[k] = bestWeights[k];
+  });
+
   const optimizedWeights = projectWeightsWithContinuousProofShrinkage(
     currentW,
     normalizedInit,
     proofMap,
     forcedZeroKeys
   );
+  const finalTrainEval = evaluateSampleSet(trainTensors, optimizedWeights, validKeys);
+  const finalValEval = isValidationAvailable
+    ? evaluateSampleSet(valTensors, optimizedWeights, validKeys)
+    : null;
+  finalLoss = finalTrainEval.meanLoss;
   const duration = Date.now() - startTime;
 
   const algoGradients: AlgoNeuralGradientInfo[] = validKeys
@@ -1019,63 +1091,151 @@ export const runNeuralSelfOptimization = (
   const lossReductionPct =
     initialLoss > 0 ? ((initialLoss - finalLoss) / initialLoss) * 100 : 0;
 
+  let convergenceStatus: NeuralOptimizationResult['convergenceStatus'] = 'PLATEAU';
+  if (!isValidationAvailable) {
+    convergenceStatus = 'INSUFFICIENT_VALIDATION';
+  } else if (initialValEval && finalValEval) {
+    const valReductionPct =
+      initialValEval.meanLoss > 0
+        ? ((initialValEval.meanLoss - finalValEval.meanLoss) / initialValEval.meanLoss) * 100
+        : 0;
+    const rolledBackFromOverfit =
+      bestEpoch < epochHistory.length && lastObservedValLoss > bestValLoss + 1e-6;
+    if (valReductionPct > 0.25 && bestEpoch > 0) {
+      convergenceStatus = 'CONVERGED';
+    } else if (rolledBackFromOverfit) {
+      convergenceStatus = 'OVERFIT_ROLLED_BACK';
+    } else {
+      convergenceStatus = 'PLATEAU';
+    }
+  }
+
   return {
     drawName,
-    epochsCompleted: maxEpochs,
+    epochsCompleted: epochHistory.length,
     initialLoss: parseFloat(initialLoss.toFixed(5)),
     finalLoss: parseFloat(finalLoss.toFixed(5)),
     lossReductionPct: parseFloat(lossReductionPct.toFixed(2)),
-    validationLossInitial: parseFloat(initialValEval.meanLoss.toFixed(5)),
-    validationLossFinal: parseFloat(finalValEval.meanLoss.toFixed(5)),
-    initialAccuracy: parseFloat(initialValEval.accuracy.toFixed(2)),
-    finalAccuracy: parseFloat(finalValEval.accuracy.toFixed(2)),
-    accuracyGain: parseFloat(
-      (finalValEval.accuracy - initialValEval.accuracy).toFixed(2)
-    ),
+    validationLossInitial: initialValEval
+      ? parseFloat(initialValEval.meanLoss.toFixed(5))
+      : undefined,
+    validationLossFinal: finalValEval
+      ? parseFloat(finalValEval.meanLoss.toFixed(5))
+      : undefined,
+    initialAccuracy: initialValEval ? parseFloat(initialValEval.accuracy.toFixed(2)) : 0,
+    finalAccuracy: finalValEval ? parseFloat(finalValEval.accuracy.toFixed(2)) : 0,
+    accuracyGain:
+      initialValEval && finalValEval
+        ? parseFloat((finalValEval.accuracy - initialValEval.accuracy).toFixed(2))
+        : 0,
     trainAccuracyInitial: parseFloat(initialTrainEval.accuracy.toFixed(2)),
     trainAccuracyFinal: parseFloat(finalTrainEval.accuracy.toFixed(2)),
     batchSize: effectiveBatchSize,
     trainingSampleCount: trainTensors.length,
     validationSampleCount: valTensors.length,
+    isValidationAvailable,
+    bestEpoch,
+    earlyStopped,
     initialWeights: normalizedInit,
     optimizedWeights,
     algoGradients,
     epochHistory,
     trainingDurationMs: duration,
-    convergenceStatus: lossReductionPct > 1.5 ? 'CONVERGED' : 'PLATEAU',
+    convergenceStatus,
   };
 };
 
 /**
- * Version asynchrone non-bloquante partageant strictement le même pipeline mathématique
- * avec notification progressive de chaque époque pour la fluidité UI.
+ * Version asynchrone non-bloquante exécutée dans un Web Worker dédié (`neuralOptimization.worker.ts`)
+ * lorsque `Worker` est disponible, avec repli déterministe direct en environnement Node/Vitest.
  */
-export const runNeuralSelfOptimizationAsync = async (
+export const runNeuralSelfOptimizationAsync = (
   drawName: string,
   history: DrawResult[],
   initialWeights: AlgoWeights,
   params: Partial<NeuralHyperparameters> = {},
-  onEpochProgress?: (
-    epoch: number,
-    totalEpochs: number,
-    currentLoss: number,
-    currentAccDelta: number
-  ) => void
+  onEpochProgress?: NeuralEpochProgressCallback
 ): Promise<NeuralOptimizationResult> => {
+  if (typeof Worker !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      let worker: Worker | null = null;
+      try {
+        worker = new Worker(
+          new URL('../workers/neuralOptimization.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+      } catch {
+        resolve(
+          runNeuralSelfOptimization(
+            drawName,
+            history,
+            initialWeights,
+            params,
+            onEpochProgress
+          )
+        );
+        return;
+      }
+
+      worker.onmessage = (event: MessageEvent) => {
+        const msg = event.data as
+          | {
+              type: 'EPOCH_PROGRESS';
+              epoch: number;
+              totalEpochs: number;
+              currentLoss: number;
+              currentAccDelta: number;
+            }
+          | { type: 'COMPLETE'; result: NeuralOptimizationResult }
+          | { type: 'ERROR'; error: string };
+
+        if (msg.type === 'EPOCH_PROGRESS') {
+          if (onEpochProgress) {
+            onEpochProgress(
+              msg.epoch,
+              msg.totalEpochs,
+              msg.currentLoss,
+              msg.currentAccDelta
+            );
+          }
+          return;
+        }
+
+        if (msg.type === 'COMPLETE') {
+          worker?.terminate();
+          resolve(msg.result);
+          return;
+        }
+
+        if (msg.type === 'ERROR') {
+          worker?.terminate();
+          reject(new Error(msg.error));
+        }
+      };
+
+      worker.onerror = () => {
+        worker?.terminate();
+        resolve(
+          runNeuralSelfOptimization(
+            drawName,
+            history,
+            initialWeights,
+            params,
+            onEpochProgress
+          )
+        );
+      };
+
+      worker.postMessage({ drawName, history, initialWeights, params });
+    });
+  }
+
   const result = runNeuralSelfOptimization(
     drawName,
     history,
     initialWeights,
-    params
+    params,
+    onEpochProgress
   );
-
-  if (onEpochProgress && result.epochHistory.length > 0) {
-    const total = result.epochHistory.length;
-    for (const epLog of result.epochHistory) {
-      onEpochProgress(epLog.epoch, total, epLog.loss, epLog.accuracyDelta);
-      await new Promise((r) => setTimeout(r, 0));
-    }
-  }
-
-  return result;
+  return Promise.resolve(result);
 };

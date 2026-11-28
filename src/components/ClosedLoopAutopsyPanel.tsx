@@ -202,13 +202,20 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
         globalWeights
       );
       setLastAdjustmentResult(result);
-      setGlobalWeights(result.optimizedWeights, drawName);
-      setApplied(true);
-      showToast(
-        `ADN Recalibré ! Nouvelle version ${result.dnaRecord.version} enregistrée`,
-        "success"
-      );
-      audioEngine.play("success");
+      if (result.idempotentHit) {
+        showToast(
+          `Tirage du ${result.targetDrawDate} déjà traité (idempotence active) — poids conservés.`,
+          "info"
+        );
+      } else {
+        setGlobalWeights(result.optimizedWeights, drawName);
+        setApplied(true);
+        showToast(
+          `ADN Recalibré ! Nouvelle version ${result.dnaRecord.version} enregistrée`,
+          "success"
+        );
+        audioEngine.play("success");
+      }
     } catch (e: any) {
       showToast(e?.message || "Erreur lors de l'application de la correction", "error");
     } finally {
@@ -232,13 +239,21 @@ export const ClosedLoopAutopsyPanel: React.FC<{ drawName: string }> = ({
         }
       );
       setEpigenomeResult(synthesis);
-      setGlobalWeights(synthesis.optimizedWeights, drawName);
-      setApplied(true);
-      audioEngine.play("success");
-      showToast(
-        `EpiGenome-SQ appliqué sur ${drawName} (${synthesis.sequenceMetrics.sequenceSignature} · cohérence ${synthesis.sequenceMetrics.epistaticCoherenceScore}%)`,
-        "success"
-      );
+      if (synthesis.applied) {
+        setGlobalWeights(synthesis.optimizedWeights, drawName);
+        setApplied(true);
+        audioEngine.play("success");
+        showToast(
+          `EpiGenome-SQ appliqué sur ${drawName} (${synthesis.sequenceMetrics.sequenceSignature} · cohérence ${synthesis.sequenceMetrics.epistaticCoherenceScore}%)`,
+          "success"
+        );
+      } else {
+        showToast(
+          synthesis.applicationBlockedReason ||
+            `Simulation sèche EpiGenome-SQ uniquement : avantage OOS non démontré (${synthesis.walkForwardVerdict ?? "PARITY_WITH_BASELINE"}).`,
+          "info"
+        );
+      }
     } catch (e: any) {
       showToast(
         e?.message || "Erreur lors de la synthèse EpiGenome-SQ",

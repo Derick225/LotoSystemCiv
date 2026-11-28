@@ -1,6 +1,7 @@
 import { createClient } from 'supabase'
 import { z } from "zod";
 import { corsHeaders } from "../../_shared/cors.ts"
+import { computeCanonicalTopologicalLoss } from "../../_shared/forensic-learning-engine.ts"
 
 const SelfLearnRequestSchema = z.object({
     drawName: z.string().default('Global')
@@ -171,40 +172,8 @@ const evaluateGenome = (weights: Record<string, number>, foldsData: { signalMatr
             // 1. Hits (Exact overlaps in top 5)
             const hits = top5.filter(n => drawTargets.includes(n)).length;
 
-            // 2. Continuous Topological Loss
-            let totalContinLoss = 0;
-            drawTargets.forEach((w: number) => {
-                let maxSimForWinner = 1e-9;
-                top5.forEach((p: number) => {
-                    let sim = 0.0;
-                    if (p === w) {
-                        sim = 1.0;
-                    } else {
-                        const linSim = Math.exp(-0.25 * Math.abs(p - w));
-                        const posP = getGridPos(p);
-                        const posW = getGridPos(w);
-                        const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-                        const gridSim = Math.exp(-0.35 * gridDist);
-
-                        let mirrorSim = 0.0;
-                        if (p + w === 91) mirrorSim = 0.45;
-                        const strP = p.toString();
-                        const revP = parseInt(strP.split("").reverse().join(""), 10);
-                        if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, 0.40);
-
-                        let harmonicSim = 0.0;
-                        if (p % 10 === w % 10) harmonicSim = 0.35;
-
-                        let decadeSim = 0.0;
-                        if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = 0.25;
-
-                        sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
-                    }
-                    if (sim > maxSimForWinner) maxSimForWinner = sim;
-                });
-                totalContinLoss += (1.0 - maxSimForWinner);
-            });
-            const continuousTopologicalLoss = totalContinLoss / (drawTargets.length || 5);
+            // 2. Continuous Topological Loss (géométrique canonique, sans numérologie)
+            const continuousTopologicalLoss = computeCanonicalTopologicalLoss(top5, drawTargets);
 
             // 3. Brier Score (Probabilistic Calibration)
             const temp = 1.0;
@@ -250,52 +219,19 @@ const evaluateGenome = (weights: Record<string, number>, foldsData: { signalMatr
             ) / 10.0;
 
             // 5. Counterfactual Improvement (compared to baseline flat weights)
-            let baseTotalContinLoss = 0;
-            drawTargets.forEach((w: number) => {
-                let maxSimForWinner = 1e-9;
-                const baseCandidates: Array<{ n: number, v: number }> = [];
-                for (let i = 1; i <= 90; i++) {
-                    const sig = signalMatrix[i];
-                    if (!sig) continue;
-                    let score_i = 0;
-                    for (const key of GENOME_KEYS) {
-                        score_i += (sig[key] || 0) * (1.0 / GENOME_KEYS.length);
-                    }
-                    baseCandidates.push({ n: i, v: score_i });
+            const baseCandidates: Array<{ n: number, v: number }> = [];
+            for (let i = 1; i <= 90; i++) {
+                const sig = signalMatrix[i];
+                if (!sig) continue;
+                let score_i = 0;
+                for (const key of GENOME_KEYS) {
+                    score_i += (sig[key] || 0) * (1.0 / GENOME_KEYS.length);
                 }
-                baseCandidates.sort((a, b) => b.v - a.v);
-                const baseTop5 = baseCandidates.slice(0, 5).map(c => c.n);
-                
-                baseTop5.forEach((p: number) => {
-                    let sim = 0.0;
-                    if (p === w) {
-                        sim = 1.0;
-                    } else {
-                        const linSim = Math.exp(-0.25 * Math.abs(p - w));
-                        const posP = getGridPos(p);
-                        const posW = getGridPos(w);
-                        const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-                        const gridSim = Math.exp(-0.35 * gridDist);
-
-                        let mirrorSim = 0.0;
-                        if (p + w === 91) mirrorSim = 0.45;
-                        const strP = p.toString();
-                        const revP = parseInt(strP.split("").reverse().join(""), 10);
-                        if (revP >= 1 && revP <= 90 && revP === w) mirrorSim = Math.max(mirrorSim, 0.40);
-
-                        let harmonicSim = 0.0;
-                        if (p % 10 === w % 10) harmonicSim = 0.35;
-
-                        let decadeSim = 0.0;
-                        if (Math.floor((p - 1) / 10) === Math.floor((w - 1) / 10)) decadeSim = 0.25;
-
-                        sim = Math.max(linSim, gridSim, mirrorSim, harmonicSim, decadeSim);
-                    }
-                    if (sim > maxSimForWinner) maxSimForWinner = sim;
-                });
-                baseTotalContinLoss += (1.0 - maxSimForWinner);
-            });
-            const baseTopologicalLoss = baseTotalContinLoss / (drawTargets.length || 5);
+                baseCandidates.push({ n: i, v: score_i });
+            }
+            baseCandidates.sort((a, b) => b.v - a.v);
+            const baseTop5 = baseCandidates.slice(0, 5).map(c => c.n);
+            const baseTopologicalLoss = computeCanonicalTopologicalLoss(baseTop5, drawTargets);
             const counterfactualImprovement = Math.max(-1.0, Math.min(1.0, baseTopologicalLoss - continuousTopologicalLoss));
 
             // --- MULTI-OBJECTIVE CONTINUOUS FORENSIC REWARD ---
@@ -323,13 +259,62 @@ const evaluateGenome = (weights: Record<string, number>, foldsData: { signalMatr
     return totalScore / (foldsData.length || 1);
 };
 
-export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Response> {
+export async function handleSelfLearn(
+  req: Request,
+  reqBody?: any,
+  handlerOptions?: { internalSystem?: boolean }
+): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
     const startTime = Date.now()
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    
+    if(!supabaseUrl || !supabaseKey) throw new Error("Config Supabase manquante")
+    
+    const supabase = createClient(supabaseUrl, supabaseKey)
+
+    let isAuthorized = handlerOptions?.internalSystem === true;
+    if (!isAuthorized) {
+      const cronSecret = req.headers.get('x-cron-secret');
+      if (cronSecret) {
+        const { data: verified } = await supabase
+          .rpc('verify_cron_secret', { p_secret: cronSecret })
+          .catch(() => ({ data: false }));
+        if (verified === true) isAuthorized = true;
+      }
+    }
+    if (!isAuthorized) {
+      const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+      if (!token) {
+        return new Response(JSON.stringify({ success: false, error: 'Non autorisé: authentification requise' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      if (token === supabaseKey) {
+        isAuthorized = true;
+      } else {
+        const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+        if (authErr || !user) {
+          return new Response(JSON.stringify({ success: false, error: 'Non autorisé: jeton invalide' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        if (user.app_metadata?.role !== 'admin') {
+          return new Response(JSON.stringify({ success: false, error: 'Accès refusé: rôle administrateur requis' }), {
+            status: 403,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+        isAuthorized = true;
+      }
+    }
+
     const body = reqBody || await (req.method === 'POST' ? req.json().catch(() => ({})) : {});
     const validation = SelfLearnRequestSchema.safeParse(body);
 
@@ -342,13 +327,6 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
 
     const { drawName: rawDrawName } = validation.data;
     const drawName = rawDrawName.trim().charAt(0).toUpperCase() + rawDrawName.trim().slice(1).toLowerCase().replace(/(\s[a-z])/g, (c: string) => c.toUpperCase());
-    
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-    
-    if(!supabaseUrl || !supabaseKey) throw new Error("Config Supabase manquante")
-    
-    const supabase = createClient(supabaseUrl, supabaseKey)
 
     // Retrieve historical results isolated strictly by drawName
     const { data: rawHistory } = await supabase
@@ -513,7 +491,7 @@ export async function handleSelfLearn(req: Request, reqBody?: any): Promise<Resp
     console.error("Self Learn Error:", error)
     const errorMessage = error instanceof Error ? error.message : String(error)
     return new Response(JSON.stringify({ success: false, message: errorMessage, error: errorMessage }), {
-      status: 200,
+      status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

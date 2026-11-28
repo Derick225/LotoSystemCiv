@@ -34,7 +34,7 @@ export const ChaosAttractor: React.FC<ChaosAttractorProps> = ({ history }) => {
   const regime = useNexusStore((state) => state.regime);
   const volatility = useNexusStore((state) => state.volatility);
   const currentDrawName =
-    useNexusStore((state) => state.currentDrawName) || "Loto 5/90";
+    useNexusStore((state) => state.currentDrawName || state.drawName) || "";
 
   const [fps, setFps] = useState<number>(60);
   const containerRef = useRef<HTMLDivElement>(null);

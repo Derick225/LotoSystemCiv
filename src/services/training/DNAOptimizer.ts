@@ -1,5 +1,4 @@
 import { AlgoKey, AlgoWeights } from "../../types";
-import { computeWassersteinDistance } from "../mathCore";
 import { DNA_LEARNING_CALIBRATION } from "../prediction/calibrationConstants";
 
 export interface DNAProfile {
@@ -473,12 +472,8 @@ export class DNAOptimizer {
       targetProfile.medianVector,
     );
     const klDiv = this.klDivergence(synergyVector, targetProfile.medianVector);
-    const wassersteinDist = computeWassersteinDistance(
-      synergyVector,
-      targetProfile.medianVector,
-    );
 
-    let distance = (cosDist + klDiv + varianceCost + wassersteinDist) / 4.0;
+    let distance = (cosDist + klDiv + varianceCost) / 3.0;
 
     if (candidateNumbers && historicalDraws && historicalDraws.length > 0) {
       const spectralSync = this.evaluateSpectral55Alignment(
@@ -590,10 +585,14 @@ export class DNAOptimizer {
       const key = this.algoKeys[i];
       if (adjustedWeights[key] === undefined) continue;
 
-      const correction = x[i] * couplingFactor;
+      const scaleRef = Math.max(
+        1e-3,
+        Math.abs(profile.medianVector[i]) + Math.sqrt(Math.max(0, P[i])),
+      );
+      const dimensionlessShift = Math.tanh(x[i] / scaleRef) * couplingFactor;
       adjustedWeights[key] = Math.max(
         Number.EPSILON,
-        candidateWeights[key] + correction,
+        candidateWeights[key] * (1.0 + dimensionlessShift),
       );
     }
 
@@ -601,25 +600,77 @@ export class DNAOptimizer {
   }
 
   /**
-   * BATCH GRADIENT DESCENT BACKPROPAGATION (with scale-adaptive L2 weight decay)
-   * Regularizations:
-   *  - Adds L2 regularization proportional to 1/sqrt(history_length) to penalize extremes
-   *    and completely arrest overfitting on scarce, transient profiles.
+   * Perte propre non ordonnée (invariant par permutation des étiquettes 1..90) :
+   * combinaison équipondérée Brier + Log-Loss de Bernoulli sur les marginales normalisées (Σ p = 5).
+   */
+  private evaluateUnorderedProperLoss(
+    w: AlgoWeights,
+    drawIndices: number[],
+    historicalDraws: { gagnants: number[] }[],
+    breakdownsByDraw: Record<number, Record<number, Record<AlgoKey, number>>>,
+  ): number {
+    if (drawIndices.length === 0) return 0;
+    let totalLoss = 0;
+    const rawScores = new Float64Array(90);
+
+    for (const d of drawIndices) {
+      const winners = new Set(historicalDraws[d]?.gagnants || []);
+      const numberBreakdowns = breakdownsByDraw[d] || {};
+
+      let sumRaw = 0;
+      for (let n = 1; n <= 90; n++) {
+        const breakdown = numberBreakdowns[n] || {};
+        let score = 0;
+        for (const k of this.algoKeys) {
+          score += (w[k] || 0) * (breakdown[k] || 0);
+        }
+        const clipped = Math.max(0, score);
+        rawScores[n - 1] = clipped;
+        sumRaw += clipped;
+      }
+
+      let brier = 0;
+      let logLoss = 0;
+      for (let n = 1; n <= 90; n++) {
+        const rawProb = sumRaw > 1e-12 ? (5.0 * rawScores[n - 1]) / sumRaw : 5.0 / 90.0;
+        const p = Math.min(1.0 - 1e-6, Math.max(1e-6, rawProb));
+        const y = winners.has(n) ? 1.0 : 0.0;
+        const diff = p - y;
+        brier += diff * diff;
+        logLoss -= y * Math.log(p) + (1.0 - y) * Math.log(1.0 - p);
+      }
+
+      totalLoss += 0.5 * (brier / 90.0) + 0.5 * (logLoss / 90.0);
+    }
+
+    return totalLoss / drawIndices.length;
+  }
+
+  /**
+   * BATCH GRADIENT DESCENT BACKPROPAGATION (with chronological train/validation split & scale-adaptive L2)
    */
   public backpropagateWeights(
     initialWeights: AlgoWeights,
     historicalDraws: { gagnants: number[] }[],
     breakdownsByDraw: Record<number, Record<number, Record<AlgoKey, number>>>,
-    // Learning rate without exact magic threshold
     learningRate: number = 0.05,
   ): AlgoWeights {
-    const weights = { ...initialWeights };
+    const weights = this.normalizeWeightsMass({ ...initialWeights });
     const numDraws = historicalDraws.length;
     if (numDraws === 0) return weights;
 
+    const valCount =
+      numDraws >= 4 ? Math.max(1, Math.min(Math.floor(numDraws * 0.25), numDraws - 2)) : 0;
+    const valIndices: number[] = [];
+    const trainIndices: number[] = [];
+    for (let d = 0; d < numDraws; d++) {
+      if (d < valCount) valIndices.push(d);
+      else trainIndices.push(d);
+    }
+
     const gradients = new Float32Array(this.numAlgos);
 
-    for (let d = 0; d < numDraws; d++) {
+    for (const d of trainIndices) {
       const winners = new Set(historicalDraws[d]?.gagnants || []);
       const numberBreakdowns = breakdownsByDraw[d] || {};
 
@@ -641,34 +692,55 @@ export class DNAOptimizer {
       }
     }
 
-    const totalSamples = numDraws * 90;
+    const trainDrawsCount = Math.max(1, trainIndices.length);
+    const totalSamples = trainDrawsCount * 90;
     const factor = 2.0 / totalSamples;
-    const lambdaL2 = 0.01 / Math.sqrt(numDraws || 1); // Scale-adaptive L2 regularization penalty
+    const lambdaL2 = 0.01 / Math.sqrt(trainDrawsCount);
 
-    const initialEntropy = this.calculateShannonEntropyNormalized(new Float32Array(Object.values(initialWeights)));
+    const initialEntropy = this.calculateShannonEntropyNormalized(
+      new Float32Array(this.algoKeys.map((k) => weights[k] || 0)),
+    );
     const adaptiveLR = learningRate * (1.0 + Math.tanh(1.0 - initialEntropy));
 
+    const candidate: AlgoWeights = { ...weights };
     for (let idx = 0; idx < this.numAlgos; idx++) {
       const k = this.algoKeys[idx];
-      if (weights[k] === undefined) continue;
+      if (candidate[k] === undefined) continue;
 
       const avgGradient = gradients[idx] * factor;
-      const l2Penalty = lambdaL2 * weights[k];
+      const l2Penalty = lambdaL2 * candidate[k];
 
-      // Step in direction of negative gradient with weight decay
-      weights[k] = Math.max(
+      candidate[k] = Math.max(
         Number.EPSILON,
-        weights[k] - adaptiveLR * (avgGradient + l2Penalty),
+        candidate[k] - adaptiveLR * (avgGradient + l2Penalty),
       );
     }
 
-    return this.normalizeWeightsMass(weights);
+    const candidateNorm = this.normalizeWeightsMass(candidate);
+    if (valIndices.length > 0) {
+      const initValLoss = this.evaluateUnorderedProperLoss(
+        weights,
+        valIndices,
+        historicalDraws,
+        breakdownsByDraw,
+      );
+      const candValLoss = this.evaluateUnorderedProperLoss(
+        candidateNorm,
+        valIndices,
+        historicalDraws,
+        breakdownsByDraw,
+      );
+      if (candValLoss > initValLoss + 1e-6) {
+        return weights;
+      }
+    }
+
+    return candidateNorm;
   }
 
   /**
    * DETAILED SYMMETRIC COORDINATE DESCENT OPTIMIZER
-   * Highly stable non-differentiable solver moving parameter-by-parameter to optimize prediction loss.
-   * Runs directly on L1 probability simplex with adaptive step-sizes.
+   * Evaluates unordered proper Brier + Log-Loss on training split with chronological holdout early-stopping.
    */
   public optimizeWeightsCoordinateDescent(
     initialWeights: AlgoWeights,
@@ -676,83 +748,104 @@ export class DNAOptimizer {
     breakdownsByDraw: Record<number, Record<number, Record<AlgoKey, number>>>,
     iterations: number = 3,
   ): AlgoWeights {
-    const weights = { ...initialWeights };
+    let weights = this.normalizeWeightsMass({ ...initialWeights });
     const numDraws = historicalDraws.length;
     if (numDraws === 0) return weights;
 
-    const evaluateLoss = (w: AlgoWeights): number => {
-      let totalLoss = 0;
-      let count = 0;
-      for (let d = 0; d < numDraws; d++) {
-        const winners = new Set(historicalDraws[d]?.gagnants || []);
-        const numberBreakdowns = breakdownsByDraw[d] || {};
+    const valCount =
+      numDraws >= 4 ? Math.max(1, Math.min(Math.floor(numDraws * 0.25), numDraws - 2)) : 0;
+    const valIndices: number[] = [];
+    const trainIndices: number[] = [];
+    for (let d = 0; d < numDraws; d++) {
+      if (d < valCount) valIndices.push(d);
+      else trainIndices.push(d);
+    }
 
-        const predDist = new Float32Array(90);
-        const targetDist = new Float32Array(90);
+    let bestTrainLoss = this.evaluateUnorderedProperLoss(
+      weights,
+      trainIndices,
+      historicalDraws,
+      breakdownsByDraw,
+    );
+    let bestValWeights = { ...weights };
+    let bestValLoss =
+      valIndices.length > 0
+        ? this.evaluateUnorderedProperLoss(
+            weights,
+            valIndices,
+            historicalDraws,
+            breakdownsByDraw,
+          )
+        : bestTrainLoss;
 
-        let mse = 0;
-        for (let n = 1; n <= 90; n++) {
-          const breakdown = numberBreakdowns[n] || {};
-          let predictedScore = 0;
-          this.algoKeys.forEach((k) => {
-            predictedScore += (w[k] || 0) * (breakdown[k] || 0);
-          });
-          const target = winners.has(n) ? 1.0 : 0.0;
-          const error = predictedScore - target;
-          mse += error * error;
-
-          predDist[n - 1] = Math.max(0, predictedScore);
-          targetDist[n - 1] = target;
-        }
-
-        const wassLoss = computeWassersteinDistance(predDist, targetDist);
-        const combinedLoss = 0.5 * (mse / 90.0) + 0.5 * wassLoss;
-        totalLoss += combinedLoss;
-        count++;
-      }
-      return count > 0 ? totalLoss / count : 0;
-    };
-
-    let bestLoss = evaluateLoss(weights);
+    const initialEntropy = this.calculateShannonEntropyNormalized(
+      new Float32Array(this.algoKeys.map((k) => weights[k] || 0)),
+    );
+    const stepScale = 0.01 + 0.03 * (1.0 - initialEntropy);
 
     for (let iter = 0; iter < iterations; iter++) {
       let improved = false;
+      const stepSize = stepScale / (iter + 1);
 
       for (const key of this.algoKeys) {
         if (weights[key] === undefined) continue;
-
-        const initialEntropy = this.calculateShannonEntropyNormalized(new Float32Array(Object.values(initialWeights)));
-        const stepScale = 0.01 + 0.03 * (1.0 - initialEntropy);
         const currentVal = weights[key];
-        const stepSize = stepScale / (iter + 1); // Adaptive decaying step size
 
         // Positive coordinate push
-        const wPlus = { ...weights };
-        wPlus[key] = Math.min(1.0, currentVal + stepSize);
+        const wPlus = { ...weights, [key]: Math.min(1.0, currentVal + stepSize) };
         const wPlusNorm = this.normalizeWeightsMass(wPlus);
-        const lossPlus = evaluateLoss(wPlusNorm);
+        const lossPlus = this.evaluateUnorderedProperLoss(
+          wPlusNorm,
+          trainIndices,
+          historicalDraws,
+          breakdownsByDraw,
+        );
 
         // Negative coordinate push
-        const wMinus = { ...weights };
-        wMinus[key] = Math.max(Number.EPSILON, currentVal - stepSize);
+        const wMinus = {
+          ...weights,
+          [key]: Math.max(Number.EPSILON, currentVal - stepSize),
+        };
         const wMinusNorm = this.normalizeWeightsMass(wMinus);
-        const lossMinus = evaluateLoss(wMinusNorm);
+        const lossMinus = this.evaluateUnorderedProperLoss(
+          wMinusNorm,
+          trainIndices,
+          historicalDraws,
+          breakdownsByDraw,
+        );
 
-        if (lossPlus < bestLoss && lossPlus < lossMinus) {
-          weights[key] = wPlus[key];
-          bestLoss = lossPlus;
+        if (lossPlus < bestTrainLoss && lossPlus <= lossMinus) {
+          weights = wPlusNorm;
+          bestTrainLoss = lossPlus;
           improved = true;
-        } else if (lossMinus < bestLoss) {
-          weights[key] = wMinus[key];
-          bestLoss = lossMinus;
+        } else if (lossMinus < bestTrainLoss) {
+          weights = wMinusNorm;
+          bestTrainLoss = lossMinus;
           improved = true;
+        }
+      }
+
+      if (valIndices.length > 0) {
+        const valLoss = this.evaluateUnorderedProperLoss(
+          weights,
+          valIndices,
+          historicalDraws,
+          breakdownsByDraw,
+        );
+        if (valLoss < bestValLoss - 1e-6) {
+          bestValLoss = valLoss;
+          bestValWeights = { ...weights };
+        } else {
+          break;
         }
       }
 
       if (!improved) break;
     }
 
-    return this.normalizeWeightsMass(weights);
+    return valIndices.length > 0
+      ? this.normalizeWeightsMass(bestValWeights)
+      : this.normalizeWeightsMass(weights);
   }
 
   private normalizeWeightsMass(weights: AlgoWeights): AlgoWeights {
@@ -894,48 +987,13 @@ export class DNAOptimizer {
         }
       });
 
-      // 4. Valeurs de Shapley (Game Theory - Exact Marginal Contribution)
-      // On simule une fonction caractéristique non linéaire v(S) = (sum(S))^1.5
-      // pour évaluer la synergie non linéaire exacte de chaque algorithme.
-      const shapleyValues: Record<AlgoKey, number> = {} as any;
-      const MC_ITERATIONS = 300;
-      const marginalContributions = new Float32Array(this.numAlgos);
-      const lcg = this.createDeterministicLCG(candidateNumbers[k] + Math.round(totalScore * 100));
-
-      for (let i = 0; i < MC_ITERATIONS; i++) {
-        const permutation = Array.from({ length: this.numAlgos }, (_, idx) => idx);
-        for (let j = permutation.length - 1; j > 0; j--) {
-          const randIdx = Math.floor(lcg() * (j + 1));
-          [permutation[j], permutation[randIdx]] = [permutation[randIdx], permutation[j]];
-        }
-        
-        let currentScore = 0;
-        for (let j = 0; j < this.numAlgos; j++) {
-          const algoIdx = permutation[j];
-          const val = Math.max(0, dna[algoIdx]);
-          const newScore = currentScore + val;
-          const vS_old = Math.pow(currentScore, 1.5);
-          const vS_new = Math.pow(newScore, 1.5);
-          marginalContributions[algoIdx] += (vS_new - vS_old);
-          currentScore = newScore;
-        }
-      }
-
-      let sumShapley = 0;
+      // 4. Valeurs de Shapley Exactes du modèle additif linéaire
+      // Le score agrégé étant additif, v(S) = Σ_{i∈S} dna[i], la contribution marginale
+      // exacte de chaque algorithme est exactement sa part linéaire dna[i] / Σ dna.
+      const shapleyValues: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
       for (let a = 0; a < this.numAlgos; a++) {
-        const sv = marginalContributions[a] / MC_ITERATIONS;
-        shapleyValues[this.algoKeys[a]] = sv;
-        sumShapley += sv;
-      }
-
-      if (sumShapley > 0) {
-        for (let a = 0; a < this.numAlgos; a++) {
-          shapleyValues[this.algoKeys[a]] = (shapleyValues[this.algoKeys[a]] / sumShapley) * 100;
-        }
-      } else {
-        for (let a = 0; a < this.numAlgos; a++) {
-          shapleyValues[this.algoKeys[a]] = 0;
-        }
+        const val = Math.max(0, dna[a]);
+        shapleyValues[this.algoKeys[a]] = totalScore > 0 ? (val / totalScore) * 100 : 0;
       }
 
       explanations.push({
@@ -954,85 +1012,102 @@ export class DNAOptimizer {
   }
 
   /**
-   * CALIBRATION D'ADN VIA RETROACTION DE COMPOSITION DES GAGNANTS (Feedback de Composition)
-   * Calcule les ajustements de poids optimaux en comparant la composition ADN réelle
-   * des numéros gagnants observés et le profil de poids actuels.
-   * Modulé continuellement par l'Entropie et l'Indice de Gini global de la composition.
+   * CALIBRATION D'ADN VIA CONTRASTE GAGNANTS vs NON-GAGNANTS
+   * Compare la composition normalisée des numéros gagnants à celle des numéros non-gagnants
+   * du même tirage afin d'éliminer tout biais lié aux échelles brutes des algorithmes.
    */
   public calibrateDNAFromWinningComposition(
-    currentWeights: AlgoWeights,
+    _currentWeights: AlgoWeights,
     winningXAPs: XAPExplanation[],
+    nonWinningVectors?: Array<Float32Array | Partial<Record<AlgoKey, number>>>,
   ): { algo: AlgoKey; proposedWeightChange: number; reason: string }[] {
     const adjustments: { algo: AlgoKey; proposedWeightChange: number; reason: string }[] = [];
-    if (winningXAPs.length === 0) return adjustments;
-
-    // 1. Calculer le vecteur moyen de composition réelle des numéros gagnants
-    const avgWinningComposition: Record<AlgoKey, number> = {} as any;
-    this.algoKeys.forEach((key) => {
-      avgWinningComposition[key] = 0;
-    });
-
-    winningXAPs.forEach((xap) => {
-      this.algoKeys.forEach((key) => {
-        avgWinningComposition[key] += xap.dnaVector[key] || 0;
-      });
-    });
-
-    // Normalisation de la composition moyenne gagnante
-    let totalWinScore = 0;
-    this.algoKeys.forEach((key) => {
-      totalWinScore += avgWinningComposition[key];
-    });
-    if (totalWinScore > 0) {
-      this.algoKeys.forEach((key) => {
-        avgWinningComposition[key] /= totalWinScore;
-      });
-    } else {
-      // Composition neutre uniforme
-      this.algoKeys.forEach((key) => {
-        avgWinningComposition[key] = 1.0 / this.numAlgos;
-      });
+    if (
+      winningXAPs.length === 0 ||
+      !nonWinningVectors ||
+      nonWinningVectors.length === 0
+    ) {
+      return adjustments;
     }
 
-    // 2. Calculer l'entropie et l'inégalité de Gini globales de la composition gagnante
+    // 1. Composition moyenne des gagnants et des non-gagnants (chacune normalisée L1)
+    const winAvg: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+    const loseAvg: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
+    this.algoKeys.forEach((key) => {
+      winAvg[key] = 0;
+      loseAvg[key] = 0;
+    });
+
+    for (const xap of winningXAPs) {
+      for (const key of this.algoKeys) {
+        winAvg[key] += Math.max(0, xap.dnaVector[key] || 0);
+      }
+    }
+
+    for (const vec of nonWinningVectors) {
+      if (vec instanceof Float32Array) {
+        for (let i = 0; i < this.numAlgos; i++) {
+          const key = this.algoKeys[i];
+          loseAvg[key] += Math.max(0, vec[i] || 0);
+        }
+      } else {
+        for (const key of this.algoKeys) {
+          loseAvg[key] += Math.max(0, vec[key] || 0);
+        }
+      }
+    }
+
+    let totalWinScore = 0;
+    let totalLoseScore = 0;
+    this.algoKeys.forEach((key) => {
+      totalWinScore += winAvg[key];
+      totalLoseScore += loseAvg[key];
+    });
+    if (totalWinScore <= 1e-12 || totalLoseScore <= 1e-12) {
+      return adjustments;
+    }
+
+    this.algoKeys.forEach((key) => {
+      winAvg[key] /= totalWinScore;
+      loseAvg[key] /= totalLoseScore;
+    });
+
+    // 2. Entropie et Gini de la composition gagnante (modulation continue du taux)
     const compositionProbArray = new Float32Array(this.numAlgos);
     this.algoKeys.forEach((key, i) => {
-      compositionProbArray[i] = avgWinningComposition[key];
+      compositionProbArray[i] = winAvg[key];
     });
 
     const globalEntropy = this.calculateShannonEntropyNormalized(compositionProbArray);
-    
-    // Calcul de l'indice de Gini de la composition gagnante
+
     let giniSum = 0;
     for (let i = 0; i < this.numAlgos; i++) {
       for (let j = 0; j < this.numAlgos; j++) {
         giniSum += Math.abs(compositionProbArray[i] - compositionProbArray[j]);
       }
     }
-    const globalGini = giniSum / (2.0 * this.numAlgos * (compositionProbArray.reduce((a, b) => a + b, 0) || 1.0));
+    const globalGini =
+      giniSum /
+      (2.0 * this.numAlgos * (compositionProbArray.reduce((a, b) => a + b, 0) || 1.0));
 
-    // 3. Déterminer la dérive (erreur) et l'injecter sous forme d'ajustements continus
-    // Taux d'apprentissage auto-calibré basé sur la concentration (plus Gini est fort/Entropy est faible,
-    // plus le signal est pur, donc on peut ajuster plus fermement).
-    // Facteur de base centralisé dans calibrationConstants.DNA_LEARNING_CALIBRATION.
-    const learningFactor = DNA_LEARNING_CALIBRATION.BASE_LEARNING_FACTOR * (1.0 + globalGini - globalEntropy);
+    const learningFactor =
+      DNA_LEARNING_CALIBRATION.BASE_LEARNING_FACTOR *
+      (1.0 + globalGini - globalEntropy);
 
+    // 3. Contraste gagnants − non-gagnants (strictement nul sous tirage i.i.d. à amplitude égale)
     this.algoKeys.forEach((key) => {
-      const currentVal = currentWeights[key] ?? (1.0 / this.numAlgos);
-      const targetVal = avgWinningComposition[key];
-      const error = targetVal - currentVal;
-
-      // Ajustement avec régularisation continue (amortissement exponentiel pour éviter le surapprentissage)
-      const rawAdjust = error * learningFactor;
+      const contrast = winAvg[key] - loseAvg[key];
+      const rawAdjust = contrast * learningFactor;
       const proposedWeightChange = parseFloat(rawAdjust.toFixed(4));
 
       if (Math.abs(proposedWeightChange) > 1e-4) {
-        const direction = proposedWeightChange > 0 ? "Sous-représenté" : "Sur-représenté";
+        const direction =
+          proposedWeightChange > 0
+            ? "Sur-exprimé chez les gagnants"
+            : "Sous-exprimé chez les gagnants";
         const impactPercent = (proposedWeightChange * 100.0).toFixed(2);
-        
-        // Explications de haut niveau basées sur l'autopsie géométrique
-        const reason = `Calibrage ADN par composition réelle : L'algorithme est ${direction} par rapport aux numéros gagnants (Gini=${globalGini.toFixed(2)}, Entropy=${globalEntropy.toFixed(2)}). Ajustement proposé de ${proposedWeightChange > 0 ? '+' : ''}${impactPercent}% pour calibrer l'ADN.`;
-        
+        const reason = `Contraste ADN gagnants vs non-gagnants : ${direction} (Δpart=${(contrast * 100).toFixed(2)}%, Gini=${globalGini.toFixed(2)}, Entropy=${globalEntropy.toFixed(2)}). Ajustement proposé de ${proposedWeightChange > 0 ? "+" : ""}${impactPercent}%.`;
+
         adjustments.push({
           algo: key,
           proposedWeightChange,

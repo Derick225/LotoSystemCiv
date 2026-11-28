@@ -369,6 +369,10 @@ export interface SyncStatusRecord {
 
 export const lotteryService = {
   async fetchHistory(drawName: string, force?: boolean): Promise<DrawResult[]> {
+    const trimmedName = (drawName || '').trim();
+    if (!trimmedName || trimmedName.toLowerCase() === 'loto 5/90') {
+      return [];
+    }
     const cacheKey = globalCache.generateKey('history', drawName);
     const now = Date.now();
     const lastSync = lastDeltaSyncByDraw.get(drawName) || 0;

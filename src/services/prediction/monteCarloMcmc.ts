@@ -10,9 +10,15 @@ import { DNAOptimizer } from '../training/DNAOptimizer';
 import { ParkMillerLCG } from './deterministicCore';
 import { calculateShannonEntropy } from '../mathService';
 import { getCalibratedHyperparameters, normalizeWeights } from './weightsManager';
-import { PLATT_SCORE_STANDARDIZATION } from './calibrationConstants';
 import { generateXAPNarratives } from './xapExplainabilityService';
 import { generateProbabilisticScenarioMatrix, ScenarioCoherenceCalibration, HONEST_NOTE } from './predictionScenarios';
+import { computeWalkForwardCalibrationHpc } from '../wasm/lotoEngineBridge';
+import {
+    deriveSkillShrinkage,
+    shrinkProbabilityVector,
+    summarizePredictionEdge,
+} from './empiricalSkillCalibration';
+import { DRAW_DOMAIN_SIZE, DRAW_PICK_SIZE } from '../../shared/drawTheory';
 
 export const runMonteCarloMcmcCore = async (
     drawName: string,
@@ -183,23 +189,64 @@ export const runMonteCarloMcmcCore = async (
     const rawFinalScores = calculateScores(baseFeatures, normalizeWeights(finalWeights), baseBundle, history, 0.90, drawName);
     const finalScores = await applyPCADenoising(rawFinalScores, normalizeWeights(finalWeights), baseBundle, 0.90);
 
-    // Calibrage de Platt continu pour la confiance de cohérence (ZÉRO NOMBRE MAGIQUE)
-    const currentEntropyResult = calculateShannonEntropy(history);
+    // Calibrage empirique causal aligné sur predictionFinalize.ts (shrinkage H0 5/90 sans inflation)
+    const boundedHistory = temporalDepth > 0 ? history.slice(0, temporalDepth) : history;
+    const walkForwardCalibration = computeWalkForwardCalibrationHpc(drawName, 15, boundedHistory);
+    const skillEstimate = deriveSkillShrinkage(walkForwardCalibration);
+
+    const currentEntropyResult = calculateShannonEntropy(boundedHistory);
     const currentEntropy = currentEntropyResult.normalized;
     const calibratedParams = await getCalibratedHyperparameters(drawName, currentEntropy);
     const plattA = calibratedParams.sigmoid_slope;
     const plattB = calibratedParams.sigmoid_intercept;
 
-    const avgScore = top5.reduce((sum, n) => {
-        const s = finalScores.find(x => x.num === n);
-        return sum + (s?.score || 0);
-    }, 0) / (top5.length || 1);
+    // Extraction des probabilités brutes post-PCA avec repli softmax canonique si absentes
+    const rawProbabilityVector = new Array<number>(DRAW_DOMAIN_SIZE).fill(0);
+    let hasExplainabilityProbs = false;
+    finalScores.forEach((s) => {
+        const idx = s.num - 1;
+        const p = s.explainability?.calibratedProbability;
+        if (idx >= 0 && idx < DRAW_DOMAIN_SIZE && typeof p === 'number' && Number.isFinite(p) && p > 0) {
+            rawProbabilityVector[idx] = p;
+            hasExplainabilityProbs = true;
+        }
+    });
+    if (!hasExplainabilityProbs && finalScores.length > 0) {
+        const maxS = Math.max(...finalScores.map((s) => s.score || 0));
+        let sumExp = 0;
+        const exps = new Array<number>(DRAW_DOMAIN_SIZE).fill(1);
+        finalScores.forEach((s) => {
+            const idx = s.num - 1;
+            if (idx >= 0 && idx < DRAW_DOMAIN_SIZE) {
+                const e = Math.exp((s.score || 0) - maxS);
+                exps[idx] = e;
+            }
+        });
+        for (let i = 0; i < DRAW_DOMAIN_SIZE; i++) sumExp += exps[i];
+        const safeSum = sumExp > 0 ? sumExp : DRAW_DOMAIN_SIZE;
+        for (let i = 0; i < DRAW_DOMAIN_SIZE; i++) {
+            rawProbabilityVector[i] = (exps[i] / safeSum) * DRAW_PICK_SIZE;
+        }
+    }
 
-    const rawX = (avgScore - PLATT_SCORE_STANDARDIZATION.CENTER) / PLATT_SCORE_STANDARDIZATION.SCALE;
-    const plattProb = 1.0 / (1.0 + Math.exp(-(plattA * rawX + plattB)));
-    const dynamicConfidence = Math.round(
-        Math.max(1, Math.min(99, plattProb * 100.0 * calibratedParams.boosting_multiplier))
-    );
+    const probabilityVector = shrinkProbabilityVector(rawProbabilityVector, skillEstimate.shrinkage);
+    const numberProbabilities: Record<number, number> = {};
+    for (let n = 1; n <= DRAW_DOMAIN_SIZE; n++) {
+        numberProbabilities[n] = probabilityVector[n - 1];
+    }
+
+    const edgeSummary = summarizePredictionEdge(probabilityVector, top5);
+    const uniformMarginal = DRAW_PICK_SIZE / DRAW_DOMAIN_SIZE;
+    const sumSelectedProbs = top5.reduce((sum, n) => sum + (numberProbabilities[n] || uniformMarginal), 0);
+    const meanSelectedProb = top5.length > 0 ? sumSelectedProbs / top5.length : uniformMarginal;
+    const expectedLift = parseFloat((meanSelectedProb / uniformMarginal).toFixed(3));
+    const dynamicConfidence = Math.max(1, Math.min(99, Math.round(meanSelectedProb * 100)));
+
+    const hasDisplayedRetention = skillEstimate.shrinkage > 0 && skillEstimate.shrinkage.toFixed(4) !== '0.0000';
+    const skillEvidenceNote = !hasDisplayedRetention
+        ? 'Aucun avantage prouvé (distribution neutre 5/90, lift 1.00x).'
+        : `Skill out-of-fold mesuré (${skillEstimate.source}, n=${skillEstimate.evidenceDraws}) : BSS=${skillEstimate.pointEstimate.toFixed(4)}, σ=${Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty.toFixed(4) : 'n/d'}, rétention λ=${skillEstimate.shrinkage.toFixed(4)}, lift=${expectedLift.toFixed(2)}x.`;
+    const honestConfidenceNote = `${HONEST_NOTE} ${skillEvidenceNote}`;
 
     // Construction des dictionnaires d'explicabilité pour les 90 numéros
     const scoresMap: Record<number, number> = {};
@@ -213,7 +260,10 @@ export const runMonteCarloMcmcCore = async (
             shapValues: s.explainability?.shapValues || {},
             topologicalTension: s.explainability?.topologicalTension || 0,
             dnaOrbitingIndex: s.explainability?.dnaOrbitingIndex || 0,
-            narrativeInterpretation: s.explainability?.narrativeInterpretation
+            narrativeInterpretation: s.explainability?.narrativeInterpretation,
+            rawCalibratedProbability: rawProbabilityVector[s.num - 1],
+            calibratedProbability: probabilityVector[s.num - 1],
+            skillShrinkage: skillEstimate.shrinkage,
         };
     });
 
@@ -223,7 +273,8 @@ export const runMonteCarloMcmcCore = async (
         numbersToExplain,
         scoresMap,
         shapMap,
-        explainabilityRecord
+        explainabilityRecord,
+        { shrinkage: skillEstimate.shrinkage, brierSkillScore: skillEstimate.pointEstimate }
     );
 
     numbersToExplain.forEach(num => {
@@ -243,11 +294,13 @@ export const runMonteCarloMcmcCore = async (
 
     onProgress(98, "Formulation des scénarios et quantification de l'incertitude...");
 
-    // Matrice de simulation multi-scénarios déterministe
+    // Matrice de simulation multi-scénarios déterministe (multiplicateur shrinké par la preuve)
+    const shrunkBoostingMultiplier =
+        1.0 + skillEstimate.shrinkage * (calibratedParams.boosting_multiplier - 1.0);
     const scenarioCalibration: ScenarioCoherenceCalibration = {
         plattSlope: plattA,
         plattIntercept: plattB,
-        boostingMultiplier: calibratedParams.boosting_multiplier,
+        boostingMultiplier: shrunkBoostingMultiplier,
         cyclicModulator: 1.0,
         shrinkageMultiplier: 1.0,
     };
@@ -261,24 +314,30 @@ export const runMonteCarloMcmcCore = async (
         calibration: scenarioCalibration,
     });
 
-    // Quantification de l'incertitude
-    const maxShannonEntropy = Math.log2(90);
+    // Quantification de l'incertitude cohérente avec predictionFinalize
+    const maxShannonEntropy = Math.log2(DRAW_DOMAIN_SIZE);
     const normalizedEntropy = Math.min(1.0, Math.max(0.0, currentEntropy / maxShannonEntropy));
     const aleatoricUncertainty = parseFloat((normalizedEntropy * 100.0).toFixed(2));
-    const top5Consensus = top5.reduce((sum, n) => sum + counts[n], 0) / (5 * resolvedMcIterations);
+    const top5Consensus = top5.reduce((sum, n) => sum + (counts[n] || 0), 0) / Math.max(1, 5 * resolvedMcIterations);
     const epistemicUncertainty = parseFloat(
         (Math.max(0, 100.0 - dynamicConfidence) * (1.0 - (top5Consensus || 0.5))).toFixed(2)
     );
-    const ciLower = Math.max(1, Math.round(dynamicConfidence - epistemicUncertainty));
-    const ciUpper = Math.min(99, Math.round(dynamicConfidence + epistemicUncertainty));
+    const coherenceHalfWidth = parseFloat(((epistemicUncertainty / 100.0) * dynamicConfidence).toFixed(1));
+    const ciLower = Math.max(1, Math.round(dynamicConfidence - coherenceHalfWidth));
+    const ciUpper = Math.min(99, Math.round(dynamicConfidence + coherenceHalfWidth));
 
     const uncertaintyQuantification = {
         epistemicUncertainty,
         aleatoricUncertainty,
         confidenceInterval: { lower: ciLower, upper: ciUpper },
+        intervalKind: 'epistemic_coherence_band' as const,
+        intervalNote:
+            'Bande de cohérence épistémique (± incertitude de stabilité MCMC), distincte d’un intervalle de confiance fréquentiste sur les gains.',
         entropyBits: parseFloat(currentEntropy.toFixed(3)),
         credibleIntervalRange: ciUpper - ciLower,
     };
+
+    walkForwardCalibration.channelWeights = { ...normalizeWeights(finalWeights) };
 
     const aggregatedPred: Prediction = {
         drawName,
@@ -286,15 +345,31 @@ export const runMonteCarloMcmcCore = async (
         candidates,
         breakdown: breakdownAcc as any,
         confidence: dynamicConfidence,
-        confidenceNote: HONEST_NOTE,
-        analysis: `Convergence MCMC Metropolis-Hastings (${resolvedMcIterations} cycles) avec alignement historique de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique déterministe calibré.`,
+        expectedLift,
+        confidenceNote: honestConfidenceNote,
+        analysis: `Convergence MCMC Metropolis-Hastings (${resolvedMcIterations} cycles) avec alignement structurel ADN de ${calculatedAlignment !== undefined ? calculatedAlignment + '%' : 'Non calculable'}. Moteur cybernétique déterministe calibré.`,
         timestamp: Date.now(),
         realityAlignment: calculatedAlignment,
-        realityAlignmentNote: HONEST_NOTE,
+        realityAlignmentNote: `Score d'alignement structurel ADN (n'augmente pas la probabilité de gain). ${HONEST_NOTE}`,
         diversityMetrics: calculateGeneticDiversityIndex(top5, breakdownAcc as any),
         explainabilityData: explainabilityRecord,
         simulationScenarios,
         uncertaintyQuantification,
+        walkForwardCalibration,
+        numberProbabilities,
+        empiricalSkill: {
+            shrinkage: skillEstimate.shrinkage,
+            brierSkillScore: skillEstimate.pointEstimate,
+            positiveBrierSkillScore: skillEstimate.positiveEstimate,
+            uncertainty: Number.isFinite(skillEstimate.uncertainty) ? skillEstimate.uncertainty : null,
+            evidenceDraws: skillEstimate.evidenceDraws,
+            source: skillEstimate.source,
+            expectedHitsTopK: edgeSummary.expectedHitsTopK,
+            uniformExpectedHitsTopK: edgeSummary.uniformExpectedHitsTopK,
+            liftVsUniform: edgeSummary.liftVsUniform,
+            maxProbability: edgeSummary.maxProbability,
+            maxLiftVsUniform: edgeSummary.maxLiftVsUniform,
+        },
     };
 
     return aggregatedPred;

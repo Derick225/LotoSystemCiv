@@ -30,7 +30,7 @@ describe('deriveSkillShrinkage — empirique Bayes sans seuil binaire', () => {
     ).toBe(0);
   });
 
-  it('applique la formule λ = μ₊²/(μ₊²+σ²) sur le bootstrap mesuré', () => {
+  it('applique la formule de Wiener débiaisée λ = μ_deb²/(μ_deb²+σ²) et atténue la malédiction du vainqueur', () => {
     const estimate = deriveSkillShrinkage({
       evaluatedWindows: 100,
       blockBootstrapBssMean: 0.04,
@@ -39,7 +39,17 @@ describe('deriveSkillShrinkage — empirique Bayes sans seuil binaire', () => {
     expect(estimate.source).toBe('block_bootstrap');
     expect(estimate.pointEstimate).toBeCloseTo(0.04, 12);
     expect(estimate.uncertainty).toBeCloseTo(0.02, 12);
-    expect(estimate.shrinkage).toBeCloseTo(0.8, 12);
+    // z = 2 => erf(sqrt(2)) ≈ 0.9545, μ_deb ≈ 0.03818 => λ ≈ 0.7846
+    expect(estimate.shrinkage).toBeGreaterThan(0.75);
+    expect(estimate.shrinkage).toBeLessThan(0.8);
+
+    // Malédiction du vainqueur : une faible excursion positive bruitée (0.5σ) est fortement écrasée (< 5% vs 20% naïf)
+    const noisyPositive = deriveSkillShrinkage({
+      evaluatedWindows: 100,
+      blockBootstrapBssMean: 0.01,
+      blockBootstrapBssStd: 0.02,
+    });
+    expect(noisyPositive.shrinkage).toBeLessThan(0.05);
   });
 
   it('priorise la holdout sur le bootstrap et le walk-forward', () => {

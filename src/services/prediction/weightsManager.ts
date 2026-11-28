@@ -1561,18 +1561,26 @@ export const saveAlgoWeights = async (drawName: string, weights: AlgoWeights) =>
       );
     }
     // Debounce de 2.5 secondes sur l'écriture Supabase (table unique model_weights_config)
-    // pour éviter toute saturation de quota lors d'ajustements rapides
+    // Réservé strictement aux comptes administrateurs vérifiés (B.6 : éviter les conflits d'écrivains et les erreurs RLS)
     if (isSupabaseConfigured()) {
       const existingTimer = pendingWeightsRemoteTimers.get(drawName);
       if (existingTimer) clearTimeout(existingTimer);
       const timer = setTimeout(async () => {
         pendingWeightsRemoteTimers.delete(drawName);
         try {
+          const { data: authData } = await supabase.auth.getUser();
+          const role = (authData?.user?.app_metadata as Record<string, unknown> | undefined)?.role;
+          if (role !== 'admin') {
+            logger.debug(
+              { drawName },
+              '[weightsManager] Synchronisation distante model_weights_config ignorée (utilisateur non admin : poids conservés en local).'
+            );
+            return;
+          }
+
           const { error } = await supabase
             .from('model_weights_config')
             .upsert({ draw_name: drawName, weights: normalized, updated_at: new Date().toISOString() });
-          // Le client Supabase ne lève pas d'exception sur un refus RLS : l'erreur doit être lue,
-          // sinon les poids restent locaux sans aucun signal (cas des comptes non admin).
           if (error) {
             logger.warn({ drawName, code: error.code, message: error.message },
               '[weightsManager] Poids non synchronisés vers Supabase (conservés en local)');

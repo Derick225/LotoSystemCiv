@@ -64,6 +64,7 @@ import {
   UNIFORM_BRIER_BASELINE,
   UNIFORM_EXPECTED_HITS_TOP5,
   UNIFORM_LOG_LOSS_BASELINE,
+  computeCanonicalExactHitsAndNearMisses,
   computeCautiousAggregatedWeightUpdate,
   evaluateMarginalPredictions,
   runChronologicalWalkForwardValidation,
@@ -214,8 +215,10 @@ export const projectWeightsWithContinuousProofShrinkage = (
       blendedInput[k] = shrunk;
       upperCaps[k] = Math.max(baseW, shrunk);
     } else {
-      const negScore = proof && proof.proofScore < 0 ? Math.abs(proof.proofScore) : 0;
-      const dampener = 1.0 - 0.5 * Math.tanh(negScore);
+      // Réduction freinée en l'absence de preuve négative forte et protégée par la crédibilité positive
+      const negEvidence =
+        proof && proof.proofScore < 0 ? Math.tanh(Math.abs(proof.proofScore) / 2.0) : 0;
+      const dampener = Math.max(0.05, negEvidence * (1.0 - 0.5 * cred));
       blendedInput[k] = Math.max(0, baseW - (baseW - candW) * dampener);
       upperCaps[k] = Math.max(baseW, blendedInput[k]);
     }
@@ -233,9 +236,7 @@ export const projectWeightsWithContinuousProofShrinkage = (
         return;
       }
       const baseW = baselineNormalized[k] || 0;
-      const cred = credibilityByKey[k] || 0;
-      // Plafond lisse : un canal à crédibilité nulle reste borné par baseW après renormalisation
-      const cap = baseW + cred * Math.max(0, (upperCaps[k] || baseW) - baseW) + cred * 0.5;
+      const cap = Math.max(baseW, upperCaps[k] || baseW);
       if ((w[k] || 0) > cap) {
         excess += (w[k] || 0) - cap;
         w[k] = cap;
@@ -456,34 +457,15 @@ export const executeClosedLoopAutopsy = async (
   const directHitsTop10 = top10Predicted.filter((n) => actualWinnersSet.has(n));
   const directHitsTop20 = top20Predicted.filter((n) => actualWinnersSet.has(n));
 
-  // 5. Frôlements physiques (adjacence circulaire immédiate ±1 sur le Top 5 prédit, au plus 1 par gagnant)
-  const nearMisses: NearMissItem[] = [];
-  const top5Set = new Set(top5Predicted);
-
-  actualWinners.forEach((w) => {
-    if (top5Set.has(w)) return; // Hit exact déjà comptabilisé
-
-    const minus1 = w > 1 ? w - 1 : 90;
-    const plus1 = w < 90 ? w + 1 : 1;
-
-    if (top5Set.has(minus1)) {
-      nearMisses.push({
-        actualWinner: w,
-        closestPredicted: minus1,
-        distance: 1,
-        type: 'neighbor_1',
-        description: `Adjacence circulaire -1 : Gagnant ${w} vs Prédit ${minus1}`,
-      });
-    } else if (top5Set.has(plus1)) {
-      nearMisses.push({
-        actualWinner: w,
-        closestPredicted: plus1,
-        distance: 1,
-        type: 'neighbor_1',
-        description: `Adjacence circulaire +1 : Gagnant ${w} vs Prédit ${plus1}`,
-      });
-    }
-  });
+  // 5. Frôlements physiques canoniques (adjacence circulaire immédiate ±1 sur Z/90Z, dédupliqués)
+  const canonicalMatch = computeCanonicalExactHitsAndNearMisses(top5Predicted, actualWinners);
+  const nearMisses: NearMissItem[] = canonicalMatch.nearMissDetails.map((nm) => ({
+    actualWinner: nm.actual,
+    closestPredicted: nm.predicted,
+    distance: 1,
+    type: 'neighbor_1',
+    description: `Adjacence circulaire ${nm.type} : Gagnant ${nm.actual} vs Prédit ${nm.predicted}`,
+  }));
 
   // 6. Évaluation propre sur marginales cohérentes (Σ q_i = 5 exactement) & séparation des frôlements
   const K = actualWinners.length || 5;
@@ -580,22 +562,27 @@ export const executeClosedLoopAutopsy = async (
     baseLearningRate: temporalDriftMetrics.learningRate,
     forcedZeroKeys: singleForcedZero,
     modelVersion: FORENSIC_MODEL_VERSION,
+    singleDrawOnlineUpdate: true,
   });
 
-  // Modulation topologique de phase cyclique très douce après normalisation prudente
-  const phaseModulatedRaw: Record<string, number> = {};
-  validKeys.forEach((key) => {
-    const baseProposed = singleUpdate.updatedWeights[key] ?? 0;
-    if (singleForcedZero.has(key) || baseProposed <= 0) {
-      phaseModulatedRaw[key] = 0;
-      return;
-    }
-    const phaseModifier = cyclicPhaseProfile.algoWeightModifiers[key] || 0.0;
-    const phaseMultiplier = Math.exp(phaseModifier * singleUpdate.audit.sampleAttenuation * 0.25);
-    phaseModulatedRaw[key] = baseProposed * phaseMultiplier;
-  });
-
-  const correctedWeights = normalizeWeights(phaseModulatedRaw as AlgoWeights);
+  // Barrière Prudence (A.7) : aucune modulation cyclique ni mutation des poids lorsque prudence est active
+  let correctedWeights: AlgoWeights;
+  if (singleUpdate.audit.prudenceModeActive) {
+    correctedWeights = normalizeWeights({ ...normalizedCurrent } as AlgoWeights);
+  } else {
+    const phaseModulatedRaw: Record<string, number> = {};
+    validKeys.forEach((key) => {
+      const baseProposed = singleUpdate.updatedWeights[key] ?? 0;
+      if (singleForcedZero.has(key) || baseProposed <= 0) {
+        phaseModulatedRaw[key] = 0;
+        return;
+      }
+      const phaseModifier = cyclicPhaseProfile.algoWeightModifiers[key] || 0.0;
+      const phaseMultiplier = Math.exp(phaseModifier * singleUpdate.audit.sampleAttenuation * 0.25);
+      phaseModulatedRaw[key] = baseProposed * phaseMultiplier;
+    });
+    correctedWeights = normalizeWeights(phaseModulatedRaw as AlgoWeights);
+  }
   const learningRate = singleUpdate.audit.effectiveLearningRate;
 
   const algoGradients: AlgoGradientBreakdown[] = validKeys.map((key) => {
@@ -696,13 +683,10 @@ export const executeClosedLoopAutopsy = async (
         (1.0 / K) * Math.log((1.0 / K) / pScen);
     }
 
-    // Score d'alignement monotone sur [0, 100] :
-    // - 0 hit, 0 frôlement = 0%
-    // - 1 hit direct = 20% (domine strictement même 5 frôlements = 12.5%)
-    // - 5 hits directs = 100%
+    // Score d'alignement strictement basé sur les hits exacts (zéro prime aux near-misses)
     const alignmentScore = Math.max(
       0,
-      Math.min(100, Math.round(hitCount * 20.0 + Math.min(5, nearMissCount) * 2.5))
+      Math.min(100, Math.round((hitCount / Math.max(1, K)) * 100))
     );
 
     return {
@@ -720,10 +704,9 @@ export const executeClosedLoopAutopsy = async (
     };
   });
 
-  // Identification du scénario optimal rétroactivement
+  // Identification du scénario optimal rétroactivement (hits exacts puis score propre KL)
   scenarioEvaluations.sort((a, b) => {
     if (b.hitCount !== a.hitCount) return b.hitCount - a.hitCount;
-    if (b.nearMissCount !== a.nearMissCount) return b.nearMissCount - a.nearMissCount;
     return a.klDivergence - b.klDivergence;
   });
 
@@ -831,6 +814,88 @@ export interface ClosedLoopAutoAdjustmentResult {
   causalAuditTrail: string[];
   learningRate: number;
   appliedDirectly: boolean;
+  idempotentHit?: boolean;
+}
+
+interface ProcessedAutopsyEntry {
+  optimizedWeights: AlgoWeights;
+  dnaRecord: ModelDnaRecord;
+  processedAt: string;
+}
+
+const MAX_IN_MEMORY_AUTOPSY_REGISTRY = 200;
+const MAX_LOCAL_AUTOPSY_ENTRIES_PER_DRAW = 50;
+const PROCESSED_AUTOPSY_REGISTRY = new Map<string, ProcessedAutopsyEntry>();
+
+function buildAutopsyIdempotencyKey(
+  drawName: string,
+  targetDraw: DrawResult,
+  isRetroactive: boolean
+): string {
+  const normalizedDraw = drawName.trim().toUpperCase();
+  const drawId = targetDraw.id ? String(targetDraw.id).trim() : '';
+  const drawDate = String(targetDraw.date || '').trim();
+  return `${normalizedDraw}::${drawId}::${drawDate}::${isRetroactive ? 'retro' : 'live'}`;
+}
+
+function getAutopsyIdempotencyStorageKey(drawName: string): string {
+  return `lotopro_autopsy_idempotency_${drawName.trim().toUpperCase()}`;
+}
+
+function getProcessedAutopsyEntry(
+  drawName: string,
+  idempotencyKey: string
+): ProcessedAutopsyEntry | null {
+  const inMemory = PROCESSED_AUTOPSY_REGISTRY.get(idempotencyKey);
+  if (inMemory) return inMemory;
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(getAutopsyIdempotencyStorageKey(drawName));
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, ProcessedAutopsyEntry>;
+        const found = parsed?.[idempotencyKey];
+        if (found && found.optimizedWeights && found.dnaRecord) {
+          PROCESSED_AUTOPSY_REGISTRY.set(idempotencyKey, found);
+          return found;
+        }
+      }
+    } catch {
+      // Ignorer erreur de lecture localStorage
+    }
+  }
+  return null;
+}
+
+function recordProcessedAutopsyEntry(
+  drawName: string,
+  idempotencyKey: string,
+  entry: ProcessedAutopsyEntry
+): void {
+  if (PROCESSED_AUTOPSY_REGISTRY.size >= MAX_IN_MEMORY_AUTOPSY_REGISTRY) {
+    const oldestKey = PROCESSED_AUTOPSY_REGISTRY.keys().next().value;
+    if (oldestKey) PROCESSED_AUTOPSY_REGISTRY.delete(oldestKey);
+  }
+  PROCESSED_AUTOPSY_REGISTRY.set(idempotencyKey, entry);
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const storageKey = getAutopsyIdempotencyStorageKey(drawName);
+      const raw = localStorage.getItem(storageKey);
+      const parsed: Record<string, ProcessedAutopsyEntry> = raw ? JSON.parse(raw) : {};
+      parsed[idempotencyKey] = entry;
+      const keys = Object.keys(parsed);
+      if (keys.length > MAX_LOCAL_AUTOPSY_ENTRIES_PER_DRAW) {
+        const toDrop = keys.slice(0, keys.length - MAX_LOCAL_AUTOPSY_ENTRIES_PER_DRAW);
+        for (const k of toDrop) {
+          delete parsed[k];
+        }
+      }
+      localStorage.setItem(storageKey, JSON.stringify(parsed));
+    } catch {
+      // Ignorer quota / indisponibilité localStorage
+    }
+  }
 }
 
 /**
@@ -848,6 +913,7 @@ export const executeClosedLoopAutoAdjustment = async (
     learningRateOverride?: number;
     auditContext?: string;
     timestamp?: string;
+    allowDuplicateDraw?: boolean;
   }
 ): Promise<ClosedLoopAutoAdjustmentResult> => {
   // 1. Exécuter l'autopsie complète en boucle fermée
@@ -941,6 +1007,30 @@ export const executeClosedLoopAutoAdjustment = async (
 
   // 4. Enregistrement via le Contrôleur d'Optimisation Centralisé (ou simulation pure sans effet de bord en dryRun)
   const appliedDirectly = !options?.dryRun;
+  const isRetroactive = targetDrawIndex > 0;
+  const idempotencyKey = buildAutopsyIdempotencyKey(drawName, targetDraw, isRetroactive);
+
+  if (appliedDirectly && !options?.allowDuplicateDraw) {
+    const existingEntry = getProcessedAutopsyEntry(drawName, idempotencyKey);
+    if (existingEntry) {
+      causalAuditTrail.push(
+        `Idempotence : tirage du ${targetDraw.date} déjà traité (${existingEntry.processedAt}) ; poids existants conservés sans écrasement.`
+      );
+      return {
+        drawName,
+        targetDrawDate: targetDraw.date,
+        autopsyReport,
+        previousWeights: initialNormalized,
+        optimizedWeights: existingEntry.optimizedWeights,
+        dnaRecord: existingEntry.dnaRecord,
+        causalAuditTrail,
+        learningRate: 0,
+        appliedDirectly: false,
+        idempotentHit: true,
+      };
+    }
+  }
+
   const drawDateSafe = targetDraw.date.replace(/[^a-zA-Z0-9]/g, '_');
   const deterministicTimestamp = parseDateSafely(targetDraw.date).toISOString();
   const versionId = `v_autopsy_${drawDateSafe}`;
@@ -979,7 +1069,13 @@ export const executeClosedLoopAutoAdjustment = async (
       causalAuditTrail,
       reason: `Autopsie fermée tirage ${targetDraw.date}`,
       allowCriticalDrift: false,
-      isRetroactive: targetDrawIndex > 0,
+      isRetroactive,
+    });
+
+    recordProcessedAutopsyEntry(drawName, idempotencyKey, {
+      optimizedWeights: optResult.appliedWeights,
+      dnaRecord: optResult.dnaRecord,
+      processedAt: new Date().toISOString(),
     });
 
     return {
@@ -992,6 +1088,7 @@ export const executeClosedLoopAutoAdjustment = async (
       causalAuditTrail,
       learningRate: effectiveLearningRate,
       appliedDirectly: true,
+      idempotentHit: false,
     };
   }
 
@@ -1055,6 +1152,7 @@ export const executeClosedLoopAutoAdjustment = async (
     causalAuditTrail,
     learningRate: effectiveLearningRate,
     appliedDirectly: false,
+    idempotentHit: false,
   };
 };
 

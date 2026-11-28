@@ -202,8 +202,28 @@ export const DnaGeneSequencerPanel: React.FC<{
         forensicReports: reports,
         applyWeights: true,
       });
-      setGlobalWeights(applied.optimizedWeights);
+      if (applied.walkForwardResult) {
+        setWalkForward(applied.walkForwardResult);
+      }
       setResult(applied);
+
+      if (!applied.applied) {
+        addAgentLog({
+          id: `epigenome_sq_blocked_${Date.now()}`,
+          timestamp: new Date(),
+          action: `Séquenceur génomique exécuté en dry-run sur ${drawName} (poids conservés)`,
+          type: "META",
+          impact: applied.applicationBlockedReason || `Verdict OOS: ${applied.walkForwardVerdict || 'PARITY'}`,
+        });
+        showToast(
+          applied.applicationBlockedReason ||
+            `Poids conservés : verdict walk-forward ${applied.walkForwardVerdict || 'non significatif'}.`,
+          "info"
+        );
+        return;
+      }
+
+      setGlobalWeights(applied.optimizedWeights);
       addAgentLog({
         id: `epigenome_sq_${Date.now()}`,
         timestamp: new Date(),

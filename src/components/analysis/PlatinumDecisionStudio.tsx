@@ -39,6 +39,7 @@ import {
 } from "../../services/lonaciReceiptPdfService";
 import { LonaciReceiptModal } from "./LonaciReceiptModal";
 import { RESPONSIBLE_GAMING_NOTICE } from "../../services/prediction/markowitzKellyPortfolioService";
+import { computeHypergeometricNullProbability } from "../KellyCalculator";
 
 interface PlatinumDecisionStudioProps {
   result: PlatinumResult;
@@ -161,9 +162,11 @@ export const PlatinumDecisionStudio: React.FC<PlatinumDecisionStudioProps> = ({
       label = p.label;
     }
 
+    const kOrder =
+      betType === "1N" ? 1 : betType === "3N" || betType === "T3" ? 3 : betType === "4N" ? 4 : betType === "5N" ? 5 : 2;
     const potentialGain = recommendedStake * odds;
-    const theoreticalProb = odds > 0 ? 1 / odds : 0.01;
-    const expectedValue = potentialGain * theoreticalProb - recommendedStake;
+    const nullProb = computeHypergeometricNullProbability(kOrder);
+    const expectedValue = potentialGain * nullProb - recommendedStake;
 
     return {
       optimalFraction,

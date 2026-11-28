@@ -160,12 +160,16 @@ CREATE TABLE IF NOT EXISTS public.post_mortem_reviews (
     prudence_mode_triggered BOOLEAN DEFAULT FALSE,
     calibration_delta_slope NUMERIC NOT NULL DEFAULT 0.0,
     calibration_delta_intercept NUMERIC NOT NULL DEFAULT 0.0,
-    entropy_dampener_value NUMERIC NOT NULL,
+    entropy_dampener_value NUMERIC NOT NULL DEFAULT 1.0,
+    sample_size INTEGER NOT NULL DEFAULT 1,
+    uncertainty_se NUMERIC,
     weight_deltas JSONB NOT NULL,
     counterfactual_analysis JSONB,
+    learning_audit JSONB,
     ai_forensic_critique TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT unique_snapshot_review UNIQUE (snapshot_id)
+    draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
+    model_version TEXT NOT NULL DEFAULT 'v12.1-unified-cf',
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- J. FORENSIC REPORTS
@@ -175,7 +179,8 @@ CREATE TABLE IF NOT EXISTS public.forensic_reports (
     prediction_id UUID,
     draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
     draw_name TEXT,
-    draw_date TEXT,
+    draw_date DATE,
+    model_version TEXT DEFAULT 'v12.1-unified-cf',
     report_data JSONB NOT NULL,
     ai_model_used TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -206,6 +211,8 @@ CREATE TABLE IF NOT EXISTS public.draw_regimes (
 -- M. MODEL PERFORMANCE METRICS (Forensic Continuous Learning)
 CREATE TABLE IF NOT EXISTS public.model_performance_metrics (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_id UUID REFERENCES public.prediction_snapshots(id) ON DELETE CASCADE,
+    draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
     draw_name TEXT NOT NULL,
     date DATE,
     exact_matches INTEGER NOT NULL,
@@ -213,9 +220,18 @@ CREATE TABLE IF NOT EXISTS public.model_performance_metrics (
     partial_matches_3_5 BOOLEAN,
     partial_matches_4_5 BOOLEAN,
     brier_score NUMERIC,
+    log_loss NUMERIC,
+    calibration_error NUMERIC,
+    uniform_brier_baseline NUMERIC,
+    uniform_log_loss_baseline NUMERIC,
+    historical_brier_baseline NUMERIC,
+    historical_log_loss_baseline NUMERIC,
     near_miss_count INTEGER,
     sliding_window_yield NUMERIC,
     model_version TEXT,
+    sample_size INTEGER DEFAULT 1,
+    uncertainty_se NUMERIC,
+    learning_audit JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -228,8 +244,26 @@ CREATE TABLE IF NOT EXISTS public.model_weights_config (
     sigmoid_intercept NUMERIC DEFAULT 0.0,
     boosting_multiplier NUMERIC DEFAULT 1.0,
     prudence_mode_active BOOLEAN DEFAULT FALSE,
+    model_version TEXT DEFAULT 'v12.1-unified-cf',
+    last_autopsy_key TEXT,
+    last_draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE SET NULL,
+    last_draw_date DATE,
+    weight_version INTEGER NOT NULL DEFAULT 1,
+    sample_size INTEGER DEFAULT 0,
+    last_audit JSONB,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT unique_model_weights_config_draw UNIQUE (draw_name)
+);
+
+-- O. GLOBAL DRAW LEARNING LEDGER (1 mise à jour globale max par tirage)
+CREATE TABLE IF NOT EXISTS public.global_draw_learning_ledger (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draw_name TEXT NOT NULL,
+    draw_result_id UUID NOT NULL REFERENCES public.draw_results(id) ON DELETE CASCADE,
+    model_version TEXT NOT NULL,
+    snapshot_id UUID REFERENCES public.prediction_snapshots(id) ON DELETE SET NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_global_draw_learning UNIQUE (draw_name, draw_result_id, model_version)
 );
 
 -- 4. INDEXES
@@ -267,6 +301,7 @@ ALTER TABLE public.draw_regimes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.model_performance_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.model_weights_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.global_draw_learning_ledger ENABLE ROW LEVEL SECURITY;
 
 -- Policies Publiques (Idempotentes)
 DROP POLICY IF EXISTS "Public Read Results" ON public.draw_results;
@@ -283,6 +318,8 @@ DROP POLICY IF EXISTS "Public Read Performance Metrics" ON public.model_performa
 CREATE POLICY "Public Read Performance Metrics" ON public.model_performance_metrics FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Public Read Weights Config" ON public.model_weights_config;
 CREATE POLICY "Public Read Weights Config" ON public.model_weights_config FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Learning Ledger" ON public.global_draw_learning_ledger;
+CREATE POLICY "Public Read Learning Ledger" ON public.global_draw_learning_ledger FOR SELECT USING (true);
 
 -- Policies User (Idempotentes)
 DROP POLICY IF EXISTS "User Manage Own Prefs" ON public.user_preferences;
@@ -364,13 +401,15 @@ CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service
 DROP POLICY IF EXISTS "Service Full Access Subscriptions" ON public.subscriptions;
 CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Service role can update snapshots" ON public.prediction_snapshots;
-CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE USING (true);
+CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE TO service_role USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Service role full access on post_mortem_reviews" ON public.post_mortem_reviews;
 CREATE POLICY "Service role full access on post_mortem_reviews" ON public.post_mortem_reviews FOR ALL TO service_role USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Service Full Access Performance Metrics" ON public.model_performance_metrics;
 CREATE POLICY "Service Full Access Performance Metrics" ON public.model_performance_metrics FOR ALL TO service_role USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Service Full Access Weights Config" ON public.model_weights_config;
 CREATE POLICY "Service Full Access Weights Config" ON public.model_weights_config FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Learning Ledger" ON public.global_draw_learning_ledger;
+CREATE POLICY "Service Full Access Learning Ledger" ON public.global_draw_learning_ledger FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- 6. REALTIME
 DO $$

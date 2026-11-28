@@ -423,6 +423,9 @@ export const finalizePredictionPayload = async (
     epistemicUncertainty,
     aleatoricUncertainty,
     confidenceInterval: { lower: ciLower, upper: ciUpper },
+    intervalKind: 'epistemic_coherence_band' as const,
+    intervalNote:
+      'Bande de cohérence épistémique (± incertitude de stabilité vectorielle), distincte d’un intervalle de confiance fréquentiste sur les gains.',
     entropyBits: parseFloat(currentEntropy.toFixed(3)),
     credibleIntervalRange: ciUpper - ciLower,
   };
@@ -430,10 +433,12 @@ export const finalizePredictionPayload = async (
   // ============================================================================
   // SCÉNARIOS DE SIMULATION PROBABILISTES DÉTERMINISTES (SCÉNARIO D SYNTHESIZER)
   // ============================================================================
+  const shrunkBoostingMultiplier =
+    1.0 + skillEstimate.shrinkage * (calibratedParams.boosting_multiplier - 1.0);
   const scenarioCalibration: ScenarioCoherenceCalibration = {
     plattSlope: plattA,
     plattIntercept: plattB,
-    boostingMultiplier: calibratedParams.boosting_multiplier,
+    boostingMultiplier: shrunkBoostingMultiplier,
     cyclicModulator: cyclicPhaseProfile.confidenceModulator,
     shrinkageMultiplier: shrinkageApplied ? shrinkageFactor : 1.0,
   };
@@ -464,7 +469,7 @@ export const finalizePredictionPayload = async (
     timestamp: Date.now(),
     symbiosisFactor: context.symbioticContext ? Math.min(2.0, 1.0 + 0.5 * (1.0 - Math.exp(-Object.keys(context.symbioticContext.orchestrationBoosts || {}).length))) : 1.0,
     realityAlignment,
-    realityAlignmentNote: HONEST_NOTE,
+    realityAlignmentNote: `Score de forme structurelle (somme, parité, diversité, stabilité) : n'augmente pas la probabilité de gain. ${HONEST_NOTE}`,
     adversarialApplied: context.adversarialMode,
     challengedNumbers: [],
     stabilityScore,

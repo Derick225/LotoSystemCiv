@@ -351,7 +351,7 @@ describe('dnaGeneSequenceService (EpiGenome-SQ)', () => {
     );
   });
 
-  it('propage sequenceProfile, codons et cohérence épistasique via runUnifiedDnaGeneSequencer(applyWeights: true)', async () => {
+  it('bloque l’application live sous parité Walk-Forward et propage sequenceProfile quand le verdict est OUTPERFORMS_BASELINE', async () => {
     const drawName = 'TEST_UNIFIED_SEQ_APPLY';
     const history = makeDeterministicHistory(drawName, 30);
     const weights = getDefaultWeights();
@@ -368,16 +368,52 @@ describe('dnaGeneSequenceService (EpiGenome-SQ)', () => {
       causalAuditTrail: ['Génération de référence'],
     });
 
+    // Sur historique synthétique sans surperformance prouvée, applyWeights: true bascule en simulation sèche
     const result = await runUnifiedDnaGeneSequencer(drawName, history, weights, {
       forensicReports: reports,
       applyWeights: true,
     });
 
     expect(result.sequenceFingerprint).toMatch(/^dna_/);
+    expect(result.applied).toBe(false);
+    expect(result.walkForwardVerdict).toBeDefined();
+    expect(result.walkForwardVerdict).not.toBe('OUTPERFORMS_BASELINE');
+    expect(result.applicationBlockedReason).toBeTruthy();
+
+    const lineageBefore = await getModelEvolutionLineage(drawName);
+    expect(lineageBefore.totalGenerations).toBe(1);
+
+    // Vérification de la persistance complète de sequenceProfile et walkForwardVerdict lorsque le verdict est validé
+    const { applyOptimizedWeights } = await import(
+      '../src/services/prediction/optimizationController'
+    );
+    await applyOptimizedWeights({
+      drawName,
+      weights: result.optimizedWeights,
+      origin: 'GENETIC_EVOLUTION',
+      walkForwardVerdict: 'OUTPERFORMS_BASELINE',
+      history,
+      sequenceProfile: {
+        orderedGenes: result.geneSequence.map((g) => g.key),
+        sequenceSignature: result.sequenceMetrics.sequenceSignature,
+        kendallTauShiftFromPrevious: result.sequenceMetrics.kendallTauShiftVsActive,
+        epistaticCoherenceScore: result.sequenceMetrics.epistaticCoherenceScore,
+        topCodons: result.codons.slice(0, 3).map((c) => ({
+          id: c.id,
+          genes: c.genes,
+          cohesionScore: c.cohesionScore,
+          synergyLift: c.synergyLift,
+        })),
+      },
+      causalAuditTrail: result.auditTrail,
+      reason: 'Validation Walk-Forward OUTPERFORMS_BASELINE',
+    });
+
     const lineage = await getModelEvolutionLineage(drawName);
     expect(lineage.totalGenerations).toBe(2);
     const latest = lineage.history[0];
     expect(latest.origin).toBe('GENETIC_EVOLUTION');
+    expect(latest.walkForwardVerdict).toBe('OUTPERFORMS_BASELINE');
     expect(latest.sequenceProfile).toBeDefined();
     expect(latest.sequenceProfile!.epistaticCoherenceScore).toBe(
       result.sequenceMetrics.epistaticCoherenceScore

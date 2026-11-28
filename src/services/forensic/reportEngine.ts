@@ -22,6 +22,7 @@ import {
   calculateLjungBoxTest,
   calculateACValue,
 } from "../mathCore";
+import { computeCanonicalExactHitsAndNearMisses } from "../../../supabase/functions/_shared/forensic-learning-engine.ts";
 
 const normalCDF = (x: number, mean: number, std: number): number => {
   const z = (x - mean) / Math.max(Number.EPSILON, std);
@@ -312,25 +313,11 @@ export const generateForensicReport = (
   predictedScores.sort((a, b) => b.score - a.score);
   const predictedCombo = predictedScores.slice(0, 5).map(s => s.num);
 
-  const actualSet = new Set(combo);
-  let hits = 0;
-  predictedCombo.forEach(num => {
-    if (actualSet.has(num)) hits++;
-  });
+  const canonicalStats = computeCanonicalExactHitsAndNearMisses(predictedCombo, combo);
+  const hits = canonicalStats.exactHits;
+  const nearMisses = canonicalStats.nearMissCount;
 
-  let nearMisses = 0;
-  predictedCombo.forEach(num => {
-    if (!actualSet.has(num)) {
-      for (const act of combo) {
-        if (Math.abs(num - act) === 1 || Math.abs(num - act) === 2) {
-          nearMisses++;
-          break;
-        }
-      }
-    }
-  });
-
-  const modelMissScore = Math.max(0, 1.0 - (hits * 1.0 + nearMisses * 0.25) / 5.0);
+  const modelMissScore = Math.max(0, 1.0 - hits / 5.0);
 
   // Evaluate predicted combo structural alignment
   const predSorted = [...predictedCombo].sort((a, b) => a - b);

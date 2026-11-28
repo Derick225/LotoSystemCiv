@@ -140,6 +140,27 @@ class OfflineQueueService {
     }
   }
 
+  private sanitizeSnapshotClientPayload(
+    raw: Record<string, unknown>,
+    userId: string
+  ): Record<string, unknown> {
+    const cleanMetrics =
+      raw.metrics_snapshot && typeof raw.metrics_snapshot === 'object'
+        ? { ...(raw.metrics_snapshot as Record<string, unknown>) }
+        : {};
+    delete cleanMetrics.geneScores;
+    return {
+      id: raw.id,
+      user_id: userId,
+      draw_name: raw.draw_name,
+      target_date: raw.target_date,
+      predicted_numbers: raw.predicted_numbers,
+      decision_dna: raw.decision_dna,
+      metrics_snapshot: cleanMetrics,
+      status: 'PENDING',
+    };
+  }
+
   /**
    * Enregistre un élément dans la queue locale IndexedDB et tente une synchronisation si en ligne
    */
@@ -154,7 +175,30 @@ class OfflineQueueService {
       return;
     }
 
-    const payloadRecord = payload as Record<string, unknown>;
+    const rawRecord = { ...(payload as Record<string, unknown>) };
+    let originUserId: string | null =
+      typeof rawRecord.user_id === 'string' && rawRecord.user_id.trim() !== ''
+        ? rawRecord.user_id.trim()
+        : null;
+
+    if (!originUserId && isSupabaseConfigured()) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        originUserId = data?.user?.id || null;
+      } catch {
+        originUserId = null;
+      }
+    }
+
+    const payloadRecord =
+      typeValidation.data === 'prediction_snapshot'
+        ? (() => {
+            const cleaned = this.sanitizeSnapshotClientPayload(rawRecord, originUserId || '');
+            if (!originUserId) delete cleaned.user_id;
+            return cleaned;
+          })()
+        : rawRecord;
+
     this.queueSequence = (this.queueSequence + 1) % 1000000;
     const rawId = typeof payloadRecord.id === 'string' ? payloadRecord.id : undefined;
     const id = rawId || `queue_${type}_${Date.now()}_${this.queueSequence}`;
@@ -164,6 +208,7 @@ class OfflineQueueService {
       type: typeValidation.data,
       drawName,
       payload: payloadRecord,
+      originUserId,
       timestamp: Date.now(),
       attempts: 0,
     };
@@ -247,10 +292,26 @@ class OfflineQueueService {
 
         try {
           if (item.type === 'prediction_snapshot') {
-            const rowData = {
-              ...item.payload,
-              user_id: user?.id || null,
-            };
+            if (!user?.id) {
+              // Ne jamais écrire avec user_id = null (rejeté par la RLS) : conserver en file d'attente
+              continue;
+            }
+            const itemOwner =
+              item.originUserId ??
+              (typeof item.payload.user_id === 'string' && item.payload.user_id.trim() !== ''
+                ? item.payload.user_id.trim()
+                : null);
+
+            if (!itemOwner || itemOwner !== user.id) {
+              logger.warn(
+                { id: item.id, itemOwner, activeUserId: user.id },
+                "[OfflineQueue] Snapshot ignoré et purgé : propriétaire absent ou différent du compte actif."
+              );
+              keysToDelete.push(key);
+              continue;
+            }
+
+            const rowData = this.sanitizeSnapshotClientPayload(item.payload, user.id);
             const { error } = await supabase.from('prediction_snapshots').upsert(rowData);
             if (!error) syncSuccess = true;
           } else if (item.type === 'learning_log' || item.type === 'learning_session') {

@@ -301,7 +301,7 @@ class WorkerService {
         }
     }
 
-    public async warmup(drawName: string = "Loto 5/90"): Promise<{ ready: boolean; latencyMs: number }> {
+    public async warmup(drawName: string = ""): Promise<{ ready: boolean; latencyMs: number }> {
         const start = performance.now();
         try {
             if (!this.workerReady || !this.localWorker) {

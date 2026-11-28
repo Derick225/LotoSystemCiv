@@ -40,6 +40,7 @@ interface NexusState {
   globalWeights: AlgoWeights;
   isForensicOptimized: boolean;
   isAutonomousAgentActive: boolean;
+  lastProcessedAutonomousDrawByDraw: Record<string, string>;
   agentLogs: {
     id: string;
     timestamp: Date;
@@ -89,6 +90,7 @@ interface NexusState {
   setGlobalWeights: (weights: AlgoWeights, targetDrawName?: string) => void;
   setForensicOptimized: (opt: boolean) => void;
   setAutonomousAgentActive: (active: boolean) => void;
+  markAutonomousDrawProcessed: (drawName: string, signature: string) => void;
   addAgentLog: (log: {
     id: string;
     timestamp: Date;
@@ -141,6 +143,7 @@ export const useNexusStore = create<NexusState>()(
       globalWeights: {} as AlgoWeights, // Will be initialized by initialize or getAlgoWeights
       isForensicOptimized: false,
       isAutonomousAgentActive: typeof window !== "undefined" && window.localStorage && window.localStorage.getItem("nexus_enable_bg_autolearn") === "true" ? true : false,
+      lastProcessedAutonomousDrawByDraw: {},
       useSpatioTemporalHawkes: false,
       agentLogs: [],
       neuralFeedbackLogs: [],
@@ -287,6 +290,16 @@ export const useNexusStore = create<NexusState>()(
             }
           }).catch(() => {});
         }
+      },
+      markAutonomousDrawProcessed: (name, signature) => {
+        const normalized = (name || "").trim().toUpperCase();
+        if (!normalized || !signature) return;
+        set((state) => ({
+          lastProcessedAutonomousDrawByDraw: {
+            ...state.lastProcessedAutonomousDrawByDraw,
+            [normalized]: signature,
+          },
+        }));
       },
       setInspectingNumber: (num) => set({ inspectingNumber: num }),
       setHoveredNumber: (num) => set({ hoveredNumber: num }),
@@ -482,6 +495,7 @@ export const useNexusStore = create<NexusState>()(
         interDrawMatrixScope: state.interDrawMatrixScope,
         activeStrategicPosture: state.activeStrategicPosture,
         forcedOutsiderCount: state.forcedOutsiderCount,
+        lastProcessedAutonomousDrawByDraw: state.lastProcessedAutonomousDrawByDraw,
       }),
       storage:
         typeof window !== "undefined"
@@ -509,6 +523,8 @@ export const useNexusIsFocusMode = () => useNexusStore((s) => s.isFocusMode);
 export const useNexusGlobalWeights = () => useNexusStore((s) => s.globalWeights);
 export const useNexusIsForensicOptimized = () => useNexusStore((s) => s.isForensicOptimized);
 export const useNexusIsAutonomousAgentActive = () => useNexusStore((s) => s.isAutonomousAgentActive);
+export const useNexusLastProcessedAutonomousDraws = () =>
+  useNexusStore((s) => s.lastProcessedAutonomousDrawByDraw);
 export const useNexusAgentLogs = () => useNexusStore((s) => s.agentLogs);
 export const useNexusNeuralFeedbackLogs = () => useNexusStore((s) => s.neuralFeedbackLogs);
 export const useNexusVocalContext = () => useNexusStore((s) => s.vocalContext);
@@ -552,6 +568,7 @@ export const useNexusActions = () =>
     setGlobalWeights: s.setGlobalWeights,
     setForensicOptimized: s.setForensicOptimized,
     setAutonomousAgentActive: s.setAutonomousAgentActive,
+    markAutonomousDrawProcessed: s.markAutonomousDrawProcessed,
     addAgentLog: s.addAgentLog,
     addNeuralFeedbackLogs: s.addNeuralFeedbackLogs,
     setVocalContext: s.setVocalContext,

@@ -109,7 +109,10 @@ export const performForensicAnalysis = async (
     return rev >= 1 && rev <= 90 && rev !== n ? rev : null;
   };
 
-  // 2. Analyse Balistique des Hits et Écarts
+  // 2. Analyse Balistique des Hits et Écarts (Voisin circulaire ±1 sur Z/90Z dédupliqué par gagnant)
+  const claimedVoisinWinners = new Set<number>(
+    predictedNumbers.filter((p) => actualSet.has(p))
+  );
   predictedNumbers.forEach((pred) => {
     if (actualSet.has(pred)) {
       matches.push({
@@ -131,24 +134,28 @@ export const performForensicAnalysis = async (
         });
         found = true;
       }
-      if (!found && actualSet.has(pred - 1)) {
+      const minus1 = pred > 1 ? pred - 1 : 90;
+      const plus1 = pred < 90 ? pred + 1 : 1;
+      if (!found && actualSet.has(minus1) && !claimedVoisinWinners.has(minus1)) {
+        claimedVoisinWinners.add(minus1);
         matches.push({
           predicted: pred,
-          actual: pred - 1,
+          actual: minus1,
           errorType: "Voisin",
           delta: "-1",
           suggestedCorrection:
-            "Ajustement Mineur : Augmenter l'influence Markov/Spatial.",
+            "Ajustement Mineur (diagnostique uniquement) : Adjacence circulaire -1.",
         });
         found = true;
-      } else if (!found && actualSet.has(pred + 1)) {
+      } else if (!found && actualSet.has(plus1) && !claimedVoisinWinners.has(plus1)) {
+        claimedVoisinWinners.add(plus1);
         matches.push({
           predicted: pred,
-          actual: pred + 1,
+          actual: plus1,
           errorType: "Voisin",
           delta: "+1",
           suggestedCorrection:
-            "Ajustement Mineur : Augmenter l'influence Markov/Spatial.",
+            "Ajustement Mineur (diagnostique uniquement) : Adjacence circulaire +1.",
         });
         found = true;
       }
@@ -161,7 +168,7 @@ export const performForensicAnalysis = async (
             errorType: "Miroir",
             delta: "Inv",
             suggestedCorrection:
-              "Symétrie Structurelle : Effet miroir détecté.",
+              "Symétrie Structurelle (diagnostique uniquement) : Effet miroir détecté.",
           });
           found = true;
         }
@@ -175,7 +182,7 @@ export const performForensicAnalysis = async (
             errorType: "Shadow",
             delta: "Flip",
             suggestedCorrection:
-              "Anomalie Numérologique : Inversion de pattern.",
+              "Anomalie Numérologique (diagnostique uniquement) : Inversion de pattern.",
           });
           found = true;
         }
@@ -358,8 +365,8 @@ export const performForensicAnalysis = async (
 
   // 6. Simulation Contrefactuelle
   let counterfactuals: CounterfactualResult[] = [];
-  let continuousTopologicalLoss = 1.0 - Math.exp(-1.0); // Baseline exponentielle continue (1 - 1/e ≈ 0.632)
-  let wassersteinLoss = (90.0 / 4.0) * (1.0 - Math.exp(-1.0)); // Dispersion Wasserstein baseline
+  let continuousTopologicalLoss = 1.0; // Ratio neutre (Log-Loss = baseline uniforme 5/90)
+  let wassersteinLoss = 1.0; // Ratio neutre (Brier marginal = baseline uniforme 5/90)
   const baseWeights: AlgoWeights = await getAlgoWeights(drawName);
   if (activeBreakdown) {
     const simulationResult = runCounterfactualSimulation(
@@ -481,18 +488,13 @@ export const performForensicAnalysis = async (
   }
 
   matches
-    .filter(
-      (m) =>
-        m.errorType === "Voisin" ||
-        m.errorType === "Miroir" ||
-        m.errorType === "Shadow",
-    )
+    .filter((m) => m.errorType === "Voisin")
     .forEach((m) => {
       if (m.actual) {
         nearMisses.push({
           predicted: m.predicted,
           actual: m.actual,
-          distance: Math.abs(m.predicted - m.actual),
+          distance: 1,
           errorType: m.errorType,
         });
       }
@@ -532,14 +534,9 @@ export const performForensicAnalysis = async (
       });
   }
 
-  // 8. XAI - Autopsie Littéraire
+  // 8. XAI - Autopsie Littéraire (définition canonique : exactHits Top-5 et Voisin circulaire ±1)
   const exactHitsCount = matches.filter((m) => m.errorType === "Hit").length;
-  const nearMissesCount = matches.filter(
-    (m) =>
-      m.errorType === "Voisin" ||
-      m.errorType === "Miroir" ||
-      m.errorType === "Shadow",
-  ).length;
+  const nearMissesCount = matches.filter((m) => m.errorType === "Voisin").length;
   let machineHits = 0;
   predictedNumbers.forEach((n) => {
     if (machineNumbers.includes(n)) machineHits++;
@@ -585,35 +582,8 @@ export const performForensicAnalysis = async (
     }
   });
 
-  if (spectralDeviations.length > 0) {
-    const meanDelta =
-      spectralDeviations.reduce((a, b) => a + Math.abs(b.delta), 0) /
-      spectralDeviations.length;
-    const stdDelta =
-      Math.sqrt(
-        spectralDeviations.reduce(
-          (a, b) => a + Math.pow(Math.abs(b.delta) - meanDelta, 2),
-          0,
-        ) / spectralDeviations.length,
-      ) || Number.EPSILON;
-
-    spectralDeviations.forEach((spectral) => {
-      const zScore = Math.abs(Math.abs(spectral.delta) - meanDelta) / stdDelta;
-      const continuousSignificance = 1.0 / (1.0 + Math.exp(-2.0 * (zScore - 1.5)));
-      const spectralAdjustment = 0.15 * driftTolerance * continuousSignificance;
-
-      if (spectralAdjustment > Number.EPSILON) {
-        proposedAdjustments.push({
-          algo: `Numéro ${spectral.number}`,
-          proposedWeightChange:
-            spectral.delta > 0
-              ? -spectralAdjustment
-              : spectralAdjustment,
-          reason: `Signature spectrale (Delta: ${spectral.delta.toFixed(1)}). Ajusté continuellement via UFI (z=${zScore.toFixed(2)}).`,
-        });
-      }
-    });
-  }
+  // Les ajustements algorithmiques proviennent exclusivement de la dérive agrégée des gènes
+  // et de la calibration contrefactuelle DNAOptimizer (aucun ajustement arbitraire "Numéro X" sur le bruit).
 
   // 10. Audit d'Orbitage d'ADN & Force de Consensus (Théorie de l'Information)
   let antiConsensusActive = false;
@@ -682,7 +652,23 @@ export const performForensicAnalysis = async (
     );
 
     try {
-      const dnaCalibrations = optimizer.calibrateDNAFromWinningComposition(baseWeights, winningXAP);
+      const actualSet = new Set(actualWinningNumbers);
+      const nonWinningVectors: Float32Array[] = [];
+      for (let num = 1; num <= 90; num++) {
+        if (actualSet.has(num)) continue;
+        const bdown = predictionBreakdown[num];
+        if (!bdown) continue;
+        const vec = new Float32Array(numAlgos);
+        algoKeys.forEach((k, i) => {
+          vec[i] = (bdown as Record<string, number>)[k] || 0;
+        });
+        nonWinningVectors.push(vec);
+      }
+      const dnaCalibrations = optimizer.calibrateDNAFromWinningComposition(
+        baseWeights,
+        winningXAP,
+        nonWinningVectors,
+      );
       dnaCalibrations.forEach((adj) => {
         proposedAdjustments.push(adj);
       });
@@ -756,13 +742,14 @@ export const performForensicAnalysis = async (
   }
   const deterministicId = getDeterministicUUID(`forensic_${Math.abs(hashVal)}`);
 
-  const divergenceMetric = Math.max(0, Math.min(100, Math.round((1.0 - (exactHitsCount + 0.5 * nearMisses.length) / 5) * 100)));
+  // Divergence et efficacité calculées exclusivement sur les hits exacts (near-misses strictement diagnostiques)
+  const divergenceMetric = Math.max(0, Math.min(100, Math.round((1.0 - exactHitsCount / 5) * 100)));
 
   // ============================================================================
   // SYSTÈME D'ATTRIBUTION CAUSALE AUTOMATISÉE & RAPPORT D'AMÉLIORATION ACTIONNABLE
   // ============================================================================
   const drawAnomalyScore = Math.max(0, Math.min(100, Math.round(100.0 - (UFI_Data.unifiedIntegrityIndex ?? 100.0))));
-  const hitEffectiveness = (exactHitsCount * 1.0 + nearMisses.length * 0.4) / 5.0;
+  const hitEffectiveness = exactHitsCount / 5.0;
   const brierPenaltyFactor =
     brier_score === undefined
       ? 1.0
@@ -770,7 +757,7 @@ export const performForensicAnalysis = async (
   const modelMissScore = Math.min(100, Math.max(0, Math.round((1.0 - Math.min(1.0, hitEffectiveness)) * 100.0 * brierPenaltyFactor)));
 
   const structuralQualityScore = Math.max(0, Math.min(100, Math.round(
-    100.0 * Math.exp(-Math.max(0, continuousTopologicalLoss) - (Math.max(0, wassersteinLoss) / 45.0))
+    100.0 * Math.exp(-0.5 * (Math.max(0, continuousTopologicalLoss) + Math.max(0, wassersteinLoss)))
   )));
 
   const postMortemStabilityScore = Math.max(0, Math.min(100, Math.round(
@@ -797,14 +784,11 @@ export const performForensicAnalysis = async (
       }`,
     );
   }
-  if (nearMisses.length >= 3 && exactHitsCount <= 1) {
-    dominantCauses.push(`Dispersion par frôlements (${nearMisses.length} near-misses) : résonance spatiale/miroir présente mais décalée`);
-  }
   if (brier_score !== undefined && brier_score > 0.08) {
     dominantCauses.push("Surconfiance de l'ensemble d'inférence : probabilités disproportionnées par rapport aux réalisations");
   }
-  if (continuousTopologicalLoss > 0.6) {
-    dominantCauses.push("Divergence topologique : barycentre des prédictions éloigné des zones d'attraction réelles");
+  if (continuousTopologicalLoss > 1.05) {
+    dominantCauses.push("Déficit de calibration marginale : perte Log-Loss supérieure à la référence uniforme");
   }
 
   const severeDrifts = algorithmicDrift.filter(d => Math.abs(d.driftScore) >= 1.5);
@@ -812,10 +796,10 @@ export const performForensicAnalysis = async (
     dominantCauses.push(`Dérive algorithmique prononcée sur les estimateurs : ${severeDrifts.slice(0, 3).map(d => `${d.algo} (${d.direction})`).join(", ")}`);
   }
   if (dominantCauses.length === 0) {
-    if (exactHitsCount >= 2) {
+    if (exactHitsCount >= 3) {
       dominantCauses.push("Convergence prédictive réussie : alignement cohérent des sous-modèles");
     } else {
-      dominantCauses.push("Fluctuation stochastique normale : dispersion dans les limites prévues par le bruit poissonnien");
+      dominantCauses.push("Fluctuation stochastique normale : dispersion dans les limites prévues par le bruit hypergéométrique");
     }
   }
 
@@ -827,7 +811,7 @@ export const performForensicAnalysis = async (
     failureMode = "regimebreak";
   } else if (severeDrifts.some(d => d.algo.toLowerCase().includes("momentum") || d.algo.toLowerCase().includes("freq"))) {
     failureMode = "recentoverfit";
-  } else if (continuousTopologicalLoss > 0.65 || (nearMisses.length >= 3 && exactHitsCount === 0)) {
+  } else if (continuousTopologicalLoss > 1.08) {
     failureMode = "structuralmisalignment";
   } else if (brier_score !== undefined && brier_score > 0.08) {
     failureMode = "overconfidence";

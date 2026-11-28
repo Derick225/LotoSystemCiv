@@ -38,7 +38,10 @@ describe('Option 1 : Câblage de l’Apprentissage Fermé (Post-Mortem ➔ Micro
     expect(report.calibrationAccuracy).toBeLessThanOrEqual(100);
     expect(report.algoGradients.length).toBeGreaterThan(0);
     expect(report.correctedWeights).toBeDefined();
-    expect(report.learningRate).toBeGreaterThan(0);
+    expect(report.temporalDriftMetrics?.learningRate).toBeGreaterThan(0);
+    // Audit A.7 : sur 5 tirages (< 18), le mode prudence verrouille l'apprentissage effectif à 0
+    expect(report.learningAudit?.prudenceModeActive).toBe(true);
+    expect(report.learningRate).toBe(0);
     expect(report.temporalDriftMetrics).toBeDefined();
     expect(report.cyclicPhaseProfile).toBeDefined();
   });

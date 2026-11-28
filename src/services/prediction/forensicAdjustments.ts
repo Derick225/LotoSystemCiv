@@ -5,7 +5,7 @@ import { getLocalForensicReports } from "../postPredictionAnalysisService";
 import { detectGameRegime } from "../mathService";
 import { ScoredNumber } from "./scoringEngine";
 import { getMedian, getStdDev } from "./microSgd";
-import { parseDateSafely } from "../../utils/dateUtils";
+import { parseStrictTimestampMs } from "../../utils/dateUtils";
 import type { PredictionRuntimeContext } from "./predictionOrchestrator";
 
 /**
@@ -56,17 +56,23 @@ export const applyForensicAdjustments = async (
     }
   }
 
-  // Garde anti-fuite (causalité) : en backtesting walk-forward, `history` est la tranche STRICTEMENT
-  // antérieure au tirage cible. Un rapport forensic daté après le plus récent tirage connu de cette
-  // tranche décrit le tirage cible (ou un tirage futur) et révélerait ses gagnants → on ne conserve
-  // que les rapports dont la date est ≤ celle du dernier tirage causalement disponible.
-  const causalCutoff = (history && history.length > 0)
-    ? Math.max(...history.map(d => parseDateSafely(d.date).getTime()))
-    : Number.POSITIVE_INFINITY;
+  // Garde anti-fuite (causalité) fail-closed (B.1) :
+  // Si l'historique n'a aucune date valide ou si la date du rapport est invalide/manquante,
+  // le rapport est rejeté afin d'éviter toute fuite future en cas de champ inparsable.
+  const validHistoryTimestamps = (history || [])
+    .map(d => parseStrictTimestampMs(d.date))
+    .filter((ts): ts is number => ts !== null);
+  const causalCutoff = validHistoryTimestamps.length > 0
+    ? Math.max(...validHistoryTimestamps)
+    : 0;
 
-  const recentReports = (reports || []).filter(r =>
-    r.drawName === drawName && parseDateSafely(r.date).getTime() <= causalCutoff
-  );
+  const recentReports = causalCutoff > 0
+    ? (reports || []).filter(r => {
+        if (!r || r.drawName !== drawName) return false;
+        const repTs = parseStrictTimestampMs(r.date);
+        return repTs !== null && repTs <= causalCutoff;
+      })
+    : [];
 
   if (recentReports.length === 0) {
     logger.debug("[forensicAdjustments] Scénario D : Rapport forensique indisponible pour ce tirage. Ajustements neutralisés.");

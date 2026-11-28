@@ -136,32 +136,40 @@ export const computeContinuousKellyAllocation = ({
   const criticalThreshold = kOrder / (kOrder + 1.5);
 
   // 4. Probabilité de gain :
-  // - Mode calibré par preuve empirique hors-échantillon (λ ∈ [0,1]) : interpolation continue
-  //   entre la loi hypergéométrique nulle exacte C(5,k)/C(90,k) et le signal amplifié par le lift réel.
-  //   Lorsque λ = 0 (aucune preuve OOS), p = pNull combinatoire exacte (espérance négative -> 0 FCFA).
-  const pFair = 1.0 / (odds + 1.0);
+  // - Mode calibré par preuve empirique hors-échantillon (λ ∈ [0,1] et lift > 1) :
+  //   interpolation continue entre la loi hypergéométrique nulle exacte C(5,k)/C(90,k) et le
+  //   signal calibré.
+  // - Sans calibration OOS explicite (ou λ <= 0.02, ou empiricalLift <= 1.0) : aucun avantage
+  //   n'est fabriqué à partir de la confiance brute ; p = pNull exacte (E[R] < 0 -> mise 0 FCFA).
+  const grossOdds = Math.max(1, odds);
+  const b = Math.max(1, grossOdds - 1.0); // Gain net par unité misée (LOTO_PAYOUTS donne le gain brut)
+  const pFair = 1.0 / grossOdds;
   const pNull = computeHypergeometricNullProbability(kOrder);
   const infoLift = Math.exp(
     (effectiveConf - criticalThreshold) / (Math.sqrt(kOrder) * (1.0 - criticalThreshold))
   );
 
-  let p: number;
-  let hasProvenEdge = true;
-  const useShrinkageCalibration = typeof empiricalSkillShrinkage === "number" && Number.isFinite(empiricalSkillShrinkage);
+  let p = pNull;
+  let hasProvenEdge = false;
+  const useShrinkageCalibration =
+    typeof empiricalSkillShrinkage === "number" && Number.isFinite(empiricalSkillShrinkage);
 
   if (useShrinkageCalibration) {
     const lambda = Math.max(0.0, Math.min(1.0, empiricalSkillShrinkage as number));
-    const safeLift = typeof empiricalLift === "number" && Number.isFinite(empiricalLift) ? Math.max(0.5, empiricalLift) : 1.0;
-    const combinatorialLift = Math.pow(safeLift, kOrder) * Math.max(1.0, infoLift);
-    const pModelWithEdge = Math.max(pNull, Math.min(0.99, pNull * combinatorialLift));
-    p = Math.max(1e-7, Math.min(0.99, (1.0 - lambda) * pNull + lambda * pModelWithEdge));
-    hasProvenEdge = lambda > 0.02 && p > pFair;
-  } else {
-    p = Math.max(1e-6, Math.min(0.99, pFair * infoLift));
+    const safeLift =
+      typeof empiricalLift === "number" && Number.isFinite(empiricalLift)
+        ? Math.max(0.5, empiricalLift)
+        : 1.0;
+
+    if (lambda > 0.02 && safeLift > 1.0) {
+      const combinatorialLift = Math.pow(safeLift, kOrder) * Math.max(1.0, infoLift);
+      const pModelWithEdge = Math.max(pNull, Math.min(0.99, pNull * combinatorialLift));
+      p = Math.max(1e-7, Math.min(0.99, (1.0 - lambda) * pNull + lambda * pModelWithEdge));
+      hasProvenEdge = p > pFair;
+    }
   }
 
   const q = 1.0 - p;
-  const b = odds;
 
   // Espérance mathématique nette (Edge) et fraction de Kelly brute f* = (b*p - q) / b
   const edge = b * p - q;
@@ -175,12 +183,16 @@ export const computeContinuousKellyAllocation = ({
   const baseDomainRatio = 5.0 / 90.0;
   const dynamicMaxRisk = baseDomainRatio / (numTickets * (1.0 + 0.5 * entropy));
 
-  // Transition continue positive
-  const f = rawKelly > 0 ? Math.min(dynamicMaxRisk, rawKelly * continuousKellyDamping) : 0;
+  // Transition continue positive uniquement lorsqu'un avantage OOS calibré est avéré
+  const f =
+    hasProvenEdge && rawKelly > 0
+      ? Math.min(dynamicMaxRisk, rawKelly * continuousKellyDamping)
+      : 0;
 
   if (f <= 0 || safeBankroll <= 0) {
-    const zeroReason =
-      useShrinkageCalibration && !hasProvenEdge
+    const zeroReason = !useShrinkageCalibration
+      ? `Aucune calibration hors-échantillon active (λ non mesuré). Sous la loi hypergéométrique 5/90, l'espérance est négative (${(edge * 100).toFixed(1)}%) : mise recommandée 0 FCFA.`
+      : !hasProvenEdge
         ? `Aucun avantage statistique hors-échantillon démontré (λ=${((empiricalSkillShrinkage || 0) * 100).toFixed(0)}%, Edge ${(edge * 100).toFixed(1)}% vs seuil 5/90). Capital strictement préservé.`
         : `Espérance négative (Edge ${(edge * 100).toFixed(1)}%). Conserver le capital ou réduire l'ordre combinatoire.`;
     return {

@@ -192,16 +192,19 @@ Deno.serve(async (req) => {
             .select('id')
             .eq('draw_name', result.draw_name)
             .eq('status', 'PENDING')
-            .or(`target_date.is.null,target_date.lte.${result.date}`)
+            .or(`target_date.is.null,target_date.eq.${result.date}`)
           if (!pending || pending.length === 0) continue
+          const internalHeaders = { Authorization: `Bearer ${supabaseKey}` }
           for (let i = 0; i < pending.length; i += 5) {
             await Promise.all(pending.slice(i, i + 5).map((snap: { id: string }) =>
               supabase.functions.invoke('nexus-api', {
                 body: { action: 'forensic-autopsy', snapshotId: snap.id, drawResultId: result.id },
+                headers: internalHeaders,
               }).catch((e: unknown) => console.error(`autopsy ${snap.id}:`, e))))
           }
           await supabase.functions.invoke('nexus-api', {
             body: { action: 'self-learn', drawName: result.draw_name },
+            headers: internalHeaders,
           }).catch((e: unknown) => console.error('self-learn:', e))
         }
       } catch (e) {
@@ -215,6 +218,7 @@ Deno.serve(async (req) => {
       const { data: pendings } = await supabase.from('prediction_snapshots')
         .select('id, draw_name, target_date').eq('status', 'PENDING').lte('target_date', today).limit(40)
       const drawsToLearn = new Set<string>()
+      const internalHeaders = { Authorization: `Bearer ${supabaseKey}` }
       for (const snap of pendings || []) {
         if (Date.now() - startedAt.getTime() > MAX_EXECUTION_TIME) { log.errors.push('timeout avant la fin du rattrapage'); break }
         const { data: res } = await supabase.from('draw_results').select('id')
@@ -222,6 +226,7 @@ Deno.serve(async (req) => {
         if (res) {
           await supabase.functions.invoke('nexus-api', {
             body: { action: 'forensic-autopsy', snapshotId: snap.id, drawResultId: res.id },
+            headers: internalHeaders,
           }).catch((e: unknown) => console.error(`rattrapage autopsy ${snap.id}:`, e))
           drawsToLearn.add(snap.draw_name)
           log.caught_up++
@@ -237,6 +242,7 @@ Deno.serve(async (req) => {
       for (const name of drawsToLearn) {
         await supabase.functions.invoke('nexus-api', {
           body: { action: 'self-learn', drawName: name },
+          headers: internalHeaders,
         }).catch((e: unknown) => console.error('self-learn rattrapage:', e))
       }
     } catch (e) {

@@ -168,6 +168,8 @@ export interface Prediction {
     epistemicUncertainty: number;
     aleatoricUncertainty: number;
     confidenceInterval: { lower: number; upper: number };
+    intervalKind?: 'epistemic_coherence_band';
+    intervalNote?: string;
     entropyBits: number;
     credibleIntervalRange: number;
   };

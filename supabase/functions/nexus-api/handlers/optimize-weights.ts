@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { corsHeaders } from "../../_shared/cors.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { computeCanonicalTopologicalLoss } from "../../_shared/forensic-learning-engine.ts";
 
 export async function handleOptimizeWeights(req: Request, reqBody?: any): Promise<Response> {
   if (req.method === "OPTIONS") {
@@ -8,6 +9,50 @@ export async function handleOptimizeWeights(req: Request, reqBody?: any): Promis
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !supabaseKey) throw new Error("Config Supabase manquante");
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Authentification obligatoire : cron-secret, service_role, ou administrateur authentifié
+    let isAuthorized = false;
+    const cronSecret = req.headers.get('x-cron-secret');
+    if (cronSecret) {
+      const { data: verified } = await supabase
+        .rpc('verify_cron_secret', { p_secret: cronSecret })
+        .catch(() => ({ data: false }));
+      if (verified === true) isAuthorized = true;
+    }
+    if (!isAuthorized) {
+      const authHeader = req.headers.get('Authorization');
+      const token = (authHeader || '').replace(/^Bearer\s+/i, '').trim();
+      if (!token) {
+        return new Response(JSON.stringify({ error: "Non autorisé: authentification requise" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (token === supabaseKey) {
+        isAuthorized = true;
+      } else {
+        const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+        if (authErr || !user) {
+          return new Response(JSON.stringify({ error: "Non autorisé: jeton invalide" }), {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        if (user.app_metadata?.role !== 'admin') {
+          return new Response(JSON.stringify({ error: "Accès refusé: rôle administrateur requis" }), {
+            status: 403,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        isAuthorized = true;
+      }
+    }
+
     const body = reqBody || await req.json().catch(() => ({}));
     const { history: reqHistory, currentWeights: reqWeights, rlSignal, drawName } = body;
 
@@ -17,12 +62,6 @@ export async function handleOptimizeWeights(req: Request, reqBody?: any): Promis
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!supabaseUrl || !supabaseKey) throw new Error("Config Supabase manquante");
-    
-    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Fetch history if not provided
     let history = reqHistory;
@@ -220,27 +259,8 @@ export async function handleOptimizeWeights(req: Request, reqBody?: any): Promis
         candidates.sort((a, b) => b.val - a.val);
         const top5 = candidates.slice(0, 5).map(c => c.n);
 
-        let topologicalSim = 0;
-        targets.forEach((actual: number) => {
-          let maxSim = 1e-9;
-          top5.forEach((predicted: number) => {
-            let sim = 0.0;
-            if (predicted === actual) {
-              sim = 1.0;
-            } else {
-              const linSim = Math.exp(-0.25 * Math.abs(predicted - actual));
-              const posP = getGridPos(predicted);
-              const posW = getGridPos(actual);
-              const gridDist = Math.sqrt(Math.pow(posP.row - posW.row, 2) + Math.pow(posP.col - posW.col, 2));
-              const gridSim = Math.exp(-0.35 * gridDist);
-              sim = Math.max(linSim, gridSim);
-            }
-            if (sim > maxSim) maxSim = sim;
-          });
-          topologicalSim += maxSim;
-        });
-
-        totalFitness += (topologicalSim / 5.0);
+        const loss = computeCanonicalTopologicalLoss(top5, targets);
+        totalFitness += Math.max(0, 1.0 - loss);
       }
 
       return totalFitness / (folds.length || 1);

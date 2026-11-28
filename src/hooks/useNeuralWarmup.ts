@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNexusStore } from '../store/useNexusStore';
 import { workerService } from '../services/workerService';
-import { lotteryService } from '../services/lotteryService';
+import { lotteryService, getNextScheduledDraw } from '../services/lotteryService';
 import { getAlgoWeights } from '../services/prediction/weightsManager';
 import { initializeLcgForDraw } from '../utils/mathUtils';
 import { initializeLotoEngineWasm } from '../services/wasm/lotoEngineBridge';
@@ -28,7 +28,8 @@ export interface WarmupState {
  * @returns WarmupState
  */
 export function useNeuralWarmup(isBooted: boolean): WarmupState {
-  const currentDrawName = useNexusStore((state) => state.drawName) || "Loto 5/90";
+  const storeDrawName = useNexusStore((state) => state.drawName || state.currentDrawName);
+  const currentDrawName = storeDrawName || getNextScheduledDraw()?.name || "";
   const [warmupState, setWarmupState] = useState<WarmupState>({
     isWarmedUp: false,
     isWarming: false,
@@ -40,7 +41,7 @@ export function useNeuralWarmup(isBooted: boolean): WarmupState {
   const warmupTriggeredRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!isBooted) return;
+    if (!isBooted || !currentDrawName) return;
 
     // Ne ré-exécuter que si le tirage actif a changé et n'a pas encore été réchauffé
     if (warmupTriggeredRef.current === currentDrawName && warmupState.isWarmedUp) {

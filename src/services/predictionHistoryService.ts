@@ -444,8 +444,9 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
     const weights = await getAlgoWeights(drawName);
     const targetDate = new Date().toISOString().split('T')[0];
     
-    // Enrich metrics_snapshot with full mathematical and model context
+    // Enrich metrics_snapshot with full mathematical and model context (sans champs scellés serveur)
     const enrichedMetrics: Record<string, any> = { ...(metrics || {}) };
+    delete enrichedMetrics.geneScores;
     
     enrichedMetrics.app_version = "v12.0";
     
@@ -468,11 +469,15 @@ export const savePredictionSnapshot = async (id: string, drawName: string, predi
         prudence_mode_active: false
     };
 
+    const sanitizedPredicted = Array.from(
+        new Set((prediction.suggestedNumbers || []).filter((n) => Number.isInteger(n) && n >= 1 && n <= 90))
+    ).slice(0, 5);
+
     const snapshotData = {
         id: id,
         draw_name: drawName,
         target_date: targetDate,
-        predicted_numbers: prediction.suggestedNumbers,
+        predicted_numbers: sanitizedPredicted,
         decision_dna: weights,
         metrics_snapshot: enrichedMetrics,
         status: 'PENDING'

@@ -452,32 +452,69 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
 
   const applyWeights = async () => {
     if (status === "running") return;
+    if (!finalReport) {
+      addLog("Application bloquée : aucun backtest mesuré pour ce génome (n/d).");
+      showToast(
+        "Impossible de sauvegarder : lancez d'abord une évolution avec backtest mesuré.",
+        "error"
+      );
+      audioEngine.play("error");
+      return;
+    }
+
     audioEngine.play("scan");
-    addLog("Persistance du nouveau génome via la passerelle d'optimisation unifiée...");
+    addLog("Vérification Walk-Forward hors-échantillon avant persistance du génome...");
 
     const safeWeights = normalizeWeights(liveWeights);
+    let wfRes = conformalWfResult;
+    if (!wfRes || wfRes.status !== "COMPLETED") {
+      try {
+        const { getLocalForensicReports } = await import("../../services/postPredictionAnalysisService");
+        const allReports = await getLocalForensicReports().catch(() => []);
+        wfRes = await evaluateDnaGeneSequencerWalkForward({
+          drawName,
+          history: cleanHistory,
+          currentWeights: safeWeights,
+          forensicReports: allReports,
+        });
+        setConformalWfResult(wfRes);
+      } catch (err) {
+        console.warn("[TrainingTab] Walk-Forward verification error:", err);
+      }
+    }
+
+    if (!wfRes || wfRes.status !== "COMPLETED" || wfRes.verdict !== "OUTPERFORMS_BASELINE") {
+      const verdictLabel = wfRes?.verdict ?? "INSUFFICIENT_DATA";
+      addLog(
+        `Persistance bloquée : le verdict Walk-Forward (${verdictLabel}) ne démontre aucun avantage statistique hors-échantillon.`
+      );
+      showToast(
+        `Sauvegarde bloquée : verdict Walk-Forward "${verdictLabel}" (avantage OOS non vérifié).`,
+        "info"
+      );
+      return;
+    }
+
     const response = await applyOptimizedWeights({
       drawName,
       weights: safeWeights,
       origin: "GENETIC_EVOLUTION",
-      allowCriticalDrift: true,
+      allowCriticalDrift: false,
+      walkForwardVerdict: wfRes.verdict,
       history: cleanHistory,
-      performance: finalReport
-        ? {
-            score: finalReport.score,
-            relativeGain: lastEvolution?.relativeGainPct ?? undefined,
-            hitRate:
-              finalReport.averageHits != null
-                ? (finalReport.averageHits / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) * 100
-                : undefined,
-          }
-        : undefined,
+      performance: {
+        score: finalReport.score,
+        relativeGain: lastEvolution?.relativeGainPct ?? undefined,
+        hitRate:
+          finalReport.averageHits != null
+            ? (finalReport.averageHits / LOTTERY_CONSTANTS.NUMBERS_PER_DRAW) * 100
+            : undefined,
+      },
       causalAuditTrail: [
         `Optimisation génomique exécutée (${optimizerType.toUpperCase()}) sur ${drawName}`,
         `Générations: ${generations}, Échantillon: ${sampleSize} tirages`,
-        ...(finalReport
-          ? [`Score backtest mesuré: ${finalReport.score.toFixed(1)}/100`]
-          : ["Aucun backtest mesuré pour ce génome (n/d)"]),
+        `Score backtest mesuré: ${finalReport.score.toFixed(1)}/100`,
+        `Verdict Walk-Forward vérifié: ${wfRes.verdict} (N=${wfRes.evaluatedDrawsCount})`,
       ],
       reason: "Application du meilleur génome issu de l'entraînement",
     });
@@ -536,7 +573,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
         drawName,
         weights: normalized,
         origin: "MANUAL_CALIBRATION",
-        allowCriticalDrift: true,
+        allowCriticalDrift: false,
         history: cleanHistory,
         causalAuditTrail: [`Profil ADN externe importé (fichier JSON) sur ${drawName}`],
         reason: "Import manuel d'un profil ADN externe",
@@ -710,7 +747,7 @@ export const TrainingTab: React.FC<{ drawName: string }> = ({ drawName }) => {
       drawName,
       weights: normalized,
       origin: "MANUAL_CALIBRATION",
-      allowCriticalDrift: true,
+      allowCriticalDrift: false,
       history: cleanHistory,
       causalAuditTrail: [`Calibrage manuel des poids appliqué sur ${drawName}`],
       reason: "Ajustement fin manuel des gènes de l'ADN",

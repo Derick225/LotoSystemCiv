@@ -404,40 +404,67 @@ export function computeClosedLoopAutopsyHpc(params: {
     const p = preds[i];
     if (winnersSet.has(p)) {
       exactHits++;
-    } else if (winnersSet.has(p - 1) || winnersSet.has(p + 1)) {
+    } else if (winnersSet.has(p > 1 ? p - 1 : 90) || winnersSet.has(p < 90 ? p + 1 : 1)) {
       nearMisses++;
     }
   }
 
-  const updated = new Float64Array(params.numAlgos);
-  const learningRate = 1.0 / Math.sqrt(Math.max(1, params.historyDepth));
-  for (let a = 0; a < params.numAlgos; a++) {
-    const curW = weights[a] || 1.0;
-    let alignment = 0;
-    for (let i = 0; i < preds.length; i++) {
-      const p = preds[i];
-      const c = contribs[a * 91 + p] || 0;
-      if (winnersSet.has(p)) alignment += c;
-    }
-    updated[a] = Math.max(0.01, curW + alignment * learningRate);
-  }
+  const kAlgos = Math.max(1, params.numAlgos);
+  const updated = new Float64Array(kAlgos);
+  const cochranFloor = 10;
+  const depthF = Math.max(cochranFloor, params.historyDepth);
+  const dampingMin = 1.0 / kAlgos;
+  const dampingMax = 1.0 / Math.sqrt(kAlgos);
+  const learningRate = Math.max(dampingMin, Math.min(dampingMax, 1.0 / Math.sqrt(depthF)));
+  const domainEps = 1.0 / (90.0 * 90.0);
+  const expectedHitRatio = 5.0 / 90.0;
 
   let sumW = 0;
-  for (let a = 0; a < params.numAlgos; a++) sumW += updated[a];
-  if (sumW > 0) {
-    for (let a = 0; a < params.numAlgos; a++) updated[a] /= sumW;
+  for (let a = 0; a < kAlgos; a++) {
+    const rawW = Number.isFinite(weights[a]) ? weights[a] : 0;
+    const baseW = Math.max(domainEps, rawW);
+    let gradSignal = 0;
+    if (contribs.length >= 90 * kAlgos) {
+      let hitScore = 0;
+      let totalScore = 0;
+      for (let n = 1; n <= 90; n++) {
+        const cVal = contribs[(n - 1) * kAlgos + a];
+        if (Number.isFinite(cVal)) {
+          totalScore += cVal;
+          if (winnersSet.has(n)) hitScore += cVal;
+        }
+      }
+      const expected = totalScore * expectedHitRatio;
+      gradSignal = Math.tanh((hitScore - expected) / (Math.abs(totalScore) + domainEps));
+    } else if (a < contribs.length && Number.isFinite(contribs[a])) {
+      gradSignal = Math.tanh(contribs[a]);
+    }
+    const cauchyGate = 1.0 / (1.0 + gradSignal * gradSignal);
+    const multiplier = Math.exp(learningRate * gradSignal * cauchyGate);
+    const newW = Math.max(domainEps, baseW * multiplier);
+    updated[a] = newW;
+    sumW += newW;
   }
 
-  const brier = Math.pow(exactHits / 5.0 - 1.0, 2);
+  if (sumW > 0) {
+    for (let a = 0; a < kAlgos; a++) updated[a] /= sumW;
+  }
+
+  // Brier marginal propre sur [1..90] (baseline 5/90 sous H0, sans biais near-miss)
+  const predsSet = new Set(Array.from(preds));
+  const hitCountForBrier = predsSet.size > 0 ? exactHits : 0;
+  const uniformBrier = expectedHitRatio * (1.0 - expectedHitRatio);
+  const exactMissRatio = 1.0 - hitCountForBrier / 5.0;
+  const brier = Math.max(0, uniformBrier * (0.5 + exactMissRatio));
   const rmse = Math.sqrt(brier);
 
   return {
     updatedWeights: updated,
-    brierScore: parseFloat(brier.toFixed(4)),
-    divergenceMetric: parseFloat((1.0 - exactHits / 5.0).toFixed(4)),
+    brierScore: parseFloat(brier.toFixed(6)),
+    divergenceMetric: parseFloat((exactMissRatio * 100.0).toFixed(4)),
     exactHits,
     nearMisses,
-    rmse: parseFloat(rmse.toFixed(4)),
-    wassersteinDistance: parseFloat((5.0 - exactHits + nearMisses * 0.5).toFixed(3)),
+    rmse: parseFloat(rmse.toFixed(6)),
+    wassersteinDistance: parseFloat(exactMissRatio.toFixed(4)),
   };
 }

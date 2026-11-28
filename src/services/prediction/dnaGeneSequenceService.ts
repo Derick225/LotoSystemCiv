@@ -9,7 +9,7 @@ import {
 } from '../../shared/prediction.types';
 import { LABELS_MAP } from '../../hooks/useAlgorithmSync';
 import { purifyHistoryForDraw } from '../../utils/arrayUtils';
-import { parseDateSafely } from '../../utils/dateUtils';
+import { parseDateSafely, parseStrictTimestampMs } from '../../utils/dateUtils';
 import {
   drawHasMachineNumbers,
   getDrawNetworkId,
@@ -189,6 +189,10 @@ export interface DnaGeneSynthesisResult {
   initialWeights: AlgoWeights;
   optimizedWeights: AlgoWeights;
   auditTrail: string[];
+  applied?: boolean;
+  applicationBlockedReason?: string;
+  walkForwardVerdict?: DnaGeneWalkForwardVerdict;
+  walkForwardResult?: DnaGeneWalkForwardResult;
 }
 
 export const CHROMOSOMAL_ARM_LABELS: Record<ChromosomalArm, string> = {
@@ -481,43 +485,55 @@ export function synthesizeDnaGeneSequenceAndWeights(
   });
   const activeCount = Math.max(1, K - forcedZeroKeys.size);
 
-  // 3. Garde anti-fuite causale sur les rapports post-mortem (date, dataCutoff, computedAt <= cutoff)
+  // 3. Garde anti-fuite causale FAIL-CLOSED sur les rapports post-mortem (date, dataCutoff, computedAt <= cutoff)
+  const validHistoryTimestamps = pureHistory
+    .map((d) => parseStrictTimestampMs(d.date))
+    .filter((ts): ts is number => ts !== null && Number.isFinite(ts) && ts > 0);
+  const hasValidCausalCutoff = pureHistory.length === 0 || validHistoryTimestamps.length > 0;
   const causalCutoff =
-    pureHistory.length > 0
-      ? Math.max(
-          ...pureHistory.map((d) => {
-            const ts = parseDateSafely(d.date).getTime();
-            return Number.isFinite(ts) ? ts : 0;
-          })
-        )
-      : Number.POSITIVE_INFINITY;
+    pureHistory.length === 0
+      ? Number.POSITIVE_INFINITY
+      : hasValidCausalCutoff
+        ? Math.max(...validHistoryTimestamps)
+        : 0;
 
-  const usableForensics = [...forensicReports]
-    .filter((r) => {
-      if (!r || r.drawName?.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
-        return false;
-      }
-      if (pureHistory.length > 0 && causalCutoff > 0 && Number.isFinite(causalCutoff)) {
-        if (r.date) {
-          const repTs = parseDateSafely(r.date).getTime();
-          if (Number.isFinite(repTs) && repTs > causalCutoff) return false;
-        }
-        if (r.dataCutoff) {
-          const cutTs = parseDateSafely(r.dataCutoff).getTime();
-          if (Number.isFinite(cutTs) && cutTs > causalCutoff) return false;
-        }
-        if (r.computedAt) {
-          const compTs = new Date(r.computedAt).getTime();
-          if (Number.isFinite(compTs) && compTs > causalCutoff) return false;
-        }
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      const tA = a.timestamp ? new Date(a.timestamp).getTime() : parseDateSafely(a.date).getTime();
-      const tB = b.timestamp ? new Date(b.timestamp).getTime() : parseDateSafely(b.date).getTime();
-      return (Number.isFinite(tB) ? tB : 0) - (Number.isFinite(tA) ? tA : 0);
-    });
+  const usableForensics = !hasValidCausalCutoff
+    ? []
+    : [...forensicReports]
+        .filter((r) => {
+          if (!r || r.drawName?.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
+            return false;
+          }
+          if (pureHistory.length > 0) {
+            if (!Number.isFinite(causalCutoff) || causalCutoff <= 0) return false;
+            const dateChecks: Array<unknown> = [];
+            if (r.date !== undefined && r.date !== null && String(r.date).trim() !== '') {
+              dateChecks.push(r.date);
+            }
+            if (r.dataCutoff !== undefined && r.dataCutoff !== null && String(r.dataCutoff).trim() !== '') {
+              dateChecks.push(r.dataCutoff);
+            }
+            if (r.computedAt !== undefined && r.computedAt !== null && String(r.computedAt).trim() !== '') {
+              dateChecks.push(r.computedAt);
+            }
+            // Fail-closed : un rapport sans horodatage exploitable ne peut pas prouver la causalité
+            if (dateChecks.length === 0) return false;
+            for (const rawTs of dateChecks) {
+              const parsed = parseStrictTimestampMs(rawTs);
+              if (parsed === null || parsed > causalCutoff) return false;
+            }
+            if (r.timestamp !== undefined && r.timestamp !== null && String(r.timestamp).trim() !== '') {
+              const tsMs = parseStrictTimestampMs(r.timestamp);
+              if (tsMs === null || tsMs > causalCutoff) return false;
+            }
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          const tA = parseStrictTimestampMs(a.timestamp) ?? parseStrictTimestampMs(a.date) ?? 0;
+          const tB = parseStrictTimestampMs(b.timestamp) ?? parseStrictTimestampMs(b.date) ?? 0;
+          return tB - tA;
+        });
 
   // 4. Agrégation continue des signaux par gène depuis les 4 sources d'analyse
   const forensicAcc: Record<AlgoKey, number> = {} as Record<AlgoKey, number>;
@@ -555,11 +571,14 @@ export function synthesizeDnaGeneSequenceAndWeights(
 
   usableForensics.forEach((rep, idx) => {
     const recencyWeight = Math.exp(-idx / tauR);
-    const klPenalty =
-      rep.kl_divergence && Number.isFinite(rep.kl_divergence)
-        ? Math.exp(-Math.max(0, rep.kl_divergence) / maxKL)
-        : 1.0;
-    const blackSwanFactor = rep.isBlackSwan ? 0.5 : 1.0;
+    const klDiv =
+      rep.kl_divergence && Number.isFinite(rep.kl_divergence) ? Math.max(0, rep.kl_divergence) : 0;
+    const klPenalty = klDiv > 0 ? Math.exp(-klDiv / maxKL) : 1.0;
+    const divergenceRatio =
+      klDiv > 0
+        ? klDiv / maxKL
+        : Math.max(0, Number.isFinite(rep.suspicionScore) ? (rep.suspicionScore || 0) / 100.0 : 0);
+    const blackSwanFactor = rep.isBlackSwan ? Math.exp(-divergenceRatio) / (1.0 + divergenceRatio) : 1.0;
     const wRep = recencyWeight * klPenalty * blackSwanFactor;
 
     if (Array.isArray(rep.proposedAdjustments)) {
@@ -1005,8 +1024,9 @@ export function synthesizeDnaGeneSequenceAndWeights(
     }
   }
 
-  // Seuil de classification épistasique dérivé de l'écart-type observé et du quantile normal (z_{1-5/90})
-  const zCutoff = acklamInvNormal(1.0 - 5.0 / 90.0);
+  // Seuil de classification épistasique dérivé du contrôle multi-tests FDR sur P paires testées
+  const numTestedPairs = Math.max(2, nonZeroCouplings.length);
+  const zCutoff = acklamInvNormal(1.0 - 1.0 / (2.0 * numTestedPairs));
   const epiMeanSq =
     nonZeroCouplings.length > 0
       ? nonZeroCouplings.reduce((acc, c) => acc + c.clamped * c.clamped, 0) / nonZeroCouplings.length
@@ -1432,11 +1452,41 @@ export async function runUnifiedDnaGeneSequencer(
   });
 
   if (options?.applyWeights) {
+    const wfResult = await evaluateDnaGeneSequencerWalkForward({
+      drawName,
+      history: pureHistory,
+      currentWeights,
+      forensicReports: localForensics,
+      autopsyReports: options?.autopsyReports,
+      dnaLineage,
+    });
+
+    if (wfResult.verdict !== 'OUTPERFORMS_BASELINE') {
+      const blockedReason =
+        `Application des poids bloquée (mode dry-run forcé) : verdict walk-forward OOS = ${wfResult.verdict} ` +
+        `(N=${wfResult.evaluatedDrawsCount}, Δhits=${wfResult.deltaMeanHitsTop5 >= 0 ? '+' : ''}${wfResult.deltaMeanHitsTop5.toFixed(3)}, ` +
+        `p_hits=${wfResult.permutationTest.pValueOneSidedPositive.toFixed(3)}, p_brier=${wfResult.brierPermutationTest.pValueOneSidedPositive.toFixed(3)}).`;
+
+      return {
+        ...synthesis,
+        applied: false,
+        applicationBlockedReason: blockedReason,
+        walkForwardVerdict: wfResult.verdict,
+        walkForwardResult: wfResult,
+        auditTrail: [...synthesis.auditTrail, blockedReason],
+      };
+    }
+
     const optRes = await applyOptimizedWeights({
       drawName,
       weights: synthesis.optimizedWeights,
       origin: 'GENETIC_EVOLUTION',
       history: pureHistory,
+      performance: {
+        brierScore: wfResult.meanBrierEpigenome,
+        hitRate: wfResult.meanHitsTop5Epigenome / 5.0,
+        relativeGain: wfResult.deltaMeanHitsTop5,
+      },
       sequenceProfile: {
         sequenceSignature: synthesis.sequenceMetrics.sequenceSignature,
         orderedGenes: synthesis.geneSequence.map((g) => g.key),
@@ -1458,16 +1508,23 @@ export async function runUnifiedDnaGeneSequencer(
       reason: `Séquenceur Génomique EpiGenome-SQ (${synthesis.sequenceMetrics.sequenceSignature})`,
       allowCriticalDrift: options?.allowCriticalDrift,
       isRetroactive: options?.isRetroactive,
+      walkForwardVerdict: wfResult.verdict,
     });
 
     return {
       ...synthesis,
       optimizedWeights: optRes.appliedWeights,
       sequenceFingerprint: optRes.fingerprint,
+      applied: true,
+      walkForwardVerdict: wfResult.verdict,
+      walkForwardResult: wfResult,
     };
   }
 
-  return synthesis;
+  return {
+    ...synthesis,
+    applied: false,
+  };
 }
 
 export interface DnaGeneWalkForwardStep {
@@ -1910,31 +1967,31 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
     }
 
     const actualSet = new Set(actualWinners);
-    const targetTimeMs = parseDateSafely(targetDraw.date).getTime();
+    const targetTimeMs = parseStrictTimestampMs(targetDraw.date);
 
-    // Coupure causale stricte sur les rapports post-mortem (date, dataCutoff, computedAt < targetTimeMs)
+    // Coupure causale stricte FAIL-CLOSED sur les rapports post-mortem (date, dataCutoff, computedAt < targetTimeMs)
     const causalReports = forensicReports.filter((r) => {
       if (!r || r.drawName?.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
         return false;
       }
-      if (!Number.isFinite(targetTimeMs) || targetTimeMs <= 0) return false;
-      const repTs = parseDateSafely(r.date).getTime();
-      if (!Number.isFinite(repTs) || repTs <= 0 || repTs >= targetTimeMs) return false;
+      if (targetTimeMs === null || targetTimeMs <= 0) return false;
+      const repTs = parseStrictTimestampMs(r.date);
+      if (repTs === null || repTs >= targetTimeMs) return false;
       if (r.dataCutoff) {
-        const cutTs = parseDateSafely(r.dataCutoff).getTime();
-        if (Number.isFinite(cutTs) && cutTs >= targetTimeMs) return false;
+        const cutTs = parseStrictTimestampMs(r.dataCutoff);
+        if (cutTs === null || cutTs >= targetTimeMs) return false;
       }
       if (r.computedAt) {
-        const compTs = new Date(r.computedAt).getTime();
-        if (Number.isFinite(compTs) && compTs >= targetTimeMs) return false;
+        const compTs = parseStrictTimestampMs(r.computedAt);
+        if (compTs === null || compTs >= targetTimeMs) return false;
       }
       return true;
     });
 
     const causalAutopsies = autopsyReports.filter((a) => {
       if (a.drawName && a.drawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) return false;
-      const aTs = parseDateSafely(a.targetDrawDate).getTime();
-      return Number.isFinite(aTs) && Number.isFinite(targetTimeMs) && aTs > 0 && aTs < targetTimeMs;
+      const aTs = parseStrictTimestampMs(a.targetDrawDate);
+      return aTs !== null && targetTimeMs !== null && aTs < targetTimeMs;
     });
 
     const causalLineage = [
@@ -1942,8 +1999,8 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
         if (rec.drawName && rec.drawName.trim().toLowerCase() !== drawName.trim().toLowerCase()) {
           return false;
         }
-        const ts = parseDateSafely(rec.timestamp).getTime();
-        return Number.isFinite(ts) && Number.isFinite(targetTimeMs) && ts > 0 && ts < targetTimeMs;
+        const ts = parseStrictTimestampMs(rec.timestamp);
+        return ts !== null && targetTimeMs !== null && ts < targetTimeMs;
       }),
       ...syntheticLineage,
     ];
@@ -2391,15 +2448,35 @@ export async function evaluateDnaGeneSequencerWalkForward(input: {
     regimeProfiles,
   };
 
-  // Verdict STATISTIQUE : OUTPERFORMS uniquement si borne inférieure CI95 > 0, UNDERPERFORMS si borne sup < 0
+  // Verdict STATISTIQUE avec correction de multiplicité de Bonferroni sur m = 2 tests appariés (hits & Brier) :
+  // α_corr = 0.05 / 2 = 0.025 => requiert N >= 6 (1/2^6 = 0.0156 <= 0.025) pour déclarer une surperformance.
+  const alphaBonferroni = 0.05 / 2;
   let verdict: DnaGeneWalkForwardVerdict = 'PARITY_WITH_BASELINE';
-  if (permutationTest.ciLower95 > 0) {
+  if (
+    N >= 6 &&
+    permutationTest.ciLower95 > 0 &&
+    permutationTest.pValueOneSidedPositive <= alphaBonferroni
+  ) {
     verdict = 'OUTPERFORMS_BASELINE';
-  } else if (permutationTest.ciUpper95 < 0) {
+  } else if (
+    N >= 6 &&
+    permutationTest.ciUpper95 < 0 &&
+    permutationTest.pValueTwoSided <= alphaBonferroni
+  ) {
     verdict = 'UNDERPERFORMS_BASELINE';
-  } else if (Math.abs(deltaMeanHitsTop5) <= 1e-6 && brierPermutationTest.ciLower95 > 0) {
+  } else if (
+    N >= 6 &&
+    Math.abs(deltaMeanHitsTop5) <= 1e-6 &&
+    brierPermutationTest.ciLower95 > 0 &&
+    brierPermutationTest.pValueOneSidedPositive <= alphaBonferroni
+  ) {
     verdict = 'OUTPERFORMS_BASELINE';
-  } else if (Math.abs(deltaMeanHitsTop5) <= 1e-6 && brierPermutationTest.ciUpper95 < 0) {
+  } else if (
+    N >= 6 &&
+    Math.abs(deltaMeanHitsTop5) <= 1e-6 &&
+    brierPermutationTest.ciUpper95 < 0 &&
+    brierPermutationTest.pValueTwoSided <= alphaBonferroni
+  ) {
     verdict = 'UNDERPERFORMS_BASELINE';
   }
 

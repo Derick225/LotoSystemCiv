@@ -180,7 +180,8 @@ CREATE TABLE IF NOT EXISTS public.forensic_reports (
     prediction_id UUID,
     draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
     draw_name TEXT,
-    draw_date TEXT,
+    draw_date DATE,
+    model_version TEXT DEFAULT 'v12.1-unified-cf',
     report_data JSONB NOT NULL,
     ai_model_used TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -194,6 +195,89 @@ CREATE TABLE IF NOT EXISTS public.learning_sessions (
     session_data JSONB NOT NULL,
     timestamp BIGINT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- L. POST MORTEM REVIEWS & MODEL CONFIG / METRICS / LEDGER
+CREATE TABLE IF NOT EXISTS public.post_mortem_reviews (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_id UUID NOT NULL REFERENCES public.prediction_snapshots(id) ON DELETE CASCADE,
+    draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
+    model_version TEXT NOT NULL DEFAULT 'v12.1-unified-cf',
+    draw_name TEXT NOT NULL,
+    draw_date DATE NOT NULL,
+    exact_hits INTEGER NOT NULL CHECK (exact_hits BETWEEN 0 AND 5),
+    near_miss_count INTEGER NOT NULL DEFAULT 0,
+    brier_score NUMERIC NOT NULL,
+    log_loss NUMERIC,
+    calibration_ece NUMERIC,
+    brier_skill_vs_uniform NUMERIC,
+    brier_skill_vs_historical NUMERIC,
+    sliding_window_yield NUMERIC,
+    prudence_mode_triggered BOOLEAN DEFAULT FALSE,
+    calibration_delta_slope NUMERIC NOT NULL DEFAULT 0.0,
+    calibration_delta_intercept NUMERIC NOT NULL DEFAULT 0.0,
+    entropy_dampener_value NUMERIC NOT NULL DEFAULT 1.0,
+    sample_size INTEGER NOT NULL DEFAULT 1,
+    uncertainty_se NUMERIC,
+    weight_deltas JSONB NOT NULL DEFAULT '{}'::jsonb,
+    counterfactual_analysis JSONB,
+    learning_audit JSONB,
+    ai_forensic_critique TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.model_performance_metrics (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_id UUID REFERENCES public.prediction_snapshots(id) ON DELETE CASCADE,
+    draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE CASCADE,
+    draw_name TEXT NOT NULL,
+    date DATE,
+    exact_matches INTEGER NOT NULL DEFAULT 0,
+    partial_matches_2_5 BOOLEAN,
+    partial_matches_3_5 BOOLEAN,
+    partial_matches_4_5 BOOLEAN,
+    brier_score NUMERIC,
+    log_loss NUMERIC,
+    calibration_error NUMERIC,
+    uniform_brier_baseline NUMERIC,
+    uniform_log_loss_baseline NUMERIC,
+    historical_brier_baseline NUMERIC,
+    historical_log_loss_baseline NUMERIC,
+    near_miss_count INTEGER,
+    sliding_window_yield NUMERIC,
+    model_version TEXT,
+    sample_size INTEGER DEFAULT 1,
+    uncertainty_se NUMERIC,
+    learning_audit JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.model_weights_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draw_name TEXT NOT NULL UNIQUE,
+    weights JSONB NOT NULL,
+    sigmoid_slope NUMERIC DEFAULT 1.0,
+    sigmoid_intercept NUMERIC DEFAULT 0.0,
+    boosting_multiplier NUMERIC DEFAULT 1.0,
+    prudence_mode_active BOOLEAN DEFAULT FALSE,
+    model_version TEXT DEFAULT 'v12.1-unified-cf',
+    last_autopsy_key TEXT,
+    last_draw_result_id UUID REFERENCES public.draw_results(id) ON DELETE SET NULL,
+    last_draw_date DATE,
+    weight_version INTEGER NOT NULL DEFAULT 1,
+    sample_size INTEGER DEFAULT 0,
+    last_audit JSONB,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.global_draw_learning_ledger (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draw_name TEXT NOT NULL,
+    draw_result_id UUID NOT NULL REFERENCES public.draw_results(id) ON DELETE CASCADE,
+    model_version TEXT NOT NULL,
+    snapshot_id UUID REFERENCES public.prediction_snapshots(id) ON DELETE SET NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_global_draw_learning UNIQUE (draw_name, draw_result_id, model_version)
 );
 
 -- ==============================================================================
@@ -231,6 +315,10 @@ ALTER TABLE public.prediction_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.forensic_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.post_mortem_reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.model_performance_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.model_weights_config ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.global_draw_learning_ledger ENABLE ROW LEVEL SECURITY;
 
 -- Nettoyage préventif des politiques
 DO $$ 
@@ -250,6 +338,12 @@ DROP POLICY IF EXISTS "Public Read Weights" ON public.algo_weights;
 CREATE POLICY "Public Read Weights" ON public.algo_weights FOR SELECT USING (true);
 DROP POLICY IF EXISTS "Public Read Logs" ON public.learning_logs;
 CREATE POLICY "Public Read Logs" ON public.learning_logs FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Performance Metrics" ON public.model_performance_metrics;
+CREATE POLICY "Public Read Performance Metrics" ON public.model_performance_metrics FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Weights Config" ON public.model_weights_config;
+CREATE POLICY "Public Read Weights Config" ON public.model_weights_config FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Public Read Learning Ledger" ON public.global_draw_learning_ledger;
+CREATE POLICY "Public Read Learning Ledger" ON public.global_draw_learning_ledger FOR SELECT USING (true);
 
 -- --- POLITIQUES SERVICE (ÉCRITURE BACKEND - IDEMPOTENTES) ---
 -- Seul le 'service_role' (Edge Functions) peut écrire dans les tables de données globales
@@ -265,6 +359,10 @@ DROP POLICY IF EXISTS "Service Full Access Tx" ON public.transactions;
 CREATE POLICY "Service Full Access Tx" ON public.transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS "Service Full Access Subscriptions" ON public.subscriptions;
 CREATE POLICY "Service Full Access Subscriptions" ON public.subscriptions FOR ALL TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service role can update snapshots" ON public.prediction_snapshots;
+CREATE POLICY "Service role can update snapshots" ON public.prediction_snapshots FOR UPDATE TO service_role USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS "Service Full Access Learning Ledger" ON public.global_draw_learning_ledger;
+CREATE POLICY "Service Full Access Learning Ledger" ON public.global_draw_learning_ledger FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- --- POLITIQUES UTILISATEUR (ISOLATION - IDEMPOTENTES) ---
 -- Les utilisateurs ne voient et ne modifient que leurs propres données

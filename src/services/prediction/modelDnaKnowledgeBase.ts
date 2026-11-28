@@ -61,6 +61,11 @@ export interface ModelDnaRecord {
   };
   specializations: AlgorithmicSpecialization[];
   causalAuditTrail: string[];
+  walkForwardVerdict?:
+    | 'OUTPERFORMS_BASELINE'
+    | 'PARITY_WITH_BASELINE'
+    | 'UNDERPERFORMS_BASELINE'
+    | 'INSUFFICIENT_DATA';
 }
 
 export interface ModelEvolutionLineage {
@@ -270,6 +275,7 @@ export const recordModelDnaVersion = async (
     regimeContext: entry.regimeContext,
     specializations,
     causalAuditTrail: entry.causalAuditTrail || [],
+    ...(entry.walkForwardVerdict ? { walkForwardVerdict: entry.walkForwardVerdict } : {}),
   };
 
   if (hasLocalStorage) {

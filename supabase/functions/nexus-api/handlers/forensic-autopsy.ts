@@ -4,22 +4,78 @@ import { z } from 'zod';
 import { corsHeaders } from '../../_shared/cors.ts';
 import {
   runForensicAutopsyCore,
+  type AutopsyActor,
   type ForensicAutopsyDeps,
 } from '../../_shared/forensic-autopsy-core.ts';
 
-export async function handleForensicAutopsy(req: Request, reqBody?: any): Promise<Response> {
+export interface HandleForensicAutopsyInternalOptions {
+  systemTrusted?: boolean;
+}
+
+export async function handleForensicAutopsy(
+  req: Request,
+  reqBody?: any,
+  internalOptions?: HandleForensicAutopsyInternalOptions
+): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const body = reqBody || (await req.json());
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     if (!supabaseUrl || !supabaseKey) throw new Error('Config Supabase manquante');
 
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } });
+
+    // 1. Authentification stricte (A.2)
+    let actor: AutopsyActor | null = internalOptions?.systemTrusted ? { kind: 'system' } : null;
+
+    if (!actor) {
+      const cronSecret = req.headers.get('x-cron-secret');
+      if (cronSecret) {
+        const { data: verified } = await supabase
+          .rpc('verify_cron_secret', { p_secret: cronSecret })
+          .catch(() => ({ data: false }));
+        if (verified === true) {
+          actor = { kind: 'system' };
+        }
+      }
+    }
+
+    if (!actor) {
+      const authHeader = req.headers.get('Authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return new Response(JSON.stringify({ success: false, error: 'Non autorisé.' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (token === supabaseKey) {
+        actor = { kind: 'system' };
+      } else {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser(token);
+
+        if (userError || !user) {
+          return new Response(JSON.stringify({ success: false, error: 'Jeton d’authentification invalide.' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+
+        actor =
+          user.app_metadata?.role === 'admin'
+            ? { kind: 'admin', userId: user.id }
+            : { kind: 'user', userId: user.id };
+      }
+    }
+
+    const body = reqBody || (await req.json());
     const geminiKey = Deno.env.get('GEMINI_API_KEY') || Deno.env.get('API_KEY');
 
     const deps: ForensicAutopsyDeps = {
@@ -58,6 +114,16 @@ export async function handleForensicAutopsy(req: Request, reqBody?: any): Promis
         return { id: data.id, report: snap?.autopsy_report ?? null };
       },
 
+      async hasGlobalDrawLearned(drawResultId, modelVersion) {
+        const { data } = await supabase
+          .from('global_learning_draw_log')
+          .select('id')
+          .eq('draw_result_id', drawResultId)
+          .eq('model_version', modelVersion)
+          .maybeSingle();
+        return Boolean(data);
+      },
+
       async getPriorDrawResults(drawName, beforeDateIso, limit) {
         const { data } = await supabase
           .from('draw_results')
@@ -72,10 +138,13 @@ export async function handleForensicAutopsy(req: Request, reqBody?: any): Promis
       async getPriorPostMortemReviews(drawName, beforeDateIso, modelVersion, limit) {
         const { data } = await supabase
           .from('post_mortem_reviews')
-          .select('draw_date, exact_hits, brier_score, log_loss, calibration_ece, counterfactual_analysis')
+          .select(
+            'draw_result_id, draw_date, exact_hits, brier_score, log_loss, calibration_ece, is_global_learning_applied, counterfactual_analysis'
+          )
           .eq('draw_name', drawName)
           .eq('model_version', modelVersion)
           .lt('draw_date', beforeDateIso)
+          .order('is_global_learning_applied', { ascending: false })
           .order('draw_date', { ascending: false })
           .limit(limit);
         return data || [];
@@ -84,7 +153,7 @@ export async function handleForensicAutopsy(req: Request, reqBody?: any): Promis
       async getCurrentWeightsConfig(drawName) {
         const { data } = await supabase
           .from('model_weights_config')
-          .select('draw_name, weights, sigmoid_slope, sigmoid_intercept')
+          .select('draw_name, weights, sigmoid_slope, sigmoid_intercept, weight_version')
           .eq('draw_name', drawName)
           .maybeSingle();
         return data || null;
@@ -93,7 +162,12 @@ export async function handleForensicAutopsy(req: Request, reqBody?: any): Promis
       async applyAtomicPersistence(params) {
         const { data, error } = await supabase.rpc('apply_forensic_autopsy_atomic', params);
         if (error) throw new Error(`Échec transaction atomique autopsie: ${error.message}`);
-        return data as { applied: boolean; idempotent_hit: boolean; report?: Record<string, any> };
+        return data as {
+          applied: boolean;
+          idempotent_hit: boolean;
+          global_learning_applied?: boolean;
+          report?: Record<string, any>;
+        };
       },
 
       generateNarrative: geminiKey
@@ -105,9 +179,9 @@ Tirage: ${ctx.drawName} (${ctx.drawDate})
 Prédiction: ${ctx.predicted.join(', ')}
 Résultat réel: ${ctx.actual.join(', ')}
 Hits exacts: ${ctx.exactHits}/5 (baseline uniforme: 0.278)
-Near-misses (±1, diagnostic uniquement): ${ctx.nearMissesCount}
+Near-misses (±1 circulaire, diagnostic uniquement): ${ctx.nearMissesCount}
 Brier: ${ctx.brierScore.toFixed(5)} | Log-Loss: ${ctx.logLoss.toFixed(5)} | BSS vs Uniforme: ${(ctx.brierSkillVsUniform * 100).toFixed(2)}%
-Échantillon cumulé N=${ctx.sampleSize} | Mode prudence: ${ctx.prudenceModeActive ? 'ACTIF' : 'STANDARD'}
+Échantillon cumulé N=${ctx.sampleSize} tirages distincts | Barrière prudence: ${ctx.prudenceModeActive ? 'ACTIVE' : 'STANDARD'}
 Gènes favorables (ablation): ${ctx.topBeneficialGenes.join(', ') || 'Aucun'}
 Gènes défavorables (ablation): ${ctx.harmfulGenes.join(', ') || 'Aucun'}`;
 
@@ -137,7 +211,7 @@ Gènes défavorables (ablation): ${ctx.harmfulGenes.join(', ') || 'Aucun'}`;
         : undefined,
     };
 
-    const result = await runForensicAutopsyCore(deps, body);
+    const result = await runForensicAutopsyCore(deps, body, { actor });
     return new Response(JSON.stringify(result.body), {
       status: result.status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -148,7 +222,7 @@ Gènes défavorables (ablation): ${ctx.harmfulGenes.join(', ') || 'Aucun'}`;
     return new Response(
       JSON.stringify({ success: false, error: err.message || 'Unknown error' }),
       {
-        status: 200,
+        status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }
     );

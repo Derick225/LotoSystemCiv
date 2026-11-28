@@ -3,12 +3,8 @@ import { useNexusStore } from '../store/useNexusStore';
 import { audioEngine } from '../utils/audioEngine';
 import { AlgoWeights } from '../types';
 import { getLocalForensicReports } from '../services/postPredictionAnalysisService';
-import { normalizeWeights } from '../services/prediction/weightsManager';
-import { applyOptimizedWeights } from '../services/prediction/optimizationController';
 import { executeClosedLoopAutoAdjustment } from '../services/prediction/closedLoopAutopsyService';
 import { purifyHistoryForDraw } from '../utils/arrayUtils';
-import { drawHasMachineNumbers } from '../constants';
-import { AlgoKey, RETIRED_ALGO_WEIGHT_KEYS } from '../shared/prediction.types';
 
 export interface AgentActionLog {
     id: string;
@@ -25,9 +21,11 @@ export const useAutonomousAgent = () => {
     const drawName = useNexusStore(s => s.drawName);
     const addAgentLog = useNexusStore(s => s.addAgentLog);
     const updateGlobalWeights = useNexusStore(s => s.updateGlobalWeights);
+    const markAutonomousDrawProcessed = useNexusStore(s => s.markAutonomousDrawProcessed);
 
-    // Utilisation de Ref pour éviter les problèmes de Stale Closure dans la boucle asynchrone
+    // Utilisation de Ref pour éviter les problèmes de Stale Closure et le retraitement en boucle
     const isRunningRef = useRef(false);
+    const processedSignatureRef = useRef<string | null>(null);
 
     const logAction = (action: string, type: AgentActionLog['type'], impact?: string) => {
         agentLogCounter++;
@@ -48,21 +46,46 @@ export const useAutonomousAgent = () => {
     useEffect(() => {
         let active = true;
 
-        if (!isAutonomousAgentActive) {
+        if (!isAutonomousAgentActive || !drawName || !drawName.trim()) {
             isRunningRef.current = false;
             return;
         }
 
         isRunningRef.current = true;
+        const normalizedDrawKey = drawName.trim().toUpperCase();
+        const storageKey = `nexus_agent_last_processed_${normalizedDrawKey}`;
+        const storeProcessed = useNexusStore.getState().lastProcessedAutonomousDrawByDraw?.[normalizedDrawKey];
+        if (storeProcessed) {
+            processedSignatureRef.current = storeProcessed;
+        } else {
+            try {
+                const persisted = localStorage.getItem(storageKey);
+                if (persisted) {
+                    processedSignatureRef.current = persisted;
+                    markAutonomousDrawProcessed(drawName, persisted);
+                }
+            } catch {
+                // Ignorer si localStorage indisponible
+            }
+        }
+
+        const persistProcessedDraw = (signature: string) => {
+            processedSignatureRef.current = signature;
+            markAutonomousDrawProcessed(drawName, signature);
+            try {
+                localStorage.setItem(storageKey, signature);
+            } catch {
+                // Ignorer
+            }
+        };
 
         /**
          * Cœur de l'Auto-Tune : Passe par la passerelle d'optimisation unifiée
-         * (Proof-Guard, verrouillage des canaux retirés / sans machine, et traçabilité ADN).
+         * (Proof-Guard, déduplication stricte store + tirage/rapport, verrouillage prudence).
          */
-        const performAutoTune = async () => {
-            const { globalWeights, history } = useNexusStore.getState();
+        const performAutoTune = async (isForced = false) => {
+            const { globalWeights, history, lastProcessedAutonomousDrawByDraw } = useNexusStore.getState();
             const cleanHistory = purifyHistoryForDraw(drawName, history || []);
-            const hasMachine = drawHasMachineNumbers(drawName, cleanHistory);
 
             // Lecture des paramètres utilisateur
             const thresholdString = localStorage.getItem('nexus_agent_drift_threshold');
@@ -78,7 +101,23 @@ export const useAutonomousAgent = () => {
                 return;
             }
 
-            const latestDrift = currentDrawReports[0].algorithmicDrift?.[0];
+            const latestReport = currentDrawReports[0];
+            const latestDraw = cleanHistory[0];
+            const stateSignature = `${drawName}::${latestDraw?.id || latestDraw?.date || 'none'}::${latestReport.id || latestReport.date}`;
+            const alreadyProcessedInStore = lastProcessedAutonomousDrawByDraw?.[normalizedDrawKey] === stateSignature;
+
+            if (!isForced && (processedSignatureRef.current === stateSignature || alreadyProcessedInStore)) {
+                return;
+            }
+            if (isForced && (processedSignatureRef.current === stateSignature || alreadyProcessedInStore)) {
+                logAction(
+                    `Tirage/rapport déjà mémorisé dans le store (${latestReport.date}). Aucune ré-application pour éviter l'accumulation.`,
+                    "SCAN"
+                );
+                return;
+            }
+
+            const latestDrift = latestReport.algorithmicDrift?.[0];
             const driftScore = latestDrift?.driftScore || 0;
 
             // 1. ACTIVATION SIGMOÏDE CONTINUE (Remplace le seuil binaire)
@@ -90,6 +129,9 @@ export const useAutonomousAgent = () => {
                     "WARNING"
                 );
 
+                // Mémoriser le dernier tirage traité dans le store et localStorage avant exécution pour bloquer toute boucle concurrente
+                persistProcessedDraw(stateSignature);
+
                 // Voie principale : si l'historique réel suffit, déléguer à l'autopsie en boucle fermée
                 if (cleanHistory.length >= 6) {
                     const closedLoopResult = await executeClosedLoopAutoAdjustment(
@@ -98,10 +140,29 @@ export const useAutonomousAgent = () => {
                         cleanHistory,
                         globalWeights,
                         {
-                            dryRun: false,
+                            dryRun: cleanHistory.length < 18,
                             auditContext: `AutonomousAgent (activation=${(activationFactor * 100).toFixed(1)}%, drift=${driftScore.toFixed(1)})`,
                         }
                     );
+
+                    if (closedLoopResult.idempotentHit) {
+                        logAction(
+                            `Idempotence confirmée sur ${drawName} (${closedLoopResult.targetDrawDate}) : tirage déjà traité, poids existants conservés.`,
+                            "SCAN"
+                        );
+                        return;
+                    }
+
+                    const prudenceActive = Boolean(
+                        closedLoopResult.autopsyReport.learningAudit?.prudenceModeActive
+                    );
+                    if (prudenceActive || !closedLoopResult.appliedDirectly) {
+                        logAction(
+                            `Mode prudence actif sur ${drawName} (${closedLoopResult.targetDrawDate}) : observation enregistrée sans mutation des poids.`,
+                            "META"
+                        );
+                        return;
+                    }
 
                     const targetWeights: AlgoWeights = closedLoopResult.optimizedWeights;
                     await updateGlobalWeights(targetWeights, drawName);
@@ -122,74 +183,13 @@ export const useAutonomousAgent = () => {
                     return;
                 }
 
-                // Voie de repli lorsque l'historique local est encore court (< 6 tirages) :
-                // passe tout de même par applyOptimizedWeights + Kalman + verrouillage canaux
-                const optimizedWeights: AlgoWeights = { ...globalWeights };
-                RETIRED_ALGO_WEIGHT_KEYS.forEach((rk) => {
-                    optimizedWeights[rk] = 0;
-                });
-                if (!hasMachine) {
-                    optimizedWeights[AlgoKey.MACHINE_TRANSFER] = 0;
-                }
-
-                const activeKeysCount = Math.max(
-                    1,
-                    Object.entries(optimizedWeights).filter(([k]) => {
-                        const key = k as AlgoKey;
-                        return !RETIRED_ALGO_WEIGHT_KEYS.has(key) && (hasMachine || key !== AlgoKey.MACHINE_TRANSFER);
-                    }).length
+                // Historique trop court (< 6 tirages) : aucune mutation hasardeuse sur les poids de production
+                logAction(
+                    `Historique insuffisant (${cleanHistory.length}/6 tirages) : mode prudence actif, aucune mutation des poids.`,
+                    "META"
                 );
-
-                const normalizedDriftScale = Math.min(1.0, driftScore / 150.0);
-                const stepMultiplierString = localStorage.getItem('nexus_agent_step_size');
-                const parsedStep = stepMultiplierString ? parseFloat(stepMultiplierString) : NaN;
-                const userStepMultiplier = Number.isFinite(parsedStep) ? parsedStep : 1.0;
-
-                const adaptiveStep = (Math.sqrt(normalizedDriftScale) / activeKeysCount) * userStepMultiplier;
-                const updateMagnitude = adaptiveStep * activationFactor;
-
-                const currentFreq = optimizedWeights[AlgoKey.FREQUENCY] ?? 0.05;
-                const currentSpectral = optimizedWeights[AlgoKey.SPECTRAL] ?? 0.04;
-                const currentGaps = optimizedWeights[AlgoKey.GAPS] ?? 0.05;
-                const currentMomentum = optimizedWeights[AlgoKey.MOMENTUM] ?? 0.05;
-                const currentBayes = optimizedWeights[AlgoKey.BAYES] ?? 0.05;
-
-                if (latestDrift.direction === 'underestimating') {
-                    optimizedWeights[AlgoKey.FREQUENCY] = Math.min(0.8, currentFreq + updateMagnitude * 1.5);
-                    optimizedWeights[AlgoKey.GAPS] = Math.min(0.8, currentGaps + updateMagnitude * 1.2);
-                    optimizedWeights[AlgoKey.SPECTRAL] = Math.max(0.001, currentSpectral - updateMagnitude * 0.5);
-                    optimizedWeights[AlgoKey.MOMENTUM] = Math.max(0.001, currentMomentum - updateMagnitude * 0.5);
-                } else {
-                    optimizedWeights[AlgoKey.FREQUENCY] = Math.max(0.001, currentFreq - updateMagnitude * 1.5);
-                    optimizedWeights[AlgoKey.BAYES] = Math.min(0.8, currentBayes + updateMagnitude * 2.0);
-                    optimizedWeights[AlgoKey.GAPS] = Math.min(0.8, currentGaps + updateMagnitude * 0.8);
-                }
-
-                const normalizedCandidate = normalizeWeights(optimizedWeights);
-                const optRes = await applyOptimizedWeights({
-                    drawName,
-                    weights: normalizedCandidate,
-                    origin: 'FORENSIC_AUTOPSY',
-                    history: cleanHistory,
-                    useKalmanSmoothing: true,
-                    causalAuditTrail: [
-                        `Auto-Tune autonome (activation=${(activationFactor * 100).toFixed(1)}%, drift=${driftScore.toFixed(1)})`,
-                    ],
-                    reason: `Autonomous Agent Auto-Tune (${latestDrift.direction})`,
-                });
-
-                await updateGlobalWeights(optRes.appliedWeights, drawName);
-
-                const adnImpact = Object.entries(optRes.appliedWeights)
-                    .filter(([_, w]) => w > 0)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 6)
-                    .map(([key, w]) => `${key}: ${(w * 100).toFixed(1)}%`)
-                    .join(' | ');
-
-                logAction(`Auto-Tune Appliqué (Passerelle ADN).`, "AUTOTUNE", adnImpact);
-                useNexusStore.getState().setForensicOptimized(true);
             } else {
+                persistProcessedDraw(stateSignature);
                 logAction(`Écoute spectrale active (Score: ${driftScore.toFixed(1)}). Stable.`, "SCAN");
             }
         };
@@ -206,7 +206,7 @@ export const useAutonomousAgent = () => {
                 if (!active || !isRunningRef.current) break;
 
                 try {
-                    await performAutoTune();
+                    await performAutoTune(false);
                 } catch (err) {
                     const msg = err instanceof Error ? err.message : String(err);
                     logAction(`Erreur cycle auto-tune : ${msg}`, "WARNING");
@@ -219,7 +219,7 @@ export const useAutonomousAgent = () => {
         const handleForceTrigger = async () => {
             logAction("Signal de forçage reçu. Lancement d'un cycle auto-tuné instantané.", "OVERRIDE");
             try {
-                await performAutoTune();
+                await performAutoTune(true);
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 logAction(`Erreur forçage auto-tune : ${msg}`, "WARNING");
@@ -234,5 +234,5 @@ export const useAutonomousAgent = () => {
             window.removeEventListener('TRIGGER_AUTONOMOUS_AUTOTUNE', handleForceTrigger);
             logAction("Agent autonome hors-ligne.", "WARNING");
         };
-    }, [isAutonomousAgentActive, drawName, addAgentLog, updateGlobalWeights]);
+    }, [isAutonomousAgentActive, drawName, addAgentLog, updateGlobalWeights, markAutonomousDrawProcessed]);
 };

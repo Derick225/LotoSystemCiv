@@ -193,6 +193,8 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
         selectedBetType: '2N',
         portfolioMode: false,
         regime: persistentRegime,
+        empiricalSkillShrinkage: 0.75,
+        empiricalLift: 2.0,
       });
 
       const allocChaotic = computeContinuousKellyAllocation({
@@ -202,6 +204,8 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
         selectedBetType: '2N',
         portfolioMode: false,
         regime: chaoticRegime,
+        empiricalSkillShrinkage: 0.75,
+        empiricalLift: 2.0,
       });
 
       // En régime persistant à faible entropie, le modulateur et l'allocation sont strictement supérieurs au régime chaotique
@@ -209,7 +213,7 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
       expect(allocPersistent.edge).toBeGreaterThan(allocChaotic.edge);
       expect(allocPersistent.percentage).toBeGreaterThanOrEqual(allocChaotic.percentage);
 
-      // Ordre combinatoire : à confiance modérée (68%), un pari 1N ou 2N a un meilleur Edge qu'un pari 5N (5 numéros)
+      // Ordre combinatoire : avec preuve calibrée, 1N domine 5N (dont la cote ne compense pas 1/43M)
       const alloc1N = computeContinuousKellyAllocation({
         confidence: 68,
         bankroll: 50000,
@@ -217,6 +221,8 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
         selectedBetType: '1N',
         portfolioMode: false,
         regime: persistentRegime,
+        empiricalSkillShrinkage: 0.75,
+        empiricalLift: 2.0,
       });
       const alloc5N = computeContinuousKellyAllocation({
         confidence: 68,
@@ -225,15 +231,35 @@ describe('Campagne Walk-Forward, Filtrage Kernel PCA (Huber-Wiener) & Allocation
         selectedBetType: '5N',
         portfolioMode: false,
         regime: persistentRegime,
+        empiricalSkillShrinkage: 0.75,
+        empiricalLift: 2.0,
       });
 
       expect(alloc1N.edge).toBeGreaterThan(alloc5N.edge);
-      expect(alloc5N.betAmount).toBe(0); // Protection du capital sur 5N lorsque la confiance n'atteint pas le seuil critique
+      expect(alloc5N.betAmount).toBe(0);
     });
 
-    it('protège strictement le capital (0 FCFA) sous preuve empirique nulle (λ = 0) face à la loi hypergéométrique exacte 5/90', () => {
+    it('protège strictement le capital (0 FCFA) sans preuve empirique OOS (λ absent ou λ = 0) face à la loi hypergéométrique exacte 5/90', () => {
       expect(computeHypergeometricNullProbability(1)).toBeCloseTo(5 / 90, 10);
       expect(computeHypergeometricNullProbability(2)).toBeCloseTo(10 / 4005, 10);
+
+      const omittedCalibration = computeContinuousKellyAllocation({
+        confidence: 95,
+        bankroll: 50000,
+        gameMode: 'STANDARD',
+        selectedBetType: '2N',
+        portfolioMode: false,
+        regime: { regime: 'trend', hurst: 0.7, entropy: 0.3, volatility: 0.15 },
+      });
+
+      expect(omittedCalibration.betAmount).toBe(0);
+      expect(omittedCalibration.kellyFraction).toBe(0);
+      expect(omittedCalibration.edge).toBeLessThan(0);
+      expect(omittedCalibration.hasProvenEdge).toBe(false);
+      expect(omittedCalibration.winProbability).toBeCloseTo(
+        computeHypergeometricNullProbability(2) * 100,
+        3
+      );
 
       const uncalibratedZeroSkill = computeContinuousKellyAllocation({
         confidence: 85,
